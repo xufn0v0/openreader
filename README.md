@@ -1,26 +1,40 @@
 # OpenReader
 
-OpenReader 是一个自部署、轻量级、多端同步的小说阅读器。当前仓库已经按项目交接文档配置为：
+A self-hosted, lightweight ebook reader with multi-device sync. Read your own books, from anywhere.
 
-- 后端：Go 1.22、Gin、GORM、SQLite WAL、Gorilla WebSocket、goquery
-- 前端：Vue 3、Vite、Vue Router、Pinia、Axios
-- 部署：Docker 多阶段构建，单容器运行，`data/` 保存 SQLite，`cache/` 保存章节缓存，`library/` 保存导入原文件
+![](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)
+![](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js)
+![](https://img.shields.io/badge/SQLite-WAL-brightgreen)
+![](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)
 
-## 已可验收功能
+## Features
 
-- 本地导入：支持 `.txt`、`.text`、`.md`、`.epub`
-- TXT 分章：识别 `第一章`、`第1章`、`第十回` 等中文章节标题
-- EPUB 分章：读取 `container.xml`、OPF manifest/spine，并按 spine 顺序导入章节
-- 分类：创建分类，导入时选择分类，书架按分类/未分组过滤
-- 章节缓存：导入后章节正文写入 `cache/`，数据库只保存元数据、目录、缓存路径和阅读状态
-- 导入归档：原始书籍会落到 `library/data/用户名/书名_作者/`，同目录生成 `bookSource.json` 与 `chapters.json`
-- 书签：阅读页创建书签，书籍详情页展示并可跳回章节位置
-- 阅读模式：滚动、翻页、分页三种模式，翻页模式支持上一页/下一页
-- 进度：保存章节、偏移、百分比和阅读模式，后端保留 WebSocket 同步通道
+- **Multi-format Import** — TXT, EPUB, Markdown, PDF, UMD files with automatic chapter detection
+- **Online Sources** — Add custom book sources (CSS selectors / XPath), browse catalogs, and pull chapters from the web
+- **Reading Experience** — Three reading modes: scroll, paginated, and page-turn. Bookmarks, reading progress, and chapter caching
+- **Content Cleaning** — Regex-based replace rules to clean up ad text, watermarks, and formatting noise
+- **Library Management** — Categories, search, batch operations, and local file storage with WebDAV access
+- **RSS Reader** — Subscribe to feeds and read articles within the app
+- **Book Discovery** — Explore mode to browse online source catalogs
+- **Backup & Restore** — Backup/restore to WebDAV, import Legado-compatible backups
+- **Multi-User** — JWT-based authentication, admin dashboard, per-user activity tracking
+- **Single Binary** — Go backend serves both API and frontend static files. One container, zero fuss.
 
-## 本地开发
+## Quick Start
 
-后端：
+### Docker
+
+```bash
+cp .env.example .env
+# Edit .env and set a secure OPENREADER_JWT_SECRET
+docker compose up --build
+```
+
+Open `http://localhost:8080`. Register an account and start reading.
+
+### Local Development
+
+**Backend:**
 
 ```bash
 cd backend
@@ -28,7 +42,7 @@ go mod tidy
 go run .
 ```
 
-前端：
+**Frontend:**
 
 ```bash
 cd frontend
@@ -36,71 +50,50 @@ npm install
 npm run dev
 ```
 
-默认地址：
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:8080`
+- Health check: `http://localhost:8080/api/health`
 
-- 前端：`http://localhost:5173`
-- 后端：`http://localhost:8080`
-- 健康检查：`http://localhost:8080/api/health`
-
-验证：
+### Running Tests
 
 ```bash
-cd backend
-go test ./...
-
-cd ../frontend
-npm run build
-npm audit --audit-level=moderate
+cd backend && go test ./...
+cd frontend && npm run build
 ```
 
-## Docker / OrbStack
+## Persistent Data
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+| Directory | Purpose |
+|-----------|---------|
+| `data/` | SQLite database — users, books, bookmarks, progress |
+| `cache/` | Per-chapter content cache for fast reading |
+| `library/` | Imported original files and local store |
 
-推荐使用 OrbStack 或 Docker Desktop 提供 Docker 运行时。安装并启动后，确认命令可用：
+All three are mounted as volumes in Docker. Backup these directories to migrate.
 
-```bash
-docker version
-docker compose version
-```
+## Environment Variables
 
-服务会监听 `http://localhost:8080`，并从 Go 服务直接托管前端静态文件。
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENREADER_ADDR` | `:8080` | Server listen address |
+| `OPENREADER_DATA_DIR` | `data` | Data directory path |
+| `OPENREADER_CACHE_DIR` | `cache` | Cache directory path |
+| `OPENREADER_LIBRARY_DIR` | `library` | Library directory path |
+| `OPENREADER_DB` | `data/openreader.db` | SQLite database path |
+| `OPENREADER_JWT_SECRET` | *(required)* | JWT signing secret — use a long random string |
+| `OPENREADER_CORS_ORIGIN` | `http://localhost:5173` | CORS allowed origin |
+| `OPENREADER_PUBLIC_DIR` | `public` | Frontend static files directory |
 
-常用部署命令：
+## Tech Stack
 
-```bash
-# 构建镜像
-docker compose build
+| Layer | Technology |
+|-------|-----------|
+| Backend | Go 1.24, Gin, GORM, SQLite (WAL mode) |
+| Frontend | Vue 3, Vite, Pinia, Vue Router, Element Plus |
+| Realtime | Gorilla WebSocket (sync channel) |
+| Parsing | goquery (CSS selectors), custom regex chapter detection |
+| Deployment | Docker multi-stage build, single Alpine container |
 
-# 后台启动
-docker compose up -d
+## License
 
-# 查看日志
-docker compose logs -f openreader
-
-# 停止服务
-docker compose down
-```
-
-生产部署前建议把 `.env` 中的 `OPENREADER_JWT_SECRET` 改成足够长的随机字符串。
-
-需要持久化的目录：
-
-- `data/`：SQLite 数据库，保存用户、分类、书架、书签、阅读进度
-- `cache/`：按章节拆分后的正文缓存，供阅读页快速加载
-- `library/`：用户导入的原始书籍文件及可迁移目录文件，例如 `library/data/yuchangsheng/御仙1-86_/御仙1-86.txt`
-
-`docker-compose.yml` 已默认挂载这三个目录。以后重建镜像或换机器部署时，把 `data/`、`cache/`、`library/` 一起带走即可。
-
-## 当前环境状态
-
-已通过 Homebrew 安装本地开发工具：
-
-- Go：`go1.26.3 darwin/arm64`
-- Node：`v26.0.0`
-- npm：`11.12.1`
-
-Docker 运行时预留给 OrbStack；当前尚未检测到 `docker` 命令。安装 OrbStack 后即可执行 Docker 部署命令。
+MIT
