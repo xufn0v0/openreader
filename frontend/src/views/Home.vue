@@ -904,22 +904,138 @@ function readError(err, fallback) {
 }
 
 @media (max-width: 700px) {
+  .shelf-page {
+    gap: 10px;
+  }
+
   .shelf-head,
   .recent-panel,
   .shelf-toolbar {
     display: grid;
   }
 
-  .head-actions {
-    justify-content: stretch;
+  .shelf-head {
+    order: 2;
+    gap: 4px;
   }
 
-  .head-actions .el-button {
-    flex: 1;
+  .shelf-head .app-page-subtitle,
+  .shelf-stats,
+  .head-actions {
+    display: none;
+  }
+
+  .shelf-head .app-page-title {
+    font-size: 22px;
+  }
+
+  .eyebrow {
+    display: none;
+  }
+
+  .recent-panel {
+    order: 1;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px;
+    border-radius: 0;
+  }
+
+  .recent-cover {
+    width: 44px;
+    height: 58px;
+    font-size: 20px;
+  }
+
+  .recent-main span {
+    font-size: 11px;
+  }
+
+  .recent-main h2 {
+    font-size: 16px;
+  }
+
+  .recent-main p {
+    font-size: 12px;
+  }
+
+  .recent-panel .el-button {
+    padding: 8px 10px;
+  }
+
+  .shelf-layout {
+    order: 3;
+    gap: 10px;
+  }
+
+  .group-panel {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    scrollbar-width: none;
+  }
+
+  .group-title,
+  .group-create,
+  .group-actions,
+  .group-note {
+    display: none;
+  }
+
+  .group-row {
+    flex: 0 0 auto;
+  }
+
+  .group-item {
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .shelf-toolbar {
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .shelf-toolbar .el-button {
+    display: none;
   }
 
   .book-grid {
     grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .book-card {
+    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    min-height: 0;
+  }
+
+  .book-cover {
+    grid-row: 1 / span 2;
+    height: 100%;
+    min-height: 108px;
+    font-size: 28px;
+  }
+
+  .book-body {
+    padding: 10px 10px 6px;
+  }
+
+  .book-actions {
+    justify-content: flex-start;
+    padding: 0 10px 10px;
   }
 
   .book-row {

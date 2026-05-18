@@ -70,66 +70,10 @@
     </aside>
 
     <div class="app-workspace">
-      <header class="mobile-topbar">
-        <button class="mobile-brand" type="button" @click="goHome">
-          <span class="app-brand-mark">阅</span>
-          <span>OpenReader</span>
-        </button>
-        <div class="mobile-actions">
-          <button class="mobile-icon-btn" type="button" @click="goRoute('search')" title="搜索">
-            <el-icon><Search /></el-icon>
-          </button>
-          <button class="mobile-icon-btn" type="button" @click="goRoute('settings')" title="设置">
-            <el-icon><Setting /></el-icon>
-          </button>
-        </div>
-      </header>
-
       <main class="app-content">
         <slot />
       </main>
     </div>
-
-    <nav class="mobile-nav">
-      <button
-        v-for="item in mobilePrimaryNavItems"
-        :key="item.name"
-        class="mobile-nav-item"
-        :class="{ active: route.name === item.name }"
-        type="button"
-        @click="goRoute(item.name)"
-      >
-        <el-icon><component :is="item.icon" /></el-icon>
-        <span>{{ item.label }}</span>
-      </button>
-      <button class="mobile-nav-item" type="button" @click="mobileMenu = true">
-        <el-icon><MoreFilled /></el-icon>
-        <span>更多</span>
-      </button>
-    </nav>
-
-    <el-drawer v-model="mobileMenu" title="全部功能" direction="btt" size="72%" class="mobile-menu-drawer">
-      <div class="mobile-menu-grid">
-        <button
-          v-for="item in navItems"
-          :key="item.name"
-          class="mobile-menu-item"
-          :class="{ active: route.name === item.name }"
-          type="button"
-          @click="goRoute(item.name)"
-        >
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
-        </button>
-      </div>
-      <div class="mobile-menu-status">
-        <span class="sync-pill" :class="{ connected: syncConnected }">
-          <span class="sync-dot" />
-          {{ syncConnected ? '实时同步在线' : '同步未连接' }}
-        </span>
-        <button class="mobile-logout" type="button" @click="handleLogout">退出登录</button>
-      </div>
-    </el-drawer>
   </div>
 </template>
 
@@ -141,7 +85,6 @@ import {
   Compass,
   Connection,
   FolderOpened,
-  MoreFilled,
   Notebook,
   Search,
   Setting,
@@ -155,7 +98,6 @@ const route = useRoute()
 const userStore = useUserStore()
 const quickSearch = ref('')
 const offline = ref(false)
-const mobileMenu = ref(false)
 
 const navItems = [
   { name: 'home', label: '书架', icon: Notebook },
@@ -166,7 +108,6 @@ const navItems = [
   { name: 'settings', label: '设置', icon: Setting },
 ]
 
-const mobilePrimaryNavItems = navItems.filter(item => ['home', 'search', 'discover'].includes(item.name))
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
 
 const { connected: syncConnected, connect, disconnect } = useSync()
@@ -176,7 +117,6 @@ function goHome() {
 }
 
 function goRoute(name) {
-  mobileMenu.value = false
   router.push({ name })
 }
 
@@ -188,7 +128,6 @@ function goSearch() {
 }
 
 function handleLogout() {
-  mobileMenu.value = false
   userStore.logout()
   router.push({ name: 'login' })
 }
@@ -403,143 +342,82 @@ onBeforeUnmount(() => {
   min-height: 100vh;
 }
 
-.mobile-topbar,
-.mobile-nav {
-  display: none;
-}
-
 @media (max-width: 860px) {
   .app-sidebar {
-    display: none;
+    width: 72px;
+    overflow-y: auto;
+    padding: 8px 6px;
+    scrollbar-width: none;
   }
 
   .app-workspace {
-    padding-left: 0;
+    padding-left: 72px;
   }
 
-  .mobile-topbar {
-    position: sticky;
-    top: 0;
-    z-index: 25;
-    display: flex;
-    height: 58px;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 14px;
-    background: rgba(255, 253, 248, 0.92);
-    border-bottom: 1px solid var(--app-border);
-    backdrop-filter: blur(14px);
+  .app-content {
+    min-height: 100vh;
   }
 
-  .mobile-brand {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--app-text);
-    background: transparent;
-    border: 0;
-    font-weight: 800;
-  }
-
-  .mobile-brand .app-brand-mark {
-    width: 32px;
-    height: 32px;
-    flex-basis: 32px;
-    background: var(--app-primary);
-    color: #fff;
-  }
-
-  .mobile-actions {
-    display: flex;
-    gap: 6px;
-  }
-
-  .mobile-icon-btn {
+  .app-brand {
     display: grid;
-    width: 36px;
-    height: 36px;
+    justify-items: center;
+    gap: 5px;
+    padding: 8px 0 14px;
+  }
+
+  .app-brand > div:last-child,
+  .app-shell-search,
+  .app-sidebar-footer {
+    display: none;
+  }
+
+  .app-brand-mark {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    border-radius: 4px;
+  }
+
+  .app-nav {
+    display: grid;
+    gap: 0;
+    padding-bottom: 12px;
+  }
+
+  .app-nav-item {
+    display: grid;
+    height: 66px;
     place-items: center;
-    color: var(--app-text);
-    background: var(--app-surface);
-    border: 1px solid var(--app-border);
-    border-radius: var(--app-radius-sm);
+    align-content: center;
+    gap: 5px;
+    padding: 0;
+    border-radius: 0;
   }
 
-  .mobile-nav {
-    position: fixed;
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
-    z-index: 40;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    padding: 6px;
-    background: rgba(37, 34, 31, 0.94);
-    border: 1px solid rgba(255, 249, 237, 0.1);
-    border-radius: 16px;
-    box-shadow: var(--app-shadow-md);
-    backdrop-filter: blur(14px);
+  .app-nav-item span {
+    font-size: 12px;
   }
 
-  .mobile-nav-item {
-    display: grid;
-    min-width: 0;
-    gap: 3px;
-    place-items: center;
-    padding: 7px 2px 6px;
-    color: var(--app-nav-muted);
-    background: transparent;
-    border: 0;
-    border-radius: 12px;
+  .app-nav-item + .app-nav-item {
+    border-top: 1px solid rgba(255, 249, 237, 0.08);
+  }
+}
+
+@media (max-width: 420px) {
+  .app-sidebar {
+    width: 64px;
+  }
+
+  .app-workspace {
+    padding-left: 64px;
+  }
+
+  .app-nav-item {
+    height: 62px;
+  }
+
+  .app-nav-item span {
     font-size: 11px;
-  }
-
-  .mobile-nav-item.active {
-    color: var(--app-nav-active);
-    background: rgba(244, 228, 197, 0.12);
-  }
-
-  .mobile-menu-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .mobile-menu-item {
-    display: grid;
-    min-height: 74px;
-    place-items: center;
-    gap: 6px;
-    color: var(--app-text);
-    background: var(--app-bg-soft);
-    border: 1px solid var(--app-border);
-    border-radius: var(--app-radius-sm);
-  }
-
-  .mobile-menu-item.active {
-    color: var(--app-primary-strong);
-    background: var(--app-primary-soft);
-    border-color: var(--app-primary);
-  }
-
-  .mobile-menu-status {
-    display: grid;
-    gap: 10px;
-    margin-top: 18px;
-  }
-
-  .mobile-menu-status .sync-pill {
-    justify-content: center;
-    color: var(--app-text-muted);
-    background: var(--app-bg-soft);
-  }
-
-  .mobile-logout {
-    height: 42px;
-    color: var(--app-danger);
-    background: var(--app-surface);
-    border: 1px solid var(--app-border);
-    border-radius: var(--app-radius-sm);
   }
 }
 </style>
