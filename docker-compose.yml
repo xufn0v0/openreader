@@ -1,6 +1,6 @@
 services:
   openreader:
-    build: .
+    image: ghcr.io/changshengyu/openreader:latest
     container_name: openreader
     ports:
       - "8080:8080"

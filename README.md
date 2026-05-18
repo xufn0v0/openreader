@@ -29,7 +29,7 @@ A self-hosted, lightweight ebook reader with multi-device sync. Read your own bo
 ```bash
 cp .env.example .env
 # Edit .env and set a secure OPENREADER_JWT_SECRET
-docker compose up --build
+docker compose up -d
 ```
 
 Open `http://localhost:8080`. Register an account and start reading.

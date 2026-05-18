@@ -29,7 +29,7 @@
 ```bash
 cp .env.example .env
 # 编辑 .env，将 OPENREADER_JWT_SECRET 改为安全随机字符串
-docker compose up --build
+docker compose up -d
 ```
 
 打开 `http://localhost:8080`，注册账号即可开始阅读。
