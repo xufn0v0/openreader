@@ -8,30 +8,11 @@
       </div>
       <div class="head-actions">
         <el-button :icon="Refresh" :loading="loadingUpdates" @click="checkUpdates">刷新</el-button>
-        <el-button :icon="Files" @click="manageDrawer = true">书籍管理</el-button>
-        <el-button :icon="FolderOpened" @click="router.push({ name: 'local-store' })">浏览书仓</el-button>
+        <el-button :icon="Files" @click="overlay.openBookManage()">书籍管理</el-button>
+        <el-button :icon="FolderOpened" @click="overlay.openLocalStore(router)">浏览书仓</el-button>
         <el-button type="primary" :icon="Upload" @click="importDialog = true">导入书籍</el-button>
       </div>
     </header>
-
-    <section class="shelf-stats">
-      <article class="stat-panel app-panel">
-        <span>书籍</span>
-        <strong>{{ bookshelf.books.length }}</strong>
-      </article>
-      <article class="stat-panel app-panel">
-        <span>分组</span>
-        <strong>{{ bookshelf.categories.length }}</strong>
-      </article>
-      <article class="stat-panel app-panel">
-        <span>远程</span>
-        <strong>{{ remoteCount }}</strong>
-      </article>
-      <article class="stat-panel app-panel">
-        <span>本地</span>
-        <strong>{{ localCount }}</strong>
-      </article>
-    </section>
 
     <section v-if="recentBook" class="recent-panel app-panel">
       <div class="recent-cover" :style="coverStyle(recentBook)">{{ coverInitial(recentBook) }}</div>
@@ -47,7 +28,7 @@
       <aside class="group-panel app-panel">
         <div class="group-title">
           <strong>书架分组</strong>
-          <el-button text :icon="Plus" @click="showGroupInput = !showGroupInput">新增</el-button>
+          <el-button text :icon="Plus" @click="overlay.openBookGroup('manage')">管理</el-button>
         </div>
         <div v-if="showGroupInput" class="group-create">
           <el-input v-model="newGroupName" placeholder="分组名称" size="small" @keyup.enter="createCategory" />
@@ -175,45 +156,6 @@
         <el-button type="primary" :loading="importing" :disabled="!draft.file" @click="importBook">导入</el-button>
       </template>
     </el-dialog>
-
-    <el-drawer v-model="manageDrawer" title="书籍管理" direction="rtl" size="420px">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="已支持批量分组、批量缓存、清缓存、导出和删除。"
-      />
-      <div class="manage-toolbar">
-        <el-checkbox
-          :model-value="allManagedSelected"
-          :indeterminate="someManagedSelected"
-          @change="toggleManageAll"
-        >
-          全选
-        </el-checkbox>
-        <el-select v-model="batchCategoryId" placeholder="批量分组" clearable size="small">
-          <el-option label="未分组" value="" />
-          <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
-        </el-select>
-        <el-button size="small" :disabled="!selectedBookIds.length" :loading="batchManaging" @click="batchSetCategory">设置分组</el-button>
-        <el-button size="small" :disabled="!selectedBookIds.length" :loading="batchManaging" @click="batchCacheBooks">缓存</el-button>
-        <el-button size="small" :disabled="!selectedBookIds.length" :loading="batchManaging" @click="batchClearCache">清缓存</el-button>
-        <el-button size="small" :disabled="!selectedBookIds.length" :loading="batchManaging" @click="batchExportBooks">导出</el-button>
-        <el-button size="small" type="danger" plain :disabled="!selectedBookIds.length" :loading="batchManaging" @click="batchDeleteBooks">删除</el-button>
-      </div>
-      <div class="manage-list">
-        <div v-for="book in bookshelf.books" :key="book.id" class="manage-row">
-          <el-checkbox v-model="selectedBookIds" :value="book.id" />
-          <span class="list-cover" :style="coverStyle(book)">{{ coverInitial(book) }}</span>
-          <span>
-            <strong>{{ book.title }}</strong>
-            <small>{{ categoryName(book.categoryId) }} · {{ book.chapterCount || 0 }} 章</small>
-          </span>
-          <el-button size="small" @click="openDetail(book)">详情</el-button>
-          <el-button size="small" type="danger" plain @click="deleteManagedBook(book)">删除</el-button>
-        </div>
-      </div>
-    </el-drawer>
   </section>
 </template>
 
@@ -224,10 +166,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowUp, Delete, Edit, Files, FolderOpened, Plus, Refresh, Search, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { checkBookUpdates } from '../api/books'
 import { useBookshelfStore } from '../stores/bookshelf'
+import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 
 const router = useRouter()
 const bookshelf = useBookshelfStore()
+const overlay = useOverlayStore()
 const reader = useReaderStore()
 
 const keyword = ref('')
@@ -281,13 +225,15 @@ const groupItems = computed(() => {
 
 const displayedBooks = computed(() => {
   const value = keyword.value.trim().toLowerCase()
-  return bookshelf.books.filter(book => {
-    const matchesKeyword = !value || `${book.title || ''} ${book.author || ''}`.toLowerCase().includes(value)
-    if (!matchesKeyword) return false
-    if (!selectedGroup.value) return true
-    if (selectedGroup.value === 'none') return !book.categoryId
-    return String(book.categoryId) === selectedGroup.value
-  })
+  return bookshelf.books
+    .filter(book => {
+      const matchesKeyword = !value || `${book.title || ''} ${book.author || ''}`.toLowerCase().includes(value)
+      if (!matchesKeyword) return false
+      if (!selectedGroup.value) return true
+      if (selectedGroup.value === 'none') return !book.categoryId
+      return String(book.categoryId) === selectedGroup.value
+    })
+    .sort(compareByReadingOrder)
 })
 
 const emptyText = computed(() => {
@@ -500,7 +446,10 @@ async function batchDeleteBooks() {
 }
 
 function openDetail(book) {
-  router.push({ name: 'book-detail', params: { id: book.id } })
+  overlay.openBookInfo(book, {
+    categoryName: categoryName(book.categoryId),
+    progress: (bookProgress(book)?.percent || 0),
+  })
 }
 
 function continueRead(book) {
@@ -513,6 +462,15 @@ function bookProgressPercent(book) {
 
 function bookProgress(book) {
   return reader.progressByBook[book.id] || book.progress
+}
+
+function compareByReadingOrder(a, b) {
+  const aProgress = bookProgress(a)
+  const bProgress = bookProgress(b)
+  const aReadAt = new Date(aProgress?.updatedAt || 0).getTime()
+  const bReadAt = new Date(bProgress?.updatedAt || 0).getTime()
+  if (aReadAt !== bReadAt) return bReadAt - aReadAt
+  return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
 }
 
 function categoryName(id) {

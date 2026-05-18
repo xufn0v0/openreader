@@ -85,7 +85,9 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	}
 }
 
-// DefaultRateLimiter is a sensible default (100 req/min).
+// DefaultRateLimiter is a browser-friendly default for self-hosted reading.
+// Mobile browsers may load static assets, API data, and sync channels in a
+// short burst; keep this high enough to avoid false positives during startup.
 func DefaultRateLimiter() gin.HandlerFunc {
-	return NewRateLimiter(100, time.Minute).Middleware()
+	return NewRateLimiter(600, time.Minute).Middleware()
 }

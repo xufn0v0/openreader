@@ -25,17 +25,20 @@
       </div>
 
       <nav class="app-nav">
-        <button
-          v-for="item in navItems"
-          :key="item.name"
-          class="app-nav-item"
-          :class="{ active: route.name === item.name }"
-          type="button"
-          @click="goRoute(item.name)"
-        >
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
-        </button>
+        <section v-for="section in navSections" :key="section.title" class="app-nav-section">
+          <p class="app-nav-title">{{ section.title }}</p>
+          <button
+            v-for="item in section.items"
+            :key="item.key"
+            class="app-nav-item"
+            :class="{ active: item.route && route.name === item.route }"
+            type="button"
+            @click="runNavAction(item)"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.label }}</span>
+          </button>
+        </section>
       </nav>
 
       <div class="app-sidebar-footer">
@@ -82,30 +85,60 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowUp,
+  Box,
   Compass,
   Connection,
+  Files,
   FolderOpened,
   Notebook,
+  Operation,
   Search,
   Setting,
   SwitchButton,
+  Upload,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '../stores/user'
+import { useOverlayStore } from '../stores/overlay'
 import { useSync } from '../composables/useSync'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+const overlay = useOverlayStore()
 const quickSearch = ref('')
 const offline = ref(false)
 
-const navItems = [
-  { name: 'home', label: '书架', icon: Notebook },
-  { name: 'search', label: '搜索', icon: Search },
-  { name: 'discover', label: '书海', icon: Compass },
-  { name: 'sources', label: '书源', icon: Connection },
-  { name: 'local-store', label: '书仓', icon: FolderOpened },
-  { name: 'settings', label: '设置', icon: Setting },
+const navSections = [
+  {
+    title: '书架',
+    items: [
+      { key: 'home', label: '书架', icon: Notebook, route: 'home' },
+      { key: 'search', label: '搜索', icon: Search, route: 'search' },
+      { key: 'discover', label: '书海', icon: Compass, route: 'discover' },
+    ],
+  },
+  {
+    title: '书源设置',
+    items: [
+      { key: 'sources', label: '书源管理', icon: Connection, route: 'sources' },
+      { key: 'sourceDebug', label: '调试检测', icon: Operation, route: 'sources' },
+    ],
+  },
+  {
+    title: '书架设置',
+    items: [
+      { key: 'bookManage', label: '书籍管理', icon: Files, action: () => overlay.openBookManage() },
+      { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
+      { key: 'localStore', label: '本地书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
+    ],
+  },
+  {
+    title: '用户空间',
+    items: [
+      { key: 'webdav', label: 'WebDAV', icon: Upload, action: () => overlay.openWebDAV(router), route: 'settings' },
+      { key: 'settings', label: '设置', icon: Setting, route: 'settings' },
+    ],
+  },
 ]
 
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
@@ -118,6 +151,14 @@ function goHome() {
 
 function goRoute(name) {
   router.push({ name })
+}
+
+function runNavAction(item) {
+  if (item.action) {
+    item.action()
+    return
+  }
+  if (item.route) goRoute(item.route)
 }
 
 function goSearch() {
@@ -240,7 +281,23 @@ onBeforeUnmount(() => {
 
 .app-nav {
   display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 0 4px 14px;
+  scrollbar-width: thin;
+}
+
+.app-nav-section {
+  display: grid;
   gap: 4px;
+}
+
+.app-nav-title {
+  margin: 0 8px 4px;
+  color: rgba(244, 228, 197, 0.58);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .app-nav-item {
@@ -379,9 +436,23 @@ onBeforeUnmount(() => {
   }
 
   .app-nav {
-    display: grid;
     gap: 0;
-    padding-bottom: 12px;
+    overflow-y: visible;
+    padding: 0 0 12px;
+  }
+
+  .app-nav-section {
+    gap: 0;
+  }
+
+  .app-nav-title {
+    margin: 9px 0 3px;
+    overflow: hidden;
+    color: rgba(244, 228, 197, 0.48);
+    font-size: 10px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
   }
 
   .app-nav-item {

@@ -7,6 +7,7 @@
     <AppLayout>
       <router-view />
     </AppLayout>
+    <GlobalOverlayHost />
   </template>
 
   <router-view v-else />
@@ -16,6 +17,7 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from './layouts/AppLayout.vue'
+import GlobalOverlayHost from './components/GlobalOverlayHost.vue'
 import { useUserStore } from './stores/user'
 
 const route = useRoute()

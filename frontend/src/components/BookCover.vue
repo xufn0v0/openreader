@@ -1,5 +1,5 @@
 <template>
-  <span class="book-cover-shared" :style="coverStyle">{{ initial }}</span>
+  <span class="book-cover-shared" :class="`size-${size}`" :style="coverStyle">{{ initial }}</span>
 </template>
 
 <script setup>
@@ -51,5 +51,11 @@ const coverStyle = computed(() => {
   font-size: 30px;
   font-weight: 900;
   line-height: 1;
+}
+
+.book-cover-shared.size-small {
+  width: 44px;
+  height: 58px;
+  font-size: 20px;
 }
 </style>

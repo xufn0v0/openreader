@@ -84,22 +84,6 @@
       <el-empty v-else description="输入关键词后开始搜索" />
     </div>
 
-    <BookInfoDialog
-      v-model="previewDialog"
-      :book="selectedResult"
-      :source-name="selectedResult?.sourceName"
-      status-label="搜索结果"
-      status-type="success"
-    >
-      <div v-if="selectedResult" class="preview-actions">
-        <el-select v-model="targetCategoryId" placeholder="加入书架分组（可选）" clearable>
-          <el-option label="未分组" value="" />
-          <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
-        </el-select>
-        <el-button plain :loading="addingBook === selectedResult.bookUrl" @click="addRemoteBook(selectedResult, false)">加入书架</el-button>
-        <el-button type="primary" :loading="addingBook === selectedResult.bookUrl" @click="addRemoteBook(selectedResult, true)">加入并阅读</el-button>
-      </div>
-    </BookInfoDialog>
   </section>
 </template>
 
@@ -111,12 +95,13 @@ import { Connection, Search as SearchIcon } from '@element-plus/icons-vue'
 import { createRemoteBook } from '../api/books'
 import api from '../api/client'
 import BookCover from '../components/BookCover.vue'
-import BookInfoDialog from '../components/BookInfoDialog.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
+import { useOverlayStore } from '../stores/overlay'
 
 const route = useRoute()
 const router = useRouter()
 const bookshelf = useBookshelfStore()
+const overlay = useOverlayStore()
 
 const keyword = ref('')
 const sources = ref([])
@@ -129,8 +114,6 @@ const results = ref([])
 const searching = ref(false)
 const searched = ref(false)
 const addingBook = ref(null)
-const previewDialog = ref(false)
-const selectedResult = ref(null)
 
 const enabledSources = computed(() => sources.value.filter(source => source.enabled))
 const allSelected = computed(() => enabledSources.value.length > 0 && selectedIds.value.length === enabledSources.value.length)
@@ -228,7 +211,7 @@ async function addRemoteBook(item, shouldRead) {
     }
     const { data } = await createRemoteBook(payload)
     ElMessage.success(`已加入书架：《${item.title}》`)
-    previewDialog.value = false
+    overlay.closeBookInfo()
     router.push({ name: shouldRead ? 'reader' : 'book-detail', params: { id: data.id } })
   } catch (err) {
     ElMessage.error(readError(err, '加入失败'))
@@ -238,8 +221,15 @@ async function addRemoteBook(item, shouldRead) {
 }
 
 function openPreview(item) {
-  selectedResult.value = item
-  previewDialog.value = true
+  overlay.openBookInfo(item, {
+    sourceName: item.sourceName,
+    statusLabel: '搜索结果',
+    statusType: 'success',
+    actions: [
+      { label: '加入书架', plain: true, handler: () => addRemoteBook(item, false) },
+      { label: '加入并阅读', type: 'primary', handler: () => addRemoteBook(item, true) },
+    ],
+  })
 }
 
 function readError(err, fallback) {
