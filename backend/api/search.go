@@ -1,0 +1,109 @@
+package api
+
+import (
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"openreader/backend/engine"
+	"openreader/backend/models"
+)
+
+type searchRequest struct {
+	Keyword   string `json:"keyword" binding:"required"`
+	SourceIDs []uint `json:"sourceIds"`
+}
+
+func (s *Server) search(c *gin.Context) {
+	var req searchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keyword is required"})
+		return
+	}
+	req.Keyword = strings.TrimSpace(req.Keyword)
+	if req.Keyword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keyword is required"})
+		return
+	}
+
+	var sources []models.BookSource
+	query := s.db.Where("enabled = ?", true)
+	if len(req.SourceIDs) > 0 {
+		query = query.Where("id IN ?", req.SourceIDs)
+	}
+	if err := query.Find(&sources).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load sources"})
+		return
+	}
+	if len(sources) == 0 {
+		c.JSON(http.StatusOK, []engine.SearchResult{})
+		return
+	}
+
+	results := concurrentSearch(sources, req.Keyword)
+	c.JSON(http.StatusOK, results)
+}
+
+func concurrentSearch(sources []models.BookSource, keyword string) []engine.SearchResult {
+	type searchOutcome struct {
+		Results []engine.SearchResult
+		Error   error
+	}
+
+	var wg sync.WaitGroup
+	channel := make(chan searchOutcome, len(sources))
+	timeout := 15 * time.Second
+
+	for _, source := range sources {
+		wg.Add(1)
+		source := source
+		go func() {
+			defer wg.Done()
+			done := make(chan searchOutcome, 1)
+			go func() {
+				results, err := engine.SearchBooks(source, keyword)
+				done <- searchOutcome{Results: results, Error: err}
+			}()
+			select {
+			case outcome := <-done:
+				channel <- outcome
+			case <-time.After(timeout):
+				channel <- searchOutcome{Error: errTimeout}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(channel)
+	}()
+
+	seen := make(map[string]bool)
+	aggregated := make([]engine.SearchResult, 0)
+	for outcome := range channel {
+		if outcome.Error != nil {
+			continue
+		}
+		for _, result := range outcome.Results {
+			key := result.Title + "|" + result.Author
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			aggregated = append(aggregated, result)
+		}
+	}
+	if aggregated == nil {
+		aggregated = []engine.SearchResult{}
+	}
+	return aggregated
+}
+
+var errTimeout = &searchTimeoutError{}
+
+type searchTimeoutError struct{}
+
+func (e *searchTimeoutError) Error() string { return "search timeout" }

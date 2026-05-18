@@ -1,0 +1,15 @@
+services:
+  openreader:
+    build: .
+    container_name: openreader
+    ports:
+      - "8080:8080"
+    environment:
+      OPENREADER_JWT_SECRET: ${OPENREADER_JWT_SECRET:-change-this-before-deploy}
+      OPENREADER_CORS_ORIGIN: ${OPENREADER_CORS_ORIGIN:-http://localhost:8080}
+      OPENREADER_LOCAL_STORE_DIR: /app/library/localStore
+    volumes:
+      - ./data:/app/data
+      - ./cache:/app/cache
+      - ./library:/app/library
+    restart: unless-stopped

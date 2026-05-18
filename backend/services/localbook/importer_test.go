@@ -1,0 +1,64 @@
+package localbook
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"openreader/backend/config"
+	readerdb "openreader/backend/db"
+	"openreader/backend/models"
+)
+
+func TestImporterArchivesLocalBookByUserNamespace(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+	}
+
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+
+	user := models.User{Username: "tester", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	book, err := NewImporter(cfg, database).Import(ImportRequest{
+		UserID:    user.ID,
+		UserName:  user.Username,
+		FileName:  "测试书.txt",
+		Extension: ".txt",
+		Data:      []byte("第一章 起\n第一章正文。\n第二章 承\n第二章正文。"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantDir := filepath.Join("data", "tester", "测试书_")
+	if book.LibraryPath != wantDir {
+		t.Fatalf("LibraryPath = %q, want %q", book.LibraryPath, wantDir)
+	}
+
+	for _, relativePath := range []string{book.OriginalFile, book.SourceFile, book.TOCFile} {
+		if _, err := os.Stat(filepath.Join(cfg.LibraryDir, relativePath)); err != nil {
+			t.Fatalf("%s was not created: %v", relativePath, err)
+		}
+	}
+
+	var chapterCount int64
+	if err := database.Model(&models.Chapter{}).Where("book_id = ?", book.ID).Count(&chapterCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if chapterCount != 2 {
+		t.Fatalf("chapter count = %d, want 2", chapterCount)
+	}
+}

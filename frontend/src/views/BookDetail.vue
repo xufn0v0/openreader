@@ -1,0 +1,717 @@
+<template>
+  <section class="app-page detail-page">
+    <button class="back-link" type="button" @click="router.push({ name: 'home' })">
+      <el-icon><ArrowLeft /></el-icon>
+      <span>返回书架</span>
+    </button>
+
+    <div v-loading="loading">
+      <template v-if="book">
+        <section class="book-hero app-panel">
+          <BookInfoPanel
+            :book="book"
+            :source-name="currentSource?.name || ''"
+            :category-name="categoryName(book.categoryId)"
+            :chapters="chapters"
+            :progress="reader.progressByBook[book.id]?.percent || 0"
+            :status-label="book.sourceId ? '远程书籍' : '本地书籍'"
+            :status-type="book.sourceId ? 'success' : 'info'"
+          >
+            <div class="hero-actions">
+              <el-button type="primary" @click="startRead">开始阅读</el-button>
+	              <el-button @click="openBookEditor">编辑</el-button>
+	              <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
+	              <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
+	              <el-button :loading="cachingBook" @click="cacheCurrentBook">缓存全书</el-button>
+	              <el-button :loading="clearingCache" @click="clearCurrentBookCache">清缓存</el-button>
+	              <el-button type="danger" plain @click="deleteCurrentBook">删除</el-button>
+              <el-select v-model="categoryDraft" placeholder="设置分组" clearable size="default" class="category-select" @change="changeCategory">
+                <el-option label="未分组" value="" />
+                <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
+              </el-select>
+            </div>
+          </BookInfoPanel>
+        </section>
+
+        <el-tabs v-model="activeTab" class="detail-tabs">
+          <el-tab-pane label="目录" name="toc">
+            <section class="app-panel tab-panel">
+              <div class="tab-toolbar">
+                <el-input v-model="tocKeyword" placeholder="搜索章节" clearable>
+                  <template #prefix><el-icon><Search /></el-icon></template>
+                </el-input>
+                <el-switch v-model="tocReverse" active-text="倒序" inactive-text="正序" />
+              </div>
+              <div class="chapter-list">
+                <button v-for="chapter in shownChapters" :key="chapter.id" type="button" class="chapter-row" @click="goChapter(chapter.index)">
+                  <span>{{ chapter.title }}</span>
+                  <small>第 {{ chapter.index + 1 }} 章 · {{ chapter.cachePath ? '已缓存' : '未缓存' }}</small>
+                </button>
+              </div>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="书签" name="bookmarks">
+            <section class="app-panel tab-panel">
+              <div v-if="bookmarks.length" class="bookmark-list">
+                <article v-for="bookmark in bookmarks" :key="bookmark.id" class="bookmark-row">
+                  <button type="button" @click="goBookmark(bookmark)">
+                    <strong>{{ bookmark.title || '书签' }}</strong>
+                    <span>{{ bookmark.excerpt || bookmark.note || '无摘录' }}</span>
+                    <small>第 {{ bookmark.chapterIndex + 1 }} 章 · {{ Math.round((bookmark.percent || 0) * 100) }}%</small>
+                  </button>
+                  <el-button size="small" text type="danger" @click="deleteBookmarkItem(bookmark)">删除</el-button>
+                </article>
+              </div>
+              <el-empty v-else description="暂无书签，阅读页右侧书签按钮可以添加" />
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="来源" name="sources">
+            <section class="app-panel tab-panel">
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                title="按当前书名搜索候选来源，切换时会使用候选书籍地址重新抓取目录。"
+              />
+              <div class="tab-toolbar">
+                <el-button :loading="loadingSourceCandidates" @click="loadSourceCandidates">搜索更多来源</el-button>
+              </div>
+              <div class="source-grid">
+                <button
+                  v-for="source in sourceCandidates"
+                  :key="`${source.sourceId}-${source.bookUrl}`"
+                  type="button"
+                  class="source-card"
+                  :class="{ active: source.current }"
+                  :disabled="source.current"
+                  @click="changeSource(source)"
+                >
+                  <strong>{{ source.title || book.title }}</strong>
+                  <span>{{ source.sourceName }} · {{ source.author || '未知作者' }}</span>
+                  <small>{{ source.current ? '当前来源' : '点击切换' }}</small>
+                </button>
+              </div>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="详情" name="info">
+            <section class="app-panel tab-panel">
+              <dl class="info-list">
+                <div><dt>书籍 ID</dt><dd>{{ book.id }}</dd></div>
+                <div><dt>来源 ID</dt><dd>{{ book.sourceId || '本地' }}</dd></div>
+                <div><dt>原始文件</dt><dd>{{ book.originalFile || '-' }}</dd></div>
+                <div><dt>书库路径</dt><dd>{{ book.libraryPath || '-' }}</dd></div>
+                <div><dt>创建时间</dt><dd>{{ formatDate(book.createdAt) }}</dd></div>
+                <div><dt>更新时间</dt><dd>{{ formatDate(book.updatedAt) }}</dd></div>
+              </dl>
+            </section>
+          </el-tab-pane>
+        </el-tabs>
+      </template>
+    </div>
+
+    <el-dialog v-model="showChangeSource" title="换源" width="460px">
+      <div class="source-list-dialog">
+        <el-button
+          v-for="source in sourceCandidates"
+          :key="`${source.sourceId}-${source.bookUrl}`"
+          :type="source.current ? 'primary' : ''"
+          :loading="changingSource === source.sourceId"
+          :disabled="source.current"
+          @click="changeSource(source)"
+        >
+          {{ source.sourceName }}{{ source.current ? '（当前）' : '' }}
+        </el-button>
+      </div>
+      <p v-if="changeMessage" :class="changeError ? 'msg-error' : 'msg-success'">{{ changeMessage }}</p>
+    </el-dialog>
+
+    <el-dialog v-model="showBookEditor" title="编辑书籍" width="540px">
+      <el-form label-position="top" class="book-editor">
+        <el-form-item label="书名"><el-input v-model="bookDraft.title" /></el-form-item>
+        <el-form-item label="作者"><el-input v-model="bookDraft.author" /></el-form-item>
+        <el-form-item label="封面">
+          <div class="cover-upload-row">
+            <el-input v-model="bookDraft.coverUrl" placeholder="封面地址或上传本地图片" />
+            <el-upload accept="image/*" :show-file-list="false" :auto-upload="false" @change="uploadBookCover">
+              <el-button :loading="uploadingCover">上传</el-button>
+            </el-upload>
+          </div>
+        </el-form-item>
+        <el-form-item label="简介"><el-input v-model="bookDraft.intro" type="textarea" :rows="5" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showBookEditor = false">取消</el-button>
+        <el-button type="primary" :loading="savingBook" @click="saveBookEdit">保存</el-button>
+      </template>
+    </el-dialog>
+  </section>
+</template>
+
+<script setup>
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, Search, Switch } from '@element-plus/icons-vue'
+import { cacheBookContent, changeBookSource, deleteBook, deleteBookmark, listBookmarks, listBookSourceCandidates, refreshBook, updateBook, updateBookCategory } from '../api/books'
+import api from '../api/client'
+import { uploadAsset } from '../api/uploads'
+import BookInfoPanel from '../components/BookInfoPanel.vue'
+import { useBookshelfStore } from '../stores/bookshelf'
+import { useReaderStore } from '../stores/reader'
+
+const route = useRoute()
+const router = useRouter()
+const bookshelf = useBookshelfStore()
+const reader = useReaderStore()
+
+const loading = ref(true)
+const book = ref(null)
+const chapters = ref([])
+const bookmarks = ref([])
+const availableSources = ref([])
+const sourceCandidates = ref([])
+const loadingSourceCandidates = ref(false)
+const activeTab = ref('toc')
+const tocKeyword = ref('')
+const tocReverse = ref(false)
+const categoryDraft = ref('')
+const showChangeSource = ref(false)
+const showBookEditor = ref(false)
+const savingBook = ref(false)
+const uploadingCover = ref(false)
+const refreshingBook = ref(false)
+const cachingBook = ref(false)
+const clearingCache = ref(false)
+const changingSource = ref(null)
+const changeMessage = ref('')
+const changeError = ref(false)
+const bookDraft = reactive({ title: '', author: '', coverUrl: '', intro: '' })
+
+const currentSource = computed(() => availableSources.value.find(source => source.id === book.value?.sourceId))
+
+const shownChapters = computed(() => {
+  const keyword = tocKeyword.value.trim().toLowerCase()
+  const list = keyword
+    ? chapters.value.filter(chapter => chapter.title.toLowerCase().includes(keyword))
+    : chapters.value
+  return tocReverse.value ? [...list].reverse() : list
+})
+
+onMounted(load)
+
+async function load() {
+  loading.value = true
+  try {
+    const id = route.params.id
+    await bookshelf.loadCategories()
+    const [bookRes, chapterRes, bookmarkRes, sourceRes] = await Promise.all([
+      api.get(`/books/${id}`),
+      api.get(`/books/${id}/chapters`),
+      listBookmarks(id),
+      api.get('/sources'),
+      reader.loadProgress(id).catch(() => null),
+    ])
+    book.value = bookRes.data
+    chapters.value = chapterRes.data
+    bookmarks.value = bookmarkRes.data
+    availableSources.value = sourceRes.data.filter(source => source.enabled)
+    await loadSourceCandidates()
+    categoryDraft.value = book.value.categoryId ? String(book.value.categoryId) : ''
+  } catch (err) {
+    ElMessage.error(readError(err, '加载书籍失败'))
+  } finally {
+    loading.value = false
+  }
+}
+
+function startRead() {
+  router.push({ name: 'reader', params: { id: book.value.id } })
+}
+
+function goChapter(index) {
+  router.push({ name: 'reader', params: { id: book.value.id }, query: { chapter: index } })
+}
+
+function goBookmark(bookmark) {
+  router.push({ name: 'reader', params: { id: book.value.id }, query: { chapter: bookmark.chapterIndex, offset: bookmark.offset } })
+}
+
+async function deleteBookmarkItem(bookmark) {
+  try {
+    await deleteBookmark(bookmark.id)
+    bookmarks.value = bookmarks.value.filter(item => item.id !== bookmark.id)
+    ElMessage.success('书签已删除')
+  } catch (err) {
+    ElMessage.error(readError(err, '删除书签失败'))
+  }
+}
+
+async function changeCategory(value) {
+  try {
+    const categoryId = value ? Number(value) : null
+    const { data } = await updateBookCategory(book.value.id, categoryId)
+    book.value = data
+    ElMessage.success('分组已更新')
+  } catch (err) {
+    ElMessage.error(readError(err, '更新分组失败'))
+    categoryDraft.value = book.value.categoryId ? String(book.value.categoryId) : ''
+  }
+}
+
+async function deleteCurrentBook() {
+  if (!book.value) return
+  try {
+    await ElMessageBox.confirm(`确定删除《${book.value.title}》吗？阅读进度和书签也会一并删除。`, '删除书籍', { type: 'warning' })
+    await deleteBook(book.value.id)
+    ElMessage.success('书籍已删除')
+    router.push({ name: 'home' })
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '删除失败'))
+  }
+}
+
+function openBookEditor() {
+  if (!book.value) return
+  Object.assign(bookDraft, {
+    title: book.value.title || '',
+    author: book.value.author || '',
+    coverUrl: book.value.coverUrl || '',
+    intro: book.value.intro || '',
+  })
+  showBookEditor.value = true
+}
+
+async function saveBookEdit() {
+  if (!book.value) return
+  if (!bookDraft.title.trim()) {
+    ElMessage.warning('书名不能为空')
+    return
+  }
+  savingBook.value = true
+  try {
+    const { data } = await updateBook(book.value.id, {
+      title: bookDraft.title,
+      author: bookDraft.author,
+      coverUrl: bookDraft.coverUrl,
+      intro: bookDraft.intro,
+      categoryId: book.value.categoryId || null,
+    })
+    book.value = data
+    showBookEditor.value = false
+    ElMessage.success('书籍已更新')
+  } catch (err) {
+    ElMessage.error(readError(err, '更新书籍失败'))
+  } finally {
+    savingBook.value = false
+  }
+}
+
+async function uploadBookCover(data) {
+  const file = data.raw || data.file
+  if (!file) return
+  uploadingCover.value = true
+  try {
+    const { data: result } = await uploadAsset({ file, type: 'cover' })
+    bookDraft.coverUrl = result.url
+    ElMessage.success('封面已上传')
+  } catch (err) {
+    ElMessage.error(readError(err, '上传封面失败'))
+  } finally {
+    uploadingCover.value = false
+  }
+}
+
+async function refreshCurrentBook() {
+  if (!book.value) return
+  refreshingBook.value = true
+  try {
+    const { data } = await refreshBook(book.value.id)
+    book.value = data.book
+    const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
+    chapters.value = chaptersRes.data
+    ElMessage.success(data.added ? `新增 ${data.added} 章` : '目录已刷新')
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新目录失败'))
+  } finally {
+    refreshingBook.value = false
+  }
+}
+
+async function cacheCurrentBook() {
+  if (!book.value) return
+  cachingBook.value = true
+  try {
+    const { data } = await cacheBookContent(book.value.id, { all: true })
+    await reloadChapters()
+    ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
+  } catch (err) {
+    ElMessage.error(readError(err, '缓存失败'))
+  } finally {
+    cachingBook.value = false
+  }
+}
+
+async function clearCurrentBookCache() {
+  if (!book.value) return
+  try {
+    await ElMessageBox.confirm(`确定清理《${book.value.title}》的章节缓存吗？`, '清理缓存', { type: 'warning' })
+    clearingCache.value = true
+    const data = await bookshelf.batchClearCache([book.value.id])
+    await reloadChapters()
+    ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '清理缓存失败'))
+  } finally {
+    clearingCache.value = false
+  }
+}
+
+async function reloadChapters() {
+  if (!book.value) return
+  const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
+  chapters.value = chaptersRes.data
+}
+
+async function loadSourceCandidates() {
+  if (!book.value) return
+  loadingSourceCandidates.value = true
+  try {
+    const { data } = await listBookSourceCandidates(book.value.id)
+    sourceCandidates.value = data || []
+  } catch (err) {
+    ElMessage.error(readError(err, '搜索可用来源失败'))
+  } finally {
+    loadingSourceCandidates.value = false
+  }
+}
+
+async function openChangeSource() {
+  showChangeSource.value = true
+  if (!sourceCandidates.value.length) {
+    await loadSourceCandidates()
+  }
+}
+
+async function changeSource(source) {
+  if (!book.value || source.current) return
+  changingSource.value = source.sourceId
+  changeMessage.value = ''
+  changeError.value = false
+  try {
+    const { data } = await changeBookSource(book.value.id, {
+      sourceId: source.sourceId,
+      bookUrl: source.bookUrl,
+      title: source.title,
+      author: source.author,
+      coverUrl: source.coverUrl,
+      intro: source.intro,
+    })
+    book.value = data
+    const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
+    chapters.value = chaptersRes.data
+    changeMessage.value = `已切换，共 ${data.chapterCount || chapters.value.length} 章`
+    await loadSourceCandidates()
+    ElMessage.success('换源成功')
+  } catch (err) {
+    changeError.value = true
+    changeMessage.value = readError(err, '换源失败')
+  } finally {
+    changingSource.value = null
+  }
+}
+
+function categoryName(id) {
+  if (!id) return '未分组'
+  return bookshelf.categories.find(category => String(category.id) === String(id))?.name || '未分组'
+}
+
+function formatDate(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
+function readError(err, fallback) {
+  return err?.response?.data?.error?.message || err?.response?.data?.error || fallback
+}
+</script>
+
+<style scoped>
+.detail-page {
+  display: grid;
+  gap: 16px;
+}
+
+.back-link {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--app-text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.back-link:hover {
+  color: var(--app-primary);
+}
+
+.book-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.cover-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.cover-shadow {
+  position: absolute;
+  inset: 8px;
+  opacity: 0.18;
+  background-position: center;
+  background-size: cover;
+  filter: blur(18px);
+}
+
+.book-cover {
+  position: relative;
+  display: grid;
+  width: 118px;
+  height: 160px;
+  place-items: center;
+  border-radius: 5px;
+  box-shadow: 0 16px 36px rgba(58, 41, 10, 0.18);
+  font-size: 44px;
+  font-weight: 900;
+}
+
+.book-main {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.book-title-line,
+.hero-actions,
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.book-title-line {
+  justify-content: space-between;
+}
+
+.book-title-line h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.book-meta,
+.book-intro {
+  margin: 0;
+  color: var(--app-text-muted);
+}
+
+.book-intro {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.7;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.book-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.book-facts span {
+  padding: 5px 9px;
+  color: var(--app-text-muted);
+  background: var(--app-bg-soft);
+  border: 1px solid var(--app-border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.category-select {
+  width: 160px;
+}
+
+.detail-tabs {
+  min-width: 0;
+}
+
+.tab-panel {
+  padding: 16px;
+}
+
+.tab-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.tab-toolbar .el-input {
+  max-width: 360px;
+}
+
+.chapter-list,
+.bookmark-list,
+.source-grid,
+.info-list {
+  display: grid;
+  gap: 8px;
+}
+
+.chapter-list {
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.chapter-row,
+.bookmark-row button,
+.source-card {
+  width: 100%;
+  color: var(--app-text);
+  background: transparent;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.chapter-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.chapter-row:hover,
+.source-card:hover,
+.source-card.active {
+  border-color: var(--app-primary);
+  background: var(--app-primary-soft);
+}
+
+.chapter-row small,
+.bookmark-row small,
+.source-card small,
+.source-card span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.bookmark-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.bookmark-row button {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.bookmark-row span {
+  overflow: hidden;
+  color: var(--app-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-grid {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  margin-top: 12px;
+}
+
+.source-card {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.info-list {
+  margin: 0;
+}
+
+.info-list div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.info-list dt {
+  color: var(--app-text-muted);
+}
+
+.info-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-list-dialog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.book-editor {
+  display: grid;
+}
+
+.cover-upload-row {
+  display: flex;
+  gap: 8px;
+}
+
+.cover-upload-row .el-input {
+  flex: 1;
+}
+
+.msg-success {
+  color: #67c23a;
+}
+
+.msg-error {
+  color: #f56c6c;
+}
+
+@media (max-width: 720px) {
+  .book-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .book-title-line,
+  .hero-actions,
+  .tab-toolbar {
+    display: grid;
+  }
+
+  .tab-toolbar .el-input,
+  .category-select {
+    max-width: none;
+    width: 100%;
+  }
+}
+</style>

@@ -1,0 +1,83 @@
+package engine
+
+import (
+	"bytes"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
+)
+
+var defaultClient = &http.Client{Timeout: 12 * time.Second}
+
+func SetHTTPClient(client *http.Client) func() {
+	previous := defaultClient
+	if client == nil {
+		defaultClient = &http.Client{Timeout: 12 * time.Second}
+	} else {
+		defaultClient = client
+	}
+	return func() {
+		defaultClient = previous
+	}
+}
+
+func FetchDocument(url, charset string) (*goquery.Document, error) {
+	decoded, err := FetchText(url, charset)
+	if err != nil {
+		return nil, err
+	}
+	return goquery.NewDocumentFromReader(strings.NewReader(decoded))
+}
+
+func FetchText(url, charset string) (string, error) {
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("User-Agent", "OpenReader/0.1 (+self-hosted reader)")
+
+	response, err := defaultClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return "", err
+	}
+
+	decoded, err := DecodeBody(body, charset)
+	if err != nil {
+		return "", err
+	}
+	return decoded, nil
+}
+
+func DecodeBody(body []byte, charset string) (string, error) {
+	if utf8.Valid(body) && !isGBK(charset) {
+		return string(body), nil
+	}
+
+	if isGBK(charset) {
+		reader := transform.NewReader(bytes.NewReader(body), simplifiedchinese.GBK.NewDecoder())
+		decoded, err := io.ReadAll(reader)
+		if err != nil {
+			return "", err
+		}
+		return string(decoded), nil
+	}
+
+	return string(body), nil
+}
+
+func isGBK(charset string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(charset))
+	return normalized == "gbk" || normalized == "gb2312" || normalized == "gb18030"
+}

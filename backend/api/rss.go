@@ -1,0 +1,302 @@
+package api
+
+import (
+	"encoding/xml"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"openreader/backend/engine"
+	"openreader/backend/middleware"
+	"openreader/backend/models"
+)
+
+type rssSourceRequest struct {
+	Title   string `json:"title"`
+	URL     string `json:"url" binding:"required"`
+	Enabled *bool  `json:"enabled"`
+}
+
+func (s *Server) listRSSSources(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	var sources []models.RSSSource
+	if err := s.db.Where("user_id = ?", userID).Order("updated_at desc").Find(&sources).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list RSS sources"})
+		return
+	}
+	c.JSON(http.StatusOK, sources)
+}
+
+func (s *Server) createRSSSource(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	var req rssSourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	source := models.RSSSource{
+		UserID:  userID,
+		Title:   strings.TrimSpace(req.Title),
+		URL:     strings.TrimSpace(req.URL),
+		Enabled: enabled,
+	}
+	if source.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+	if source.Title == "" {
+		source.Title = source.URL
+	}
+	if err := s.db.Create(&source).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create RSS source"})
+		return
+	}
+	c.JSON(http.StatusCreated, source)
+}
+
+func (s *Server) updateRSSSource(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	sourceID, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var source models.RSSSource
+	if err := s.db.Where("user_id = ? AND id = ?", userID, sourceID).First(&source).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "RSS source not found"})
+		return
+	}
+	var req rssSourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+	source.Title = strings.TrimSpace(req.Title)
+	source.URL = strings.TrimSpace(req.URL)
+	if req.Enabled != nil {
+		source.Enabled = *req.Enabled
+	}
+	if source.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+	if source.Title == "" {
+		source.Title = source.URL
+	}
+	if err := s.db.Save(&source).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update RSS source"})
+		return
+	}
+	c.JSON(http.StatusOK, source)
+}
+
+func (s *Server) deleteRSSSource(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	sourceID, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	if err := s.db.Where("user_id = ? AND source_id = ?", userID, sourceID).Delete(&models.RSSArticle{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete RSS articles"})
+		return
+	}
+	result := s.db.Where("user_id = ? AND id = ?", userID, sourceID).Delete(&models.RSSSource{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete RSS source"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "RSS source not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (s *Server) refreshRSSSource(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	sourceID, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var source models.RSSSource
+	if err := s.db.Where("user_id = ? AND id = ?", userID, sourceID).First(&source).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "RSS source not found"})
+		return
+	}
+	articles, err := fetchRSSArticles(source)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to fetch RSS source: " + err.Error()})
+		return
+	}
+	imported := 0
+	for _, article := range articles {
+		article.UserID = userID
+		article.SourceID = source.ID
+		var existing models.RSSArticle
+		if article.Link != "" && s.db.Where("user_id = ? AND source_id = ? AND link = ?", userID, source.ID, article.Link).First(&existing).Error == nil {
+			existing.Title = article.Title
+			existing.Author = article.Author
+			existing.Summary = article.Summary
+			existing.Content = article.Content
+			existing.PublishedAt = article.PublishedAt
+			_ = s.db.Save(&existing).Error
+			continue
+		}
+		if err := s.db.Create(&article).Error; err == nil {
+			imported++
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"imported": imported, "total": len(articles)})
+}
+
+func (s *Server) listRSSArticles(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	query := s.db.Where("user_id = ?", userID)
+	if sourceID := strings.TrimSpace(c.Query("sourceId")); sourceID != "" {
+		query = query.Where("source_id = ?", sourceID)
+	}
+	if strings.TrimSpace(c.Query("unread")) == "true" {
+		query = query.Where("is_read = ?", false)
+	}
+	if strings.TrimSpace(c.Query("favorite")) == "true" {
+		query = query.Where("favorite = ?", true)
+	}
+	var articles []models.RSSArticle
+	if err := query.Order("published_at desc, updated_at desc").Limit(200).Find(&articles).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list RSS articles"})
+		return
+	}
+	c.JSON(http.StatusOK, articles)
+}
+
+type rssArticleStateRequest struct {
+	IsRead   *bool `json:"isRead"`
+	Favorite *bool `json:"favorite"`
+}
+
+func (s *Server) updateRSSArticleState(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	articleID, ok := parseUintParam(c, "id")
+	if !ok {
+		return
+	}
+	var article models.RSSArticle
+	if err := s.db.Where("user_id = ? AND id = ?", userID, articleID).First(&article).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "RSS article not found"})
+		return
+	}
+	var req rssArticleStateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid RSS article payload"})
+		return
+	}
+	if req.IsRead != nil {
+		article.IsRead = *req.IsRead
+	}
+	if req.Favorite != nil {
+		article.Favorite = *req.Favorite
+	}
+	if err := s.db.Save(&article).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update RSS article"})
+		return
+	}
+	c.JSON(http.StatusOK, article)
+}
+
+type parsedRSS struct {
+	Channel struct {
+		Items []struct {
+			Title       string `xml:"title"`
+			Link        string `xml:"link"`
+			Description string `xml:"description"`
+			Creator     string `xml:"creator"`
+			Author      string `xml:"author"`
+			PubDate     string `xml:"pubDate"`
+			Encoded     string `xml:"encoded"`
+		} `xml:"item"`
+	} `xml:"channel"`
+	Entries []struct {
+		Title string `xml:"title"`
+		Link  []struct {
+			Href string `xml:"href,attr"`
+		} `xml:"link"`
+		Summary string `xml:"summary"`
+		Content string `xml:"content"`
+		Author  struct {
+			Name string `xml:"name"`
+		} `xml:"author"`
+		Published string `xml:"published"`
+		Updated   string `xml:"updated"`
+	} `xml:"entry"`
+}
+
+func fetchRSSArticles(source models.RSSSource) ([]models.RSSArticle, error) {
+	text, err := engine.FetchText(source.URL, "utf-8")
+	if err != nil {
+		return nil, err
+	}
+	var parsed parsedRSS
+	if err := xml.Unmarshal([]byte(text), &parsed); err != nil {
+		return nil, err
+	}
+	articles := make([]models.RSSArticle, 0)
+	for _, item := range parsed.Channel.Items {
+		articles = append(articles, models.RSSArticle{
+			Title:       strings.TrimSpace(item.Title),
+			Link:        strings.TrimSpace(item.Link),
+			Author:      firstNonEmpty(item.Creator, item.Author),
+			Summary:     strings.TrimSpace(item.Description),
+			Content:     strings.TrimSpace(item.Encoded),
+			PublishedAt: parseRSSDate(item.PubDate),
+		})
+	}
+	for _, entry := range parsed.Entries {
+		link := ""
+		if len(entry.Link) > 0 {
+			link = entry.Link[0].Href
+		}
+		articles = append(articles, models.RSSArticle{
+			Title:       strings.TrimSpace(entry.Title),
+			Link:        strings.TrimSpace(link),
+			Author:      strings.TrimSpace(entry.Author.Name),
+			Summary:     strings.TrimSpace(entry.Summary),
+			Content:     strings.TrimSpace(entry.Content),
+			PublishedAt: parseRSSDate(firstNonEmpty(entry.Published, entry.Updated)),
+		})
+	}
+	filtered := articles[:0]
+	for _, article := range articles {
+		if article.Title != "" {
+			filtered = append(filtered, article)
+		}
+	}
+	return filtered, nil
+}
+
+func parseRSSDate(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	layouts := []string{time.RFC1123Z, time.RFC1123, time.RFC3339, "Mon, 02 Jan 2006 15:04:05 -0700"}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}

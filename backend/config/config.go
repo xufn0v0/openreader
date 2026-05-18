@@ -1,0 +1,45 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+)
+
+type Config struct {
+	Address        string
+	DataDir        string
+	CacheDir       string
+	LibraryDir     string
+	DatabasePath   string
+	JWTSecret      string
+	CORSOrigin     string
+	PublicDir      string
+	CheckInterval  string
+	LocalStoreDir  string
+}
+
+func Load() Config {
+	dataDir := env("OPENREADER_DATA_DIR", "data")
+	cacheDir := env("OPENREADER_CACHE_DIR", "cache")
+
+	return Config{
+		Address:       env("OPENREADER_ADDR", ":8080"),
+		DataDir:       dataDir,
+		CacheDir:      cacheDir,
+		LibraryDir:    env("OPENREADER_LIBRARY_DIR", "library"),
+		DatabasePath:  env("OPENREADER_DB", filepath.Join(dataDir, "openreader.db")),
+		JWTSecret:     env("OPENREADER_JWT_SECRET", "change-me-in-production"),
+		CORSOrigin:    env("OPENREADER_CORS_ORIGIN", "http://localhost:5173"),
+		PublicDir:     env("OPENREADER_PUBLIC_DIR", "public"),
+		CheckInterval: env("OPENREADER_CHECK_INTERVAL", "30m"),
+		LocalStoreDir: env("OPENREADER_LOCAL_STORE_DIR", filepath.Join("library", "localStore")),
+	}
+}
+
+func env(key, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value
+}

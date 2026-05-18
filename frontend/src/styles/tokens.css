@@ -1,0 +1,38 @@
+:root {
+  color-scheme: light;
+  --app-bg: #f5f1e8;
+  --app-bg-soft: #fbf8f1;
+  --app-surface: #fffdf8;
+  --app-surface-muted: #f1eadf;
+  --app-border: #e4d9c8;
+  --app-border-strong: #cabaa4;
+  --app-text: #24201b;
+  --app-text-muted: #766a5c;
+  --app-text-subtle: #a09282;
+  --app-primary: #2f6f6d;
+  --app-primary-strong: #1f5654;
+  --app-primary-soft: #d9ece7;
+  --app-accent: #9c5b34;
+  --app-warning: #ba7a20;
+  --app-danger: #b5463e;
+  --app-success: #3c7a4b;
+  --app-nav-bg: #25221f;
+  --app-nav-active: #f4e4c5;
+  --app-nav-muted: #b8aa99;
+  --app-radius-sm: 6px;
+  --app-radius-md: 8px;
+  --app-radius-lg: 12px;
+  --app-shadow-sm: 0 1px 2px rgba(36, 32, 27, 0.08);
+  --app-shadow-md: 0 14px 35px rgba(44, 34, 24, 0.12);
+  --app-sidebar-width: 236px;
+  --app-content-max: 1320px;
+  --app-header-height: 72px;
+  --reader-page-bg: #f7ecd0;
+  --reader-page-text: #26211b;
+  --reader-page-width: 760px;
+  --reader-toolbar-bg: rgba(255, 253, 248, 0.92);
+}
+
+html.dark-reader {
+  color-scheme: dark;
+}
