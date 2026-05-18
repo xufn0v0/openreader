@@ -104,7 +104,7 @@ All three are mounted as volumes in Docker. Backup these directories to migrate.
 
 ## License
 
-MIT
+[GPL v3](LICENSE)
 
 ---
 
@@ -208,4 +208,4 @@ cd frontend && npm run build
 
 ## 许可证
 
-MIT
+[GPL v3](LICENSE)
