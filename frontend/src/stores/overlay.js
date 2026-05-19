@@ -37,6 +37,15 @@ export const useOverlayStore = defineStore('overlay', {
       this.searchBook = book
       this.searchBookContentVisible = true
     },
+    openReplaceRules(router) {
+      router?.push?.({ name: 'settings', query: { panel: 'replace' } })
+    },
+    openRSS(router) {
+      router?.push?.({ name: 'settings', query: { panel: 'rss' } })
+    },
+    openUserManage(router) {
+      router?.push?.({ name: 'settings', query: { panel: 'admin' } })
+    },
     openLocalStore(router) {
       router?.push?.({ name: 'local-store' })
     },

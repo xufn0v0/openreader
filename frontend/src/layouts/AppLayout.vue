@@ -31,7 +31,7 @@
             v-for="item in section.items"
             :key="item.key"
             class="app-nav-item"
-            :class="{ active: item.route && route.name === item.route }"
+            :class="{ active: isNavActive(item) }"
             type="button"
             @click="runNavAction(item)"
           >
@@ -88,6 +88,7 @@ import {
   Box,
   Compass,
   Connection,
+  Edit,
   Files,
   FolderOpened,
   Notebook,
@@ -130,13 +131,16 @@ const navSections = [
       { key: 'bookManage', label: '书籍管理', icon: Files, action: () => overlay.openBookManage() },
       { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
       { key: 'localStore', label: '本地书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
+      { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules(router), route: 'settings', panel: 'replace' },
     ],
   },
   {
     title: '用户空间',
     items: [
-      { key: 'webdav', label: 'WebDAV', icon: Upload, action: () => overlay.openWebDAV(router), route: 'settings' },
-      { key: 'settings', label: '设置', icon: Setting, route: 'settings' },
+      { key: 'webdav', label: 'WebDAV', icon: Upload, action: () => overlay.openWebDAV(router), route: 'settings', panel: 'webdav' },
+      { key: 'rss', label: 'RSS', icon: Connection, action: () => overlay.openRSS(router), route: 'settings', panel: 'rss' },
+      { key: 'userManage', label: '用户管理', icon: Operation, action: () => overlay.openUserManage(router), route: 'settings', panel: 'admin' },
+      { key: 'settings', label: '设置', icon: Setting, route: 'settings', panel: 'account' },
     ],
   },
 ]
@@ -159,6 +163,12 @@ function runNavAction(item) {
     return
   }
   if (item.route) goRoute(item.route)
+}
+
+function isNavActive(item) {
+  if (!item.route || route.name !== item.route) return false
+  if (!item.panel) return true
+  return String(route.query.panel || 'account') === item.panel
 }
 
 function goSearch() {

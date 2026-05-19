@@ -404,8 +404,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Connection,
@@ -437,11 +437,13 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useUserStore } from '../stores/user'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const readerStore = useReaderStore()
 const { connected: syncConnected } = useSync()
 
-const activeTab = ref('account')
+const settingPanels = new Set(['account', 'backup', 'cache', 'webdav', 'reader', 'replace', 'rss', 'admin'])
+const activeTab = ref(settingPanels.has(String(route.query.panel || '')) ? String(route.query.panel) : 'account')
 const checking = ref(false)
 const backupLoading = ref(false)
 const backupListLoading = ref(false)
@@ -504,6 +506,14 @@ onMounted(() => {
   loadRSSArticles()
   if (userStore.profile?.role === 'admin') loadUsers()
 })
+
+watch(
+  () => route.query.panel,
+  (panel) => {
+    const value = String(panel || '')
+    if (settingPanels.has(value)) activeTab.value = value
+  },
+)
 
 async function checkHealth() {
   checking.value = true
