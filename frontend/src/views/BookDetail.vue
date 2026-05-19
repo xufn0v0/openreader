@@ -69,30 +69,15 @@
 
           <el-tab-pane label="来源" name="sources">
             <section class="app-panel tab-panel">
-              <el-alert
-                type="info"
-                :closable="false"
-                show-icon
-                title="按当前书名搜索候选来源，切换时会使用候选书籍地址重新抓取目录。"
+              <SourceSwitchPanel
+                :book="book"
+                :sources="sourceCandidates"
+                :loading="loadingSourceCandidates"
+                :changing-source="changingSource"
+                :show-info-button="false"
+                @refresh="loadSourceCandidates"
+                @change="changeSource"
               />
-              <div class="tab-toolbar">
-                <el-button :loading="loadingSourceCandidates" @click="loadSourceCandidates">搜索更多来源</el-button>
-              </div>
-              <div class="source-grid">
-                <button
-                  v-for="source in sourceCandidates"
-                  :key="`${source.sourceId}-${source.bookUrl}`"
-                  type="button"
-                  class="source-card"
-                  :class="{ active: source.current }"
-                  :disabled="source.current"
-                  @click="changeSource(source)"
-                >
-                  <strong>{{ source.title || book.title }}</strong>
-                  <span>{{ source.sourceName }} · {{ source.author || '未知作者' }}</span>
-                  <small>{{ source.current ? '当前来源' : '点击切换' }}</small>
-                </button>
-              </div>
             </section>
           </el-tab-pane>
 
@@ -113,18 +98,15 @@
     </div>
 
     <el-dialog v-model="showChangeSource" title="换源" width="460px">
-      <div class="source-list-dialog">
-        <el-button
-          v-for="source in sourceCandidates"
-          :key="`${source.sourceId}-${source.bookUrl}`"
-          :type="source.current ? 'primary' : ''"
-          :loading="changingSource === source.sourceId"
-          :disabled="source.current"
-          @click="changeSource(source)"
-        >
-          {{ source.sourceName }}{{ source.current ? '（当前）' : '' }}
-        </el-button>
-      </div>
+      <SourceSwitchPanel
+        :book="book"
+        :sources="sourceCandidates"
+        :loading="loadingSourceCandidates"
+        :changing-source="changingSource"
+        :show-info-button="false"
+        @refresh="loadSourceCandidates"
+        @change="changeSource"
+      />
       <p v-if="changeMessage" :class="changeError ? 'msg-error' : 'msg-success'">{{ changeMessage }}</p>
     </el-dialog>
 
@@ -159,6 +141,7 @@ import { cacheBookContent, changeBookSource, deleteBook, deleteBookmark, listBoo
 import api from '../api/client'
 import { uploadAsset } from '../api/uploads'
 import BookInfoPanel from '../components/BookInfoPanel.vue'
+import SourceSwitchPanel from '../components/reader/SourceSwitchPanel.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 
@@ -570,7 +553,6 @@ function readError(err, fallback) {
 
 .chapter-list,
 .bookmark-list,
-.source-grid,
 .info-list {
   display: grid;
   gap: 8px;
@@ -582,8 +564,7 @@ function readError(err, fallback) {
 }
 
 .chapter-row,
-.bookmark-row button,
-.source-card {
+.bookmark-row button {
   width: 100%;
   color: var(--app-text);
   background: transparent;
@@ -600,17 +581,13 @@ function readError(err, fallback) {
   padding: 10px 12px;
 }
 
-.chapter-row:hover,
-.source-card:hover,
-.source-card.active {
+.chapter-row:hover {
   border-color: var(--app-primary);
   background: var(--app-primary-soft);
 }
 
 .chapter-row small,
-.bookmark-row small,
-.source-card small,
-.source-card span {
+.bookmark-row small {
   color: var(--app-text-muted);
   font-size: 12px;
 }
@@ -635,17 +612,6 @@ function readError(err, fallback) {
   white-space: nowrap;
 }
 
-.source-grid {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  margin-top: 12px;
-}
-
-.source-card {
-  display: grid;
-  gap: 5px;
-  padding: 12px;
-}
-
 .info-list {
   margin: 0;
 }
@@ -668,12 +634,6 @@ function readError(err, fallback) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.source-list-dialog {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .book-editor {

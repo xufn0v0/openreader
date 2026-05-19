@@ -8,7 +8,7 @@
   />
   <div class="drawer-actions">
     <el-button size="small" :loading="loading" @click="$emit('refresh')">搜索更多来源</el-button>
-    <el-button size="small" @click="$emit('showInfo')">书籍信息</el-button>
+    <el-button v-if="showInfoButton" size="small" @click="$emit('showInfo')">书籍信息</el-button>
   </div>
   <div class="source-switch-list">
     <button
@@ -45,6 +45,10 @@ defineProps({
   changingSource: {
     type: [Number, String],
     default: null,
+  },
+  showInfoButton: {
+    type: Boolean,
+    default: true,
   },
 })
 

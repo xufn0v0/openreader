@@ -1,6 +1,6 @@
 <template>
   <div class="drawer-actions">
-    <el-button type="primary" size="small" @click="$emit('add')">添加书签</el-button>
+    <el-button v-if="showAdd" type="primary" size="small" @click="$emit('add')">添加书签</el-button>
   </div>
   <div class="bookmark-list">
     <div v-for="item in bookmarks" :key="item.id" class="bookmark-card">
@@ -23,6 +23,10 @@ defineProps({
   bookmarks: {
     type: Array,
     default: () => [],
+  },
+  showAdd: {
+    type: Boolean,
+    default: true,
   },
 })
 

@@ -24,6 +24,8 @@
     </div>
     <div v-else-if="overlay.bookInfoBook?.id" class="overlay-actions">
       <el-button type="primary" @click="continueRead(overlay.bookInfoBook)">继续阅读</el-button>
+      <el-button plain @click="openContentSearch(overlay.bookInfoBook)">搜正文</el-button>
+      <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
     </div>
@@ -86,18 +88,67 @@
     </div>
     <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
   </el-drawer>
+
+  <el-drawer
+    v-model="overlay.searchBookContentVisible"
+    :title="`搜索正文${overlay.searchBook?.title ? ` · ${overlay.searchBook.title}` : ''}`"
+    direction="rtl"
+    size="420px"
+    class="global-search-drawer"
+  >
+    <ReaderSearchPanel
+      v-model="contentKeyword"
+      :results="contentResults"
+      :loading="contentSearching"
+      :searched="contentSearched"
+      @search="searchCurrentBookContent"
+      @jump="jumpToContentResult"
+    />
+  </el-drawer>
+
+  <el-drawer
+    v-model="overlay.bookmarkVisible"
+    :title="`书签${overlay.bookmarkBook?.title ? ` · ${overlay.bookmarkBook.title}` : ''}`"
+    direction="rtl"
+    size="420px"
+    class="global-bookmark-drawer"
+  >
+    <div v-loading="bookmarkLoading">
+      <ReaderBookmarkPanel
+        :bookmarks="bookmarkItems"
+        :show-add="false"
+        @jump="jumpToBookmark"
+        @edit="openBookmarkEditor"
+        @remove="removeBookmarkItem"
+      />
+    </div>
+  </el-drawer>
+
+  <el-dialog v-model="bookmarkEditorVisible" title="编辑书签" width="380px">
+    <div class="bookmark-editor">
+      <el-input v-model="bookmarkDraft.title" placeholder="标题" />
+      <el-input v-model="bookmarkDraft.excerpt" type="textarea" :rows="3" placeholder="摘录" />
+      <el-input v-model="bookmarkDraft.note" type="textarea" :rows="4" placeholder="笔记" />
+    </div>
+    <template #footer>
+      <el-button @click="bookmarkEditorVisible = false">取消</el-button>
+      <el-button type="primary" :loading="bookmarkSaving" @click="saveBookmarkEdit">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { checkBookUpdates } from '../api/books'
+import { checkBookUpdates, deleteBookmark, listBookmarks, searchBookContent, updateBookmark } from '../api/books'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import BookCover from './BookCover.vue'
 import BookInfoDialog from './BookInfoDialog.vue'
+import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
+import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
 
 const router = useRouter()
 const bookshelf = useBookshelfStore()
@@ -109,6 +160,16 @@ const batchCategoryId = ref('')
 const batchBusy = ref(false)
 const loadingUpdates = ref(false)
 const newGroupName = ref('')
+const contentKeyword = ref('')
+const contentResults = ref([])
+const contentSearching = ref(false)
+const contentSearched = ref(false)
+const bookmarkItems = ref([])
+const bookmarkLoading = ref(false)
+const bookmarkEditorVisible = ref(false)
+const bookmarkSaving = ref(false)
+const editingBookmark = ref(null)
+const bookmarkDraft = reactive({ title: '', excerpt: '', note: '' })
 
 const allSelected = computed(() => bookshelf.books.length > 0 && selectedBookIds.value.length === bookshelf.books.length)
 const someSelected = computed(() => selectedBookIds.value.length > 0 && selectedBookIds.value.length < bookshelf.books.length)
@@ -129,6 +190,27 @@ watch(
     } catch (err) {
       ElMessage.error(readError(err, '加载书架数据失败'))
     }
+  },
+)
+
+watch(
+  () => overlay.searchBookContentVisible,
+  (visible) => {
+    if (visible) return
+    contentKeyword.value = ''
+    contentResults.value = []
+    contentSearched.value = false
+  },
+)
+
+watch(
+  () => overlay.bookmarkVisible,
+  async (visible) => {
+    if (!visible) {
+      bookmarkItems.value = []
+      return
+    }
+    await loadBookmarkItems()
   },
 )
 
@@ -163,6 +245,16 @@ function continueRead(book) {
 function goDetail(book) {
   overlay.closeBookInfo()
   router.push({ name: 'book-detail', params: { id: book.id } })
+}
+
+function openContentSearch(book) {
+  overlay.closeBookInfo()
+  overlay.openSearchBookContent(book)
+}
+
+function openBookmarks(book) {
+  overlay.closeBookInfo()
+  overlay.openBookmark(book)
 }
 
 async function refreshShelf() {
@@ -266,6 +358,105 @@ async function deleteBook(book) {
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '删除失败'))
+  }
+}
+
+async function searchCurrentBookContent() {
+  const book = overlay.searchBook
+  const keyword = contentKeyword.value.trim()
+  if (!book?.id || !keyword) return
+  contentSearching.value = true
+  contentSearched.value = true
+  try {
+    const { data } = await searchBookContent(book.id, keyword)
+    contentResults.value = data || []
+  } catch (err) {
+    ElMessage.error(readError(err, '搜索正文失败'))
+  } finally {
+    contentSearching.value = false
+  }
+}
+
+function jumpToContentResult(result) {
+  const book = overlay.searchBook
+  if (!book?.id) return
+  overlay.searchBookContentVisible = false
+  router.push({
+    name: 'reader',
+    params: { id: book.id },
+    query: {
+      chapter: Number(result.chapterIndex || 0),
+      line: Number.isInteger(result.lineIndex) ? result.lineIndex : undefined,
+      q: contentKeyword.value.trim() || undefined,
+    },
+  })
+}
+
+async function loadBookmarkItems() {
+  const book = overlay.bookmarkBook
+  if (!book?.id) return
+  bookmarkLoading.value = true
+  try {
+    const { data } = await listBookmarks(book.id)
+    bookmarkItems.value = data || []
+  } catch (err) {
+    ElMessage.error(readError(err, '加载书签失败'))
+  } finally {
+    bookmarkLoading.value = false
+  }
+}
+
+function jumpToBookmark(bookmark) {
+  const book = overlay.bookmarkBook
+  if (!book?.id) return
+  overlay.bookmarkVisible = false
+  router.push({
+    name: 'reader',
+    params: { id: book.id },
+    query: {
+      chapter: bookmark.chapterIndex,
+      offset: bookmark.offset || 0,
+    },
+  })
+}
+
+function openBookmarkEditor(bookmark) {
+  editingBookmark.value = bookmark
+  Object.assign(bookmarkDraft, {
+    title: bookmark.title || '',
+    excerpt: bookmark.excerpt || '',
+    note: bookmark.note || '',
+  })
+  bookmarkEditorVisible.value = true
+}
+
+async function saveBookmarkEdit() {
+  if (!editingBookmark.value) return
+  bookmarkSaving.value = true
+  try {
+    const { data } = await updateBookmark(editingBookmark.value.id, {
+      title: bookmarkDraft.title,
+      excerpt: bookmarkDraft.excerpt,
+      note: bookmarkDraft.note,
+    })
+    const index = bookmarkItems.value.findIndex(item => item.id === data.id)
+    if (index >= 0) bookmarkItems.value[index] = data
+    bookmarkEditorVisible.value = false
+    ElMessage.success('书签已更新')
+  } catch (err) {
+    ElMessage.error(readError(err, '更新书签失败'))
+  } finally {
+    bookmarkSaving.value = false
+  }
+}
+
+async function removeBookmarkItem(bookmark) {
+  try {
+    await deleteBookmark(bookmark.id)
+    bookmarkItems.value = bookmarkItems.value.filter(item => item.id !== bookmark.id)
+    ElMessage.success('书签已删除')
+  } catch (err) {
+    ElMessage.error(readError(err, '删除书签失败'))
   }
 }
 
@@ -406,6 +597,11 @@ function readError(err, fallback) {
   display: inline-flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.bookmark-editor {
+  display: grid;
+  gap: 10px;
 }
 
 @media (max-width: 560px) {

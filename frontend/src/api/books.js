@@ -56,6 +56,10 @@ export function changeBookSource(id, payload) {
   return api.post(`/books/${id}/change-source`, typeof payload === 'object' ? payload : { sourceId: payload })
 }
 
+export function searchBookContent(id, keyword) {
+  return api.get(`/books/${id}/search`, { params: { q: keyword } })
+}
+
 export function listChapters(id) {
   return api.get(`/books/${id}/chapters`)
 }

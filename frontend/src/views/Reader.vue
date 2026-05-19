@@ -482,6 +482,11 @@ watch(bookId, async () => {
 watch(() => route.query.chapter, async (q) => {
   const idx = Number(q || 0)
   if (idx !== currentIndex.value) await loadChapter(idx, Number(route.query.offset || 0))
+  await jumpToRouteLine()
+})
+
+watch(() => route.query.line, async () => {
+  await jumpToRouteLine()
 })
 
 watch(() => reader.mode, async () => {
@@ -510,6 +515,7 @@ async function loadReaderBook() {
     currentIndex.value = Number(route.query.chapter || 0)
   }
   await loadChapter(currentIndex.value, Number(route.query.offset || saved?.offset || 0))
+  await jumpToRouteLine()
 }
 
 async function loadChapter(index, offset = 0) {
@@ -924,6 +930,14 @@ function jumpToLine(index) {
     contentEl.value.scrollTop = Math.max(0, lineEl.offsetTop - 80)
   }
   saveCurrentProgress()
+}
+
+async function jumpToRouteLine() {
+  if (route.query.line === undefined) return
+  const index = Number(route.query.line)
+  if (!Number.isFinite(index)) return
+  await nextTick()
+  jumpToLine(Math.max(0, Math.floor(index)))
 }
 
 function scrollToTop() {
