@@ -2,15 +2,7 @@
   <section class="app-page shelf-page">
     <header class="shelf-head">
       <div>
-        <p class="eyebrow">Library</p>
-        <h1 class="app-page-title">书架</h1>
-        <p class="app-page-subtitle">继续阅读、管理分组、导入本地书籍和检查远程更新。</p>
-      </div>
-      <div class="head-actions">
-        <el-button :icon="Refresh" :loading="loadingUpdates" @click="checkUpdates">刷新</el-button>
-        <el-button :icon="Files" @click="overlay.openBookManage()">书籍管理</el-button>
-        <el-button :icon="FolderOpened" @click="overlay.openLocalStore(router)">浏览书仓</el-button>
-        <el-button type="primary" :icon="Upload" @click="importDialog = true">导入书籍</el-button>
+        <h1 class="app-page-title">书架 ({{ displayedBooks.length }})</h1>
       </div>
     </header>
 
@@ -160,16 +152,16 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowUp, Delete, Edit, Files, FolderOpened, Plus, Refresh, Search, Upload, UploadFilled } from '@element-plus/icons-vue'
-import { checkBookUpdates } from '../api/books'
+import { ArrowDown, ArrowUp, Delete, Edit, Plus, Search, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 
 const router = useRouter()
+const route = useRoute()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
@@ -182,7 +174,6 @@ const newGroupName = ref('')
 const importDialog = ref(false)
 const manageDrawer = ref(false)
 const importing = ref(false)
-const loadingUpdates = ref(false)
 const selectedBookIds = ref([])
 const batchCategoryId = ref('')
 const batchManaging = ref(false)
@@ -249,6 +240,14 @@ onMounted(async () => {
     ElMessage.error(readError(err, '加载书架失败'))
   }
 })
+
+watch(
+  () => route.query.import,
+  (value) => {
+    if (value === '1') importDialog.value = true
+  },
+  { immediate: true },
+)
 
 function selectGroup(groupId) {
   selectedGroup.value = groupId
@@ -334,19 +333,6 @@ async function importBook() {
     ElMessage.error(readError(err, '导入失败'))
   } finally {
     importing.value = false
-  }
-}
-
-async function checkUpdates() {
-  loadingUpdates.value = true
-  try {
-    const { data } = await checkBookUpdates()
-    await bookshelf.loadBooks()
-    ElMessage.success(data?.newChapters ? `发现 ${data.newChapters} 个新章节` : '暂未发现新章节')
-  } catch (err) {
-    ElMessage.error(readError(err, '刷新失败'))
-  } finally {
-    loadingUpdates.value = false
   }
 }
 
@@ -518,7 +504,6 @@ function readError(err, fallback) {
   gap: 14px;
 }
 
-.head-actions,
 .empty-actions {
   display: flex;
   flex-wrap: wrap;
@@ -878,8 +863,7 @@ function readError(err, fallback) {
   }
 
   .shelf-head .app-page-subtitle,
-  .shelf-stats,
-  .head-actions {
+  .shelf-stats {
     display: none;
   }
 

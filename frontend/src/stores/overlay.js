@@ -29,6 +29,9 @@ export const useOverlayStore = defineStore('overlay', {
       this.bookGroupMode = mode
       this.bookGroupVisible = true
     },
+    openImportBook(router) {
+      router?.push?.({ name: 'home', query: { import: '1' } })
+    },
     openBookmark(book) {
       this.bookmarkBook = book
       this.bookmarkVisible = true

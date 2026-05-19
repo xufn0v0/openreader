@@ -130,6 +130,7 @@ const navSections = [
     items: [
       { key: 'bookManage', label: '书籍管理', icon: Files, action: () => overlay.openBookManage() },
       { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
+      { key: 'importBook', label: '导入书籍', icon: Upload, action: () => overlay.openImportBook(router), route: 'home' },
       { key: 'localStore', label: '本地书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
       { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules(router), route: 'settings', panel: 'replace' },
     ],
@@ -167,6 +168,7 @@ function runNavAction(item) {
 
 function isNavActive(item) {
   if (!item.route || route.name !== item.route) return false
+  if (item.key === 'importBook') return route.query.import === '1'
   if (!item.panel) return true
   return String(route.query.panel || 'account') === item.panel
 }
