@@ -104,8 +104,10 @@ import {
   Edit,
   Files,
   FolderOpened,
+  Link as LinkIcon,
   Notebook,
   Operation,
+  Refresh,
   Search,
   Setting,
   SwitchButton,
@@ -139,7 +141,8 @@ const navSections = [
     title: '书源设置',
     items: [
       { key: 'sources', label: '书源管理', icon: Connection, route: 'sources' },
-      { key: 'sourceDebug', label: '调试检测', icon: Operation, route: 'sources' },
+      { key: 'remoteSources', label: '远程书源', icon: LinkIcon, route: 'sources', query: { panel: 'remote' } },
+      { key: 'sourceHealth', label: '失效书源', icon: Operation, route: 'sources', query: { action: 'health' } },
     ],
   },
   {
@@ -149,6 +152,7 @@ const navSections = [
       { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
       { key: 'importBook', label: '导入书籍', icon: Upload, action: () => overlay.openImportBook(router), route: 'home' },
       { key: 'localStore', label: '本地书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
+      { key: 'refreshShelf', label: '刷新书架', icon: Refresh, action: refreshShelfData },
       { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules(router), route: 'settings', panel: 'replace' },
     ],
   },
@@ -191,12 +195,16 @@ function runNavAction(item) {
     item.action()
     return
   }
-  if (item.route) goRoute(item.route)
+  if (item.route) router.push({ name: item.route, query: item.query || (item.panel ? { panel: item.panel } : {}) })
 }
 
 function isNavActive(item) {
   if (!item.route || route.name !== item.route) return false
   if (item.key === 'importBook') return route.query.import === '1'
+  if (item.key === 'sources') return !route.query.panel && !route.query.action
+  if (item.query) {
+    return Object.entries(item.query).every(([key, value]) => String(route.query[key] || '') === String(value))
+  }
   if (!item.panel) return true
   return String(route.query.panel || 'account') === item.panel
 }
@@ -223,6 +231,11 @@ function recentSubTitle(book) {
 function handleLogout() {
   userStore.logout()
   router.push({ name: 'login' })
+}
+
+async function refreshShelfData() {
+  await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks()]).catch(() => {})
+  router.push({ name: 'home' })
 }
 
 function setOffline() {

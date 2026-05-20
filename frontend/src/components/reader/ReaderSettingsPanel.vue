@@ -89,6 +89,12 @@
     </div>
 
     <div class="setting-row">
+      <label class="setting-label">替换规则</label>
+      <el-button size="small" plain @click="$emit('openReplaceRules')">管理全局替换规则</el-button>
+      <small class="setting-help">规则会在章节加载时应用，适合清理广告、乱码和固定干扰文本。</small>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">朗读语速 ({{ reader.ttsRate }})</label>
       <el-slider v-model="reader.ttsRate" :min="0.5" :max="3" :step="0.1" size="small" @input="$emit('ttsRateChange', $event)" />
     </div>
@@ -145,6 +151,7 @@ const emit = defineEmits([
   'ttsRateChange',
   'ttsPitchChange',
   'ttsVoiceChange',
+  'openReplaceRules',
 ])
 
 const localCustomBg = computed({

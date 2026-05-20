@@ -53,7 +53,7 @@
             <el-button :icon="Refresh" :loading="backupListLoading" @click="loadBackups">刷新列表</el-button>
           </div>
 
-          <el-table :data="backups" stripe class="backup-table">
+          <el-table :data="backups" stripe class="backup-table desktop-backup-table">
             <el-table-column prop="name" label="文件名" min-width="220" show-overflow-tooltip />
             <el-table-column label="大小" width="110">
               <template #default="{ row }">{{ formatSize(row.size) }}</template>
@@ -67,6 +67,15 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="backups.length" class="mobile-backup-list">
+            <article v-for="row in backups" :key="row.name" class="mobile-backup-card app-panel">
+              <div>
+                <strong>{{ row.name }}</strong>
+                <span>{{ formatDate(row.time) }} · {{ formatSize(row.size) }}</span>
+              </div>
+              <el-button size="small" text type="primary" @click="download(row)">下载</el-button>
+            </article>
+          </div>
           <el-empty v-if="!backups.length && !backupListLoading" description="暂无备份文件" />
         </section>
       </el-tab-pane>
@@ -124,7 +133,7 @@
               <button type="button" @click="goWebDAVPath(crumb.path)">{{ crumb.name }}</button>
             </el-breadcrumb-item>
           </el-breadcrumb>
-          <el-table :data="webdavItems" stripe v-loading="webdavLoading" @selection-change="webdavSelection = $event">
+          <el-table :data="webdavItems" stripe v-loading="webdavLoading" class="webdav-table desktop-webdav-table" @selection-change="webdavSelection = $event">
             <el-table-column type="selection" width="42" :selectable="row => !row.isDir" />
             <el-table-column prop="name" label="名称" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
@@ -147,6 +156,34 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="webdavItems.length" v-loading="webdavLoading" class="mobile-file-list">
+            <article v-for="row in webdavItems" :key="row.name" class="mobile-file-card app-panel">
+              <header>
+                <button class="mobile-file-name" type="button" @click="openWebDAVItem(row)">
+                  <el-icon><component :is="row.isDir ? FolderOpened : Document" /></el-icon>
+                  <span>{{ row.name }}</span>
+                </button>
+                <el-checkbox
+                  v-if="!row.isDir"
+                  :model-value="webdavSelection.some(item => item.name === row.name)"
+                  @change="value => toggleWebDAVSelection(row, value)"
+                />
+              </header>
+              <p>{{ joinPath(webdavPath, row.name) }}</p>
+              <div class="mobile-file-meta">
+                <el-tag size="small" effect="plain">{{ row.isDir ? '目录' : '文件' }}</el-tag>
+                <el-tag v-if="row.importable" size="small" type="success" effect="plain">可加入书架</el-tag>
+                <el-tag v-if="!row.isDir && isBackupFile(row)" size="small" type="warning" effect="plain">备份</el-tag>
+              </div>
+              <footer>
+                <el-button v-if="!row.isDir && isBackupFile(row)" size="small" text type="primary" :loading="webdavRestoring === row.name" @click="restoreWebDAVBackupFile(row)">恢复</el-button>
+                <el-button v-if="!row.isDir" size="small" text type="primary" @click="downloadWebDAVFile(row)">下载</el-button>
+                <el-button v-if="row.importable" size="small" text type="primary" :loading="webdavImporting" @click="importWebDAVBook(row)">加入书架</el-button>
+                <el-button size="small" text @click="renameWebDAVItem(row)">重命名</el-button>
+                <el-button size="small" text type="danger" @click="deleteWebDAVItem(row)">删除</el-button>
+              </footer>
+            </article>
+          </div>
           <el-empty v-if="!webdavLoading && !webdavItems.length" description="WebDAV 目录为空" />
         </section>
       </el-tab-pane>
@@ -255,7 +292,7 @@
             <el-button type="primary" :icon="Edit" @click="openReplaceRuleEditor()">新增规则</el-button>
             <el-button :icon="Refresh" :loading="replaceRulesLoading" @click="loadReplaceRules">刷新</el-button>
           </div>
-          <el-table :data="replaceRules" stripe v-loading="replaceRulesLoading">
+          <el-table :data="replaceRules" stripe v-loading="replaceRulesLoading" class="desktop-replace-table">
             <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
             <el-table-column prop="pattern" label="匹配" min-width="180" show-overflow-tooltip />
             <el-table-column prop="replacement" label="替换为" min-width="160" show-overflow-tooltip />
@@ -271,6 +308,22 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="replaceRules.length" v-loading="replaceRulesLoading" class="mobile-rule-list">
+            <article v-for="rule in replaceRules" :key="rule.id" class="mobile-rule-card app-panel">
+              <header>
+                <div>
+                  <strong>{{ rule.name || '未命名规则' }}</strong>
+                  <span>{{ rule.pattern }}</span>
+                </div>
+                <el-switch v-model="rule.enabled" size="small" @change="toggleReplaceRule(rule)" />
+              </header>
+              <p>替换为：{{ rule.replacement || '空' }}</p>
+              <footer>
+                <el-button size="small" text @click="openReplaceRuleEditor(rule)">编辑</el-button>
+                <el-button size="small" text type="danger" @click="removeReplaceRule(rule)">删除</el-button>
+              </footer>
+            </article>
+          </div>
           <el-empty v-if="!replaceRulesLoading && !replaceRules.length" description="暂无全局替换规则" />
         </section>
       </el-tab-pane>
@@ -309,7 +362,11 @@
             </div>
             <div class="panel-actions">
               <el-button :icon="Refresh" :loading="rssArticlesLoading" @click="loadRSSArticles">刷新文章</el-button>
-              <el-checkbox v-model="rssUnreadOnly" @change="loadRSSArticles">只看未读</el-checkbox>
+              <el-radio-group v-model="rssArticleFilter" size="small" @change="loadRSSArticles">
+                <el-radio-button value="all">全部</el-radio-button>
+                <el-radio-button value="unread">未读</el-radio-button>
+                <el-radio-button value="favorite">收藏</el-radio-button>
+              </el-radio-group>
             </div>
             <div class="rss-article-list">
               <article v-for="article in rssArticles" :key="article.id" class="rss-article" :class="{ read: article.isRead }">
@@ -343,7 +400,7 @@
             <el-button :icon="Refresh" :loading="usersLoading" @click="loadUsers">加载用户</el-button>
             <el-button :icon="Delete" :loading="cleanupLoading" @click="cleanupInactive">清理不活跃用户</el-button>
           </div>
-          <el-table :data="users" stripe>
+          <el-table :data="users" stripe class="desktop-user-table">
             <el-table-column prop="username" label="用户名" min-width="140" />
             <el-table-column prop="role" label="角色" width="90" />
             <el-table-column prop="bookCount" label="书籍" width="80" />
@@ -357,6 +414,20 @@
               </template>
             </el-table-column>
           </el-table>
+          <div v-if="users.length" v-loading="usersLoading" class="mobile-user-list">
+            <article v-for="user in users" :key="user.id" class="mobile-user-card app-panel">
+              <header>
+                <div>
+                  <strong>{{ user.username }}</strong>
+                  <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 书源 {{ user.sourceCount || 0 }}</span>
+                </div>
+              </header>
+              <div class="mobile-permission-row">
+                <el-switch v-model="user.canEditSources" size="small" active-text="书源" @change="updateUserPermission(user)" />
+                <el-switch v-model="user.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(user)" />
+              </div>
+            </article>
+          </div>
           <el-alert type="warning" :closable="false" show-icon title="只有管理员账号能访问用户管理接口；普通账号加载失败是预期行为。" />
         </section>
       </el-tab-pane>
@@ -504,7 +575,7 @@ const editingRSSSourceId = ref(null)
 const rssDraft = ref({ title: '', url: '', enabled: true })
 const rssArticleDialog = ref(false)
 const selectedRSSArticle = ref(null)
-const rssUnreadOnly = ref(false)
+const rssArticleFilter = ref('all')
 
 const fontOptions = [
   { label: '系统默认', value: 'system' },
@@ -753,7 +824,8 @@ async function loadRSSArticles() {
   rssArticlesLoading.value = true
   try {
     const params = selectedRSSSourceId.value ? { sourceId: selectedRSSSourceId.value } : {}
-    if (rssUnreadOnly.value) params.unread = true
+    if (rssArticleFilter.value === 'unread') params.unread = true
+    if (rssArticleFilter.value === 'favorite') params.favorite = true
     const { data } = await listRSSArticles(params)
     rssArticles.value = data || []
   } catch (err) {
@@ -893,6 +965,16 @@ async function goWebDAVPath(path) {
 
 function openWebDAVItem(row) {
   if (row.isDir) goWebDAVPath(joinPath(webdavPath.value, row.name))
+}
+
+function toggleWebDAVSelection(row, checked) {
+  if (checked) {
+    if (!webdavSelection.value.some(item => item.name === row.name)) {
+      webdavSelection.value.push(row)
+    }
+    return
+  }
+  webdavSelection.value = webdavSelection.value.filter(item => item.name !== row.name)
 }
 
 async function uploadWebDAVFile(data) {
@@ -1200,6 +1282,41 @@ function readError(err, fallback) {
   width: 100%;
 }
 
+.mobile-backup-list {
+  display: none;
+}
+
+.mobile-backup-card {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.mobile-backup-card div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.mobile-backup-card strong,
+.mobile-backup-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-backup-card strong {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.mobile-backup-card span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
 .webdav-breadcrumb button,
 .file-name {
   padding: 0;
@@ -1221,6 +1338,125 @@ function readError(err, fallback) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mobile-file-list {
+  display: none;
+}
+
+.mobile-file-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.mobile-file-card header,
+.mobile-file-card footer,
+.mobile-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-file-card header {
+  justify-content: space-between;
+}
+
+.mobile-file-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+  text-align: left;
+}
+
+.mobile-file-name span,
+.mobile-file-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-file-card p {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mobile-file-card footer {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mobile-rule-list,
+.mobile-user-list {
+  display: none;
+}
+
+.mobile-rule-card,
+.mobile-user-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.mobile-rule-card header,
+.mobile-rule-card footer,
+.mobile-user-card header,
+.mobile-permission-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-rule-card header,
+.mobile-user-card header {
+  justify-content: space-between;
+}
+
+.mobile-rule-card header > div,
+.mobile-user-card header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mobile-rule-card strong,
+.mobile-rule-card span,
+.mobile-rule-card p,
+.mobile-user-card strong,
+.mobile-user-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-rule-card strong,
+.mobile-user-card strong {
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.mobile-rule-card span,
+.mobile-rule-card p,
+.mobile-user-card span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mobile-rule-card p {
+  margin: 0;
+}
+
+.mobile-rule-card footer,
+.mobile-permission-row {
+  justify-content: flex-end;
 }
 
 .reader-setting-list {
@@ -1468,6 +1704,44 @@ code {
   .settings-grid {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .desktop-webdav-table {
+    display: none;
+  }
+
+  .desktop-backup-table {
+    display: none;
+  }
+
+  .desktop-replace-table,
+  .desktop-user-table {
+    display: none;
+  }
+
+  .mobile-backup-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-rule-list,
+  .mobile-user-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-file-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .rss-reader-dialog :deep(.el-dialog) {
+    width: 94vw !important;
+    margin-top: 3vh;
+  }
+
+  .rss-reader p {
+    max-height: 70vh;
   }
 }
 </style>

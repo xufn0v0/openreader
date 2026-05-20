@@ -290,6 +290,7 @@
         @tts-rate-change="setTTSRate"
         @tts-pitch-change="setTTSPitch"
         @tts-voice-change="setTTSVoice"
+        @open-replace-rules="openReplaceRules"
       />
     </el-drawer>
 
@@ -670,6 +671,11 @@ function runMobileAction(action) {
 function openMobileTool(action) {
   mobileChromeVisible.value = false
   action?.()
+}
+
+function openReplaceRules() {
+  showSettingsDrawer.value = false
+  overlay.openReplaceRules(router)
 }
 
 async function loadSourceCandidates({ append = false } = {}) {

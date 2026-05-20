@@ -639,8 +639,16 @@ function readError(err, fallback) {
 }
 
 @media (max-width: 720px) {
+  .detail-page {
+    gap: 12px;
+  }
+
+  .back-link {
+    padding: 4px 0;
+  }
+
   .book-hero {
-    grid-template-columns: 1fr;
+    padding: 14px;
   }
 
   .book-title-line,
@@ -649,10 +657,46 @@ function readError(err, fallback) {
     display: grid;
   }
 
+  .hero-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .hero-actions :deep(.el-button),
+  .hero-actions :deep(.el-select) {
+    width: 100%;
+  }
+
+  .hero-actions :deep(.el-button + .el-button) {
+    margin-left: 0;
+  }
+
   .tab-toolbar .el-input,
   .category-select {
     max-width: none;
     width: 100%;
+  }
+
+  .tab-panel {
+    padding: 12px;
+  }
+
+  .detail-tabs :deep(.el-tabs__item) {
+    padding: 0 10px;
+  }
+
+  .info-list div {
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .detail-page :deep(.el-dialog) {
+    width: 94vw !important;
+  }
+
+  .cover-upload-row {
+    display: grid;
   }
 }
 </style>

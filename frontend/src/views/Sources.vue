@@ -205,7 +205,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Download, Link, Plus, Search, Upload } from '@element-plus/icons-vue'
 import {
@@ -225,6 +226,7 @@ import {
   updateSource,
 } from '../api/sources'
 
+const route = useRoute()
 const sources = ref([])
 const keyword = ref('')
 const selectedGroup = ref('')
@@ -269,6 +271,7 @@ const debugBookURL = ref('')
 const debugChapterURL = ref('')
 const debugResult = ref(null)
 const testing = ref(false)
+const handledRouteAction = ref('')
 
 const enabledCount = computed(() => sources.value.filter(source => source.enabled).length)
 const groups = computed(() => [...new Set(sources.value.map(source => source.group || '默认分组'))].sort())
@@ -291,11 +294,32 @@ const shownSources = computed(() => {
   })
 })
 
-onMounted(loadSources)
+onMounted(async () => {
+  await loadSources()
+  applyRouteAction()
+})
+
+watch(
+  () => [route.query.panel, route.query.action],
+  () => applyRouteAction(),
+)
 
 async function loadSources() {
   const { data } = await listSources()
   sources.value = data
+}
+
+function applyRouteAction() {
+  const signature = `${route.query.panel || ''}:${route.query.action || ''}`
+  if (!signature || signature === handledRouteAction.value) return
+  handledRouteAction.value = signature
+  if (route.query.panel === 'remote') {
+    showRemote.value = true
+  }
+  if (route.query.action === 'health') {
+    failedOnly.value = true
+    if (!healthSummary.value.total && !checking.value) checkInvalidSources()
+  }
 }
 
 async function toggleSource(source, enabled) {

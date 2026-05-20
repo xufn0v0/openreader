@@ -26,17 +26,26 @@
       <el-button type="primary" @click="continueRead(overlay.bookInfoBook)">继续阅读</el-button>
       <el-button plain @click="openContentSearch(overlay.bookInfoBook)">搜正文</el-button>
       <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
+      <el-button plain @click="setBookGroup(overlay.bookInfoBook)">设置分组</el-button>
+      <el-button plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
+      <el-button plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
     </div>
   </BookInfoDialog>
 
-  <el-drawer v-model="overlay.bookManageVisible" title="书架管理" direction="rtl" size="82%" class="global-manage-drawer">
+  <el-drawer
+    v-model="overlay.bookManageVisible"
+    title="书架管理"
+    :direction="wideDrawerDirection"
+    :size="wideDrawerSize"
+    class="global-manage-drawer"
+  >
     <el-table
       :data="managedBooks"
       row-key="id"
       height="calc(100vh - 188px)"
-      class="manage-table"
+      class="manage-table desktop-manage-table"
       @selection-change="onManageSelectionChange"
     >
       <el-table-column type="selection" width="42" />
@@ -85,6 +94,25 @@
         </template>
       </el-table-column>
     </el-table>
+    <div v-if="managedBooks.length" class="mobile-manage-list">
+      <article v-for="book in managedBooks" :key="book.id" class="mobile-manage-card">
+        <header>
+          <el-checkbox :model-value="selectedBookIds.includes(book.id)" @change="value => toggleManagedBook(book.id, value)" />
+          <button type="button" @click="overlay.openBookInfo(book)">
+            <strong>{{ book.title }}</strong>
+            <span>{{ book.author || '未知作者' }} · {{ categoryName(book.categoryId) }}</span>
+          </button>
+        </header>
+        <p>共 {{ book.chapterCount || 0 }} 章 · 阅读进度 {{ progressLabel(book) }}</p>
+        <footer>
+          <el-button size="small" text @click="goDetail(book)">编辑</el-button>
+          <el-button size="small" text @click="setBookGroup(book)">分组</el-button>
+          <el-button size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">缓存</el-button>
+          <el-button size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookCache')">清缓存</el-button>
+          <el-button size="small" text @click="exportBook(book)">导出</el-button>
+        </footer>
+      </article>
+    </div>
     <div class="manage-footer">
       <el-button type="primary" :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchDeleteBooks">批量删除</el-button>
       <el-dropdown @command="batchAddCategory">
@@ -116,8 +144,8 @@
   <el-drawer
     v-model="overlay.bookGroupVisible"
     :title="overlay.bookGroupMode === 'set' ? '设置分组' : '分组管理'"
-    direction="rtl"
-    size="360px"
+    :direction="narrowDrawerDirection"
+    :size="narrowDrawerSize"
   >
     <template v-if="overlay.bookGroupMode === 'set'">
       <el-table :data="bookshelf.categories" row-key="id" class="group-set-table" @row-click="selectBookGroup">
@@ -158,8 +186,8 @@
   <el-drawer
     v-model="overlay.searchBookContentVisible"
     :title="`搜索正文${overlay.searchBook?.title ? ` · ${overlay.searchBook.title}` : ''}`"
-    direction="rtl"
-    size="420px"
+    :direction="narrowDrawerDirection"
+    :size="narrowDrawerSize"
     class="global-search-drawer"
   >
     <ReaderSearchPanel
@@ -178,8 +206,8 @@
   <el-drawer
     v-model="overlay.bookmarkVisible"
     :title="`书签${overlay.bookmarkBook?.title ? ` · ${overlay.bookmarkBook.title}` : ''}`"
-    direction="rtl"
-    size="420px"
+    :direction="narrowDrawerDirection"
+    :size="narrowDrawerSize"
     class="global-bookmark-drawer"
   >
     <div v-loading="bookmarkLoading">
@@ -207,11 +235,11 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, searchBookContent, updateBookCategory, updateBookmark } from '../api/books'
+import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, refreshBook, searchBookContent, updateBookCategory, updateBookmark } from '../api/books'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
@@ -227,6 +255,7 @@ const reader = useReaderStore()
 const selectedBookIds = ref([])
 const batchBusy = ref(false)
 const cachingBookId = ref(null)
+const refreshingBookId = ref(null)
 const settingCategoryId = ref('')
 const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
@@ -244,7 +273,13 @@ const bookmarkEditorVisible = ref(false)
 const bookmarkSaving = ref(false)
 const editingBookmark = ref(null)
 const bookmarkDraft = reactive({ title: '', excerpt: '', note: '' })
+const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 
+const isMobileOverlay = computed(() => windowWidth.value <= 680)
+const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
+const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
+const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
+const narrowDrawerSize = computed(() => isMobileOverlay.value ? '86%' : '420px')
 const bookInfoCategory = computed(() => overlay.bookInfoOptions.categoryName || categoryName(overlay.bookInfoBook?.categoryId))
 const bookInfoProgress = computed(() => {
   const book = overlay.bookInfoBook
@@ -258,6 +293,18 @@ const contentSearchStatus = computed(() => {
   if (!contentTotal.value) return `${contentResults.value.length} 条结果`
   return `已搜索 ${Math.min(scanned, contentTotal.value)} / ${contentTotal.value} 章，${contentResults.value.length} 条结果`
 })
+
+onMounted(() => {
+  window.addEventListener('resize', updateWindowWidth, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateWindowWidth)
+})
+
+function updateWindowWidth() {
+  windowWidth.value = window.innerWidth
+}
 
 watch(
   () => overlay.bookManageVisible || overlay.bookGroupVisible,
@@ -329,6 +376,14 @@ function onManageSelectionChange(rows) {
   selectedBookIds.value = rows.map(row => row.id)
 }
 
+function toggleManagedBook(bookId, checked) {
+  if (checked) {
+    if (!selectedBookIds.value.includes(bookId)) selectedBookIds.value.push(bookId)
+    return
+  }
+  selectedBookIds.value = selectedBookIds.value.filter(id => id !== bookId)
+}
+
 function continueRead(book) {
   overlay.closeBookInfo()
   router.push({ name: 'reader', params: { id: book.id } })
@@ -395,6 +450,27 @@ async function refreshShelf() {
     ElMessage.error(readError(err, '刷新失败'))
   } finally {
     loadingUpdates.value = false
+  }
+}
+
+async function refreshBookInfo(book) {
+  if (!book?.id) return
+  refreshingBookId.value = book.id
+  try {
+    const { data } = await refreshBook(book.id)
+    const updatedBook = data?.book || data
+    const index = bookshelf.books.findIndex(item => item.id === book.id)
+    if (updatedBook?.id) {
+      if (index >= 0) bookshelf.books[index] = updatedBook
+      overlay.bookInfoBook = updatedBook
+    } else {
+      await bookshelf.loadBooks()
+    }
+    ElMessage.success(`目录已刷新，共 ${data?.chapterCount || updatedBook?.chapterCount || 0} 章`)
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新目录失败'))
+  } finally {
+    refreshingBookId.value = null
   }
 }
 
@@ -731,6 +807,65 @@ function readError(err, fallback) {
   margin-bottom: 12px;
 }
 
+.mobile-manage-list {
+  display: none;
+}
+
+.mobile-manage-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.mobile-manage-card header,
+.mobile-manage-card footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-manage-card header button {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mobile-manage-card strong,
+.mobile-manage-card span,
+.mobile-manage-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-manage-card strong {
+  font-size: 14px;
+}
+
+.mobile-manage-card span,
+.mobile-manage-card p {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mobile-manage-card p {
+  margin: 0;
+}
+
+.mobile-manage-card footer {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .text-button {
   padding: 0;
 }
@@ -789,6 +924,29 @@ function readError(err, fallback) {
 .bookmark-editor {
   display: grid;
   gap: 10px;
+}
+
+@media (max-width: 680px) {
+  .desktop-manage-table {
+    display: none;
+  }
+
+  .mobile-manage-list {
+    display: grid;
+    max-height: calc(100vh - 220px);
+    overflow: auto;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .manage-footer {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .overlay-actions {
+    display: grid;
+  }
 }
 
 </style>

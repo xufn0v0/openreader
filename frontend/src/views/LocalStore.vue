@@ -52,7 +52,7 @@
       :data="shownItems"
       row-key="path"
       stripe
-      class="store-table"
+      class="store-table desktop-store-table"
       @selection-change="checkedRows = $event.filter(row => row.importable).map(row => row.path)"
       @row-dblclick="openRow"
     >
@@ -78,6 +78,33 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <div v-if="shownItems.length" class="mobile-file-list">
+      <article v-for="row in shownItems" :key="row.path" class="mobile-file-card app-panel">
+        <header>
+          <button class="mobile-file-name" type="button" @click="openRow(row)">
+            <el-icon><component :is="row.isDir ? FolderOpened : Document" /></el-icon>
+            <span>{{ row.name }}</span>
+          </button>
+          <el-checkbox
+            v-if="row.importable"
+            :model-value="checkedRows.includes(row.path)"
+            @change="value => toggleCheckedPath(row.path, value)"
+          />
+        </header>
+        <p>{{ row.path }}</p>
+        <div class="mobile-file-meta">
+          <el-tag size="small" effect="plain">{{ row.isDir ? '目录' : row.extension || '文件' }}</el-tag>
+          <el-tag v-if="!row.isDir" size="small" effect="plain">{{ formatSize(row.size) }}</el-tag>
+          <el-tag v-if="row.importable" size="small" type="success" effect="plain">可导入</el-tag>
+        </div>
+        <footer>
+          <el-button v-if="row.importable" size="small" text type="primary" @click="importOne(row)">导入</el-button>
+          <el-button size="small" text @click="renameItem(row)">重命名</el-button>
+          <el-button size="small" text type="danger" @click="deleteItem(row)">删除</el-button>
+        </footer>
+      </article>
+    </div>
 
     <el-empty v-if="!items.length && !loading" description="书仓为空，把文件放入 localStore 目录即可显示" />
 
@@ -164,6 +191,14 @@ function openRow(row) {
   if (row.isDir) {
     goPath(row.path)
   }
+}
+
+function toggleCheckedPath(path, checked) {
+  if (checked) {
+    if (!checkedRows.value.includes(path)) checkedRows.value.push(path)
+    return
+  }
+  checkedRows.value = checkedRows.value.filter(item => item !== path)
 }
 
 async function uploadFile(data) {
@@ -359,6 +394,59 @@ function readError(err, fallback) {
   white-space: nowrap;
 }
 
+.mobile-file-list {
+  display: none;
+}
+
+.mobile-file-card {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.mobile-file-card header,
+.mobile-file-card footer,
+.mobile-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-file-card header {
+  justify-content: space-between;
+}
+
+.mobile-file-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+  text-align: left;
+}
+
+.mobile-file-name span,
+.mobile-file-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-file-card p {
+  margin: 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mobile-file-card footer {
+  justify-content: flex-end;
+}
+
 .result-list {
   display: grid;
   gap: 8px;
@@ -387,6 +475,15 @@ function readError(err, fallback) {
 
   .store-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .desktop-store-table {
+    display: none;
+  }
+
+  .mobile-file-list {
+    display: grid;
+    gap: 10px;
   }
 }
 </style>

@@ -10,8 +10,15 @@
     </header>
 
     <section class="discover-toolbar app-panel">
+      <el-select v-model="selectedGroup" placeholder="全部分组" clearable @change="onGroupChange">
+        <el-option v-for="group in sourceGroups" :key="group.value" :label="`${group.label} (${group.count})`" :value="group.value" />
+      </el-select>
       <el-select v-model="selectedSourceId" placeholder="选择探索书源" filterable @change="loadBooks">
-        <el-option v-for="source in sources" :key="source.id" :label="source.name" :value="source.id" />
+        <el-option v-for="source in filteredSources" :key="source.id" :label="source.name" :value="source.id" />
+      </el-select>
+      <el-select v-model="targetCategoryId" placeholder="加入书架分组（可选）" clearable>
+        <el-option label="未分组" value="" />
+        <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
       </el-select>
       <el-button type="primary" :loading="loadingBooks" :disabled="!selectedSourceId" @click="loadBooks">加载</el-button>
       <span v-if="activeSource" class="source-status">{{ activeSource.group || '默认分组' }} · 第 {{ page }} 页</span>
@@ -56,6 +63,7 @@ const overlay = useOverlayStore()
 const sources = ref([])
 const books = ref([])
 const selectedSourceId = ref('')
+const selectedGroup = ref('')
 const targetCategoryId = ref('')
 const loadingSources = ref(false)
 const loadingBooks = ref(false)
@@ -65,6 +73,18 @@ const hasMore = ref(false)
 const loadingMore = ref(false)
 
 const activeSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value))
+const sourceGroups = computed(() => {
+  const groups = new Map()
+  for (const source of sources.value) {
+    const name = source.group || '默认分组'
+    groups.set(name, (groups.get(name) || 0) + 1)
+  }
+  return [...groups.entries()].map(([label, count]) => ({ label, value: label, count })).sort((a, b) => a.label.localeCompare(b.label))
+})
+const filteredSources = computed(() => {
+  if (!selectedGroup.value) return sources.value
+  return sources.value.filter(source => (source.group || '默认分组') === selectedGroup.value)
+})
 
 onMounted(async () => {
   await Promise.all([loadSources(), bookshelf.loadCategories()])
@@ -76,12 +96,20 @@ async function loadSources() {
   try {
     const { data } = await listExploreSources()
     sources.value = data || []
-    if (!selectedSourceId.value && sources.value.length) selectedSourceId.value = sources.value[0].id
+    if (!selectedSourceId.value && filteredSources.value.length) selectedSourceId.value = filteredSources.value[0].id
   } catch (err) {
     ElMessage.error(readError(err, '加载探索书源失败'))
   } finally {
     loadingSources.value = false
   }
+}
+
+function onGroupChange() {
+  const exists = filteredSources.value.some(source => source.id === selectedSourceId.value)
+  if (!exists) selectedSourceId.value = filteredSources.value[0]?.id || ''
+  books.value = []
+  hasMore.value = false
+  if (selectedSourceId.value) loadBooks()
 }
 
 async function loadBooks() {
