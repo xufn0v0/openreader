@@ -1,134 +1,82 @@
 <template>
   <section class="app-page shelf-page">
-    <header class="shelf-head">
-      <div>
-        <h1 class="app-page-title">书架 ({{ displayedBooks.length }})</h1>
+    <div class="shelf-title app-panel">
+      <strong>书架 ({{ displayedBooks.length }})</strong>
+      <div class="title-actions">
+        <button type="button" @click="showBookEditButton = !showBookEditButton">
+          {{ showBookEditButton ? '取消' : '编辑' }}
+        </button>
+        <button type="button" @click="refreshShelf">
+          {{ refreshLoading ? '刷新中...' : '刷新' }}
+        </button>
+        <button type="button" @click="overlay.openRSS(router)">RSS</button>
+        <button type="button" @click="router.push({ name: 'discover' })">书海</button>
       </div>
-    </header>
+    </div>
 
-    <section v-if="recentBook" class="recent-panel app-panel">
+    <section v-if="recentBook" class="recent-panel app-panel" @click="openDetail(recentBook)">
       <div class="recent-cover" :style="coverStyle(recentBook)">{{ coverInitial(recentBook) }}</div>
       <div class="recent-main">
         <span>最近阅读</span>
         <h2>{{ recentBook.title }}</h2>
         <p>{{ recentBook.author || '未知作者' }} · {{ recentBook.lastChapter || '暂无最新章节' }}</p>
       </div>
-      <el-button type="primary" @click="continueRead(recentBook)">继续阅读</el-button>
+      <el-button type="primary" @click.stop="continueRead(recentBook)">继续阅读</el-button>
     </section>
 
-    <div class="shelf-layout">
-      <aside class="group-panel app-panel">
-        <div class="group-title">
-          <strong>书架分组</strong>
-          <el-button text :icon="Plus" @click="overlay.openBookGroup('manage')">管理</el-button>
-        </div>
-        <div v-if="showGroupInput" class="group-create">
-          <el-input v-model="newGroupName" placeholder="分组名称" size="small" @keyup.enter="createCategory" />
-          <el-button size="small" type="primary" :disabled="!newGroupName.trim()" @click="createCategory">保存</el-button>
-        </div>
-        <div
-          v-for="item in groupItems"
-          :key="item.id"
-          class="group-row"
-          :class="{ active: selectedGroup === item.id }"
-        >
-          <button type="button" class="group-item" @click="selectGroup(item.id)">
-            <span>{{ item.name }}</span>
-            <small>{{ item.count }}</small>
-          </button>
-          <span v-if="!item.builtin" class="group-actions">
-            <button type="button" title="上移" @click="moveGroup(item, -1)">
-              <el-icon><ArrowUp /></el-icon>
-            </button>
-            <button type="button" title="下移" @click="moveGroup(item, 1)">
-              <el-icon><ArrowDown /></el-icon>
-            </button>
-            <button type="button" title="重命名" @click="renameGroup(item)">
-              <el-icon><Edit /></el-icon>
-            </button>
-            <button type="button" title="删除" @click="deleteGroup(item)">
-              <el-icon><Delete /></el-icon>
-            </button>
-          </span>
-        </div>
-        <el-alert
-          class="group-note"
-          type="info"
-          :closable="false"
-          show-icon
-          title="分组已支持新增、重命名、排序和删除；批量分组在书籍管理中处理。"
-        />
-      </aside>
-
-      <main class="shelf-main">
-        <div class="shelf-toolbar app-panel">
-          <el-input v-model="keyword" placeholder="搜索书名或作者" clearable>
-            <template #prefix><el-icon><Search /></el-icon></template>
-          </el-input>
-          <el-segmented v-model="viewMode" :options="viewOptions" />
-          <el-button :icon="Search" @click="router.push({ name: 'search' })">远程搜书</el-button>
-        </div>
-
-        <div v-if="bookshelf.loading" class="book-grid">
-          <article v-for="i in 8" :key="i" class="book-card app-panel skeleton-card">
-            <el-skeleton :rows="4" animated />
-          </article>
-        </div>
-
-        <template v-else-if="displayedBooks.length">
-          <div v-if="viewMode === 'grid'" class="book-grid">
-            <article v-for="book in displayedBooks" :key="book.id" class="book-card app-panel" @click="openDetail(book)">
-              <div class="book-cover" :style="coverStyle(book)">{{ coverInitial(book) }}</div>
-              <div class="book-body">
-                <div class="book-title-row">
-                  <h2>{{ book.title }}</h2>
-                  <el-tag size="small" effect="plain" :type="book.sourceId ? 'success' : 'info'">
-                    {{ book.sourceId ? '远程' : '本地' }}
-                  </el-tag>
-                </div>
-                <p>{{ book.author || '未知作者' }}</p>
-                <p class="book-latest">{{ book.lastChapter || '暂无最新章节' }}</p>
-                <div class="book-meta">
-                  <span>{{ book.chapterCount || 0 }} 章</span>
-                  <span>{{ categoryName(book.categoryId) }}</span>
-                </div>
-                <el-progress
-                  class="book-progress"
-                  :percentage="bookProgressPercent(book)"
-                  :stroke-width="5"
-                  :show-text="false"
-                />
-              </div>
-              <div class="book-actions" @click.stop>
-                <el-button size="small" type="primary" plain @click="continueRead(book)">阅读</el-button>
-                <el-button size="small" text @click="openDetail(book)">详情</el-button>
-              </div>
-            </article>
-          </div>
-
-          <div v-else class="book-list app-panel">
-            <button v-for="book in displayedBooks" :key="book.id" class="book-row" type="button" @click="openDetail(book)">
-              <span class="list-cover" :style="coverStyle(book)">{{ coverInitial(book) }}</span>
-              <span class="list-main">
-                <strong>{{ book.title }}</strong>
-                <small>{{ book.author || '未知作者' }} · {{ categoryName(book.categoryId) }} · {{ bookProgressPercent(book) }}%</small>
-              </span>
-              <span class="list-latest">{{ book.lastChapter || '暂无最新章节' }}</span>
-              <el-button size="small" type="primary" plain @click.stop="continueRead(book)">阅读</el-button>
-            </button>
-          </div>
-        </template>
-
-        <div v-else class="empty-panel app-panel">
-          <el-empty :description="emptyText">
-            <div class="empty-actions">
-              <el-button type="primary" :icon="Upload" @click="importDialog = true">导入本地书</el-button>
-              <el-button :icon="Search" @click="router.push({ name: 'search' })">搜索远程书</el-button>
-            </div>
-          </el-empty>
-        </div>
-      </main>
+    <div class="book-group-wrapper app-panel">
+      <el-tabs v-model="selectedGroup" stretch>
+        <el-tab-pane v-for="item in groupItems" :key="item.id" :label="`${item.name} ${item.count}`" :name="item.id" />
+      </el-tabs>
     </div>
+
+    <main class="shelf-main">
+      <div class="shelf-toolbar app-panel">
+        <el-input v-model="keyword" placeholder="搜索书名或作者" clearable>
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
+
+      <div v-if="bookshelf.loading" class="book-list app-panel">
+        <article v-for="i in 8" :key="i" class="book-row skeleton-row">
+          <el-skeleton :rows="2" animated />
+        </article>
+      </div>
+
+      <template v-else-if="displayedBooks.length">
+        <div class="book-list app-panel">
+          <button v-for="book in displayedBooks" :key="book.id" class="book-row" type="button" @click="openDetail(book)">
+            <span class="list-cover" :style="coverStyle(book)">{{ coverInitial(book) }}</span>
+            <span class="list-main">
+              <span class="book-operation">
+                <el-button v-if="showBookEditButton" size="small" text type="danger" @click.stop="deleteManagedBook(book)">删除</el-button>
+                <el-button v-if="showBookEditButton" size="small" text @click.stop="goEditBook(book)">编辑</el-button>
+                <el-badge
+                  v-if="!showBookEditButton && unreadCount(book) > 0"
+                  class="unread-num-badge"
+                  :max="99"
+                  :value="unreadCount(book)"
+                />
+              </span>
+              <strong>{{ book.title }}</strong>
+              <small>{{ book.author || '未知作者' }}<template v-if="book.chapterCount"> · 共{{ book.chapterCount }}章</template></small>
+              <small v-if="readChapterTitle(book)">已读：{{ readChapterTitle(book) }}</small>
+              <small v-if="book.lastChapter">最新：{{ book.lastChapter }}</small>
+            </span>
+            <el-button size="small" type="primary" plain @click.stop="continueRead(book)">阅读</el-button>
+          </button>
+        </div>
+      </template>
+
+      <div v-else class="empty-panel app-panel">
+        <el-empty :description="emptyText">
+          <div class="empty-actions">
+            <el-button type="primary" :icon="Upload" @click="importDialog = true">导入本地书</el-button>
+            <el-button :icon="Search" @click="router.push({ name: 'search' })">搜索远程书</el-button>
+          </div>
+        </el-empty>
+      </div>
+    </main>
 
     <el-dialog v-model="importDialog" title="导入本地书籍" width="520px">
       <div class="import-form">
@@ -155,7 +103,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowUp, Delete, Edit, Plus, Search, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { Search, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
@@ -168,26 +116,12 @@ const reader = useReaderStore()
 
 const keyword = ref('')
 const selectedGroup = ref('')
-const viewMode = ref('grid')
-const showGroupInput = ref(false)
-const newGroupName = ref('')
 const importDialog = ref(false)
-const manageDrawer = ref(false)
 const importing = ref(false)
-const selectedBookIds = ref([])
-const batchCategoryId = ref('')
-const batchManaging = ref(false)
+const showBookEditButton = ref(false)
+const refreshLoading = ref(false)
 const draft = reactive({ title: '', author: '', categoryId: '', file: null })
 
-const viewOptions = [
-  { label: '网格', value: 'grid' },
-  { label: '列表', value: 'list' },
-]
-
-const remoteCount = computed(() => bookshelf.books.filter(book => book.sourceId).length)
-const localCount = computed(() => bookshelf.books.length - remoteCount.value)
-const allManagedSelected = computed(() => bookshelf.books.length > 0 && selectedBookIds.value.length === bookshelf.books.length)
-const someManagedSelected = computed(() => selectedBookIds.value.length > 0 && selectedBookIds.value.length < bookshelf.books.length)
 const recentBook = computed(() => {
   const withProgress = bookshelf.books
     .filter(book => bookProgress(book))
@@ -249,66 +183,6 @@ watch(
   { immediate: true },
 )
 
-function selectGroup(groupId) {
-  selectedGroup.value = groupId
-}
-
-async function createCategory() {
-  const name = newGroupName.value.trim()
-  if (!name) return
-  try {
-    await bookshelf.addCategory({ name })
-    newGroupName.value = ''
-    showGroupInput.value = false
-    ElMessage.success('分组已创建')
-  } catch (err) {
-    ElMessage.error(readError(err, '创建分组失败'))
-  }
-}
-
-async function renameGroup(item) {
-  try {
-    const { value } = await ElMessageBox.prompt('输入新的分组名称', '重命名分组', {
-      inputValue: item.name,
-      inputValidator: value => !!value?.trim() || '分组名称不能为空',
-    })
-    const name = value.trim()
-    if (!name || name === item.name) return
-    await bookshelf.renameCategory(Number(item.id), { name })
-    ElMessage.success('分组已重命名')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '重命名失败'))
-  }
-}
-
-async function deleteGroup(item) {
-  try {
-    await ElMessageBox.confirm(`确定删除分组“${item.name}”吗？组内书籍会移动到未分组。`, '删除分组', { type: 'warning' })
-    await bookshelf.removeCategory(Number(item.id))
-    if (selectedGroup.value === item.id) selectedGroup.value = ''
-    ElMessage.success('分组已删除')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '删除分组失败'))
-  }
-}
-
-async function moveGroup(item, direction) {
-  const categories = [...bookshelf.categories]
-  const index = categories.findIndex(category => String(category.id) === String(item.id))
-  const targetIndex = index + direction
-  if (index < 0 || targetIndex < 0 || targetIndex >= categories.length) return
-  const [moved] = categories.splice(index, 1)
-  categories.splice(targetIndex, 0, moved)
-  try {
-    await bookshelf.reorderCategoryIds(categories.map(category => category.id))
-    ElMessage.success('分组排序已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '分组排序失败'))
-  }
-}
-
 function pickFile(data) {
   draft.file = data.raw || null
   if (draft.file && !draft.title) {
@@ -347,88 +221,20 @@ async function deleteManagedBook(book) {
   }
 }
 
-function toggleManageAll(value) {
-  selectedBookIds.value = value ? bookshelf.books.map(book => book.id) : []
-}
-
-async function batchSetCategory() {
-  if (!selectedBookIds.value.length) return
-  batchManaging.value = true
+async function refreshShelf() {
+  refreshLoading.value = true
   try {
-    const categoryId = batchCategoryId.value ? Number(batchCategoryId.value) : null
-    await bookshelf.batchSetCategory([...selectedBookIds.value], categoryId)
-    ElMessage.success(`已更新 ${selectedBookIds.value.length} 本书的分组`)
-    selectedBookIds.value = []
+    await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks()])
+    ElMessage.success('书架已刷新')
   } catch (err) {
-    ElMessage.error(readError(err, '批量分组失败'))
+    ElMessage.error(readError(err, '刷新书架失败'))
   } finally {
-    batchManaging.value = false
+    refreshLoading.value = false
   }
 }
 
-async function batchCacheBooks() {
-  if (!selectedBookIds.value.length) return
-  batchManaging.value = true
-  try {
-    const data = await bookshelf.batchCacheBooks([...selectedBookIds.value])
-    ElMessage.success(`已处理 ${data.affected || 0} 本书，缓存 ${data.cached || 0}/${data.requested || 0} 章`)
-  } catch (err) {
-    ElMessage.error(readError(err, '批量缓存失败'))
-  } finally {
-    batchManaging.value = false
-  }
-}
-
-async function batchClearCache() {
-  if (!selectedBookIds.value.length) return
-  try {
-    await ElMessageBox.confirm(`确定清理选中 ${selectedBookIds.value.length} 本书的章节缓存吗？`, '清理缓存', { type: 'warning' })
-    batchManaging.value = true
-    const data = await bookshelf.batchClearCache([...selectedBookIds.value])
-    ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '清理缓存失败'))
-  } finally {
-    batchManaging.value = false
-  }
-}
-
-async function batchExportBooks() {
-  if (!selectedBookIds.value.length) return
-  batchManaging.value = true
-  try {
-    const blob = await bookshelf.exportSelectedBooks([...selectedBookIds.value])
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `openreader-books-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-    ElMessage.success(`已导出 ${selectedBookIds.value.length} 本书`)
-  } catch (err) {
-    ElMessage.error(readError(err, '批量导出失败'))
-  } finally {
-    batchManaging.value = false
-  }
-}
-
-async function batchDeleteBooks() {
-  if (!selectedBookIds.value.length) return
-  try {
-    await ElMessageBox.confirm(`确定删除选中的 ${selectedBookIds.value.length} 本书吗？阅读进度和书签也会一并删除。`, '批量删除', { type: 'warning' })
-    batchManaging.value = true
-    await bookshelf.batchDeleteBooks([...selectedBookIds.value])
-    ElMessage.success('已批量删除')
-    selectedBookIds.value = []
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '批量删除失败'))
-  } finally {
-    batchManaging.value = false
-  }
+function goEditBook(book) {
+  router.push({ name: 'book-detail', params: { id: book.id } })
 }
 
 function openDetail(book) {
@@ -442,8 +248,18 @@ function continueRead(book) {
   router.push({ name: 'reader', params: { id: book.id } })
 }
 
-function bookProgressPercent(book) {
-  return Math.round((bookProgress(book)?.percent || 0) * 100)
+function readChapterTitle(book) {
+  const progress = bookProgress(book)
+  if (progress?.chapterTitle) return progress.chapterTitle
+  if (Number.isInteger(progress?.chapterIndex)) return `第 ${progress.chapterIndex + 1} 章`
+  return ''
+}
+
+function unreadCount(book) {
+  const progress = bookProgress(book)
+  const chapterIndex = Number.isInteger(progress?.chapterIndex) ? progress.chapterIndex : -1
+  const chapterCount = Number(book.chapterCount || 0)
+  return Math.max(0, chapterCount - 1 - chapterIndex)
 }
 
 function bookProgress(book) {
@@ -489,13 +305,12 @@ function readError(err, fallback) {
 
 <style scoped>
 .shelf-page,
-.shelf-main,
-.manage-list {
+.shelf-main {
   display: grid;
   gap: 16px;
 }
 
-.shelf-head,
+.shelf-title,
 .recent-panel,
 .shelf-toolbar {
   display: flex;
@@ -504,50 +319,40 @@ function readError(err, fallback) {
   gap: 14px;
 }
 
-.empty-actions {
+.shelf-title {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  padding: 12px 14px;
+  border-radius: 0;
+}
+
+.shelf-title strong {
+  font-size: 18px;
+}
+
+.title-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.shelf-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.stat-panel {
-  display: grid;
-  gap: 6px;
-  padding: 16px;
-}
-
-.stat-panel span,
-.recent-main span {
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-
-.stat-panel strong {
-  font-size: 26px;
+.title-actions button {
+  padding: 0;
+  color: var(--app-primary-strong);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 14px;
 }
 
 .recent-panel {
-  padding: 14px;
+  padding: 12px 14px;
+  cursor: pointer;
 }
 
 .recent-cover,
-.book-cover,
 .list-cover {
   display: grid;
   place-items: center;
@@ -555,10 +360,10 @@ function readError(err, fallback) {
 }
 
 .recent-cover {
-  width: 54px;
-  height: 72px;
+  width: 48px;
+  height: 64px;
   border-radius: 5px;
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .recent-main {
@@ -566,199 +371,61 @@ function readError(err, fallback) {
   flex: 1;
 }
 
-.recent-main h2,
-.recent-main p,
-.book-body p {
-  margin: 0;
-}
-
-.recent-main h2 {
-  margin: 3px 0;
-  overflow: hidden;
-  font-size: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-main p,
-.book-body p,
-.book-meta,
-.list-main small,
-.list-latest {
+.recent-main span,
+.list-main small {
   color: var(--app-text-muted);
   font-size: 13px;
 }
 
-.shelf-layout {
-  display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
-  gap: 16px;
+.recent-main h2,
+.recent-main p {
+  margin: 0;
 }
 
-.group-panel {
-  position: sticky;
-  top: 28px;
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  padding: 12px;
+.recent-main h2,
+.list-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.group-title,
-.group-create,
-.book-title-row,
-.book-meta,
-.book-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+.recent-main h2 {
+  margin: 3px 0;
+  font-size: 17px;
 }
 
-.book-progress {
-  margin-top: 2px;
+.book-group-wrapper {
+  padding: 0 10px;
 }
 
-.group-create {
-  align-items: stretch;
+.book-group-wrapper :deep(.el-tabs__header) {
+  margin: 0;
 }
 
-.group-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  border-radius: var(--app-radius-sm);
-}
-
-.group-row:hover,
-.group-row.active {
-  color: var(--app-primary-strong);
-  background: var(--app-primary-soft);
-}
-
-.group-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 11px;
-  color: var(--app-text-muted);
-  background: transparent;
-  border: 0;
-  border-radius: var(--app-radius-sm);
-  cursor: pointer;
-  text-align: left;
-}
-
-.group-actions {
-  display: inline-flex;
-  gap: 2px;
-  padding-right: 5px;
-}
-
-.group-actions button {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  color: var(--app-text-muted);
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.group-actions button:hover {
-  color: var(--app-primary-strong);
-  background: rgba(255, 255, 255, 0.55);
-}
-
-.group-note {
-  margin-top: 8px;
+.book-group-wrapper :deep(.el-tabs__item) {
+  height: 42px;
+  font-size: 14px;
 }
 
 .shelf-toolbar {
-  padding: 12px;
+  padding: 10px 12px;
 }
 
 .shelf-toolbar .el-input {
   flex: 1;
 }
 
-.book-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(218px, 1fr));
-  gap: 14px;
-}
-
-.book-card {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  min-height: 282px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
-}
-
-.book-card:hover {
-  border-color: var(--app-border-strong);
-  box-shadow: var(--app-shadow-md);
-  transform: translateY(-2px);
-}
-
-.skeleton-card {
-  padding: 16px;
-}
-
-.book-cover {
-  height: 126px;
-  color: var(--app-primary);
-  background: var(--app-primary-soft);
-  font-size: 42px;
-}
-
-.book-body {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  min-width: 0;
-  padding: 14px 14px 10px;
-}
-
-.book-title-row h2 {
-  display: -webkit-box;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font-size: 16px;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.book-latest,
-.list-latest,
-.list-main strong,
-.recent-main h2 {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.book-actions {
-  padding: 0 12px 12px;
-}
-
 .book-list {
   overflow: hidden;
 }
 
-.book-row,
-.manage-row {
+.book-row {
+  position: relative;
   display: grid;
-  grid-template-columns: 42px minmax(140px, 1fr) minmax(120px, 0.8fr) auto;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+  width: 100%;
   padding: 12px;
   color: var(--app-text);
   background: transparent;
@@ -773,15 +440,21 @@ function readError(err, fallback) {
 }
 
 .list-cover {
-  width: 42px;
-  height: 54px;
-  border-radius: var(--app-radius-sm);
+  width: 52px;
+  height: 68px;
+  border-radius: 5px;
 }
 
 .list-main {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 5px;
+}
+
+.book-operation {
+  display: grid;
+  min-height: 20px;
+  justify-items: end;
 }
 
 .empty-panel {
@@ -804,83 +477,45 @@ function readError(err, fallback) {
   color: var(--app-text-muted);
 }
 
-.manage-row {
-  grid-template-columns: auto 42px minmax(0, 1fr) auto auto;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-}
-
-.manage-toolbar {
+.empty-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  padding: 10px;
-  background: var(--app-bg-soft);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
 }
 
-.manage-toolbar .el-select {
-  width: 150px;
-}
-
-.manage-row span:nth-child(3) {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.manage-row small {
-  color: var(--app-text-muted);
-}
-
-@media (max-width: 980px) {
-  .shelf-layout,
-  .shelf-stats {
-    grid-template-columns: 1fr;
-  }
-
-  .group-panel {
-    position: static;
-  }
+.skeleton-row {
+  grid-template-columns: 1fr;
 }
 
 @media (max-width: 700px) {
   .shelf-page {
-    gap: 10px;
+    gap: 8px;
   }
 
-  .shelf-head,
+  .shelf-title,
   .recent-panel,
   .shelf-toolbar {
-    display: grid;
+    border-radius: 0;
   }
 
-  .shelf-head {
-    order: 2;
-    gap: 4px;
+  .shelf-title {
+    gap: 10px;
+    align-items: start;
   }
 
-  .shelf-head .app-page-subtitle,
-  .shelf-stats {
-    display: none;
+  .title-actions {
+    gap: 8px;
   }
 
-  .shelf-head .app-page-title {
-    font-size: 22px;
-  }
-
-  .eyebrow {
-    display: none;
+  .title-actions button {
+    font-size: 13px;
   }
 
   .recent-panel {
-    order: 1;
     grid-template-columns: 44px minmax(0, 1fr) auto;
     gap: 10px;
     padding: 10px;
-    border-radius: 0;
   }
 
   .recent-cover {
@@ -905,87 +540,19 @@ function readError(err, fallback) {
     padding: 8px 10px;
   }
 
-  .shelf-layout {
-    order: 3;
-    gap: 10px;
-  }
-
-  .group-panel {
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    padding: 0;
-    background: transparent;
-    border: 0;
-    box-shadow: none;
-    scrollbar-width: none;
-  }
-
-  .group-title,
-  .group-create,
-  .group-actions,
-  .group-note {
-    display: none;
-  }
-
-  .group-row {
-    flex: 0 0 auto;
-  }
-
-  .group-item {
-    gap: 8px;
-    padding: 8px 10px;
-    background: var(--app-surface);
-    border: 1px solid var(--app-border);
-    border-radius: 999px;
-    white-space: nowrap;
-  }
-
   .shelf-toolbar {
-    gap: 8px;
-    padding: 0;
-    background: transparent;
-    border: 0;
-    box-shadow: none;
-  }
-
-  .shelf-toolbar .el-button {
-    display: none;
-  }
-
-  .book-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .book-card {
-    grid-template-columns: 72px minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    min-height: 0;
-  }
-
-  .book-cover {
-    grid-row: 1 / span 2;
-    height: 100%;
-    min-height: 108px;
-    font-size: 28px;
-  }
-
-  .book-body {
-    padding: 10px 10px 6px;
-  }
-
-  .book-actions {
-    justify-content: flex-start;
-    padding: 0 10px 10px;
+    padding: 8px 10px;
   }
 
   .book-row {
-    grid-template-columns: 38px minmax(0, 1fr) auto;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px;
   }
 
-  .list-latest {
-    display: none;
+  .list-cover {
+    width: 42px;
+    height: 56px;
   }
 }
 </style>
