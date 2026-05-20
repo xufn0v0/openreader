@@ -113,23 +113,46 @@
     </div>
   </el-drawer>
 
-  <el-drawer v-model="overlay.bookGroupVisible" title="分组管理" direction="rtl" size="360px">
-    <div class="group-create">
-      <el-input v-model="newGroupName" placeholder="新增分组" size="small" @keyup.enter="createCategory" />
-      <el-button size="small" type="primary" :disabled="!newGroupName.trim()" @click="createCategory">新增</el-button>
-    </div>
-    <div class="group-list">
-      <div v-for="category in bookshelf.categories" :key="category.id" class="group-row">
-        <span>{{ category.name }}</span>
-        <span class="group-actions">
-          <el-button size="small" text @click="moveGroup(category, -1)">上移</el-button>
-          <el-button size="small" text @click="moveGroup(category, 1)">下移</el-button>
-          <el-button size="small" text @click="renameGroup(category)">重命名</el-button>
-          <el-button size="small" text type="danger" @click="deleteGroup(category)">删除</el-button>
-        </span>
+  <el-drawer
+    v-model="overlay.bookGroupVisible"
+    :title="overlay.bookGroupMode === 'set' ? '设置分组' : '分组管理'"
+    direction="rtl"
+    size="360px"
+  >
+    <template v-if="overlay.bookGroupMode === 'set'">
+      <el-table :data="bookshelf.categories" row-key="id" class="group-set-table" @row-click="selectBookGroup">
+        <el-table-column width="46">
+          <template #default="{ row }">
+            <span class="radio-cell" :class="{ active: String(settingCategoryId) === String(row.id) }" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="分组名" />
+      </el-table>
+      <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
+      <div class="manage-footer group-set-footer">
+        <el-button @click="settingCategoryId = ''">未分组</el-button>
+        <el-button type="primary" :loading="settingCategorySaving" @click="saveBookGroupSetting">确认</el-button>
+        <el-button @click="overlay.bookGroupVisible = false">取消</el-button>
       </div>
-    </div>
-    <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
+    </template>
+    <template v-else>
+      <div class="group-create">
+        <el-input v-model="newGroupName" placeholder="新增分组" size="small" @keyup.enter="createCategory" />
+        <el-button size="small" type="primary" :disabled="!newGroupName.trim()" @click="createCategory">新增</el-button>
+      </div>
+      <div class="group-list">
+        <div v-for="category in bookshelf.categories" :key="category.id" class="group-row">
+          <span>{{ category.name }}</span>
+          <span class="group-actions">
+            <el-button size="small" text @click="moveGroup(category, -1)">上移</el-button>
+            <el-button size="small" text @click="moveGroup(category, 1)">下移</el-button>
+            <el-button size="small" text @click="renameGroup(category)">重命名</el-button>
+            <el-button size="small" text type="danger" @click="deleteGroup(category)">删除</el-button>
+          </span>
+        </div>
+      </div>
+      <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
+    </template>
   </el-drawer>
 
   <el-drawer
@@ -185,7 +208,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, searchBookContent, updateBookmark } from '../api/books'
+import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, searchBookContent, updateBookCategory, updateBookmark } from '../api/books'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
@@ -201,6 +224,8 @@ const reader = useReaderStore()
 const selectedBookIds = ref([])
 const batchBusy = ref(false)
 const cachingBookId = ref(null)
+const settingCategoryId = ref('')
+const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
 const newGroupName = ref('')
 const contentKeyword = ref('')
@@ -228,6 +253,9 @@ watch(
     if (!visible) return
     try {
       await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks()])
+      if (overlay.bookGroupVisible && overlay.bookGroupMode === 'set') {
+        settingCategoryId.value = overlay.bookInfoBook?.categoryId ? String(overlay.bookInfoBook.categoryId) : ''
+      }
     } catch (err) {
       ElMessage.error(readError(err, '加载书架数据失败'))
     }
@@ -290,14 +318,38 @@ function goDetail(book) {
 }
 
 function setBookGroup(book) {
-  overlay.openBookInfo(book, {
+  overlay.openBookGroup('set', book, {
     categoryName: categoryName(book.categoryId),
     progress: (reader.progressByBook[book.id]?.percent || book.progress?.percent || 0),
-    actions: [
-      { label: '详情', plain: true, handler: () => goDetail(book) },
-      { label: '分组管理', type: 'primary', handler: () => { overlay.closeBookInfo(); overlay.openBookGroup('set') } },
-    ],
   })
+}
+
+function selectBookGroup(category) {
+  settingCategoryId.value = String(category.id)
+}
+
+async function saveBookGroupSetting() {
+  const book = overlay.bookInfoBook
+  if (!book?.id) return
+  settingCategorySaving.value = true
+  try {
+    const categoryId = settingCategoryId.value ? Number(settingCategoryId.value) : null
+    const { data } = await updateBookCategory(book.id, categoryId)
+    const index = bookshelf.books.findIndex(item => item.id === book.id)
+    if (index >= 0) bookshelf.books[index] = data
+    overlay.bookInfoBook = data
+    overlay.bookInfoOptions = {
+      ...overlay.bookInfoOptions,
+      categoryName: categoryName(data.categoryId),
+      progress: reader.progressByBook[data.id]?.percent || data.progress?.percent || 0,
+    }
+    overlay.bookGroupVisible = false
+    ElMessage.success('分组已设置')
+  } catch (err) {
+    ElMessage.error(readError(err, '设置分组失败'))
+  } finally {
+    settingCategorySaving.value = false
+  }
 }
 
 function openContentSearch(book) {
@@ -664,6 +716,28 @@ function readError(err, fallback) {
   padding: 10px;
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
+}
+
+.group-set-table {
+  margin-bottom: 12px;
+}
+
+.group-set-footer {
+  margin-top: 12px;
+}
+
+.radio-cell {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--app-border);
+  border-radius: 50%;
+}
+
+.radio-cell.active {
+  border-color: var(--el-color-primary);
+  box-shadow: inset 0 0 0 4px #fff;
+  background: var(--el-color-primary);
 }
 
 .group-actions {

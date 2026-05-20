@@ -25,7 +25,11 @@ export const useOverlayStore = defineStore('overlay', {
     openBookManage() {
       this.bookManageVisible = true
     },
-    openBookGroup(mode = 'manage') {
+    openBookGroup(mode = 'manage', book = null, options = {}) {
+      if (book) {
+        this.bookInfoBook = book
+        this.bookInfoOptions = options
+      }
       this.bookGroupMode = mode
       this.bookGroupVisible = true
     },
