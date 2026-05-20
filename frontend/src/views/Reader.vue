@@ -65,7 +65,7 @@
     </aside>
 
     <header class="reader-mobile-top">
-      <button class="mobile-tool-button" type="button" aria-label="返回" @click="goHome">
+      <button class="mobile-tool-button" type="button" aria-label="返回首页" @click="goShelf">
         <el-icon :size="20"><ArrowLeft /></el-icon>
       </button>
       <div class="mobile-reader-title">
@@ -255,10 +255,6 @@
         <button type="button" class="mobile-more-item" @click="runMobileAction(scrollToBottom)">
           <el-icon :size="22"><ArrowDownBold /></el-icon>
           <span>底部</span>
-        </button>
-        <button type="button" class="mobile-more-item" @click="runMobileAction(goHome)">
-          <el-icon :size="22"><ArrowLeft /></el-icon>
-          <span>详情</span>
         </button>
       </div>
       <p v-if="!tts.state.supported" class="mobile-more-hint">当前浏览器不支持系统朗读，听书入口已禁用。</p>
@@ -554,7 +550,7 @@ async function jumpFromToc(index) {
   await goChapter(index)
 }
 
-function goHome() { router.push({ name: 'book-detail', params: { id: bookId.value } }) }
+function goBookDetail() { router.push({ name: 'book-detail', params: { id: bookId.value } }) }
 function goShelf() { router.push({ name: 'home' }) }
 async function openShelfPanel() {
   showShelfDrawer.value = true
@@ -597,7 +593,7 @@ function openReaderBookInfo() {
     actions: [
       { label: '目录', plain: true, handler: () => { showTocDrawer.value = true; overlay.closeBookInfo() } },
       { label: '书源', plain: true, handler: () => { showSourceDrawer.value = true; overlay.closeBookInfo() } },
-      { label: '完整详情', type: 'primary', handler: () => { overlay.closeBookInfo(); goHome() } },
+      { label: '完整详情', type: 'primary', handler: () => { overlay.closeBookInfo(); goBookDetail() } },
     ],
   })
 }
