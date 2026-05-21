@@ -106,7 +106,7 @@
       </template>
     </div>
 
-    <el-dialog v-model="showChangeSource" title="换源" width="460px">
+    <el-dialog v-model="showChangeSource" title="换源" width="460px" :fullscreen="isMobileDialog">
       <SourceSwitchPanel
         :book="book"
         :sources="switchableSourceCandidates"
@@ -124,7 +124,7 @@
       <p v-if="changeMessage" :class="changeError ? 'msg-error' : 'msg-success'">{{ changeMessage }}</p>
     </el-dialog>
 
-    <el-dialog v-model="showBookEditor" title="编辑书籍" width="540px">
+    <el-dialog v-model="showBookEditor" title="编辑书籍" width="540px" :fullscreen="isMobileDialog">
       <el-form label-position="top" class="book-editor">
         <el-form-item label="书名"><el-input v-model="bookDraft.title" /></el-form-item>
         <el-form-item label="作者"><el-input v-model="bookDraft.author" /></el-form-item>
@@ -147,7 +147,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Switch } from '@element-plus/icons-vue'
@@ -193,15 +193,27 @@ const changingSource = ref(null)
 const changeMessage = ref('')
 const changeError = ref(false)
 const bookDraft = reactive({ title: '', author: '', coverUrl: '', intro: '' })
+const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 
 const currentSource = computed(() => availableSources.value.find(source => Number(source.id) === Number(book.value?.sourceId)))
 const switchableSourceCandidates = computed(() => sourceCandidates.value.filter(source => !source.current))
+const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
 const sourceGroups = computed(() => {
   const groups = availableSources.value.map(source => source.group).filter(Boolean)
   return [...new Set(groups)].sort()
 })
 
-onMounted(load)
+onMounted(() => {
+  window.addEventListener('resize', updateWindowWidth, { passive: true })
+  load()
+})
+onBeforeUnmount(() => window.removeEventListener('resize', updateWindowWidth))
+
+function updateWindowWidth() {
+  windowWidth.value = window.innerWidth
+  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+}
 
 async function load() {
   loading.value = true

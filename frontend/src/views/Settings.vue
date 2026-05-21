@@ -433,7 +433,7 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-dialog v-model="replaceRuleDialog" :title="editingReplaceRuleId ? '编辑替换规则' : '新增替换规则'" width="520px">
+    <el-dialog v-model="replaceRuleDialog" :title="editingReplaceRuleId ? '编辑替换规则' : '新增替换规则'" width="520px" :fullscreen="isMobileDialog">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="replaceRuleDraft.name" /></el-form-item>
         <el-form-item label="匹配正则或文本"><el-input v-model="replaceRuleDraft.pattern" /></el-form-item>
@@ -456,7 +456,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="rssDialog" :title="editingRSSSourceId ? '编辑 RSS 源' : '新增 RSS 源'" width="520px">
+    <el-dialog v-model="rssDialog" :title="editingRSSSourceId ? '编辑 RSS 源' : '新增 RSS 源'" width="520px" :fullscreen="isMobileDialog">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="rssDraft.title" /></el-form-item>
         <el-form-item label="订阅地址"><el-input v-model="rssDraft.url" /></el-form-item>
@@ -468,7 +468,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="rssArticleDialog" title="RSS 文章" width="720px" class="rss-reader-dialog">
+    <el-dialog v-model="rssArticleDialog" title="RSS 文章" width="720px" class="rss-reader-dialog" :fullscreen="isMobileDialog">
       <article v-if="selectedRSSArticle" class="rss-reader">
         <h2>{{ selectedRSSArticle.title }}</h2>
         <small>{{ formatDate(selectedRSSArticle.publishedAt || selectedRSSArticle.updatedAt) }} · {{ selectedRSSArticle.author || '未知作者' }}</small>
@@ -480,7 +480,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="webdavImportResultDialog" title="WebDAV 导入结果" width="560px">
+    <el-dialog v-model="webdavImportResultDialog" title="WebDAV 导入结果" width="560px" :fullscreen="isMobileDialog">
       <div class="result-list">
         <div v-for="(item, index) in webdavImportResults" :key="index" class="result-row">
           <el-tag :type="item.book ? 'success' : 'danger'" effect="plain">{{ item.book ? '成功' : '失败' }}</el-tag>
@@ -493,7 +493,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -576,6 +576,8 @@ const rssDraft = ref({ title: '', url: '', enabled: true })
 const rssArticleDialog = ref(false)
 const selectedRSSArticle = ref(null)
 const rssArticleFilter = ref('all')
+const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 
 const fontOptions = [
   { label: '系统默认', value: 'system' },
@@ -590,8 +592,10 @@ const webdavBreadcrumbs = computed(() => {
   return parts.map((name, index) => ({ name, path: parts.slice(0, index + 1).join('/') }))
 })
 const webdavImportSelection = computed(() => webdavSelection.value.filter(row => row.importable))
+const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
 
 onMounted(() => {
+  window.addEventListener('resize', updateWindowWidth, { passive: true })
   loadBackups()
   loadWebDAV()
   loadCacheStats()
@@ -600,6 +604,13 @@ onMounted(() => {
   loadRSSArticles()
   if (userStore.profile?.role === 'admin') loadUsers()
 })
+
+onBeforeUnmount(() => window.removeEventListener('resize', updateWindowWidth))
+
+function updateWindowWidth() {
+  windowWidth.value = window.innerWidth
+  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+}
 
 watch(
   () => route.query.panel,

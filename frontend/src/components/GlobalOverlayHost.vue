@@ -255,7 +255,7 @@
     </div>
   </el-drawer>
 
-  <el-dialog v-model="bookmarkEditorVisible" title="编辑书签" width="380px">
+  <el-dialog v-model="bookmarkEditorVisible" title="编辑书签" width="380px" :fullscreen="isMobileOverlay">
     <div class="bookmark-editor">
       <el-input v-model="bookmarkDraft.title" placeholder="标题" />
       <el-input v-model="bookmarkDraft.excerpt" type="textarea" :rows="3" placeholder="摘录" />
@@ -1219,6 +1219,7 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
   const book = overlay.searchBook
   const keyword = contentKeyword.value.trim()
   if (!book?.id || !keyword) return
+  if (contentSearching.value) return
   contentSearching.value = true
   contentSearched.value = true
   try {
@@ -1228,8 +1229,15 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
           lastIndex: contentLastIndex.value,
           chapterLimit: 80,
           matchLimit: 200,
+          perChapterLimit: 20,
         }
-      : {}
+      : {
+          paged: 1,
+          lastIndex: -1,
+          chapterLimit: 80,
+          matchLimit: 200,
+          perChapterLimit: 20,
+        }
     const { data } = await searchBookContent(book.id, keyword, params)
     const rows = Array.isArray(data) ? data : (data?.list || [])
     contentResults.value = append ? contentResults.value.concat(rows) : rows
