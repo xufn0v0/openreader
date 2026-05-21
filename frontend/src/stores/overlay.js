@@ -17,6 +17,7 @@ export const useOverlayStore = defineStore('overlay', {
     webdavVisible: false,
     userManageVisible: false,
     replaceRulesVisible: false,
+    backupVisible: false,
   }),
   actions: {
     openBookInfo(book, options = {}) {
@@ -63,6 +64,9 @@ export const useOverlayStore = defineStore('overlay', {
     },
     openWebDAV() {
       this.webdavVisible = true
+    },
+    openBackup() {
+      this.backupVisible = true
     },
   },
 })

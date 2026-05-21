@@ -370,6 +370,55 @@
   </el-dialog>
 
   <el-drawer
+    v-model="overlay.backupVisible"
+    title="备份恢复"
+    :direction="wideDrawerDirection"
+    :size="wideDrawerSize"
+    class="global-backup-drawer"
+    @open="loadBackups"
+  >
+    <section class="backup-overlay">
+      <header class="file-overlay-head">
+        <div>
+          <strong>备份恢复</strong>
+          <span>保存当前数据，或从 Legado 备份包恢复</span>
+        </div>
+        <div class="file-actions">
+          <el-button size="small" type="primary" :icon="Upload" :loading="backupLoading" @click="runBackup">保存备份</el-button>
+          <el-upload :show-file-list="false" :auto-upload="false" accept=".zip" @change="restoreBackup">
+            <el-button size="small" :icon="Refresh" :loading="restoreLoading">恢复 Legado</el-button>
+          </el-upload>
+          <el-button size="small" :icon="Refresh" :loading="backupListLoading" @click="loadBackups">刷新列表</el-button>
+        </div>
+      </header>
+      <el-table :data="backups" stripe v-loading="backupListLoading" class="desktop-backup-table">
+        <el-table-column prop="name" label="文件名" min-width="220" show-overflow-tooltip />
+        <el-table-column label="大小" width="110">
+          <template #default="{ row }">{{ formatSize(row.size) }}</template>
+        </el-table-column>
+        <el-table-column label="时间" width="190">
+          <template #default="{ row }">{{ formatDate(row.time) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button text type="primary" @click="downloadBackupFile(row)">下载</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="backups.length" v-loading="backupListLoading" class="mobile-backup-list">
+        <article v-for="row in backups" :key="row.name" class="mobile-backup-card">
+          <div>
+            <strong>{{ row.name }}</strong>
+            <span>{{ formatDate(row.time) }} · {{ formatSize(row.size) }}</span>
+          </div>
+          <el-button size="small" text type="primary" @click="downloadBackupFile(row)">下载</el-button>
+        </article>
+      </div>
+      <el-empty v-if="!backups.length && !backupListLoading" description="暂无备份文件" />
+    </section>
+  </el-drawer>
+
+  <el-drawer
     v-model="overlay.userManageVisible"
     title="用户管理"
     :direction="wideDrawerDirection"
@@ -609,7 +658,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
 import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, refreshBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
-import { restoreWebDAVBackup } from '../api/backup'
+import { downloadBackup, listBackups, restoreLegadoBackup, restoreWebDAVBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { createRSSSource, deleteRSSSource, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
 import { listSources } from '../api/sources'
@@ -677,6 +726,10 @@ const webdavRestoring = ref('')
 const webdavImporting = ref(false)
 const webdavImportResultDialog = ref(false)
 const webdavImportResults = ref([])
+const backups = ref([])
+const backupLoading = ref(false)
+const backupListLoading = ref(false)
+const restoreLoading = ref(false)
 const users = ref([])
 const usersLoading = ref(false)
 const cleanupLoading = ref(false)
@@ -1409,6 +1462,18 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function formatSize(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function formatDate(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
 async function loadWebDAV() {
   webdavLoading.value = true
   try {
@@ -1587,6 +1652,57 @@ function isImportableBookFile(name) {
 
 function joinPath(base, name) {
   return [base, name].filter(Boolean).join('/')
+}
+
+async function runBackup() {
+  backupLoading.value = true
+  try {
+    const { data } = await triggerBackup()
+    ElMessage.success(`备份已生成：${data.name || 'backup.zip'}`)
+    await loadBackups()
+  } catch (err) {
+    ElMessage.error(readError(err, '保存备份失败'))
+  } finally {
+    backupLoading.value = false
+  }
+}
+
+async function loadBackups() {
+  backupListLoading.value = true
+  try {
+    const { data } = await listBackups()
+    backups.value = data || []
+  } catch (err) {
+    ElMessage.error(readError(err, '加载备份列表失败'))
+  } finally {
+    backupListLoading.value = false
+  }
+}
+
+async function downloadBackupFile(row) {
+  try {
+    const resp = await downloadBackup(row.name)
+    downloadBlob(resp.data, row.name)
+  } catch (err) {
+    ElMessage.error(readError(err, '下载备份失败'))
+  }
+}
+
+async function restoreBackup(data) {
+  const file = data.raw
+  if (!file) return
+  restoreLoading.value = true
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    const { data: result } = await restoreLegadoBackup(form)
+    ElMessage.success(`恢复完成：书源 ${result.sources || 0}，书籍 ${result.books || 0}，进度 ${result.progress || 0}`)
+    await bookshelf.loadBooks()
+  } catch (err) {
+    ElMessage.error(readError(err, '恢复备份失败'))
+  } finally {
+    restoreLoading.value = false
+  }
 }
 
 async function loadUsers() {
@@ -2036,6 +2152,43 @@ function readError(err, fallback) {
   flex-wrap: wrap;
 }
 
+.backup-overlay {
+  display: grid;
+  gap: 12px;
+}
+
+.mobile-backup-list {
+  display: none;
+}
+
+.mobile-backup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.mobile-backup-card div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mobile-backup-card strong,
+.mobile-backup-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-backup-card span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
 .result-list {
   display: grid;
   gap: 8px;
@@ -2334,6 +2487,10 @@ function readError(err, fallback) {
     display: none;
   }
 
+  .desktop-backup-table {
+    display: none;
+  }
+
   .mobile-file-list {
     display: grid;
     max-height: 48vh;
@@ -2351,6 +2508,11 @@ function readError(err, fallback) {
   }
 
   .mobile-rule-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-backup-list {
     display: grid;
     gap: 10px;
   }

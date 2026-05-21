@@ -174,7 +174,7 @@ const navSections = computed(() => [
     title: 'WebDAV',
     items: [
       { key: 'webdav', label: '文件管理', icon: Upload, action: () => overlay.openWebDAV() },
-      { key: 'backup', label: '保存备份', icon: Refresh, route: 'settings', panel: 'backup' },
+      { key: 'backup', label: '保存备份', icon: Refresh, action: () => overlay.openBackup() },
     ],
   },
   {
