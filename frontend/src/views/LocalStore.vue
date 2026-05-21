@@ -469,7 +469,7 @@ function readError(err, fallback) {
   grid-column: 2;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .store-head,
   .store-toolbar {
     display: grid;

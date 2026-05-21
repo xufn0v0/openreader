@@ -743,8 +743,9 @@ const replaceRuleDraft = ref({ name: '', pattern: '', replacement: '', enabled: 
 const replaceRuleTestText = ref('广告123\n正文内容')
 const replaceRuleTestResult = ref(null)
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 
-const isMobileOverlay = computed(() => windowWidth.value <= 680)
+const isMobileOverlay = computed(() => windowWidth.value <= 860 || coarsePointer.value)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -785,6 +786,7 @@ onBeforeUnmount(() => {
 
 function updateWindowWidth() {
   windowWidth.value = window.innerWidth
+  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
 }
 
 async function loadImportCategories() {
@@ -2444,7 +2446,7 @@ function readError(err, fallback) {
   white-space: pre-wrap;
 }
 
-@media (max-width: 680px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .desktop-manage-table {
     display: none;
   }

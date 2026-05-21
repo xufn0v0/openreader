@@ -88,7 +88,7 @@ a {
   color: rgba(255, 249, 237, 0.45);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .app-page {
     padding: 18px 14px 82px;
   }

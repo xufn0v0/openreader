@@ -312,7 +312,7 @@ function readError(err, fallback) {
   flex: 1;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .discover-head,
   .discover-toolbar {
     display: grid;

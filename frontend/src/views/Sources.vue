@@ -773,7 +773,7 @@ function readError(err, fallback) {
   align-items: center;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .sources-head,
   .debug-row,
   .source-toolbar,

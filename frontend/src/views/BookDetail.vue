@@ -699,7 +699,7 @@ function readError(err, fallback) {
   color: #f56c6c;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .detail-page {
     gap: 12px;
   }

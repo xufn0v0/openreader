@@ -1699,7 +1699,7 @@ code {
   border-radius: 4px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .settings-head,
   .settings-grid {
     display: grid;
