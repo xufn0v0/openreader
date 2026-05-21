@@ -1275,16 +1275,12 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
       ? {
           paged: 1,
           lastIndex: contentLastIndex.value,
-          chapterLimit: contentSearchChapterLimit(book),
-          matchLimit: 200,
-          perChapterLimit: 20,
+          ...contentSearchPagingParams(book),
         }
       : {
           paged: 1,
           lastIndex: -1,
-          chapterLimit: contentSearchChapterLimit(book),
-          matchLimit: 200,
-          perChapterLimit: 20,
+          ...contentSearchPagingParams(book),
         }
     const { data } = await searchBookContent(book.id, keyword, params)
     const rows = Array.isArray(data) ? data : (data?.list || [])
@@ -1299,8 +1295,11 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
   }
 }
 
-function contentSearchChapterLimit(book) {
-  return Number(book?.sourceId || 0) > 0 ? 80 : 500
+function contentSearchPagingParams(book) {
+  if (Number(book?.sourceId || 0) > 0) {
+    return { chapterLimit: 80, matchLimit: 200, perChapterLimit: 20 }
+  }
+  return { chapterLimit: 500, matchLimit: 1000, perChapterLimit: 200, localFull: 1 }
 }
 
 function jumpToContentResult(result) {

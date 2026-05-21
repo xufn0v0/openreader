@@ -948,16 +948,12 @@ async function runBookContentSearch({ append = false } = {}) {
       ? {
           paged: 1,
           lastIndex: bookSearchLastIndex.value,
-          chapterLimit: contentSearchChapterLimit(book.value),
-          matchLimit: 200,
-          perChapterLimit: 20,
+          ...contentSearchPagingParams(book.value),
         }
       : {
           paged: 1,
           lastIndex: -1,
-          chapterLimit: contentSearchChapterLimit(book.value),
-          matchLimit: 200,
-          perChapterLimit: 20,
+          ...contentSearchPagingParams(book.value),
         }
     const { data } = await searchBookContentApi(bookId.value, keyword, params)
     const rows = Array.isArray(data) ? data : (data?.list || [])
@@ -972,8 +968,11 @@ async function runBookContentSearch({ append = false } = {}) {
   }
 }
 
-function contentSearchChapterLimit(targetBook) {
-  return Number(targetBook?.sourceId || 0) > 0 ? 80 : 500
+function contentSearchPagingParams(targetBook) {
+  if (Number(targetBook?.sourceId || 0) > 0) {
+    return { chapterLimit: 80, matchLimit: 200, perChapterLimit: 20 }
+  }
+  return { chapterLimit: 500, matchLimit: 1000, perChapterLimit: 200, localFull: 1 }
 }
 
 function openNoteDialog() {
