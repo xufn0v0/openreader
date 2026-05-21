@@ -87,7 +87,7 @@ const filteredSources = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadSources(), bookshelf.loadCategories()])
+  await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
   if (selectedSourceId.value) await loadBooks()
 })
 
@@ -159,14 +159,21 @@ function normalizeExploreResult(data, fallbackPage) {
 }
 
 function openPreview(book) {
+  const existing = findExistingBook(book)
   overlay.openBookInfo(book, {
     sourceName: book.sourceName,
-    statusLabel: '探索结果',
-    statusType: 'success',
-    actions: [
-      { label: '加入书架', plain: true, handler: () => addRemoteBook(book, false) },
-      { label: '加入并阅读', type: 'primary', handler: () => addRemoteBook(book, true) },
-    ],
+    statusLabel: existing ? '已在书架' : '探索结果',
+    statusType: existing ? 'warning' : 'success',
+    progress: existing?.progress?.percent || 0,
+    actions: existing
+      ? [
+          { label: '查看详情', plain: true, handler: () => openExistingDetail(existing) },
+          { label: '继续阅读', type: 'primary', handler: () => openExistingReader(existing) },
+        ]
+      : [
+          { label: '加入书架', plain: true, loading: addingBook.value === book.bookUrl, handler: () => addRemoteBook(book, false) },
+          { label: '加入并阅读', type: 'primary', loading: addingBook.value === book.bookUrl, handler: () => addRemoteBook(book, true) },
+        ],
   })
 }
 
@@ -183,6 +190,7 @@ async function addRemoteBook(book, shouldRead) {
       sourceName: book.sourceName,
       categoryId: targetCategoryId.value ? Number(targetCategoryId.value) : null,
     })
+    bookshelf.upsertBook(data)
     ElMessage.success(`已加入书架：《${book.title}》`)
     overlay.closeBookInfo()
     router.push({ name: shouldRead ? 'reader' : 'book-detail', params: { id: data.id } })
@@ -191,6 +199,23 @@ async function addRemoteBook(book, shouldRead) {
   } finally {
     addingBook.value = null
   }
+}
+
+function findExistingBook(book) {
+  return bookshelf.books.find(item => (
+    Number(item.sourceId || 0) === Number(book.sourceId || 0)
+    && String(item.bookUrl || '') === String(book.bookUrl || '')
+  )) || null
+}
+
+function openExistingDetail(book) {
+  overlay.closeBookInfo()
+  router.push({ name: 'book-detail', params: { id: book.id } })
+}
+
+function openExistingReader(book) {
+  overlay.closeBookInfo()
+  router.push({ name: 'reader', params: { id: book.id } })
 }
 
 function readError(err, fallback) {

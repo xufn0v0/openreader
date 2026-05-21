@@ -143,7 +143,7 @@ const sourceGroups = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadSources(), bookshelf.loadCategories()])
+  await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
   keyword.value = route.query.q || ''
   syncSelection()
   if (keyword.value) doSearch()
@@ -210,6 +210,7 @@ async function addRemoteBook(item, shouldRead) {
       categoryId: targetCategoryId.value ? Number(targetCategoryId.value) : null,
     }
     const { data } = await createRemoteBook(payload)
+    bookshelf.upsertBook(data)
     ElMessage.success(`已加入书架：《${item.title}》`)
     overlay.closeBookInfo()
     router.push({ name: shouldRead ? 'reader' : 'book-detail', params: { id: data.id } })
@@ -221,15 +222,39 @@ async function addRemoteBook(item, shouldRead) {
 }
 
 function openPreview(item) {
+  const existing = findExistingBook(item)
   overlay.openBookInfo(item, {
     sourceName: item.sourceName,
-    statusLabel: '搜索结果',
-    statusType: 'success',
-    actions: [
-      { label: '加入书架', plain: true, handler: () => addRemoteBook(item, false) },
-      { label: '加入并阅读', type: 'primary', handler: () => addRemoteBook(item, true) },
-    ],
+    statusLabel: existing ? '已在书架' : '搜索结果',
+    statusType: existing ? 'warning' : 'success',
+    progress: existing?.progress?.percent || 0,
+    actions: existing
+      ? [
+          { label: '查看详情', plain: true, handler: () => openExistingDetail(existing) },
+          { label: '继续阅读', type: 'primary', handler: () => openExistingReader(existing) },
+        ]
+      : [
+          { label: '加入书架', plain: true, loading: addingBook.value === item.bookUrl, handler: () => addRemoteBook(item, false) },
+          { label: '加入并阅读', type: 'primary', loading: addingBook.value === item.bookUrl, handler: () => addRemoteBook(item, true) },
+        ],
   })
+}
+
+function findExistingBook(item) {
+  return bookshelf.books.find(book => (
+    Number(book.sourceId || 0) === Number(item.sourceId || 0)
+    && String(book.bookUrl || '') === String(item.bookUrl || '')
+  )) || null
+}
+
+function openExistingDetail(book) {
+  overlay.closeBookInfo()
+  router.push({ name: 'book-detail', params: { id: book.id } })
+}
+
+function openExistingReader(book) {
+  overlay.closeBookInfo()
+  router.push({ name: 'reader', params: { id: book.id } })
 }
 
 function readError(err, fallback) {

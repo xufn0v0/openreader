@@ -151,7 +151,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Switch } from '@element-plus/icons-vue'
-import { cacheBookContent, changeBookSource, deleteBook, deleteBookmark, listBookmarks, listBookSourceCandidates, refreshBook, updateBook, updateBookCategory } from '../api/books'
+import { cacheBookContent, changeBookSource, deleteBookmark, listBookmarks, listBookSourceCandidates, refreshBook, updateBook, updateBookCategory } from '../api/books'
 import api from '../api/client'
 import { uploadAsset } from '../api/uploads'
 import BookInfoPanel from '../components/BookInfoPanel.vue'
@@ -194,7 +194,7 @@ const changeMessage = ref('')
 const changeError = ref(false)
 const bookDraft = reactive({ title: '', author: '', coverUrl: '', intro: '' })
 
-const currentSource = computed(() => availableSources.value.find(source => source.id === book.value?.sourceId))
+const currentSource = computed(() => availableSources.value.find(source => Number(source.id) === Number(book.value?.sourceId)))
 const switchableSourceCandidates = computed(() => sourceCandidates.value.filter(source => !source.current))
 const sourceGroups = computed(() => {
   const groups = availableSources.value.map(source => source.group).filter(Boolean)
@@ -259,6 +259,7 @@ async function changeCategory(value) {
     const categoryId = value ? Number(value) : null
     const { data } = await updateBookCategory(book.value.id, categoryId)
     book.value = data
+    bookshelf.upsertBook(data)
     ElMessage.success('分组已更新')
   } catch (err) {
     ElMessage.error(readError(err, '更新分组失败'))
@@ -270,7 +271,7 @@ async function deleteCurrentBook() {
   if (!book.value) return
   try {
     await ElMessageBox.confirm(`确定删除《${book.value.title}》吗？阅读进度和书签也会一并删除。`, '删除书籍', { type: 'warning' })
-    await deleteBook(book.value.id)
+    await bookshelf.removeBook(book.value.id)
     ElMessage.success('书籍已删除')
     router.push({ name: 'home' })
   } catch (err) {
@@ -307,6 +308,7 @@ async function saveBookEdit() {
       canUpdate: book.value.canUpdate !== false,
     })
     book.value = data
+    bookshelf.upsertBook(data)
     showBookEditor.value = false
     ElMessage.success('书籍已更新')
   } catch (err) {
@@ -345,6 +347,7 @@ async function uploadBookCoverFromPanel(file) {
       canUpdate: book.value.canUpdate !== false,
     })
     book.value = data
+    bookshelf.upsertBook(data)
     ElMessage.success('封面已更新')
   } catch (err) {
     ElMessage.error(readError(err, '上传封面失败'))
@@ -366,6 +369,7 @@ async function toggleBookCanUpdate(value) {
       canUpdate: value,
     })
     book.value = data
+    bookshelf.upsertBook(data)
     ElMessage.success(value ? '已开启追更' : '已关闭追更')
   } catch (err) {
     ElMessage.error(readError(err, '更新追更状态失败'))
@@ -379,7 +383,8 @@ async function refreshCurrentBook() {
   refreshingBook.value = true
   try {
     const { data } = await refreshBook(book.value.id)
-    book.value = data.book
+    book.value = data?.book || data
+    if (book.value?.id) bookshelf.upsertBook(book.value)
     const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
     chapters.value = chaptersRes.data
     ElMessage.success(data.added ? `新增 ${data.added} 章` : '目录已刷新')
@@ -487,6 +492,7 @@ async function changeSource(source) {
       intro: source.intro,
     })
     book.value = data
+    bookshelf.upsertBook(data)
     const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
     chapters.value = chaptersRes.data
     changeMessage.value = `已切换，共 ${data.chapterCount || chapters.value.length} 章`
