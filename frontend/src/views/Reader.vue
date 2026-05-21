@@ -100,6 +100,19 @@
       </button>
     </footer>
 
+    <footer class="reader-mobile-progress-panel">
+      <button class="mobile-chapter-step" type="button" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
+        上一章
+      </button>
+      <div class="mobile-chapter-progress">
+        <strong>{{ bookProgressLabel }}</strong>
+        <span>{{ chapterLabel }}</span>
+      </div>
+      <button class="mobile-chapter-step" type="button" :disabled="currentIndex >= chapters.length - 1" @click="goChapter(currentIndex + 1)">
+        下一章
+      </button>
+    </footer>
+
     <footer class="reader-mobile-bottom">
       <button class="mobile-tool-button" type="button" @click="openMobileTool(openTocSearch)">
         <el-icon :size="20"><List /></el-icon>
@@ -415,6 +428,8 @@ const customBg = ref('')
 const sliderLineHeight = ref(2.12)
 const pageHeight = ref(600)   // 可视区高度（翻页/分页模式用）
 const windowWidth = ref(window.innerWidth)
+const coarsePointer = ref(window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
+const mobileReaderMaxWidth = 860
 
 let saveTimer
 let autoReadTimer
@@ -486,9 +501,9 @@ const bodyStyle = computed(() => {
 })
 
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
-const isMobileReader = computed(() => windowWidth.value <= 680)
-const drawerDirection = computed(() => windowWidth.value <= 680 ? 'btt' : 'rtl')
-const drawerSize = computed(() => windowWidth.value <= 680 ? '82%' : '360px')
+const isMobileReader = computed(() => windowWidth.value <= mobileReaderMaxWidth || coarsePointer.value)
+const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
+const drawerSize = computed(() => isMobileReader.value ? '82%' : '360px')
 const bookProgress = computed(() => {
   const total = Math.max(chapters.value.length, 1)
   return Math.min(1, Math.max(0, (currentIndex.value + currentChapterPercent()) / total))
@@ -912,6 +927,7 @@ async function loadMoreBookContent() {
 async function runBookContentSearch({ append = false } = {}) {
   const keyword = contentSearch.value.trim()
   if (!keyword) return
+  if (bookSearching.value) return
   bookSearching.value = true
   searchedBookContent.value = true
   try {
@@ -1039,6 +1055,7 @@ function updateFlipLayout() {
 
 function handleResize() {
   windowWidth.value = window.innerWidth
+  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
   updateFlipLayout()
 }
 
@@ -1497,6 +1514,10 @@ function readError(err, fallback) {
   display: none;
 }
 
+.reader-mobile-progress-panel {
+  display: none;
+}
+
 .reader-mobile-top {
   display: none;
 }
@@ -1614,7 +1635,7 @@ function readError(err, fallback) {
 .empty-hint { color: #999; text-align: center; padding-top: 40px; text-indent: 0; }
 
 /* ---- 响应式 ---- */
-@media (max-width: 680px) {
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .reader-shell {
     --reader-frame-width: 100vw;
     --reader-content-width: calc(100vw - 44px);
@@ -1693,9 +1714,62 @@ function readError(err, fallback) {
     transform: translateY(110%);
     transition: transform 180ms ease;
   }
+  .reader-mobile-progress-panel {
+    position: fixed;
+    right: 10px;
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    left: 10px;
+    z-index: 8;
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr) 68px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    background: rgba(255, 252, 239, 0.94);
+    border: 1px solid rgba(148, 132, 87, 0.28);
+    border-radius: 8px;
+    box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
+    transform: translateY(180%);
+    transition: transform 180ms ease;
+  }
   .reader-shell.mobile-chrome-visible .reader-mobile-top,
-  .reader-shell.mobile-chrome-visible .reader-mobile-bottom {
+  .reader-shell.mobile-chrome-visible .reader-mobile-bottom,
+  .reader-shell.mobile-chrome-visible .reader-mobile-progress-panel {
     transform: translateY(0);
+  }
+  .mobile-chapter-step {
+    min-width: 0;
+    min-height: 38px;
+    color: #24201b;
+    background: #fffaf0;
+    border: 1px solid rgba(148, 132, 87, 0.3);
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .mobile-chapter-step:disabled {
+    color: #a09282;
+    opacity: 0.55;
+  }
+  .mobile-chapter-progress {
+    display: grid;
+    min-width: 0;
+    justify-items: center;
+    gap: 2px;
+  }
+  .mobile-chapter-progress strong,
+  .mobile-chapter-progress span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-chapter-progress strong {
+    color: #121212;
+    font-size: 14px;
+  }
+  .mobile-chapter-progress span {
+    color: #756c5a;
+    font-size: 12px;
   }
   .mobile-tool-button {
     display: grid;
