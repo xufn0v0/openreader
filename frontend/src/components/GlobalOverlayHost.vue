@@ -38,6 +38,7 @@
       <el-button plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
+      <el-button plain type="danger" :loading="deletingBookId === overlay.bookInfoBook.id" @click="deleteBookFromInfo(overlay.bookInfoBook)">移出书架</el-button>
     </div>
   </BookInfoDialog>
 
@@ -603,7 +604,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
@@ -622,6 +623,7 @@ import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
 import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
 
 const router = useRouter()
+const route = useRoute()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
@@ -632,6 +634,7 @@ const cachingBookId = ref(null)
 const refreshingBookId = ref(null)
 const coverUploadingBookId = ref(null)
 const updatingBookId = ref(null)
+const deletingBookId = ref(null)
 const settingCategoryId = ref('')
 const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
@@ -949,6 +952,26 @@ async function refreshBookInfo(book) {
     ElMessage.error(readError(err, '刷新目录失败'))
   } finally {
     refreshingBookId.value = null
+  }
+}
+
+async function deleteBookFromInfo(book) {
+  if (!book?.id) return
+  deletingBookId.value = book.id
+  try {
+    await ElMessageBox.confirm(`确定将《${book.title || '这本书'}》移出书架吗？`, '移出书架', { type: 'warning' })
+    await bookshelf.removeBook(book.id)
+    overlay.closeBookInfo()
+    ElMessage.success('已移出书架')
+    const currentBookId = Number(route.params.id || 0)
+    if ((route.name === 'reader' || route.name === 'book-detail') && currentBookId === Number(book.id)) {
+      await router.push({ name: 'home' })
+    }
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '移出书架失败'))
+  } finally {
+    deletingBookId.value = null
   }
 }
 

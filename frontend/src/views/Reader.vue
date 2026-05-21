@@ -346,7 +346,7 @@ import {
   View,
 } from '@element-plus/icons-vue'
 import api from '../api/client'
-import { cacheBookContent, changeBookSource, listBookSourceCandidates, searchBookContent as searchBookContentApi } from '../api/books'
+import { cacheBookContent, changeBookSource, listBookSourceCandidates, refreshBook, searchBookContent as searchBookContentApi } from '../api/books'
 import { listSources } from '../api/sources'
 import ReaderBookmarkPanel from '../components/reader/ReaderBookmarkPanel.vue'
 import ReaderSearchPanel from '../components/reader/ReaderSearchPanel.vue'
@@ -690,11 +690,87 @@ function openReaderBookInfo() {
     statusType: 'success',
     progress: bookProgress.value,
     actions: [
-      { label: '目录', plain: true, handler: () => { showTocDrawer.value = true; overlay.closeBookInfo() } },
-      { label: '书源', plain: true, handler: () => { showSourceDrawer.value = true; overlay.closeBookInfo() } },
+      { label: '目录', plain: true, handler: openInfoToc },
+      { label: '书签', plain: true, handler: openInfoBookmarks },
+      { label: '搜正文', plain: true, handler: openInfoSearch },
+      { label: '书源', plain: true, handler: openInfoSources },
+      { label: '分组', plain: true, handler: openInfoGroup },
+      { label: '刷新目录', plain: true, handler: refreshReaderBookCatalog },
+      { label: '设置', plain: true, handler: openInfoSettings },
       { label: '完整详情', type: 'primary', handler: () => { overlay.closeBookInfo(); goBookDetail() } },
     ],
   })
+}
+
+function closeInfoAndMobileChrome() {
+  overlay.closeBookInfo()
+  mobileChromeVisible.value = false
+}
+
+function openInfoToc() {
+  closeInfoAndMobileChrome()
+  showTocDrawer.value = true
+}
+
+function openInfoBookmarks() {
+  closeInfoAndMobileChrome()
+  showBookmarkDrawer.value = true
+}
+
+function openInfoSearch() {
+  closeInfoAndMobileChrome()
+  openContentSearch()
+}
+
+function openInfoSources() {
+  closeInfoAndMobileChrome()
+  showSourceDrawer.value = true
+}
+
+function openInfoSettings() {
+  closeInfoAndMobileChrome()
+  showSettingsDrawer.value = true
+}
+
+async function openInfoGroup() {
+  if (!book.value) return
+  closeInfoAndMobileChrome()
+  if (!bookshelf.categories.length) {
+    try {
+      await bookshelf.loadCategories()
+    } catch {
+      // 分组弹层仍可打开，失败提示由保存时处理。
+    }
+  }
+  overlay.openBookGroup('set', book.value, {
+    categoryName: categoryName(book.value.categoryId),
+    progress: bookProgress.value,
+    statusLabel: `阅读中 · ${bookProgressLabel.value}`,
+    statusType: 'success',
+  })
+}
+
+function categoryName(id) {
+  if (!id) return '未分组'
+  return bookshelf.categories.find(category => Number(category.id) === Number(id))?.name || '未分组'
+}
+
+async function refreshReaderBookCatalog() {
+  if (!book.value?.id) return
+  try {
+    const { data } = await refreshBook(book.value.id)
+    const updated = data?.book || data
+    if (updated?.id) {
+      book.value = { ...book.value, ...updated }
+      bookshelf.upsertBook(updated)
+    }
+    await loadChapters()
+    overlay.bookInfoBook = book.value
+    toastMsg.value = '目录已刷新'
+    setTimeout(() => { toastMsg.value = '' }, 1400)
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新目录失败'))
+  }
 }
 
 function goSourcePanel() {
