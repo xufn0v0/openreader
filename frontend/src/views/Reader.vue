@@ -937,12 +937,14 @@ async function runBookContentSearch({ append = false } = {}) {
           lastIndex: bookSearchLastIndex.value,
           chapterLimit: 80,
           matchLimit: 200,
+          perChapterLimit: 20,
         }
       : {
           paged: 1,
           lastIndex: -1,
           chapterLimit: 80,
           matchLimit: 200,
+          perChapterLimit: 20,
         }
     const { data } = await searchBookContentApi(bookId.value, keyword, params)
     const rows = Array.isArray(data) ? data : (data?.list || [])

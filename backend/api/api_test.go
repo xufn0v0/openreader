@@ -1274,6 +1274,54 @@ func TestSearchBookContentPaged(t *testing.T) {
 	}
 }
 
+func TestSearchBookContentPerChapterLimit(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "单章多命中"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	lines := make([]string, 0, 12)
+	for i := 0; i < 12; i++ {
+		lines = append(lines, fmt.Sprintf("第%d段目标词", i+1))
+	}
+	cachePath := filepath.Join("per-chapter-search", "chapter.txt")
+	fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chapter := models.Chapter{BookID: book.ID, Index: 0, Title: "第一章", CachePath: cachePath}
+	if err := server.db.Create(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/search?q="+url.QueryEscape("目标词")+"&paged=1&lastIndex=-1&chapterLimit=1&perChapterLimit=12&matchLimit=20", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("paged search: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result struct {
+		List []map[string]any `json:"list"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.List) != 12 {
+		t.Fatalf("expected all 12 matches from one chapter, got %d: %+v", len(result.List), result.List)
+	}
+}
+
 func TestCacheBookContentUsesCachedChapter(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

@@ -992,7 +992,8 @@ func (s *Server) searchBookContent(c *gin.Context) {
 		}
 		chapterLimit := parseBoundedInt(c.Query("chapterLimit"), 30, 1, 80)
 		matchLimit := parseBoundedInt(c.Query("matchLimit"), 80, 1, 200)
-		matches, lastIndex := s.collectContentMatches(book, chapters, keyword, start, chapterLimit, matchLimit)
+		perChapterLimit := parseBoundedInt(c.Query("perChapterLimit"), 20, 1, 100)
+		matches, lastIndex := s.collectContentMatches(book, chapters, keyword, start, chapterLimit, matchLimit, perChapterLimit)
 		c.JSON(http.StatusOK, gin.H{
 			"list":      matches,
 			"lastIndex": lastIndex,
@@ -1002,16 +1003,16 @@ func (s *Server) searchBookContent(c *gin.Context) {
 		return
 	}
 
-	matches, _ := s.collectContentMatches(book, chapters, keyword, 0, len(chapters), 200)
+	matches, _ := s.collectContentMatches(book, chapters, keyword, 0, len(chapters), 200, 20)
 	c.JSON(http.StatusOK, matches)
 }
 
-func (s *Server) collectContentMatches(book models.Book, chapters []models.Chapter, keyword string, start int, chapterLimit int, matchLimit int) ([]contentMatch, int) {
+func (s *Server) collectContentMatches(book models.Book, chapters []models.Chapter, keyword string, start int, chapterLimit int, matchLimit int, perChapterLimit int) ([]contentMatch, int) {
 	matches := make([]contentMatch, 0)
 	if start < 0 {
 		start = 0
 	}
-	if start >= len(chapters) || chapterLimit <= 0 || matchLimit <= 0 {
+	if start >= len(chapters) || chapterLimit <= 0 || matchLimit <= 0 || perChapterLimit <= 0 {
 		return matches, -1
 	}
 	end := start + chapterLimit
@@ -1025,7 +1026,7 @@ func (s *Server) collectContentMatches(book models.Book, chapters []models.Chapt
 		if content == "" {
 			continue
 		}
-		positions := searchContentPositions(content, keyword, 6)
+		positions := searchContentPositions(content, keyword, perChapterLimit)
 		for _, position := range positions {
 			matches = append(matches, contentMatch{
 				ChapterID:    chapters[i].ID,
