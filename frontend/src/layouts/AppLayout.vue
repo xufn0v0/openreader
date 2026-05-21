@@ -160,7 +160,7 @@ const navSections = computed(() => [
       { key: 'importBook', label: '导入书籍', icon: Upload, action: () => overlay.openImportBook() },
       { key: 'localStore', label: '浏览书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
       { key: 'refreshShelf', label: '刷新缓存', icon: Refresh, action: refreshShelfData },
-      { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules(router), route: 'settings', panel: 'replace' },
+      { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules() },
     ],
   },
   {

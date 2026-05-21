@@ -418,6 +418,84 @@
   </el-drawer>
 
   <el-drawer
+    v-model="overlay.replaceRulesVisible"
+    title="替换规则"
+    :direction="wideDrawerDirection"
+    :size="wideDrawerSize"
+    class="global-replace-drawer"
+    @open="loadReplaceRules"
+  >
+    <section class="replace-overlay">
+      <header class="file-overlay-head">
+        <div>
+          <strong>全局替换规则</strong>
+          <span>阅读器会按启用规则处理正文内容</span>
+        </div>
+        <div class="file-actions">
+          <el-button size="small" type="primary" :icon="Edit" @click="openReplaceRuleEditor()">新增规则</el-button>
+          <el-button size="small" :icon="Refresh" :loading="replaceRulesLoading" @click="loadReplaceRules">刷新</el-button>
+        </div>
+      </header>
+      <el-table :data="replaceRules" stripe v-loading="replaceRulesLoading" class="desktop-replace-table">
+        <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="pattern" label="匹配" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="replacement" label="替换为" min-width="160" show-overflow-tooltip />
+        <el-table-column label="启用" width="90">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" size="small" @change="toggleReplaceRule(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button text @click="openReplaceRuleEditor(row)">编辑</el-button>
+            <el-button text type="danger" @click="removeReplaceRule(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="replaceRules.length" v-loading="replaceRulesLoading" class="mobile-rule-list">
+        <article v-for="rule in replaceRules" :key="rule.id" class="mobile-rule-card">
+          <header>
+            <div>
+              <strong>{{ rule.name || '未命名规则' }}</strong>
+              <span>{{ rule.pattern }}</span>
+            </div>
+            <el-switch v-model="rule.enabled" size="small" @change="toggleReplaceRule(rule)" />
+          </header>
+          <p>替换为：{{ rule.replacement || '空' }}</p>
+          <footer>
+            <el-button size="small" text @click="openReplaceRuleEditor(rule)">编辑</el-button>
+            <el-button size="small" text type="danger" @click="removeReplaceRule(rule)">删除</el-button>
+          </footer>
+        </article>
+      </div>
+      <el-empty v-if="!replaceRulesLoading && !replaceRules.length" description="暂无全局替换规则" />
+    </section>
+  </el-drawer>
+
+  <el-dialog v-model="replaceRuleDialog" :title="editingReplaceRuleId ? '编辑替换规则' : '新增替换规则'" width="520px" :fullscreen="isMobileOverlay">
+    <el-form label-position="top">
+      <el-form-item label="名称"><el-input v-model="replaceRuleDraft.name" /></el-form-item>
+      <el-form-item label="匹配正则或文本"><el-input v-model="replaceRuleDraft.pattern" /></el-form-item>
+      <el-form-item label="替换为"><el-input v-model="replaceRuleDraft.replacement" /></el-form-item>
+      <el-form-item><el-switch v-model="replaceRuleDraft.enabled" active-text="启用" inactive-text="停用" /></el-form-item>
+      <el-form-item label="测试文本">
+        <el-input v-model="replaceRuleTestText" type="textarea" :rows="3" />
+      </el-form-item>
+      <div class="replace-test-actions">
+        <el-button size="small" :loading="replaceRuleTesting" @click="runReplaceRuleTest">测试规则</el-button>
+        <span v-if="replaceRuleTestResult" :class="replaceRuleTestResult.changed ? 'msg-success' : 'msg-muted'">
+          {{ replaceRuleTestResult.changed ? '已发生替换' : '未匹配' }}
+        </span>
+      </div>
+      <pre v-if="replaceRuleTestResult" class="replace-test-output">{{ replaceRuleTestResult.output }}</pre>
+    </el-form>
+    <template #footer>
+      <el-button @click="replaceRuleDialog = false">取消</el-button>
+      <el-button type="primary" :loading="replaceRuleSaving" @click="saveReplaceRule">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-drawer
     v-model="overlay.rssVisible"
     title="RSS"
     :direction="wideDrawerDirection"
@@ -527,10 +605,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Delete, Document, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
 import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, refreshBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { restoreWebDAVBackup } from '../api/backup'
+import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { createRSSSource, deleteRSSSource, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
@@ -598,6 +677,15 @@ const webdavImportResults = ref([])
 const users = ref([])
 const usersLoading = ref(false)
 const cleanupLoading = ref(false)
+const replaceRules = ref([])
+const replaceRulesLoading = ref(false)
+const replaceRuleDialog = ref(false)
+const replaceRuleSaving = ref(false)
+const replaceRuleTesting = ref(false)
+const editingReplaceRuleId = ref(null)
+const replaceRuleDraft = ref({ name: '', pattern: '', replacement: '', enabled: true })
+const replaceRuleTestText = ref('广告123\n正文内容')
+const replaceRuleTestResult = ref(null)
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 
 const isMobileOverlay = computed(() => windowWidth.value <= 680)
@@ -1519,6 +1607,101 @@ async function cleanupInactive() {
   }
 }
 
+async function loadReplaceRules() {
+  replaceRulesLoading.value = true
+  try {
+    const { data } = await listReplaceRules()
+    replaceRules.value = data || []
+  } catch (err) {
+    ElMessage.error(readError(err, '加载替换规则失败'))
+  } finally {
+    replaceRulesLoading.value = false
+  }
+}
+
+function openReplaceRuleEditor(rule = null) {
+  editingReplaceRuleId.value = rule?.id || null
+  replaceRuleDraft.value = {
+    name: rule?.name || '',
+    pattern: rule?.pattern || '',
+    replacement: rule?.replacement || '',
+    enabled: rule?.enabled ?? true,
+  }
+  replaceRuleTestResult.value = null
+  replaceRuleDialog.value = true
+}
+
+async function saveReplaceRule() {
+  if (!replaceRuleDraft.value.pattern.trim()) {
+    ElMessage.warning('匹配规则不能为空')
+    return
+  }
+  replaceRuleSaving.value = true
+  try {
+    const payload = { ...replaceRuleDraft.value, pattern: replaceRuleDraft.value.pattern.trim() }
+    if (editingReplaceRuleId.value) {
+      await updateReplaceRule(editingReplaceRuleId.value, payload)
+      ElMessage.success('替换规则已更新')
+    } else {
+      await createReplaceRule(payload)
+      ElMessage.success('替换规则已创建')
+    }
+    replaceRuleDialog.value = false
+    await loadReplaceRules()
+  } catch (err) {
+    ElMessage.error(readError(err, '保存替换规则失败'))
+  } finally {
+    replaceRuleSaving.value = false
+  }
+}
+
+async function toggleReplaceRule(rule) {
+  try {
+    await updateReplaceRule(rule.id, {
+      name: rule.name,
+      pattern: rule.pattern,
+      replacement: rule.replacement,
+      enabled: rule.enabled,
+    })
+    ElMessage.success(rule.enabled ? '规则已启用' : '规则已停用')
+  } catch (err) {
+    ElMessage.error(readError(err, '更新替换规则失败'))
+    await loadReplaceRules()
+  }
+}
+
+async function runReplaceRuleTest() {
+  if (!replaceRuleDraft.value.pattern.trim() || !replaceRuleTestText.value) {
+    ElMessage.warning('请输入匹配规则和测试文本')
+    return
+  }
+  replaceRuleTesting.value = true
+  try {
+    const { data } = await testReplaceRule({
+      pattern: replaceRuleDraft.value.pattern,
+      replacement: replaceRuleDraft.value.replacement,
+      text: replaceRuleTestText.value,
+    })
+    replaceRuleTestResult.value = data
+  } catch (err) {
+    ElMessage.error(readError(err, '测试替换规则失败'))
+  } finally {
+    replaceRuleTesting.value = false
+  }
+}
+
+async function removeReplaceRule(rule) {
+  try {
+    await ElMessageBox.confirm(`确定删除替换规则“${rule.name || rule.pattern}”吗？`, '删除替换规则', { type: 'warning' })
+    await deleteReplaceRule(rule.id)
+    replaceRules.value = replaceRules.value.filter(item => item.id !== rule.id)
+    ElMessage.success('替换规则已删除')
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '删除替换规则失败'))
+  }
+}
+
 async function createCategory() {
   const name = newGroupName.value.trim()
   if (!name) return
@@ -1879,6 +2062,81 @@ function readError(err, fallback) {
   font-size: 12px;
 }
 
+.replace-overlay {
+  display: grid;
+  gap: 12px;
+}
+
+.mobile-rule-list {
+  display: none;
+}
+
+.mobile-rule-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.mobile-rule-card header,
+.mobile-rule-card footer,
+.replace-test-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-rule-card header {
+  justify-content: space-between;
+}
+
+.mobile-rule-card header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mobile-rule-card strong,
+.mobile-rule-card span,
+.mobile-rule-card p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-rule-card span,
+.mobile-rule-card p,
+.msg-muted {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.mobile-rule-card p {
+  margin: 0;
+}
+
+.replace-test-actions {
+  margin-bottom: 8px;
+}
+
+.msg-success {
+  color: var(--el-color-success);
+  font-size: 12px;
+}
+
+.replace-test-output {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--app-text);
+  white-space: pre-wrap;
+}
+
 .rss-overlay-grid {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -2049,6 +2307,10 @@ function readError(err, fallback) {
     display: none;
   }
 
+  .desktop-replace-table {
+    display: none;
+  }
+
   .mobile-file-list {
     display: grid;
     max-height: 48vh;
@@ -2061,6 +2323,11 @@ function readError(err, fallback) {
   }
 
   .mobile-user-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-rule-list {
     display: grid;
     gap: 10px;
   }

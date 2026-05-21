@@ -16,6 +16,7 @@ export const useOverlayStore = defineStore('overlay', {
     rssVisible: false,
     webdavVisible: false,
     userManageVisible: false,
+    replaceRulesVisible: false,
   }),
   actions: {
     openBookInfo(book, options = {}) {
@@ -48,8 +49,8 @@ export const useOverlayStore = defineStore('overlay', {
       this.searchBook = book
       this.searchBookContentVisible = true
     },
-    openReplaceRules(router) {
-      router?.push?.({ name: 'settings', query: { panel: 'replace' } })
+    openReplaceRules() {
+      this.replaceRulesVisible = true
     },
     openRSS() {
       this.rssVisible = true
