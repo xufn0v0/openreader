@@ -92,11 +92,11 @@
 
     <footer class="reader-page-control">
       <div class="progress-box">{{ bookProgressLabel }}</div>
-      <button class="page-step" type="button" title="上一页" @click="previousPage">
-        <el-icon :size="24"><ArrowLeft /></el-icon>
+      <button class="page-step" type="button" :title="pageBackTitle" @click="previousPage">
+        <el-icon :size="24"><component :is="pageBackIcon" /></el-icon>
       </button>
-      <button class="page-step" type="button" title="下一页" @click="nextPage">
-        <el-icon :size="24"><ArrowRight /></el-icon>
+      <button class="page-step" type="button" :title="pageForwardTitle" @click="nextPage">
+        <el-icon :size="24"><component :is="pageForwardIcon" /></el-icon>
       </button>
     </footer>
 
@@ -468,10 +468,10 @@ const lines = computed(() => content.value.split('\n').map(l => l.trim()).filter
 
 const fontStack = computed(() => {
   const stacks = {
-    system: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
-    serif: '"Songti SC", "STSong", "Noto Serif CJK SC", serif',
-    kai: '"Kaiti SC", "STKaiti", "KaiTi", serif',
-    mono: '"STFangsong", "FangSong", "FangSong_GB2312", serif',
+    system: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
+    serif: '"Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", "Source Han Serif SC", serif',
+    kai: '"Kaiti SC", "STKaiti", "KaiTi", "楷体", "AR PL UKai CN", serif',
+    mono: '"STFangsong", "FangSong", "仿宋", "FangSong_GB2312", "Source Han Serif SC", serif',
   }
   return stacks[reader.fontFamily] || stacks.system
 })
@@ -533,6 +533,12 @@ const bookSearchStatus = computed(() => {
   return `已搜索 ${Math.min(scanned, total)} / ${total} 章，${bookSearchResults.value.length} 条结果`
 })
 const mobileChromeVisible = ref(false)
+const CHAPTER_END_OFFSET = -1
+
+const pageBackIcon = computed(() => reader.mode === 'flip' ? ArrowLeft : ArrowUpBold)
+const pageForwardIcon = computed(() => reader.mode === 'flip' ? ArrowRight : ArrowDownBold)
+const pageBackTitle = computed(() => reader.mode === 'flip' ? '上一页' : '上一屏')
+const pageForwardTitle = computed(() => reader.mode === 'flip' ? '下一页' : '下一屏')
 
 function onModeChange(mode) {
   reader.setMode(mode)
@@ -572,7 +578,11 @@ watch(() => reader.mode, async () => {
 })
 
 watch(() => [reader.fontFamily, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
-  await nextTick(); updateFlipLayout(); progressVersion.value += 1
+  await nextTick()
+  updateFlipLayout()
+  progressVersion.value += 1
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveCurrentProgress, 300)
 })
 
 watch(contentSearch, () => {
@@ -605,6 +615,7 @@ async function loadReaderBook() {
 
 async function loadChapter(index, offset = 0) {
   currentIndex.value = Math.max(0, Math.min(index, Math.max(chapters.value.length - 1, 0)))
+  mobileChromeVisible.value = false
   const { data } = await api.get(`/books/${bookId.value}/chapters/${currentIndex.value}/content`)
   chapter.value = data.chapter
   content.value = data.content || ''
@@ -612,9 +623,15 @@ async function loadChapter(index, offset = 0) {
   await nextTick()
   updateFlipLayout()
   if (reader.mode === 'flip' || reader.mode === 'page') {
-    page.value = Math.min(Math.max(offset, 0), pageCount.value - 1)
+    page.value = offset === CHAPTER_END_OFFSET
+      ? Math.max(0, pageCount.value - 1)
+      : Math.min(Math.max(offset, 0), pageCount.value - 1)
   } else if (contentEl.value) {
-    contentEl.value.scrollTop = Math.max(offset, 0)
+    if (offset === CHAPTER_END_OFFSET) {
+      contentEl.value.scrollTop = contentEl.value.scrollHeight
+    } else {
+      contentEl.value.scrollTop = Math.max(offset, 0)
+    }
   }
   saveCurrentProgress()
 }
@@ -642,6 +659,7 @@ async function jumpFromToc(index) {
 }
 
 function locateTocCurrentChapter() {
+  tocFilter.value = ''
   tocLocateKey.value += 1
 }
 
@@ -1050,7 +1068,7 @@ async function previousPage() {
       return
     }
   }
-  if (currentIndex.value > 0) await goChapter(currentIndex.value - 1, Number.MAX_SAFE_INTEGER)
+  if (currentIndex.value > 0) await goChapter(currentIndex.value - 1, CHAPTER_END_OFFSET)
 }
 
 async function nextPage() {
@@ -1073,20 +1091,21 @@ async function nextPage() {
 }
 
 function scrollStep() {
-  return Math.max(240, Math.floor((contentEl.value?.clientHeight || window.innerHeight) * 0.82))
+  return Math.max(240, Math.floor(readableViewportSize().height * 0.9))
 }
 
 function updateFlipLayout() {
   if (!contentEl.value || !contentBody.value) return
+  const viewport = readableViewportSize()
   if (reader.mode === 'flip') {
-    pageWidth.value = Math.max(1, contentEl.value.clientWidth)
-    pageHeight.value = contentEl.value.clientHeight
+    pageWidth.value = viewport.width
+    pageHeight.value = viewport.height
     pageCount.value = Math.max(1, Math.ceil(contentBody.value.scrollWidth / pageWidth.value))
     page.value = Math.min(page.value, pageCount.value - 1)
     return
   }
   if (reader.mode === 'page') {
-    pageHeight.value = Math.max(1, contentEl.value.clientHeight)
+    pageHeight.value = viewport.height
     pageCount.value = Math.max(1, Math.ceil(contentBody.value.scrollHeight / pageHeight.value))
     page.value = Math.min(page.value, pageCount.value - 1)
     return
@@ -1094,6 +1113,20 @@ function updateFlipLayout() {
   // 滚动模式
   pageCount.value = 1
   page.value = 0
+}
+
+function readableViewportSize() {
+  const el = contentEl.value
+  if (!el) {
+    return { width: window.innerWidth, height: window.innerHeight }
+  }
+  const style = window.getComputedStyle(el)
+  const horizontalPadding = parseFloat(style.paddingLeft || '0') + parseFloat(style.paddingRight || '0')
+  const verticalPadding = parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0')
+  return {
+    width: Math.max(1, el.clientWidth - horizontalPadding),
+    height: Math.max(1, el.clientHeight - verticalPadding),
+  }
 }
 
 function handleResize() {
@@ -1360,20 +1393,38 @@ useKeyboard({
 })
 
 useGesture(pageEl, {
-  onSwipeLeft: () => nextPage(),
-  onSwipeRight: () => previousPage(),
+  onSwipeLeft: () => {
+    if (reader.mode === 'flip') nextPage()
+  },
+  onSwipeRight: () => {
+    if (reader.mode === 'flip') previousPage()
+  },
   onCenterTap: () => {
     if (isMobileReader.value) {
       mobileChromeVisible.value = !mobileChromeVisible.value
       return
     }
+    if (reader.mode === 'flip') {
+      nextPage()
+      return
+    }
     showTocDrawer.value = !showTocDrawer.value
     showSettingsDrawer.value = false
   },
-  onEdgeLeftTap: () => previousPage(),
-  onEdgeRightTap: () => nextPage(),
-  onUpperTap: () => previousPage(),
-  onLowerTap: () => nextPage(),
+  onEdgeLeftTap: () => {
+    if (reader.mode === 'flip') previousPage()
+  },
+  onEdgeRightTap: () => {
+    if (reader.mode === 'flip') nextPage()
+  },
+  onUpperTap: () => {
+    if (reader.mode === 'flip') return
+    previousPage()
+  },
+  onLowerTap: () => {
+    if (reader.mode === 'flip') return
+    nextPage()
+  },
   onPinchOut: () => reader.setFontSize(reader.fontSize + 2),
   onPinchIn: () => reader.setFontSize(reader.fontSize - 2),
 })
@@ -1850,7 +1901,7 @@ function readError(err, fallback) {
     grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: center;
     gap: 4px;
-    min-height: calc(62px + env(safe-area-inset-bottom));
+    min-height: calc(68px + env(safe-area-inset-bottom));
     padding: 8px 10px max(8px, env(safe-area-inset-bottom));
     background: rgba(255, 252, 239, 0.92);
     border-top: 1px solid rgba(148, 132, 87, 0.35);
@@ -1861,14 +1912,14 @@ function readError(err, fallback) {
   .reader-mobile-progress-panel {
     position: fixed;
     right: 10px;
-    bottom: calc(66px + env(safe-area-inset-bottom));
+    bottom: calc(78px + env(safe-area-inset-bottom));
     left: 10px;
     z-index: 8;
     display: grid;
     grid-template-columns: minmax(62px, 76px) minmax(0, 1fr) minmax(62px, 76px);
     align-items: center;
     gap: 8px;
-    min-height: 50px;
+    min-height: 52px;
     padding: 7px;
     background: rgba(255, 252, 239, 0.94);
     border: 1px solid rgba(148, 132, 87, 0.28);
