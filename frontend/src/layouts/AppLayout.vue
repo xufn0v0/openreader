@@ -118,6 +118,7 @@ import { useOverlayStore } from '../stores/overlay'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 import { useSync } from '../composables/useSync'
+import { compareRecentBook } from '../utils/bookOrder'
 
 const router = useRouter()
 const route = useRoute()
@@ -188,13 +189,7 @@ const navSections = computed(() => [
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
 const recentBook = computed(() => {
   const rows = [...(Array.isArray(bookshelf.books) ? bookshelf.books : [])]
-  rows.sort((a, b) => {
-    const aProgress = reader.progressByBook[a.id] || a.progress
-    const bProgress = reader.progressByBook[b.id] || b.progress
-    const aTime = new Date(aProgress?.updatedAt || a.updatedAt || 0).getTime()
-    const bTime = new Date(bProgress?.updatedAt || b.updatedAt || 0).getTime()
-    return bTime - aTime
-  })
+  rows.sort((a, b) => compareRecentBook(a, b, reader.progressByBook))
   return rows[0] || null
 })
 

@@ -685,7 +685,7 @@ import { createWebDAVDirectory, deleteWebDAV, downloadWebDAV, importFromWebDAV, 
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
-import { compareByShelfOrder } from '../utils/bookOrder'
+import { sortByShelfOrder } from '../utils/bookOrder'
 import BookInfoDialog from './BookInfoDialog.vue'
 import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
 import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
@@ -782,7 +782,7 @@ const bookInfoProgress = computed(() => {
   return book ? (reader.progressByBook[book.id]?.percent || book.progress?.percent || 0) : 0
 })
 const sourceStatusLabel = computed(() => overlay.bookInfoBook?.sourceId ? '远程书籍' : '本地书籍')
-const managedBooks = computed(() => [...bookshelf.books].sort(compareByShelfOrder))
+const managedBooks = computed(() => sortByShelfOrder(bookshelf.books, reader.progressByBook))
 const filteredManagedBooks = computed(() => {
   const value = manageKeyword.value.trim().toLowerCase()
   if (!value) return managedBooks.value
@@ -1306,7 +1306,7 @@ function contentSearchPagingParams(book) {
   if (Number(book?.sourceId || 0) > 0) {
     return { chapterLimit: 80, matchLimit: 200, perChapterLimit: 20 }
   }
-  return { chapterLimit: 500, matchLimit: 1000, perChapterLimit: 200, localFull: 1 }
+  return { chapterLimit: 500, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
 }
 
 function jumpToContentResult(result) {

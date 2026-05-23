@@ -373,7 +373,7 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
 import { useTTS } from '../composables/useTTS'
-import { compareByShelfOrder } from '../utils/bookOrder'
+import { sortByShelfOrder } from '../utils/bookOrder'
 
 const route = useRoute()
 const router = useRouter()
@@ -451,7 +451,7 @@ const filteredShelfBooks = computed(() => {
   const values = value
     ? books.filter(item => `${item.title || ''} ${item.author || ''}`.toLowerCase().includes(value))
     : books
-  return [...values].sort(compareByShelfOrder)
+  return sortByShelfOrder(values, reader.progressByBook)
 })
 const sourceGroups = computed(() => {
   const sourceRows = sourceGroupOptions.value.length ? sourceGroupOptions.value : sourceCandidates.value
@@ -992,7 +992,7 @@ function contentSearchPagingParams(targetBook) {
   if (Number(targetBook?.sourceId || 0) > 0) {
     return { chapterLimit: 80, matchLimit: 200, perChapterLimit: 20 }
   }
-  return { chapterLimit: 500, matchLimit: 1000, perChapterLimit: 200, localFull: 1 }
+  return { chapterLimit: 500, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
 }
 
 function openNoteDialog() {

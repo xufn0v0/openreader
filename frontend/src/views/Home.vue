@@ -42,7 +42,15 @@
 
       <template v-else-if="displayedBooks.length">
         <div class="book-list app-panel">
-          <button v-for="book in displayedBooks" :key="book.id" class="book-row" type="button" @click="openDetail(book)">
+          <article
+            v-for="book in displayedBooks"
+            :key="book.id"
+            class="book-row"
+            role="button"
+            tabindex="0"
+            @click="openDetail(book)"
+            @keyup.enter="openDetail(book)"
+          >
             <span class="list-cover" :style="coverStyle(book)">{{ coverInitial(book) }}</span>
             <span class="list-main">
               <span class="book-operation">
@@ -61,11 +69,12 @@
               <small v-if="book.lastChapter">最新：{{ book.lastChapter }}</small>
               <span class="mobile-row-actions">
                 <span>{{ progressLabel(book) }}</span>
-                <em>点击详情</em>
+                <button type="button" @click.stop="continueRead(book)">阅读</button>
+                <button type="button" @click.stop="openDetail(book)">详情</button>
               </span>
             </span>
             <el-button class="read-button" size="small" type="primary" plain @click.stop="continueRead(book)">阅读</el-button>
-          </button>
+          </article>
         </div>
       </template>
 
@@ -85,7 +94,7 @@ import { Search } from '@element-plus/icons-vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
-import { compareByShelfOrder } from '../utils/bookOrder'
+import { sortByShelfOrder } from '../utils/bookOrder'
 
 const router = useRouter()
 const route = useRoute()
@@ -122,15 +131,14 @@ const groupItems = computed(() => {
 const displayedBooks = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   const books = Array.isArray(bookshelf.books) ? bookshelf.books : []
-  return books
-    .filter(book => {
-      const matchesKeyword = !value || `${book.title || ''} ${book.author || ''}`.toLowerCase().includes(value)
-      if (!matchesKeyword) return false
-      if (!selectedGroup.value) return true
-      if (selectedGroup.value === 'none') return !book.categoryId
-      return String(book.categoryId) === selectedGroup.value
-    })
-    .sort(compareByShelfOrder)
+  const filtered = books.filter(book => {
+    const matchesKeyword = !value || `${book.title || ''} ${book.author || ''}`.toLowerCase().includes(value)
+    if (!matchesKeyword) return false
+    if (!selectedGroup.value) return true
+    if (selectedGroup.value === 'none') return !book.categoryId
+    return String(book.categoryId) === selectedGroup.value
+  })
+  return sortByShelfOrder(filtered, reader.progressByBook)
 })
 
 const recentBook = computed(() => displayedBooks.value[0] || null)
@@ -417,10 +425,12 @@ function readError(err, fallback) {
   border: 0;
   border-bottom: 1px solid var(--app-border);
   cursor: pointer;
+  outline: 0;
   text-align: left;
 }
 
-.book-row:hover {
+.book-row:hover,
+.book-row:focus-visible {
   background: var(--app-bg-soft);
 }
 
@@ -520,10 +530,11 @@ function readError(err, fallback) {
   }
 
   .book-operation {
-    position: absolute;
-    top: 8px;
-    right: 8px;
+    position: static;
+    display: flex;
+    min-width: 0;
     min-height: 0;
+    justify-content: flex-end;
   }
 
   .book-operation :deep(.el-button) {
@@ -531,7 +542,7 @@ function readError(err, fallback) {
   }
 
   .list-main {
-    padding-right: 28px;
+    padding-right: 0;
   }
 
   .read-button {
@@ -539,10 +550,10 @@ function readError(err, fallback) {
   }
 
   .mobile-row-actions {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     min-width: 0;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     color: var(--app-primary-strong);
     font-size: 12px;
@@ -555,13 +566,22 @@ function readError(err, fallback) {
     white-space: nowrap;
   }
 
-  .mobile-row-actions em {
+  .mobile-row-actions button {
     min-width: 0;
     overflow: hidden;
+    padding: 0;
     color: var(--app-text-subtle);
-    font-style: normal;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .mobile-row-actions button:first-of-type {
+    color: var(--app-primary-strong);
+    font-weight: 700;
   }
 }
 

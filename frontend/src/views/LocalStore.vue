@@ -12,6 +12,9 @@
         <el-upload :show-file-list="false" :auto-upload="false" accept=".txt,.text,.md,.epub,.pdf,.umd" @change="uploadFile">
           <el-button :icon="Upload" :loading="uploading">上传</el-button>
         </el-upload>
+        <el-button :disabled="!shownImportablePaths.length || importing" :loading="importing" @click="importAllShown">
+          导入全部 ({{ shownImportablePaths.length }})
+        </el-button>
         <el-button type="primary" :disabled="!checkedRows.length || importing" :loading="importing" @click="importSelected">
           导入选中 ({{ checkedRows.length }})
         </el-button>
@@ -166,6 +169,7 @@ const shownItems = computed(() => {
     return `${item.name || ''} ${item.path || ''}`.toLowerCase().includes(value)
   })
 })
+const shownImportablePaths = computed(() => shownItems.value.filter(item => item.importable).map(item => item.path))
 const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
 
 onMounted(async () => {
@@ -221,7 +225,7 @@ function toggleCheckedPath(path, checked) {
 }
 
 function selectShownImportableFiles() {
-  checkedRows.value = shownItems.value.filter(item => item.importable).map(item => item.path)
+  checkedRows.value = shownImportablePaths.value
 }
 
 async function uploadFile(data) {
@@ -258,6 +262,20 @@ async function importSelected() {
   importing.value = true
   try {
     await importPaths(checkedRows.value)
+    checkedRows.value = []
+    await load()
+  } catch (err) {
+    ElMessage.error(readError(err, '导入失败'))
+  } finally {
+    importing.value = false
+  }
+}
+
+async function importAllShown() {
+  if (!shownImportablePaths.value.length) return
+  importing.value = true
+  try {
+    await importPaths(shownImportablePaths.value)
     checkedRows.value = []
     await load()
   } catch (err) {
