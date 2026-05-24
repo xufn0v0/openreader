@@ -2043,6 +2043,7 @@ async function saveReplaceRule() {
     }
     replaceRuleDialog.value = false
     await loadReplaceRules()
+    notifyReplaceRulesUpdated()
   } catch (err) {
     ElMessage.error(readError(err, '保存替换规则失败'))
   } finally {
@@ -2059,6 +2060,7 @@ async function toggleReplaceRule(rule) {
       enabled: rule.enabled,
     })
     ElMessage.success(rule.enabled ? '规则已启用' : '规则已停用')
+    notifyReplaceRulesUpdated()
   } catch (err) {
     ElMessage.error(readError(err, '更新替换规则失败'))
     await loadReplaceRules()
@@ -2091,10 +2093,15 @@ async function removeReplaceRule(rule) {
     await deleteReplaceRule(rule.id)
     replaceRules.value = replaceRules.value.filter(item => item.id !== rule.id)
     ElMessage.success('替换规则已删除')
+    notifyReplaceRulesUpdated()
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '删除替换规则失败'))
   }
+}
+
+function notifyReplaceRulesUpdated() {
+  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
 }
 
 async function createCategory() {

@@ -569,6 +569,7 @@ onMounted(async () => {
   reader.normalizeSettings()
   await loadReaderBook()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   sliderLineHeight.value = reader.lineHeight
 })
 
@@ -577,6 +578,7 @@ onBeforeUnmount(() => {
   stopAutoReading()
   saveCurrentProgress({ force: true })
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
 })
 
 watch(bookId, async () => {
@@ -675,6 +677,17 @@ async function loadChapter(index, offset = 0, options = {}) {
     }
   }
   saveCurrentProgress()
+}
+
+async function handleReplaceRulesUpdated() {
+  if (!book.value?.id || !chapter.value) return
+  const restorePercent = currentChapterPercent()
+  try {
+    await loadChapter(currentIndex.value, currentOffset(), { restorePercent })
+    ElMessage.success('已按最新替换规则刷新当前章节')
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新当前章节失败'))
+  }
 }
 
 function chapterPercentFromBookProgress(progress) {

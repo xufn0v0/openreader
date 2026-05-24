@@ -116,7 +116,7 @@
     <div class="setting-row">
       <label class="setting-label">替换规则</label>
       <el-button size="small" plain @click="$emit('openReplaceRules')">管理全局替换规则</el-button>
-      <small class="setting-help">规则会在章节加载时应用，适合清理广告、乱码和固定干扰文本。</small>
+      <small class="setting-help">保存或启停规则后会刷新当前章节，适合清理广告、乱码和固定干扰文本。</small>
     </div>
 
     <div class="setting-row">
