@@ -226,7 +226,7 @@
     <el-drawer v-model="showSourceDrawer" title="书源" :direction="drawerDirection" :size="drawerSize" @open="loadSourceCandidates">
       <SourceSwitchPanel
         :book="book"
-        :sources="switchableSourceCandidates"
+        :sources="sourceCandidates"
         :loading="loadingSources"
         :has-more="sourceHasMore"
         :changing-source="changingSource"
@@ -466,7 +466,6 @@ const currentSourceName = computed(() => {
   if (!book.value?.sourceId) return '本地书籍'
   return sourceGroupOptions.value.find(source => Number(source.id) === Number(book.value.sourceId))?.name || '当前来源'
 })
-const switchableSourceCandidates = computed(() => sourceCandidates.value.filter(source => !source.current))
 
 const lines = computed(() => content.value.split('\n').map(l => l.trim()).filter(Boolean))
 

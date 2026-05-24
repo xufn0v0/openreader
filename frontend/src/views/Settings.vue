@@ -89,8 +89,9 @@
           <article class="app-panel settings-card">
             <div class="card-head">
               <el-icon><Files /></el-icon>
-              <h2>系统缓存</h2>
+              <h2>远程章节缓存</h2>
             </div>
+            <p class="panel-text">这里只统计远程书源章节缓存。本地书导入后正文存放在书库目录，不计入这里。</p>
             <dl class="info-list">
               <div><dt>缓存目录</dt><dd>{{ cacheStats.path || '-' }}</dd></div>
               <div><dt>缓存文件</dt><dd>{{ cacheStats.files || 0 }}</dd></div>
@@ -656,6 +657,7 @@ onMounted(() => {
   loadBackups()
   loadWebDAV()
   loadCacheStats()
+  loadHealthInfo().catch(() => {})
   loadReplaceRules()
   loadRSSSources()
   loadRSSArticles()
@@ -680,8 +682,7 @@ watch(
 async function checkHealth() {
   checking.value = true
   try {
-    const { data } = await api.get('/health')
-    healthInfo.value = data
+    const data = await loadHealthInfo()
     const buildText = data.buildDate && data.buildDate !== 'unknown' ? `，构建 ${data.buildDate}` : ''
     ElMessage.success(`服务连接正常${buildText}`)
   } catch (err) {
@@ -689,6 +690,12 @@ async function checkHealth() {
   } finally {
     checking.value = false
   }
+}
+
+async function loadHealthInfo() {
+  const { data } = await api.get('/health')
+  healthInfo.value = data
+  return data
 }
 
 function shortCommit(value) {

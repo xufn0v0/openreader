@@ -76,7 +76,7 @@
             <section class="app-panel tab-panel">
               <SourceSwitchPanel
                 :book="book"
-                :sources="switchableSourceCandidates"
+                :sources="sourceCandidates"
                 :loading="loadingSourceCandidates"
                 :changing-source="changingSource"
                 :current-source-name="currentSource?.name || ''"
@@ -111,7 +111,7 @@
     <el-dialog v-model="showChangeSource" title="换源" width="460px" :fullscreen="isMobileDialog">
       <SourceSwitchPanel
         :book="book"
-        :sources="switchableSourceCandidates"
+        :sources="sourceCandidates"
         :loading="loadingSourceCandidates"
         :changing-source="changingSource"
         :current-source-name="currentSource?.name || ''"
@@ -201,7 +201,6 @@ const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth
 const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 
 const currentSource = computed(() => availableSources.value.find(source => Number(source.id) === Number(book.value?.sourceId)))
-const switchableSourceCandidates = computed(() => sourceCandidates.value.filter(source => !source.current))
 const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
 const sourceGroups = computed(() => {
   const groups = availableSources.value.map(source => source.group).filter(Boolean)
