@@ -1071,6 +1071,27 @@ func (s *Server) searchBookContent(c *gin.Context) {
 			perChapterLimit = parseBoundedInt(c.Query("perChapterLimit"), 500, 1, 2000)
 		}
 		matches, lastIndex := s.collectContentMatches(book, chapters, keyword, start, chapterLimit, matchLimit, perChapterLimit)
+		if (c.Query("scanUntilMatch") == "1" || c.Query("scanUntilMatch") == "true") && len(matches) == 0 && lastIndex >= 0 && lastIndex < len(chapters)-1 {
+			scanLimit := parseBoundedInt(c.Query("scanLimit"), chapterLimit, chapterLimit, 2000)
+			if book.SourceID > 0 {
+				scanLimit = parseBoundedInt(c.Query("scanLimit"), chapterLimit, chapterLimit, 500)
+			}
+			scanned := lastIndex - start + 1
+			for scanned < scanLimit && lastIndex >= 0 && lastIndex < len(chapters)-1 && len(matches) < matchLimit {
+				nextStart := lastIndex + 1
+				nextLimit := min(chapterLimit, scanLimit-scanned)
+				nextMatches, nextLastIndex := s.collectContentMatches(book, chapters, keyword, nextStart, nextLimit, matchLimit-len(matches), perChapterLimit)
+				if nextLastIndex < 0 {
+					break
+				}
+				scanned += nextLastIndex - nextStart + 1
+				lastIndex = nextLastIndex
+				matches = append(matches, nextMatches...)
+				if len(nextMatches) > 0 {
+					break
+				}
+			}
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"list":      matches,
 			"lastIndex": lastIndex,

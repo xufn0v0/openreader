@@ -1285,11 +1285,12 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
   try {
     let lastIndex = append ? contentLastIndex.value : -1
     let nextResults = append ? [...contentResults.value] : []
-    const maxRounds = append ? 1 : 3
+    const maxRounds = 1
     for (let round = 0; round < maxRounds; round += 1) {
       const { data } = await searchBookContent(book.id, keyword, {
         paged: 1,
         lastIndex,
+        scanUntilMatch: append ? 0 : 1,
         ...contentSearchPagingParams(book),
       })
       const rows = Array.isArray(data) ? data : (data?.list || [])
@@ -1310,9 +1311,9 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
 
 function contentSearchPagingParams(book) {
   if (Number(book?.sourceId || 0) > 0) {
-    return { chapterLimit: 80, matchLimit: 200, perChapterLimit: 20 }
+    return { chapterLimit: 80, scanLimit: 240, matchLimit: 200, perChapterLimit: 20 }
   }
-  return { chapterLimit: 500, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
+  return { chapterLimit: 500, scanLimit: 2000, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
 }
 
 function jumpToContentResult(result) {

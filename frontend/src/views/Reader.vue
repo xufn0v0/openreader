@@ -1008,11 +1008,12 @@ async function runBookContentSearch({ append = false } = {}) {
   try {
     let lastIndex = append ? bookSearchLastIndex.value : -1
     let nextResults = append ? [...bookSearchResults.value] : []
-    const maxRounds = append ? 1 : 3
+    const maxRounds = 1
     for (let round = 0; round < maxRounds; round += 1) {
       const { data } = await searchBookContentApi(bookId.value, keyword, {
         paged: 1,
         lastIndex,
+        scanUntilMatch: append ? 0 : 1,
         ...contentSearchPagingParams(book.value),
       })
       const rows = Array.isArray(data) ? data : (data?.list || [])
@@ -1033,9 +1034,9 @@ async function runBookContentSearch({ append = false } = {}) {
 
 function contentSearchPagingParams(targetBook) {
   if (Number(targetBook?.sourceId || 0) > 0) {
-    return { chapterLimit: 80, matchLimit: 200, perChapterLimit: 20 }
+    return { chapterLimit: 80, scanLimit: 240, matchLimit: 200, perChapterLimit: 20 }
   }
-  return { chapterLimit: 500, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
+  return { chapterLimit: 500, scanLimit: 2000, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
 }
 
 function openNoteDialog() {
