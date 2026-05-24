@@ -1325,6 +1325,7 @@ function jumpToContentResult(result) {
       chapter: Number(result.chapterIndex || 0),
       line: Number.isInteger(result.lineIndex) ? result.lineIndex : undefined,
       match: Number.isInteger(result.resultCountWithinChapter) ? result.resultCountWithinChapter : undefined,
+      percent: Number.isFinite(Number(result.percent)) ? Number(result.percent) : undefined,
       q: contentKeyword.value.trim() || undefined,
     },
   })
@@ -1354,6 +1355,7 @@ function jumpToBookmark(bookmark) {
     query: {
       chapter: bookmark.chapterIndex,
       offset: bookmark.offset || 0,
+      percent: Number.isFinite(Number(bookmark.percent)) ? Number(bookmark.percent) : undefined,
     },
   })
 }

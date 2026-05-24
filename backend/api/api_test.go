@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -231,6 +232,74 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	}
 	if len(books) != 1 || books[0].Progress == nil || books[0].Progress.BookID != book.ID || books[0].Progress.ChapterIndex != 3 {
 		t.Fatalf("expected embedded progress, got %+v", books)
+	}
+}
+
+func TestListBooksOrdersByRecentProgressThenShelfTime(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	oldBook := models.Book{UserID: user.ID, Title: "旧书"}
+	newBook := models.Book{UserID: user.ID, Title: "新导入"}
+	readBook := models.Book{UserID: user.ID, Title: "最近读"}
+	if err := server.db.Create(&oldBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&newBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&readBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&oldBook).Updates(map[string]any{
+		"created_at": time.Now().Add(-4 * time.Hour),
+		"updated_at": time.Now().Add(-4 * time.Hour),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&newBook).Updates(map[string]any{
+		"created_at": time.Now().Add(-2 * time.Hour),
+		"updated_at": time.Now().Add(-2 * time.Hour),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&readBook).Updates(map[string]any{
+		"created_at": time.Now().Add(-6 * time.Hour),
+		"updated_at": time.Now().Add(-6 * time.Hour),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{UserID: user.ID, BookID: readBook.ID, ChapterIndex: 1, Percent: 0.2}
+	if err := server.db.Create(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list books: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var books []struct {
+		ID uint `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &books); err != nil {
+		t.Fatal(err)
+	}
+	if len(books) != 3 {
+		t.Fatalf("expected 3 books, got %+v", books)
+	}
+	want := []uint{readBook.ID, newBook.ID, oldBook.ID}
+	for index, id := range want {
+		if books[index].ID != id {
+			t.Fatalf("unexpected order at %d: got %+v want %+v", index, books, want)
+		}
 	}
 }
 

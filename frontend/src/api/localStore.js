@@ -1,6 +1,6 @@
 import api from './client'
 
-export function listLocalStore(path = '', recursive = false) {
+export function listLocalStore(path = '', recursive = true) {
   return api.get('/local-store', { params: { path, recursive: recursive ? 1 : 0 } })
 }
 

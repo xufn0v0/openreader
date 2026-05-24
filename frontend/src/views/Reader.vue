@@ -564,10 +564,13 @@ watch(bookId, async () => {
   await loadReaderBook()
 })
 
-watch(() => [route.query.chapter, route.query.offset], async ([q, offset]) => {
+watch(() => [route.query.chapter, route.query.offset, route.query.percent], async ([q, offset, percent]) => {
   const idx = Number(q || 0)
   const nextOffset = Number(offset || 0)
-  if (idx !== currentIndex.value || offset !== undefined) await loadChapter(idx, nextOffset)
+  const restorePercent = parseRoutePercent(percent)
+  if (idx !== currentIndex.value || offset !== undefined || restorePercent !== null) {
+    await loadChapter(idx, nextOffset, { restorePercent })
+  }
   await jumpToRouteLine()
 })
 
@@ -1195,6 +1198,31 @@ function currentOffset() {
   return Math.round(contentEl.value?.scrollTop || 0)
 }
 
+function currentVisibleParagraph() {
+  const viewport = contentEl.value?.getBoundingClientRect()
+  const paragraphs = [...(contentBody.value?.querySelectorAll('p') || [])]
+  if (!viewport || !paragraphs.length) return null
+  const visibleTop = viewport.top + 8
+  const visibleBottom = viewport.bottom - 8
+  const visibleLeft = viewport.left + 8
+  const visibleRight = viewport.right - 8
+  const anchorY = viewport.top + Math.min(viewport.height * 0.32, 180)
+  const visible = paragraphs
+    .map(node => ({ node, rect: node.getBoundingClientRect() }))
+    .filter(({ rect }) => rect.bottom >= visibleTop && rect.top <= visibleBottom && rect.right >= visibleLeft && rect.left <= visibleRight)
+  if (!visible.length) return null
+  const anchored = visible.find(({ rect }) => rect.top <= anchorY && rect.bottom >= anchorY)
+  if (anchored) return anchored.node
+  return visible.sort((a, b) => Math.abs(a.rect.top - anchorY) - Math.abs(b.rect.top - anchorY))[0]?.node || null
+}
+
+function currentVisibleExcerpt() {
+  const paragraph = currentVisibleParagraph()
+  const text = paragraph?.textContent?.replace(/\s+/g, ' ').trim()
+  if (text) return text.slice(0, 140)
+  return lines.value.slice(0, 2).join(' ').slice(0, 140)
+}
+
 async function saveCurrentProgress() {
   if (!chapter.value) return
   await reader.saveProgress({
@@ -1205,7 +1233,7 @@ async function saveCurrentProgress() {
 
 async function createBookmark() {
   if (!chapter.value) return
-  const excerpt = lines.value.slice(0, 2).join(' ').slice(0, 140)
+  const excerpt = currentVisibleExcerpt()
   const { data } = await api.post(`/books/${bookId.value}/bookmarks`, {
     chapterId: chapter.value.id, chapterIndex: currentIndex.value,
     offset: currentOffset(), percent: currentChapterPercent(),
@@ -1220,7 +1248,7 @@ async function saveNote() {
   if (!chapter.value) return
   const note = noteText.value.trim()
   if (!note) return
-  const excerpt = lines.value.slice(0, 2).join(' ').slice(0, 140)
+  const excerpt = currentVisibleExcerpt()
   const { data } = await api.post(`/books/${bookId.value}/bookmarks`, {
     chapterId: chapter.value.id, chapterIndex: currentIndex.value,
     offset: currentOffset(), percent: currentChapterPercent(),
@@ -1270,22 +1298,37 @@ async function saveBookmarkEdit() {
 
 async function jumpToBookmark(bookmark) {
   showBookmarkDrawer.value = false
-  const query = { chapter: bookmark.chapterIndex, offset: bookmark.offset || 0 }
+  const query = bookmarkReaderQuery(bookmark)
   if (bookmark.chapterIndex === currentIndex.value) {
-    await loadChapter(currentIndex.value, query.offset)
+    await loadChapter(currentIndex.value, Number(query.offset || 0), { restorePercent: parseRoutePercent(query.percent) })
     return
   }
   await router.replace({ name: 'reader', params: { id: bookId.value }, query })
 }
 
+function bookmarkReaderQuery(bookmark) {
+  return {
+    chapter: bookmark.chapterIndex,
+    offset: bookmark.offset || 0,
+    percent: Number.isFinite(Number(bookmark.percent)) ? Number(bookmark.percent) : undefined,
+  }
+}
+
+function parseRoutePercent(value) {
+  if (value === undefined || value === null || value === '') return null
+  const percent = Number(value)
+  return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : null
+}
+
 async function jumpToBookSearchResult(result) {
   showSearchDrawer.value = false
   const targetIndex = Number(result.chapterIndex || 0)
+  const restorePercent = Number.isFinite(Number(result.percent)) ? Number(result.percent) : null
   if (targetIndex === currentIndex.value) {
-    await loadChapter(targetIndex, 0)
+    await loadChapter(targetIndex, 0, { restorePercent })
   } else {
-    await router.replace({ name: 'reader', params: { id: bookId.value }, query: { chapter: targetIndex } })
-    await loadChapter(targetIndex, 0)
+    await router.replace({ name: 'reader', params: { id: bookId.value }, query: { chapter: targetIndex, percent: restorePercent ?? undefined } })
+    await loadChapter(targetIndex, 0, { restorePercent })
   }
   await nextTick()
   if (jumpToSearchMatch(result)) {

@@ -252,7 +252,15 @@ function goChapter(index) {
 }
 
 function goBookmark(bookmark) {
-  router.push({ name: 'reader', params: { id: book.value.id }, query: { chapter: bookmark.chapterIndex, offset: bookmark.offset } })
+  router.push({
+    name: 'reader',
+    params: { id: book.value.id },
+    query: {
+      chapter: bookmark.chapterIndex,
+      offset: bookmark.offset,
+      percent: Number.isFinite(Number(bookmark.percent)) ? Number(bookmark.percent) : undefined,
+    },
+  })
 }
 
 function openGlobalBookmark() {

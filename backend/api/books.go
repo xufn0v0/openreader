@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,6 +65,31 @@ func (s *Server) listBooks(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
+	sort.SliceStable(items, func(i, j int) bool {
+		iProgressAt := time.Time{}
+		jProgressAt := time.Time{}
+		if items[i].Progress != nil {
+			iProgressAt = items[i].Progress.UpdatedAt
+		}
+		if items[j].Progress != nil {
+			jProgressAt = items[j].Progress.UpdatedAt
+		}
+		if !iProgressAt.Equal(jProgressAt) {
+			return iProgressAt.After(jProgressAt)
+		}
+		iShelfAt := items[i].UpdatedAt
+		if items[i].CreatedAt.After(iShelfAt) {
+			iShelfAt = items[i].CreatedAt
+		}
+		jShelfAt := items[j].UpdatedAt
+		if items[j].CreatedAt.After(jShelfAt) {
+			jShelfAt = items[j].CreatedAt
+		}
+		if !iShelfAt.Equal(jShelfAt) {
+			return iShelfAt.After(jShelfAt)
+		}
+		return items[i].ID > items[j].ID
+	})
 	c.JSON(http.StatusOK, items)
 }
 

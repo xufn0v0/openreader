@@ -206,8 +206,8 @@
                 <span>阅读模式</span>
                 <el-radio-group v-model="readerStore.mode" size="small" @change="readerStore.setMode($event)">
                   <el-radio-button value="scroll">滚动</el-radio-button>
-                  <el-radio-button value="flip">翻页</el-radio-button>
-                  <el-radio-button value="page">分页</el-radio-button>
+                  <el-radio-button value="flip">左右翻页</el-radio-button>
+                  <el-radio-button value="page">上下分页</el-radio-button>
                 </el-radio-group>
               </label>
               <label>
