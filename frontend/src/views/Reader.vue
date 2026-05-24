@@ -240,6 +240,7 @@
         :current-source-name="currentSourceName"
         :group="sourceGroup"
         :groups="sourceGroups"
+        :stats="sourceStats"
         @refresh="refreshSourceCandidates"
         @load-more="loadMoreSourceCandidates"
         @group-change="changeSourceGroup"
@@ -423,6 +424,7 @@ const sourceGroup = ref('')
 const sourceOffset = ref(0)
 const sourceHasMore = ref(false)
 const sourceCandidatesLoadedKey = ref('')
+const sourceStats = ref(null)
 const shelfKeyword = ref('')
 const shelfLoading = ref(false)
 const tocFilter = ref('')
@@ -934,6 +936,14 @@ async function loadSourceCandidates({ append = false, force = false } = {}) {
     sourceCandidates.value = append ? mergeSourceCandidates(sourceCandidates.value, rows) : rows
     sourceOffset.value = Number.isInteger(data?.nextOffset) ? data.nextOffset : sourceOffset.value + 10
     sourceHasMore.value = Boolean(data?.hasMore)
+    sourceStats.value = Array.isArray(data)
+      ? null
+      : {
+          searched: data?.searched || 0,
+          matched: data?.matched || 0,
+          failed: data?.failed || 0,
+          empty: data?.empty || 0,
+        }
     sourceCandidatesLoadedKey.value = key
   } catch (err) {
     ElMessage.error(readError(err, '搜索可用来源失败'))
@@ -945,6 +955,7 @@ async function loadSourceCandidates({ append = false, force = false } = {}) {
 function refreshSourceCandidates() {
   sourceCandidatesLoadedKey.value = ''
   sourceHasMore.value = false
+  sourceStats.value = null
   return loadSourceCandidates({ force: true })
 }
 
@@ -965,6 +976,7 @@ function changeSourceGroup(value) {
   sourceGroup.value = value || ''
   sourceCandidatesLoadedKey.value = ''
   sourceHasMore.value = false
+  sourceStats.value = null
   loadSourceCandidates({ force: true })
 }
 

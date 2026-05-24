@@ -61,6 +61,7 @@
       :current-source-name="sourceSwitchCurrentName"
       :group="sourceSwitchGroup"
       :groups="sourceSwitchGroups"
+      :stats="sourceSwitchStats"
       @refresh="refreshGlobalSourceCandidates"
       @load-more="loadMoreGlobalSourceCandidates"
       @group-change="changeGlobalSourceGroup"
@@ -747,6 +748,7 @@ const sourceSwitchGroup = ref('')
 const sourceSwitchOffset = ref(0)
 const sourceSwitchHasMore = ref(false)
 const sourceSwitchLoadedKey = ref('')
+const sourceSwitchStats = ref(null)
 const contentKeyword = ref('')
 const contentResults = ref([])
 const contentSearching = ref(false)
@@ -1064,6 +1066,7 @@ function openGlobalSourceSwitch(book) {
   sourceSwitchOffset.value = 0
   sourceSwitchHasMore.value = false
   sourceSwitchLoadedKey.value = ''
+  sourceSwitchStats.value = null
   sourceSwitchCandidates.value = []
   overlay.closeBookInfo()
   sourceSwitchVisible.value = true
@@ -1088,6 +1091,14 @@ async function loadGlobalSourceCandidates({ append = false, force = false } = {}
     sourceSwitchCandidates.value = append ? mergeSourceCandidates(sourceSwitchCandidates.value, rows) : rows
     sourceSwitchOffset.value = Number.isInteger(data?.nextOffset) ? data.nextOffset : sourceSwitchOffset.value + 10
     sourceSwitchHasMore.value = Boolean(data?.hasMore)
+    sourceSwitchStats.value = Array.isArray(data)
+      ? null
+      : {
+          searched: data?.searched || 0,
+          matched: data?.matched || 0,
+          failed: data?.failed || 0,
+          empty: data?.empty || 0,
+        }
     sourceSwitchLoadedKey.value = key
   } catch (err) {
     ElMessage.error(readError(err, '搜索可用来源失败'))
@@ -1099,6 +1110,7 @@ async function loadGlobalSourceCandidates({ append = false, force = false } = {}
 function refreshGlobalSourceCandidates() {
   sourceSwitchLoadedKey.value = ''
   sourceSwitchHasMore.value = false
+  sourceSwitchStats.value = null
   return loadGlobalSourceCandidates({ force: true })
 }
 
@@ -1110,6 +1122,7 @@ function changeGlobalSourceGroup(value) {
   sourceSwitchGroup.value = value || ''
   sourceSwitchLoadedKey.value = ''
   sourceSwitchHasMore.value = false
+  sourceSwitchStats.value = null
   loadGlobalSourceCandidates({ force: true })
 }
 

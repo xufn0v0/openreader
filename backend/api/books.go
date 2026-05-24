@@ -803,6 +803,11 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 		BookURL    string `json:"bookUrl"`
 		Current    bool   `json:"current"`
 	}
+	type sourceCandidateBatch struct {
+		Candidates []sourceCandidate
+		Failed     bool
+		Empty      bool
+	}
 
 	results := make([]sourceCandidate, 0)
 	if offset == 0 && book.SourceID > 0 {
@@ -821,7 +826,7 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 			})
 		}
 	}
-	channel := make(chan []sourceCandidate, len(sources))
+	channel := make(chan sourceCandidateBatch, len(sources))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
 	for _, source := range sources {
@@ -832,11 +837,11 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			done := make(chan []sourceCandidate, 1)
+			done := make(chan sourceCandidateBatch, 1)
 			go func() {
 				searchResults, err := engine.SearchBooks(source, book.Title)
 				if err != nil {
-					done <- nil
+					done <- sourceCandidateBatch{Failed: true}
 					return
 				}
 				candidates := make([]sourceCandidate, 0)
@@ -859,13 +864,16 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 						break
 					}
 				}
-				done <- candidates
+				done <- sourceCandidateBatch{
+					Candidates: candidates,
+					Empty:      len(candidates) == 0,
+				}
 			}()
 			select {
-			case candidates := <-done:
-				channel <- candidates
+			case batch := <-done:
+				channel <- batch
 			case <-time.After(12 * time.Second):
-				channel <- nil
+				channel <- sourceCandidateBatch{Failed: true}
 			}
 		}()
 	}
@@ -873,8 +881,20 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 		wg.Wait()
 		close(channel)
 	}()
-	for candidates := range channel {
-		results = append(results, candidates...)
+	failedSources := 0
+	emptySources := 0
+	matchedSources := 0
+	for batch := range channel {
+		if batch.Failed {
+			failedSources++
+			continue
+		}
+		if batch.Empty {
+			emptySources++
+			continue
+		}
+		matchedSources++
+		results = append(results, batch.Candidates...)
 		if len(results) >= 120 {
 			break
 		}
@@ -887,6 +907,10 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 			"nextOffset": offset + len(sources),
 			"hasMore":    int64(offset+len(sources)) < totalSources,
 			"total":      totalSources,
+			"searched":   len(sources),
+			"matched":    matchedSources,
+			"failed":     failedSources,
+			"empty":      emptySources,
 		})
 		return
 	}

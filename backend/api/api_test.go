@@ -1006,12 +1006,17 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 		NextOffset int  `json:"nextOffset"`
 		HasMore    bool `json:"hasMore"`
 		Total      int  `json:"total"`
+		Searched   int  `json:"searched"`
+		Matched    int  `json:"matched"`
 	}
 	if err := json.Unmarshal(pagedW.Body.Bytes(), &pagedCandidates); err != nil {
 		t.Fatal(err)
 	}
 	if pagedCandidates.Total != 1 || pagedCandidates.NextOffset != 1 || pagedCandidates.HasMore {
 		t.Fatalf("unexpected paged metadata: %+v", pagedCandidates)
+	}
+	if pagedCandidates.Searched != 1 || pagedCandidates.Matched != 1 {
+		t.Fatalf("unexpected paged search stats: %+v", pagedCandidates)
 	}
 	if len(pagedCandidates.List) == 0 {
 		t.Fatalf("expected paged candidates, got %+v", pagedCandidates)

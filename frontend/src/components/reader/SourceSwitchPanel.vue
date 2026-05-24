@@ -21,6 +21,9 @@
     <el-button v-if="hasMore" size="small" :loading="loading" @click="$emit('loadMore')">加载更多</el-button>
     <el-button v-if="showInfoButton" size="small" @click="$emit('showInfo')">书籍信息</el-button>
   </div>
+  <p v-if="stats && stats.searched" class="source-stats">
+    本轮搜索 {{ stats.searched }} 个书源，命中 {{ stats.matched || 0 }} 个，空结果 {{ stats.empty || 0 }} 个，失败 {{ stats.failed || 0 }} 个。
+  </p>
   <section v-if="book" class="current-source-card">
     <div>
       <strong>{{ currentSourceName || '当前来源' }}</strong>
@@ -84,6 +87,10 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  stats: {
+    type: Object,
+    default: null,
+  },
 })
 
 defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
@@ -100,6 +107,12 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
   gap: 8px;
   margin-bottom: 14px;
   min-width: 0;
+}
+
+.source-stats {
+  margin: -4px 0 12px;
+  color: #7b715e;
+  font-size: 12px;
 }
 
 .source-group-select {
