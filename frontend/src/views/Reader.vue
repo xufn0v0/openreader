@@ -88,6 +88,13 @@
           <p v-if="lines.length === 0" class="empty-hint">当前章节暂无缓存内容</p>
         </div>
       </article>
+      <div class="reader-tap-zones" aria-hidden="true">
+        <button class="tap-zone tap-left" type="button" tabindex="-1" @click="handleTapZone('left')" />
+        <button class="tap-zone tap-center" type="button" tabindex="-1" @click="handleTapZone('center')" />
+        <button class="tap-zone tap-right" type="button" tabindex="-1" @click="handleTapZone('right')" />
+        <button class="tap-zone tap-upper" type="button" tabindex="-1" @click="handleTapZone('upper')" />
+        <button class="tap-zone tap-lower" type="button" tabindex="-1" @click="handleTapZone('lower')" />
+      </div>
     </section>
 
     <footer class="reader-page-control">
@@ -538,6 +545,17 @@ const pageBackIcon = computed(() => reader.mode === 'flip' ? ArrowLeft : ArrowUp
 const pageForwardIcon = computed(() => reader.mode === 'flip' ? ArrowRight : ArrowDownBold)
 const pageBackTitle = computed(() => reader.mode === 'flip' ? '上一页' : '上一屏')
 const pageForwardTitle = computed(() => reader.mode === 'flip' ? '下一页' : '下一屏')
+const isOverlayOpen = computed(() => (
+  showTocDrawer.value ||
+  showSettingsDrawer.value ||
+  showBookmarkDrawer.value ||
+  showSearchDrawer.value ||
+  showShelfDrawer.value ||
+  showSourceDrawer.value ||
+  showMobileMoreDrawer.value ||
+  showNoteDialog.value ||
+  showBookmarkEditor.value
+))
 
 function onModeChange(mode) {
   reader.setMode(mode)
@@ -1160,6 +1178,42 @@ function scrollStep() {
   return Math.max(240, Math.floor(readableViewportSize().height * 0.9))
 }
 
+function handleTapZone(zone) {
+  if (isOverlayOpen.value) return
+  if (zone === 'center') {
+    toggleReaderChrome()
+    return
+  }
+  if (zone === 'left') {
+    if (reader.mode === 'flip') previousPage()
+    return
+  }
+  if (zone === 'right') {
+    if (reader.mode === 'flip') nextPage()
+    return
+  }
+  if (zone === 'upper') {
+    if (reader.mode === 'scroll' || reader.mode === 'page') previousPage()
+    return
+  }
+  if (zone === 'lower') {
+    if (reader.mode === 'scroll' || reader.mode === 'page') nextPage()
+  }
+}
+
+function toggleReaderChrome() {
+  if (isMobileReader.value) {
+    mobileChromeVisible.value = !mobileChromeVisible.value
+    return
+  }
+  if (showTocDrawer.value) {
+    showTocDrawer.value = false
+  } else {
+    openTocDrawer()
+  }
+  showSettingsDrawer.value = false
+}
+
 function updateFlipLayout() {
   if (!contentEl.value || !contentBody.value) return
   const viewport = readableViewportSize()
@@ -1552,20 +1606,7 @@ useGesture(pageEl, {
     if (reader.mode === 'page') previousPage()
   },
   onCenterTap: () => {
-    if (isMobileReader.value) {
-      mobileChromeVisible.value = !mobileChromeVisible.value
-      return
-    }
-    if (reader.mode === 'flip') {
-      nextPage()
-      return
-    }
-    if (showTocDrawer.value) {
-      showTocDrawer.value = false
-    } else {
-      openTocDrawer()
-    }
-    showSettingsDrawer.value = false
+    toggleReaderChrome()
   },
   onEdgeLeftTap: () => {
     if (reader.mode === 'flip') {
@@ -1779,6 +1820,65 @@ function readError(err, fallback) {
   position: relative;
   width: var(--reader-frame-width);
 }
+
+.reader-tap-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none;
+  pointer-events: none;
+}
+
+.tap-zone {
+  position: absolute;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.tap-left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 24%;
+}
+
+.tap-right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 24%;
+}
+
+.tap-center {
+  top: 35%;
+  right: 24%;
+  bottom: 35%;
+  left: 24%;
+}
+
+.tap-upper {
+  top: 0;
+  right: 24%;
+  left: 24%;
+  height: 35%;
+}
+
+.tap-lower {
+  right: 24%;
+  bottom: 0;
+  left: 24%;
+  height: 35%;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .reader-tap-zones {
+    display: block;
+  }
+}
+
 .reader-page-head {
   align-items: center; color: rgba(36,40,44,0.45);
   display: flex; font-size: 14px; justify-content: space-between;
@@ -2019,7 +2119,8 @@ function readError(err, fallback) {
   .reader-content h1 { font-size: var(--reader-heading-size); margin-bottom: 28px; }
   .reader-left-rail,
   .reader-right-rail,
-  .reader-page-control {
+  .reader-page-control,
+  .reader-tap-zones {
     display: none;
   }
   .reader-mobile-top {
