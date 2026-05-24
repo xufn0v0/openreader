@@ -60,7 +60,7 @@ const keyword = computed({
 const filteredChapters = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   const list = value
-    ? props.chapters.filter(chapter => chapter.title.toLowerCase().includes(value))
+    ? props.chapters.filter(chapter => String(chapter.title || '').toLowerCase().includes(value))
     : props.chapters
   return props.reverse ? [...list].reverse() : list
 })

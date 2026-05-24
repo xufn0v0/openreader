@@ -52,6 +52,7 @@
                 :current-index="detailCurrentIndex"
                 :reverse="tocReverse"
                 :show-meta="true"
+                :locate-key="tocLocateKey"
                 @jump="goChapter"
               />
             </section>
@@ -150,7 +151,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Switch } from '@element-plus/icons-vue'
@@ -183,6 +184,7 @@ const sourceOffset = ref(0)
 const sourceHasMore = ref(false)
 const activeTab = ref('toc')
 const tocKeyword = ref('')
+const tocLocateKey = ref(0)
 const tocReverse = ref(false)
 const categoryDraft = ref('')
 const showChangeSource = ref(false)
@@ -218,6 +220,12 @@ onMounted(() => {
   load()
 })
 onBeforeUnmount(() => window.removeEventListener('resize', updateWindowWidth))
+
+watch(activeTab, (tab) => {
+  if (tab !== 'toc') return
+  tocKeyword.value = ''
+  nextTick(() => { tocLocateKey.value += 1 })
+})
 
 function updateWindowWidth() {
   windowWidth.value = window.innerWidth
