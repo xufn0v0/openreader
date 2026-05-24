@@ -25,6 +25,10 @@ export function deleteFromLocalStore(path) {
   return api.delete('/local-store', { params: { path } })
 }
 
+export function downloadFromLocalStore(path) {
+  return api.get('/local-store/download', { params: { path }, responseType: 'blob' })
+}
+
 export function importFromLocalStore(paths, categoryId = null) {
   return api.post('/local-store/import', { paths, categoryId })
 }

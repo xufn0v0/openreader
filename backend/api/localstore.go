@@ -147,6 +147,27 @@ func (s *Server) uploadToLocalStore(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"path": cleanRelativePath(filepath.Join(c.PostForm("path"), filepath.Base(file.Filename)))})
 }
 
+func (s *Server) downloadFromLocalStore(c *gin.Context) {
+	targetPath, relativePath, ok := s.localStorePath(c, c.Query("path"))
+	if !ok {
+		return
+	}
+	if relativePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot download local store root"})
+		return
+	}
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "local store item not found"})
+		return
+	}
+	if info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot download directory"})
+		return
+	}
+	c.FileAttachment(targetPath, filepath.Base(relativePath))
+}
+
 func (s *Server) createLocalStoreDirectory(c *gin.Context) {
 	var req struct {
 		Path string `json:"path"`

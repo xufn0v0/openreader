@@ -2115,6 +2115,32 @@ func TestLocalStoreCreateDirectoryAndRename(t *testing.T) {
 	}
 }
 
+func TestLocalStoreDownloadFile(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	if err := os.MkdirAll(server.cfg.LocalStoreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(server.cfg.LocalStoreDir, "download.txt"), []byte("下载内容"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/local-store/download?path=download.txt", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("download local store file: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "下载内容" {
+		t.Fatalf("unexpected downloaded content: %s", w.Body.String())
+	}
+	if disposition := w.Header().Get("Content-Disposition"); !strings.Contains(disposition, "download.txt") {
+		t.Fatalf("expected attachment filename, got %q", disposition)
+	}
+}
+
 func TestLocalStoreImportAcceptsCategory(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

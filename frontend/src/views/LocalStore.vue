@@ -75,10 +75,11 @@
         <template #default="{ row }">{{ row.isDir ? '-' : formatSize(row.size) }}</template>
       </el-table-column>
       <el-table-column prop="path" label="路径" min-width="260" show-overflow-tooltip />
-      <el-table-column label="操作" width="210" fixed="right">
+      <el-table-column label="操作" width="250" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.importable" size="small" text type="primary" @click="importOne(row)">导入</el-button>
           <el-button v-else-if="row.isDir" size="small" text type="primary" @click="importDirectory(row)">导入目录</el-button>
+          <el-button v-if="!row.isDir" size="small" text @click="downloadItem(row)">下载</el-button>
           <el-button size="small" text @click="renameItem(row)">重命名</el-button>
           <el-button size="small" text type="danger" @click="deleteItem(row)">删除</el-button>
         </template>
@@ -115,6 +116,7 @@
         <footer>
           <el-button v-if="row.importable" size="small" text type="primary" @click="importOne(row)">导入</el-button>
           <el-button v-else-if="row.isDir" size="small" text type="primary" @click="importDirectory(row)">导入目录</el-button>
+          <el-button v-if="!row.isDir" size="small" text @click="downloadItem(row)">下载</el-button>
           <el-button size="small" text @click="renameItem(row)">重命名</el-button>
           <el-button size="small" text type="danger" @click="deleteItem(row)">删除</el-button>
         </footer>
@@ -139,7 +141,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, FolderOpened, Refresh, Search, Upload } from '@element-plus/icons-vue'
-import { createLocalStoreDirectory, deleteFromLocalStore, importFromLocalStore, listLocalStore, renameLocalStoreItem, uploadToLocalStore } from '../api/localStore'
+import { createLocalStoreDirectory, deleteFromLocalStore, downloadFromLocalStore, importFromLocalStore, listLocalStore, renameLocalStoreItem, uploadToLocalStore } from '../api/localStore'
 import { useBookshelfStore } from '../stores/bookshelf'
 
 const bookshelf = useBookshelfStore()
@@ -338,6 +340,16 @@ async function importDirectory(row) {
   }
 }
 
+async function downloadItem(row) {
+  if (row.isDir) return
+  try {
+    const resp = await downloadFromLocalStore(row.path)
+    downloadBlob(resp.data, row.name)
+  } catch (err) {
+    ElMessage.error(readError(err, '下载失败'))
+  }
+}
+
 async function importPaths(paths) {
   const categoryId = targetCategoryId.value ? Number(targetCategoryId.value) : null
   const { data } = await importFromLocalStore(paths, categoryId)
@@ -349,6 +361,15 @@ async function importPaths(paths) {
   const failed = importResults.value.filter(item => item.error).length
   ElMessage.success(`导入 ${success} 本` + (failed ? `，${failed} 本失败` : ''))
   resultDialog.value = true
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 async function renameItem(row) {
