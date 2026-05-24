@@ -454,6 +454,7 @@ const SAVE_PROGRESS_MIN_INTERVAL = 1200
 
 let saveTimer
 let autoReadTimer
+let autoReadAdvancing = false
 let savingProgress = false
 let pendingProgressPayload = null
 let lastProgressSaveKey = ''
@@ -1142,25 +1143,42 @@ function toggleAutoReading() {
   }
   autoReading.value = true
   autoReadTimer = setInterval(() => {
+    if (autoReadAdvancing) return
     if (reader.mode === 'scroll' && contentEl.value) {
       const el = contentEl.value
       const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4
       if (atBottom) {
-        if (currentIndex.value < chapters.value.length - 1) nextPage()
-        else stopAutoReading()
+        advanceAutoReadPage()
       } else {
         el.scrollTop += reader.autoReadSpeed
       }
       return
     }
-    nextPage()
+    advanceAutoReadPage()
   }, 260)
   toastMsg.value = '自动阅读已开始'
   setTimeout(() => { toastMsg.value = '' }, 1200)
 }
 
+async function advanceAutoReadPage() {
+  autoReadAdvancing = true
+  const beforeChapter = currentIndex.value
+  const beforePage = page.value
+  try {
+    await nextPage()
+    if (beforeChapter === currentIndex.value && beforePage === page.value) {
+      stopAutoReading()
+      toastMsg.value = '已到本书末尾'
+      setTimeout(() => { toastMsg.value = '' }, 1200)
+    }
+  } finally {
+    autoReadAdvancing = false
+  }
+}
+
 function stopAutoReading() {
   autoReading.value = false
+  autoReadAdvancing = false
   clearInterval(autoReadTimer)
   autoReadTimer = null
 }
