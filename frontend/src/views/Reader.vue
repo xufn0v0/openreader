@@ -448,12 +448,14 @@ const pageWidth = ref(600)
 const windowWidth = ref(window.innerWidth)
 const coarsePointer = ref(window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 const mobileReaderMaxWidth = 860
+const SAVE_PROGRESS_MIN_INTERVAL = 1200
 
 let saveTimer
 let autoReadTimer
 let savingProgress = false
 let pendingProgressPayload = null
 let lastProgressSaveKey = ''
+let lastProgressRequestAt = 0
 
 const fontOptions = readerFontOptions
 
@@ -525,7 +527,7 @@ const bodyStyle = computed(() => {
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
 const isMobileReader = computed(() => windowWidth.value <= mobileReaderMaxWidth || coarsePointer.value)
 const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
-const drawerSize = computed(() => isMobileReader.value ? '82%' : '360px')
+const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
 const bookProgress = computed(() => {
   const total = Math.max(chapters.value.length, 1)
   return Math.min(1, Math.max(0, (currentIndex.value + currentChapterPercent()) / total))
@@ -571,7 +573,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   stopAutoReading()
-  saveCurrentProgress()
+  saveCurrentProgress({ force: true })
   window.removeEventListener('resize', handleResize)
 })
 
@@ -607,12 +609,16 @@ watch(() => [reader.fontFamily, reader.fontSize, reader.fontWeight, reader.lineH
 })
 
 watch(contentSearch, () => {
+  resetContentSearchState()
+})
+
+function resetContentSearchState() {
   bookSearchLastIndex.value = -1
   bookSearchHasMore.value = false
   bookSearchTotal.value = 0
   searchedBookContent.value = false
   bookSearchResults.value = []
-})
+}
 
 async function loadReaderBook() {
   clearTimeout(saveTimer)
@@ -991,6 +997,7 @@ async function changeSource(source) {
     currentIndex.value = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
     await loadChapter(currentIndex.value, 0)
     sourceCandidatesLoadedKey.value = ''
+    resetContentSearchState()
     await loadSourceCandidates({ force: true })
     showSourceDrawer.value = false
     ElMessage.success(`已切换到 ${source.sourceName}`)
@@ -1303,8 +1310,9 @@ function currentVisibleExcerpt() {
   return lines.value.slice(0, 2).join(' ').slice(0, 140)
 }
 
-async function saveCurrentProgress() {
+async function saveCurrentProgress(options = {}) {
   if (!chapter.value) return
+  const force = Boolean(options.force)
   const payload = {
     bookId: bookId.value, chapterId: chapter.value.id,
     chapterIndex: currentIndex.value, offset: currentOffset(), percent: bookProgress.value,
@@ -1316,10 +1324,17 @@ async function saveCurrentProgress() {
   savingProgress = true
   try {
     while (pendingProgressPayload) {
+      const elapsed = Date.now() - lastProgressRequestAt
+      if (!force && elapsed < SAVE_PROGRESS_MIN_INTERVAL) {
+        clearTimeout(saveTimer)
+        saveTimer = setTimeout(() => saveCurrentProgress(), SAVE_PROGRESS_MIN_INTERVAL - elapsed)
+        break
+      }
       const nextPayload = pendingProgressPayload
       pendingProgressPayload = null
       const nextKey = progressSaveKey(nextPayload)
       if (nextKey === lastProgressSaveKey) continue
+      lastProgressRequestAt = Date.now()
       await reader.saveProgress(nextPayload)
       lastProgressSaveKey = nextKey
     }
