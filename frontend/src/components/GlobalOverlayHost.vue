@@ -35,12 +35,38 @@
       <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
       <el-button plain @click="setBookGroup(overlay.bookInfoBook)">设置分组</el-button>
       <el-button plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
+      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存后续20章</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
       <el-button plain type="danger" :loading="deletingBookId === overlay.bookInfoBook.id" @click="deleteBookFromInfo(overlay.bookInfoBook)">移出书架</el-button>
     </div>
   </BookInfoDialog>
+
+  <el-drawer
+    v-model="sourceSwitchVisible"
+    title="切换书源"
+    :direction="narrowDrawerDirection"
+    :size="narrowDrawerSize"
+    class="global-source-drawer"
+    @open="loadGlobalSourceCandidates"
+  >
+    <SourceSwitchPanel
+      :book="sourceSwitchBook"
+      :sources="sourceSwitchCandidates"
+      :loading="sourceSwitchLoading"
+      :has-more="sourceSwitchHasMore"
+      :changing-source="sourceSwitchChanging"
+      :current-source-name="sourceSwitchCurrentName"
+      :group="sourceSwitchGroup"
+      :groups="sourceSwitchGroups"
+      @refresh="refreshGlobalSourceCandidates"
+      @load-more="loadMoreGlobalSourceCandidates"
+      @group-change="changeGlobalSourceGroup"
+      @show-info="reopenSourceSwitchBookInfo"
+      @change="changeGlobalBookSource"
+    />
+  </el-drawer>
 
   <el-dialog
     v-model="overlay.importBookVisible"
@@ -673,7 +699,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
-import { cacheBookContent, checkBookUpdates, deleteBookmark, listBookmarks, refreshBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
+import { cacheBookContent, changeBookSource, checkBookUpdates, deleteBookmark, listBookSourceCandidates, listBookmarks, refreshBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, restoreWebDAVBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { createRSSSource, deleteRSSSource, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
@@ -687,6 +713,7 @@ import { sortByShelfOrder } from '../utils/bookOrder'
 import BookInfoDialog from './BookInfoDialog.vue'
 import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
 import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
+import SourceSwitchPanel from './reader/SourceSwitchPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -708,6 +735,15 @@ const importingBook = ref(false)
 const newGroupName = ref('')
 const importDraft = reactive({ title: '', author: '', categoryId: '', file: null })
 const sourceRows = ref([])
+const sourceSwitchVisible = ref(false)
+const sourceSwitchBook = ref(null)
+const sourceSwitchCandidates = ref([])
+const sourceSwitchLoading = ref(false)
+const sourceSwitchChanging = ref(null)
+const sourceSwitchGroup = ref('')
+const sourceSwitchOffset = ref(0)
+const sourceSwitchHasMore = ref(false)
+const sourceSwitchLoadedKey = ref('')
 const contentKeyword = ref('')
 const contentResults = ref([])
 const contentSearching = ref(false)
@@ -774,6 +810,15 @@ const bookInfoSourceName = computed(() => {
   const sourceId = overlay.bookInfoBook?.sourceId
   if (!sourceId) return '本地'
   return sourceRows.value.find(source => Number(source.id) === Number(sourceId))?.name || '远程书籍'
+})
+const sourceSwitchCurrentName = computed(() => {
+  const sourceId = sourceSwitchBook.value?.sourceId
+  if (!sourceId) return '本地书籍'
+  return sourceRows.value.find(source => Number(source.id) === Number(sourceId))?.name || '当前来源'
+})
+const sourceSwitchGroups = computed(() => {
+  const rows = sourceRows.value.length ? sourceRows.value : sourceSwitchCandidates.value
+  return [...new Set(rows.map(item => item.group).filter(Boolean))].sort()
 })
 const bookInfoProgress = computed(() => {
   const book = overlay.bookInfoBook
@@ -1007,6 +1052,107 @@ function openContentSearch(book) {
 function openBookmarks(book) {
   overlay.closeBookInfo()
   overlay.openBookmark(book)
+}
+
+function openGlobalSourceSwitch(book) {
+  if (!book?.id || Number(book.sourceId || 0) <= 0) return
+  sourceSwitchBook.value = book
+  sourceSwitchGroup.value = ''
+  sourceSwitchOffset.value = 0
+  sourceSwitchHasMore.value = false
+  sourceSwitchLoadedKey.value = ''
+  sourceSwitchCandidates.value = []
+  overlay.closeBookInfo()
+  sourceSwitchVisible.value = true
+}
+
+async function loadGlobalSourceCandidates({ append = false, force = false } = {}) {
+  const book = sourceSwitchBook.value
+  if (!book?.id || Number(book.sourceId || 0) <= 0) return
+  const key = `${book.id}:${sourceSwitchGroup.value || 'all'}`
+  if (!append && !force && sourceSwitchLoadedKey.value === key && sourceSwitchCandidates.value.length) return
+  sourceSwitchLoading.value = true
+  try {
+    if (!sourceRows.value.length) await loadSourceRows()
+    if (!append) sourceSwitchOffset.value = 0
+    const { data } = await listBookSourceCandidates(book.id, {
+      group: sourceSwitchGroup.value || undefined,
+      offset: sourceSwitchOffset.value,
+      limit: 10,
+      paged: 1,
+    })
+    const rows = Array.isArray(data) ? data : (data?.list || [])
+    sourceSwitchCandidates.value = append ? mergeSourceCandidates(sourceSwitchCandidates.value, rows) : rows
+    sourceSwitchOffset.value = Number.isInteger(data?.nextOffset) ? data.nextOffset : sourceSwitchOffset.value + 10
+    sourceSwitchHasMore.value = Boolean(data?.hasMore)
+    sourceSwitchLoadedKey.value = key
+  } catch (err) {
+    ElMessage.error(readError(err, '搜索可用来源失败'))
+  } finally {
+    sourceSwitchLoading.value = false
+  }
+}
+
+function refreshGlobalSourceCandidates() {
+  sourceSwitchLoadedKey.value = ''
+  sourceSwitchHasMore.value = false
+  return loadGlobalSourceCandidates({ force: true })
+}
+
+function loadMoreGlobalSourceCandidates() {
+  return loadGlobalSourceCandidates({ append: true })
+}
+
+function changeGlobalSourceGroup(value) {
+  sourceSwitchGroup.value = value || ''
+  sourceSwitchLoadedKey.value = ''
+  sourceSwitchHasMore.value = false
+  loadGlobalSourceCandidates({ force: true })
+}
+
+function mergeSourceCandidates(existing, incoming) {
+  const seen = new Set(existing.map(item => `${item.sourceId}-${item.bookUrl}`))
+  return existing.concat(incoming.filter(item => {
+    const key = `${item.sourceId}-${item.bookUrl}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }))
+}
+
+async function changeGlobalBookSource(source) {
+  const book = sourceSwitchBook.value
+  if (!book?.id || source.current) return
+  sourceSwitchChanging.value = source.sourceId
+  try {
+    const { data } = await changeBookSource(book.id, {
+      sourceId: source.sourceId,
+      bookUrl: source.bookUrl,
+      title: source.title,
+      author: source.author,
+      coverUrl: source.coverUrl,
+      intro: source.intro,
+    })
+    bookshelf.upsertBook(data)
+    sourceSwitchBook.value = data
+    if (overlay.bookInfoBook?.id === data.id) overlay.bookInfoBook = data
+    sourceSwitchLoadedKey.value = ''
+    await loadGlobalSourceCandidates({ force: true })
+    ElMessage.success(`已切换到 ${source.sourceName}`)
+  } catch (err) {
+    ElMessage.error(readError(err, '换源失败'))
+  } finally {
+    sourceSwitchChanging.value = null
+  }
+}
+
+function reopenSourceSwitchBookInfo() {
+  if (!sourceSwitchBook.value) return
+  sourceSwitchVisible.value = false
+  overlay.openBookInfo(sourceSwitchBook.value, {
+    categoryName: categoryName(sourceSwitchBook.value.categoryId),
+    progress: reader.progressByBook[sourceSwitchBook.value.id]?.percent || sourceSwitchBook.value.progress?.percent || 0,
+  })
 }
 
 async function refreshShelf() {
