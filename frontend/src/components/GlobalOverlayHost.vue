@@ -35,7 +35,7 @@
       <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
       <el-button plain @click="setBookGroup(overlay.bookInfoBook)">设置分组</el-button>
       <el-button plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
-      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存50章</el-button>
+      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存后续20章</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
       <el-button plain type="danger" :loading="deletingBookId === overlay.bookInfoBook.id" @click="deleteBookFromInfo(overlay.bookInfoBook)">移出书架</el-button>
@@ -115,7 +115,7 @@
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBook">缓存50章</el-dropdown-item>
+                <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBook">缓存后续20章</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="deleteBookCache">删除服务器缓存</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) === 0" disabled>本地书无需服务器缓存</el-dropdown-item>
               </el-dropdown-menu>
@@ -149,7 +149,7 @@
         <footer>
           <el-button size="small" text @click="goDetail(book)">编辑</el-button>
           <el-button size="small" text @click="setBookGroup(book)">分组</el-button>
-          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">缓存50章</el-button>
+          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">缓存后续20章</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookCache')">清缓存</el-button>
           <el-button size="small" text @click="exportBook(book)">导出</el-button>
         </footer>
@@ -179,7 +179,7 @@
         </template>
       </el-dropdown>
       <span class="check-tip">已选择 {{ selectedBookIds.length }} 个</span>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchCacheBooks">批量缓存50章</el-button>
+      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchCacheBooks">批量缓存10章</el-button>
       <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchClearCache">批量清缓存</el-button>
     </div>
   </el-drawer>
@@ -1215,7 +1215,7 @@ async function cacheBook(book, command) {
   cachingBookId.value = book.id
   try {
     const chapterIndex = cacheStartChapterIndex(book)
-    const { data } = await cacheBookContent(book.id, { all: true, count: 50, chapterIndex })
+    const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
     await bookshelf.loadBooks()
   } catch (err) {
@@ -1283,23 +1283,24 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
   contentSearching.value = true
   contentSearched.value = true
   try {
-    const params = append
-      ? {
-          paged: 1,
-          lastIndex: contentLastIndex.value,
-          ...contentSearchPagingParams(book),
-        }
-      : {
-          paged: 1,
-          lastIndex: -1,
-          ...contentSearchPagingParams(book),
-        }
-    const { data } = await searchBookContent(book.id, keyword, params)
-    const rows = Array.isArray(data) ? data : (data?.list || [])
-    contentResults.value = append ? contentResults.value.concat(rows) : rows
-    contentLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : -1
-    contentHasMore.value = Boolean(data?.hasMore)
-    contentTotal.value = Number(data?.total || 0)
+    let lastIndex = append ? contentLastIndex.value : -1
+    let nextResults = append ? [...contentResults.value] : []
+    const maxRounds = append ? 1 : 3
+    for (let round = 0; round < maxRounds; round += 1) {
+      const { data } = await searchBookContent(book.id, keyword, {
+        paged: 1,
+        lastIndex,
+        ...contentSearchPagingParams(book),
+      })
+      const rows = Array.isArray(data) ? data : (data?.list || [])
+      nextResults = nextResults.concat(rows)
+      contentResults.value = nextResults
+      contentLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : -1
+      contentHasMore.value = Boolean(data?.hasMore)
+      contentTotal.value = Number(data?.total || 0)
+      lastIndex = contentLastIndex.value
+      if (rows.length || !contentHasMore.value) break
+    }
   } catch (err) {
     ElMessage.error(readError(err, '搜索正文失败'))
   } finally {

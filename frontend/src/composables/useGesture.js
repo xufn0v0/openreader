@@ -7,6 +7,7 @@ const PINCH_DEAD_ZONE = 40
 export function useGesture(elementRef, handlers) {
   const {
     onSwipeLeft, onSwipeRight,
+    onSwipeUp, onSwipeDown,
     onCenterTap, onEdgeLeftTap, onEdgeRightTap, onUpperTap, onLowerTap,
     onPinchIn, onPinchOut,
   } = handlers
@@ -57,11 +58,13 @@ export function useGesture(elementRef, handlers) {
     }
 
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESHOLD) {
-      if (dx < 0) {
-        onSwipeLeft?.()
-      } else {
-        onSwipeRight?.()
-      }
+      if (dx < 0) onSwipeLeft?.()
+      else onSwipeRight?.()
+      return
+    }
+    if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > SWIPE_THRESHOLD) {
+      if (dy < 0) onSwipeUp?.()
+      else onSwipeDown?.()
     }
   }
 

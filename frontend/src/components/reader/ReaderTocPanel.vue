@@ -10,10 +10,13 @@
       type="button"
       @click="$emit('jump', item.index)"
     >
-      <span>{{ item.title }}</span>
-      <small v-if="showMeta">第 {{ item.index + 1 }} 章 · {{ item.cachePath ? '已缓存' : '未缓存' }}</small>
-      <el-tag v-else-if="item.cachePath" size="small" type="success" effect="plain">已缓存</el-tag>
+      <span class="toc-main">
+        <span>{{ item.title }}</span>
+        <small>第 {{ item.index + 1 }} 章<template v-if="showMeta"> · {{ item.cachePath ? '已缓存' : '未缓存' }}</template></small>
+      </span>
+      <el-tag v-if="!showMeta && item.cachePath" size="small" type="success" effect="plain">已缓存</el-tag>
     </button>
+    <el-empty v-if="keyword && !filteredChapters.length" description="没有匹配章节" />
   </div>
 </template>
 
@@ -90,15 +93,17 @@ watch(
 .toc-list {
   max-height: calc(100vh - 160px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .toc-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 12px 8px;
+  min-height: 52px;
+  padding: 9px 8px;
   color: inherit;
   background: transparent;
   cursor: pointer;
@@ -108,8 +113,14 @@ watch(
   text-align: left;
 }
 
-.toc-item span {
+.toc-main {
+  display: grid;
   min-width: 0;
+  gap: 4px;
+}
+
+.toc-main span,
+.toc-main small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -130,5 +141,21 @@ watch(
   color: #409eff;
   font-weight: 600;
   background: #ecf5ff;
+}
+
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+  .toc-search {
+    margin-bottom: 8px;
+  }
+
+  .toc-list {
+    max-height: calc(82vh - 76px - env(safe-area-inset-bottom));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .toc-item {
+    min-height: 48px;
+    padding: 8px 2px;
+  }
 }
 </style>

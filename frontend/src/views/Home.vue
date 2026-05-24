@@ -471,6 +471,8 @@ function readError(err, fallback) {
     gap: 8px;
     width: 100%;
     max-width: 100%;
+    min-width: 0;
+    padding: 0 0 18px;
     overflow-x: hidden;
   }
 
@@ -486,12 +488,14 @@ function readError(err, fallback) {
   .shelf-title {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: start;
+    gap: 8px;
+    align-items: center;
     min-width: 0;
+    padding: 8px 10px;
   }
 
   .title-actions {
+    min-width: max-content;
     gap: 8px;
   }
 
@@ -500,21 +504,34 @@ function readError(err, fallback) {
   }
 
   .shelf-toolbar {
-    padding: 8px 10px;
+    padding: 6px 8px;
+  }
+
+  .shelf-toolbar :deep(.el-input__wrapper) {
+    min-height: 32px;
   }
 
   .recent-strip {
-    padding: 10px;
+    padding: 8px 10px;
   }
 
   .recent-strip strong {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .recent-strip b {
-    width: 42px;
-    height: 42px;
-    flex-basis: 42px;
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    font-size: 12px;
+  }
+
+  .book-group-wrapper {
+    padding: 0 6px;
+  }
+
+  .book-group-wrapper :deep(.el-tabs__item) {
+    height: 34px;
     font-size: 12px;
   }
 
@@ -590,14 +607,23 @@ function readError(err, fallback) {
     padding: 0 6px;
   }
 
+  .book-group-wrapper :deep(.el-tabs__nav-wrap),
+  .book-group-wrapper :deep(.el-tabs__nav-scroll) {
+    max-width: 100%;
+    min-width: 0;
+  }
+
   .book-group-wrapper :deep(.el-tabs__item) {
-    min-width: 58px;
+    min-width: 52px;
+    max-width: 96px;
     padding: 0 8px;
     font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .shelf-title {
-    padding: 10px 8px;
+    padding: 8px;
   }
 
   .shelf-title strong {

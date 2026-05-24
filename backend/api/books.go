@@ -295,7 +295,7 @@ func (s *Server) batchCacheBooks(c *gin.Context, userID uint, bookIDs []uint) {
 		if books[i].SourceID == 0 {
 			continue
 		}
-		bookCached, bookRequested, err := s.cacheBookChapters(books[i], nil, true, 50)
+		bookCached, bookRequested, err := s.cacheBookChapters(books[i], nil, true, 10)
 		cached += bookCached
 		requested += bookRequested
 		if err != nil {

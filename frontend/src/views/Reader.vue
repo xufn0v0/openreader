@@ -100,20 +100,19 @@
       </button>
     </footer>
 
-    <footer class="reader-mobile-progress-panel">
-      <button class="mobile-chapter-step" type="button" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
-        上一章
-      </button>
-      <div class="mobile-chapter-progress">
-        <strong>{{ bookProgressLabel }}</strong>
-        <span>{{ chapterLabel }}</span>
-      </div>
-      <button class="mobile-chapter-step" type="button" :disabled="currentIndex >= chapters.length - 1" @click="goChapter(currentIndex + 1)">
-        下一章
-      </button>
-    </footer>
-
     <footer class="reader-mobile-bottom">
+      <div class="reader-mobile-progress-panel">
+        <button class="mobile-chapter-step" type="button" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
+          上一章
+        </button>
+        <div class="mobile-chapter-progress">
+          <strong>{{ bookProgressLabel }}</strong>
+          <span>{{ chapterLabel }}</span>
+        </div>
+        <button class="mobile-chapter-step" type="button" :disabled="currentIndex >= chapters.length - 1" @click="goChapter(currentIndex + 1)">
+          下一章
+        </button>
+      </div>
       <button class="mobile-tool-button" type="button" @click="openMobileTool(openTocSearch)">
         <el-icon :size="20"><List /></el-icon>
         <span>目录</span>
@@ -439,6 +438,9 @@ const mobileReaderMaxWidth = 860
 
 let saveTimer
 let autoReadTimer
+let savingProgress = false
+let pendingProgressPayload = null
+let lastProgressSaveKey = ''
 
 const fontOptions = [
   { label: '系统黑体', value: 'system' },
@@ -1004,23 +1006,24 @@ async function runBookContentSearch({ append = false } = {}) {
   bookSearching.value = true
   searchedBookContent.value = true
   try {
-    const params = append
-      ? {
-          paged: 1,
-          lastIndex: bookSearchLastIndex.value,
-          ...contentSearchPagingParams(book.value),
-        }
-      : {
-          paged: 1,
-          lastIndex: -1,
-          ...contentSearchPagingParams(book.value),
-        }
-    const { data } = await searchBookContentApi(bookId.value, keyword, params)
-    const rows = Array.isArray(data) ? data : (data?.list || [])
-    bookSearchResults.value = append ? bookSearchResults.value.concat(rows) : rows
-    bookSearchLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : -1
-    bookSearchHasMore.value = Boolean(data?.hasMore)
-    bookSearchTotal.value = Number(data?.total || 0)
+    let lastIndex = append ? bookSearchLastIndex.value : -1
+    let nextResults = append ? [...bookSearchResults.value] : []
+    const maxRounds = append ? 1 : 3
+    for (let round = 0; round < maxRounds; round += 1) {
+      const { data } = await searchBookContentApi(bookId.value, keyword, {
+        paged: 1,
+        lastIndex,
+        ...contentSearchPagingParams(book.value),
+      })
+      const rows = Array.isArray(data) ? data : (data?.list || [])
+      nextResults = nextResults.concat(rows)
+      bookSearchResults.value = nextResults
+      bookSearchLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : -1
+      bookSearchHasMore.value = Boolean(data?.hasMore)
+      bookSearchTotal.value = Number(data?.total || 0)
+      lastIndex = bookSearchLastIndex.value
+      if (rows.length || !bookSearchHasMore.value) break
+    }
   } catch (err) {
     ElMessage.error(readError(err, '搜索正文失败'))
   } finally {
@@ -1225,10 +1228,38 @@ function currentVisibleExcerpt() {
 
 async function saveCurrentProgress() {
   if (!chapter.value) return
-  await reader.saveProgress({
+  const payload = {
     bookId: bookId.value, chapterId: chapter.value.id,
     chapterIndex: currentIndex.value, offset: currentOffset(), percent: bookProgress.value,
-  })
+  }
+  const key = progressSaveKey(payload)
+  if (key === lastProgressSaveKey) return
+  pendingProgressPayload = payload
+  if (savingProgress) return
+  savingProgress = true
+  try {
+    while (pendingProgressPayload) {
+      const nextPayload = pendingProgressPayload
+      pendingProgressPayload = null
+      const nextKey = progressSaveKey(nextPayload)
+      if (nextKey === lastProgressSaveKey) continue
+      await reader.saveProgress(nextPayload)
+      lastProgressSaveKey = nextKey
+    }
+  } finally {
+    savingProgress = false
+  }
+}
+
+function progressSaveKey(payload) {
+  return [
+    payload.bookId,
+    payload.chapterId,
+    payload.chapterIndex,
+    payload.offset,
+    Math.round(Number(payload.percent || 0) * 10000),
+    reader.mode,
+  ].join(':')
 }
 
 async function createBookmark() {
@@ -1479,6 +1510,12 @@ useGesture(pageEl, {
   onSwipeRight: () => {
     if (reader.mode === 'flip') previousPage()
   },
+  onSwipeUp: () => {
+    if (reader.mode === 'page') nextPage()
+  },
+  onSwipeDown: () => {
+    if (reader.mode === 'page') previousPage()
+  },
   onCenterTap: () => {
     if (isMobileReader.value) {
       mobileChromeVisible.value = !mobileChromeVisible.value
@@ -1496,10 +1533,10 @@ useGesture(pageEl, {
     showSettingsDrawer.value = false
   },
   onEdgeLeftTap: () => {
-    if (reader.mode === 'flip') previousPage()
+    previousPage()
   },
   onEdgeRightTap: () => {
-    if (reader.mode === 'flip') nextPage()
+    nextPage()
   },
   onUpperTap: () => {
     if (reader.mode === 'flip') return
@@ -1984,22 +2021,18 @@ function readError(err, fallback) {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: center;
-    gap: 4px;
-    min-height: calc(68px + env(safe-area-inset-bottom));
+    gap: 7px 4px;
+    min-height: calc(124px + env(safe-area-inset-bottom));
     padding: 8px 10px max(8px, env(safe-area-inset-bottom));
     background: rgba(255, 252, 239, 0.92);
     border-top: 1px solid rgba(148, 132, 87, 0.35);
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
-    transform: translateY(110%);
+    transform: translateY(calc(100% + env(safe-area-inset-bottom)));
     transition: transform 180ms ease;
   }
   .reader-mobile-progress-panel {
-    position: fixed;
-    right: 10px;
-    bottom: calc(78px + env(safe-area-inset-bottom));
-    left: 10px;
-    z-index: 8;
     display: grid;
+    grid-column: 1 / -1;
     grid-template-columns: minmax(62px, 76px) minmax(0, 1fr) minmax(62px, 76px);
     align-items: center;
     gap: 8px;
@@ -2009,18 +2042,9 @@ function readError(err, fallback) {
     border: 1px solid rgba(148, 132, 87, 0.28);
     border-radius: 8px;
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(calc(100% + 110px + env(safe-area-inset-bottom)));
-    transition: transform 180ms ease, opacity 120ms ease;
   }
   .reader-shell.mobile-chrome-visible .reader-mobile-top,
   .reader-shell.mobile-chrome-visible .reader-mobile-bottom {
-    transform: translateY(0);
-  }
-  .reader-shell.mobile-chrome-visible .reader-mobile-progress-panel {
-    opacity: 1;
-    pointer-events: auto;
     transform: translateY(0);
   }
   .mobile-chapter-step {

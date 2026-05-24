@@ -1710,6 +1710,51 @@ func TestBatchBooksCache(t *testing.T) {
 	}
 }
 
+func TestBatchBooksCacheLimitsToTenChaptersPerBook(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := models.BookSource{Name: "批量缓存限制源", Enabled: true}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "缓存限制", SourceID: source.ID}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 12; i++ {
+		cachePath := filepath.Join("batch-cache-limit", fmt.Sprintf("chapter-%d.txt", i))
+		fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte("已缓存正文"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		chapter := models.Chapter{BookID: book.ID, Index: i, Title: fmt.Sprintf("第%d章", i+1), CachePath: cachePath}
+		if err := server.db.Create(&chapter).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body := `{"action":"cache","bookIds":[` + strconv.FormatUint(uint64(book.ID), 10) + `]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("batch cache: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"cached":10`) || !strings.Contains(w.Body.String(), `"requested":10`) {
+		t.Fatalf("expected batch cache to stop at 10 chapters, got %s", w.Body.String())
+	}
+}
+
 func TestBatchBooksClearCache(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

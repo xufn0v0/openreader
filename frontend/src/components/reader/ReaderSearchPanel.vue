@@ -71,15 +71,18 @@ const keyword = computed({
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  min-width: 0;
 }
 
 .content-search-row .el-input {
+  min-width: 0;
   flex: 1;
 }
 
 .search-result-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .search-result-item {
@@ -116,8 +119,53 @@ const keyword = computed({
   align-items: center;
   color: #7b715e;
   display: flex;
+  gap: 8px;
   font-size: 12px;
   justify-content: space-between;
   margin-top: 12px;
+}
+
+.search-footer span {
+  min-width: 0;
+}
+
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+  .content-search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .content-search-row :deep(.el-input__wrapper),
+  .content-search-row :deep(.el-button) {
+    min-height: 38px;
+  }
+
+  .search-result-list {
+    gap: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .search-result-item {
+    padding: 9px;
+  }
+
+  .search-result-item span {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .search-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-footer :deep(.el-button) {
+    min-height: 38px;
+    width: 100%;
+  }
 }
 </style>

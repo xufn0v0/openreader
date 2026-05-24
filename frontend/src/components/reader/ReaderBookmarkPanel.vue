@@ -42,11 +42,13 @@ defineEmits(['add', 'jump', 'edit', 'remove'])
   display: flex;
   gap: 8px;
   margin-bottom: 14px;
+  min-width: 0;
 }
 
 .bookmark-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .bookmark-card {
@@ -97,5 +99,37 @@ defineEmits(['add', 'jump', 'edit', 'remove'])
 .bookmark-actions {
   display: grid;
   gap: 2px;
+}
+
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+  .drawer-actions {
+    margin-bottom: 10px;
+  }
+
+  .drawer-actions :deep(.el-button) {
+    min-height: 38px;
+  }
+
+  .bookmark-list {
+    gap: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .bookmark-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px;
+  }
+
+  .bookmark-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .bookmark-actions :deep(.el-button) {
+    min-height: 32px;
+    margin: 0;
+  }
 }
 </style>

@@ -99,6 +99,7 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 14px;
+  min-width: 0;
 }
 
 .source-group-select {
@@ -108,6 +109,7 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
 .source-switch-list {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .current-source-card {
@@ -145,6 +147,7 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
   display: grid;
   gap: 5px;
   width: 100%;
+  min-width: 0;
   padding: 12px;
   color: #24282c;
   background: #fffaf0;
@@ -169,5 +172,53 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
 .source-switch-card small {
   color: #7b715e;
   font-size: 12px;
+}
+
+.source-switch-card strong,
+.source-switch-card span,
+.source-switch-card small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+  .source-alert {
+    margin-bottom: 10px;
+  }
+
+  .drawer-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .source-group-select {
+    width: auto;
+    grid-column: 1 / -1;
+  }
+
+  .drawer-actions :deep(.el-button),
+  .drawer-actions :deep(.el-select .el-input__wrapper) {
+    min-height: 38px;
+  }
+
+  .current-source-card {
+    align-items: start;
+    margin-bottom: 10px;
+    padding: 9px;
+  }
+
+  .source-switch-list {
+    gap: 8px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .source-switch-card {
+    min-height: 66px;
+    padding: 10px;
+  }
 }
 </style>

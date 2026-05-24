@@ -237,11 +237,13 @@ function changeFontSize(delta) {
 .settings-body {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 .setting-row {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .setting-label {
@@ -286,9 +288,11 @@ function changeFontSize(delta) {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .font-slider {
+  min-width: 0;
   flex: 1;
 }
 
@@ -339,5 +343,37 @@ function changeFontSize(delta) {
   background: #e6f2ee;
   border-color: #2f6f6d;
   font-weight: 700;
+}
+
+@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+  .settings-body {
+    gap: 16px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .setting-row {
+    gap: 10px;
+  }
+
+  .theme-dot {
+    width: 34px;
+    height: 34px;
+  }
+
+  .font-family-option,
+  .font-size-preset {
+    min-height: 42px;
+    font-size: 14px;
+  }
+
+  .font-controls :deep(.el-button.is-circle) {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .font-controls :deep(.el-slider) {
+    min-width: 0;
+  }
 }
 </style>
