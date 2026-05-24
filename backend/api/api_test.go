@@ -838,6 +838,33 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 		t.Fatalf("source candidates should honor group filter, got source %d", target.SourceID)
 	}
 
+	pagedReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/source-candidates?group=%E4%BC%98%E5%85%88&limit=1&offset=0&paged=1", nil)
+	pagedReq.Header.Set("Authorization", token)
+	pagedW := httptest.NewRecorder()
+	router.ServeHTTP(pagedW, pagedReq)
+	if pagedW.Code != http.StatusOK {
+		t.Fatalf("paged source candidates: expected 200, got %d: %s", pagedW.Code, pagedW.Body.String())
+	}
+	var pagedCandidates struct {
+		List []struct {
+			SourceID uint   `json:"sourceId"`
+			BookURL  string `json:"bookUrl"`
+			Current  bool   `json:"current"`
+		} `json:"list"`
+		NextOffset int  `json:"nextOffset"`
+		HasMore    bool `json:"hasMore"`
+		Total      int  `json:"total"`
+	}
+	if err := json.Unmarshal(pagedW.Body.Bytes(), &pagedCandidates); err != nil {
+		t.Fatal(err)
+	}
+	if pagedCandidates.Total != 1 || pagedCandidates.NextOffset != 1 || pagedCandidates.HasMore {
+		t.Fatalf("unexpected paged metadata: %+v", pagedCandidates)
+	}
+	if len(pagedCandidates.List) == 0 {
+		t.Fatalf("expected paged candidates, got %+v", pagedCandidates)
+	}
+
 	body := `{"sourceId":` + strconv.FormatUint(uint64(target.SourceID), 10) + `,"bookUrl":` + strconv.Quote(target.BookURL) + `,"title":"候选书","author":"新作者"}`
 	req2 := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/change-source", strings.NewReader(body))
 	req2.Header.Set("Content-Type", "application/json")
@@ -1871,6 +1898,49 @@ func TestLocalStoreImportAcceptsCategory(t *testing.T) {
 	}
 	if book.CategoryID == nil || *book.CategoryID != category.ID {
 		t.Fatalf("expected imported book category %d, got %+v", category.ID, book.CategoryID)
+	}
+}
+
+func TestLocalStoreImportDirectoryRecursively(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	nestedDir := filepath.Join(server.cfg.LocalStoreDir, "nested", "deeper")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(server.cfg.LocalStoreDir, "nested", "alpha.txt"), []byte("第一章 开始\n正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "beta.txt"), []byte("第一章 开始\n正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "ignore.bin"), []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"paths":["nested"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/local-store/import", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("local store directory import: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Imported []struct {
+			Path  string       `json:"path"`
+			Book  *models.Book `json:"book"`
+			Error string       `json:"error"`
+		} `json:"imported"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Imported) != 2 {
+		t.Fatalf("expected 2 imported files, got %+v", payload.Imported)
 	}
 }
 

@@ -81,6 +81,7 @@
                 :current-source-name="currentSource?.name || ''"
                 :group="sourceGroup"
                 :groups="sourceGroups"
+                :has-more="sourceHasMore"
                 :show-info-button="false"
                 @refresh="loadSourceCandidates"
                 @load-more="loadMoreSourceCandidates"
@@ -115,6 +116,7 @@
         :current-source-name="currentSource?.name || ''"
         :group="sourceGroup"
         :groups="sourceGroups"
+        :has-more="sourceHasMore"
         :show-info-button="false"
         @refresh="loadSourceCandidates"
         @load-more="loadMoreSourceCandidates"
@@ -177,6 +179,7 @@ const sourceCandidates = ref([])
 const loadingSourceCandidates = ref(false)
 const sourceGroup = ref('')
 const sourceOffset = ref(0)
+const sourceHasMore = ref(false)
 const activeTab = ref('toc')
 const tocKeyword = ref('')
 const tocReverse = ref(false)
@@ -411,7 +414,7 @@ async function cacheCurrentBook() {
   if (!book.value) return
   cachingBook.value = true
   try {
-    const { data } = await cacheBookContent(book.value.id, { all: true, count: 50 })
+    const { data } = await cacheBookContent(book.value.id, { all: true, count: 50, chapterIndex: cacheStartChapterIndex() })
     await reloadChapters()
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
   } catch (err) {
@@ -419,6 +422,12 @@ async function cacheCurrentBook() {
   } finally {
     cachingBook.value = false
   }
+}
+
+function cacheStartChapterIndex() {
+  const progress = reader.progressByBook[book.value?.id] || book.value?.progress
+  const chapterIndex = Number(progress?.chapterIndex)
+  return Number.isInteger(chapterIndex) && chapterIndex > 0 ? chapterIndex : 0
 }
 
 async function clearCurrentBookCache() {
@@ -447,15 +456,20 @@ async function loadSourceCandidates({ append = false } = {}) {
   if (!book.value) return
   loadingSourceCandidates.value = true
   try {
-    if (!append) sourceOffset.value = 0
+    if (!append) {
+      sourceOffset.value = 0
+      sourceHasMore.value = false
+    }
     const { data } = await listBookSourceCandidates(book.value.id, {
       group: sourceGroup.value || undefined,
       offset: sourceOffset.value,
       limit: 10,
+      paged: 1,
     })
-    const rows = data || []
+    const rows = Array.isArray(data) ? data : (data?.list || [])
     sourceCandidates.value = append ? mergeSourceCandidates(sourceCandidates.value, rows) : rows
-    sourceOffset.value += 10
+    sourceOffset.value = Number.isInteger(data?.nextOffset) ? data.nextOffset : sourceOffset.value + 10
+    sourceHasMore.value = Boolean(data?.hasMore)
   } catch (err) {
     ElMessage.error(readError(err, '搜索可用来源失败'))
   } finally {

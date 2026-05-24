@@ -13,11 +13,11 @@
         <el-icon :size="18"><Grid /></el-icon>
         <span>书源</span>
       </button>
-      <button class="rail-item" type="button" title="目录" @click="showTocDrawer = true">
+      <button class="rail-item" type="button" title="目录" @click="openTocDrawer">
         <el-icon :size="18"><List /></el-icon>
         <span>目录</span>
       </button>
-      <button class="rail-item" type="button" title="设置" @click="showSettingsDrawer = true">
+      <button class="rail-item" type="button" title="设置" @click="openSettingsDrawer">
         <el-icon :size="18"><Setting /></el-icon>
         <span>设置</span>
       </button>
@@ -53,7 +53,7 @@
       <button class="round-tool" type="button" :class="{ active: autoReading }" title="自动阅读" @click="toggleAutoReading">
         <el-icon :size="18"><VideoPlay /></el-icon>
       </button>
-      <button class="round-tool" type="button" title="阅读设置" @click="showSettingsDrawer = true">
+      <button class="round-tool" type="button" title="阅读设置" @click="openSettingsDrawer">
         <el-icon :size="18"><View /></el-icon>
       </button>
       <button class="round-tool" type="button" :class="{ active: tts.state.playing }" :disabled="!tts.state.supported" :title="tts.state.supported ? '朗读' : '当前浏览器不支持朗读'" @click="toggleTTS">
@@ -126,7 +126,7 @@
         <el-icon :size="20"><Search /></el-icon>
         <span>搜索</span>
       </button>
-      <button class="mobile-tool-button" type="button" @click="openMobileTool(() => { showSettingsDrawer = true })">
+      <button class="mobile-tool-button" type="button" @click="openMobileTool(openSettingsDrawer)">
         <el-icon :size="20"><Setting /></el-icon>
         <span>设置</span>
       </button>
@@ -229,6 +229,7 @@
         :book="book"
         :sources="switchableSourceCandidates"
         :loading="loadingSources"
+        :has-more="sourceHasMore"
         :changing-source="changingSource"
         :current-source-name="currentSourceName"
         :group="sourceGroup"
@@ -408,6 +409,7 @@ const loadingSources = ref(false)
 const changingSource = ref(null)
 const sourceGroup = ref('')
 const sourceOffset = ref(0)
+const sourceHasMore = ref(false)
 const sourceCandidatesLoadedKey = ref('')
 const shelfKeyword = ref('')
 const shelfLoading = ref(false)
@@ -562,9 +564,10 @@ watch(bookId, async () => {
   await loadReaderBook()
 })
 
-watch(() => route.query.chapter, async (q) => {
+watch(() => [route.query.chapter, route.query.offset], async ([q, offset]) => {
   const idx = Number(q || 0)
-  if (idx !== currentIndex.value) await loadChapter(idx, Number(route.query.offset || 0))
+  const nextOffset = Number(offset || 0)
+  if (idx !== currentIndex.value || offset !== undefined) await loadChapter(idx, nextOffset)
   await jumpToRouteLine()
 })
 
@@ -609,11 +612,16 @@ async function loadReaderBook() {
   } else {
     currentIndex.value = Number(route.query.chapter || 0)
   }
-  await loadChapter(currentIndex.value, Number(route.query.offset || saved?.offset || 0))
+  const hasRouteOffset = route.query.offset !== undefined
+  const initialOffset = hasRouteOffset ? Number(route.query.offset || 0) : Number(saved?.offset || 0)
+  const restorePercent = !hasRouteOffset && saved?.mode && saved.mode !== reader.mode
+    ? chapterPercentFromBookProgress(saved)
+    : null
+  await loadChapter(currentIndex.value, initialOffset, { restorePercent })
   await jumpToRouteLine()
 }
 
-async function loadChapter(index, offset = 0) {
+async function loadChapter(index, offset = 0, options = {}) {
   currentIndex.value = Math.max(0, Math.min(index, Math.max(chapters.value.length - 1, 0)))
   mobileChromeVisible.value = false
   const { data } = await api.get(`/books/${bookId.value}/chapters/${currentIndex.value}/content`)
@@ -622,18 +630,32 @@ async function loadChapter(index, offset = 0) {
   page.value = 0
   await nextTick()
   updateFlipLayout()
+  const restorePercent = Number(options.restorePercent)
+  const hasRestorePercent = Number.isFinite(restorePercent)
   if (reader.mode === 'flip' || reader.mode === 'page') {
     page.value = offset === CHAPTER_END_OFFSET
       ? Math.max(0, pageCount.value - 1)
-      : Math.min(Math.max(offset, 0), pageCount.value - 1)
+      : (hasRestorePercent
+          ? Math.round(Math.max(0, Math.min(1, restorePercent)) * Math.max(0, pageCount.value - 1))
+          : Math.min(Math.max(offset, 0), pageCount.value - 1))
   } else if (contentEl.value) {
     if (offset === CHAPTER_END_OFFSET) {
       contentEl.value.scrollTop = contentEl.value.scrollHeight
+    } else if (hasRestorePercent) {
+      const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
+      contentEl.value.scrollTop = Math.round(Math.max(0, Math.min(1, restorePercent)) * bottom)
     } else {
       contentEl.value.scrollTop = Math.max(offset, 0)
     }
   }
   saveCurrentProgress()
+}
+
+function chapterPercentFromBookProgress(progress) {
+  const total = Math.max(chapters.value.length, 1)
+  const percent = Number(progress?.percent || 0)
+  const chapterIndex = Number(progress?.chapterIndex ?? currentIndex.value)
+  return Math.max(0, Math.min(1, percent * total - chapterIndex))
 }
 
 function setTheme(theme) { reader.setTheme(theme) }
@@ -661,6 +683,17 @@ async function jumpFromToc(index) {
 function locateTocCurrentChapter() {
   tocFilter.value = ''
   tocLocateKey.value += 1
+}
+
+function openTocDrawer() {
+  tocFilter.value = ''
+  showTocDrawer.value = true
+  nextTick(locateTocCurrentChapter)
+}
+
+function openSettingsDrawer() {
+  sliderLineHeight.value = reader.lineHeight
+  showSettingsDrawer.value = true
 }
 
 function goBookDetail() { router.push({ name: 'book-detail', params: { id: bookId.value } }) }
@@ -761,7 +794,7 @@ function closeInfoAndMobileChrome() {
 
 function openInfoToc() {
   closeInfoAndMobileChrome()
-  showTocDrawer.value = true
+  openTocDrawer()
 }
 
 function openInfoBookmarks() {
@@ -781,7 +814,7 @@ function openInfoSources() {
 
 function openInfoSettings() {
   closeInfoAndMobileChrome()
-  showSettingsDrawer.value = true
+  openSettingsDrawer()
 }
 
 async function openInfoGroup() {
@@ -858,10 +891,12 @@ async function loadSourceCandidates({ append = false, force = false } = {}) {
       group: sourceGroup.value || undefined,
       offset: sourceOffset.value,
       limit: 10,
+      paged: 1,
     })
-    const rows = data || []
+    const rows = Array.isArray(data) ? data : (data?.list || [])
     sourceCandidates.value = append ? mergeSourceCandidates(sourceCandidates.value, rows) : rows
-    sourceOffset.value += 10
+    sourceOffset.value = Number.isInteger(data?.nextOffset) ? data.nextOffset : sourceOffset.value + 10
+    sourceHasMore.value = Boolean(data?.hasMore)
     sourceCandidatesLoadedKey.value = key
   } catch (err) {
     ElMessage.error(readError(err, '搜索可用来源失败'))
@@ -872,6 +907,7 @@ async function loadSourceCandidates({ append = false, force = false } = {}) {
 
 function refreshSourceCandidates() {
   sourceCandidatesLoadedKey.value = ''
+  sourceHasMore.value = false
   return loadSourceCandidates({ force: true })
 }
 
@@ -891,6 +927,7 @@ function loadMoreSourceCandidates() {
 function changeSourceGroup(value) {
   sourceGroup.value = value || ''
   sourceCandidatesLoadedKey.value = ''
+  sourceHasMore.value = false
   loadSourceCandidates({ force: true })
 }
 
@@ -934,7 +971,7 @@ async function changeSource(source) {
 }
 
 function openTocSearch() {
-  showTocDrawer.value = true
+  openTocDrawer()
   nextTick(() => {
     const input = document.querySelector('.toc-search input')
     input?.focus()
@@ -1408,7 +1445,11 @@ useGesture(pageEl, {
       nextPage()
       return
     }
-    showTocDrawer.value = !showTocDrawer.value
+    if (showTocDrawer.value) {
+      showTocDrawer.value = false
+    } else {
+      openTocDrawer()
+    }
     showSettingsDrawer.value = false
   },
   onEdgeLeftTap: () => {

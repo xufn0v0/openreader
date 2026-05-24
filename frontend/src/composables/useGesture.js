@@ -52,7 +52,7 @@ export function useGesture(elementRef, handlers) {
       const relX = endX - rect.left
 
       lastTouchTapAt = Date.now()
-      handleTap(endX, endY)
+      handleTap(endX, endY, event.target)
       return
     }
 

@@ -167,7 +167,7 @@ function openPreview(book) {
     progress: existing?.progress?.percent || 0,
     actions: existing
       ? [
-          { label: '查看详情', plain: true, handler: () => openExistingDetail(existing) },
+          { label: '查看详情', plain: true, handler: () => openExistingInfo(existing, book.sourceName) },
           { label: '继续阅读', type: 'primary', handler: () => openExistingReader(existing) },
         ]
       : [
@@ -192,8 +192,21 @@ async function addRemoteBook(book, shouldRead) {
     })
     bookshelf.upsertBook(data)
     ElMessage.success(`已加入书架：《${book.title}》`)
-    overlay.closeBookInfo()
-    router.push({ name: shouldRead ? 'reader' : 'book-detail', params: { id: data.id } })
+    if (shouldRead) {
+      overlay.closeBookInfo()
+      router.push({ name: 'reader', params: { id: data.id } })
+      return
+    }
+    overlay.openBookInfo(data, {
+      sourceName: book.sourceName,
+      statusLabel: '已加入书架',
+      statusType: 'success',
+      progress: 0,
+      actions: [
+        { label: '完整详情', plain: true, handler: () => openExistingDetail(data) },
+        { label: '开始阅读', type: 'primary', handler: () => openExistingReader(data) },
+      ],
+    })
   } catch (err) {
     ElMessage.error(readError(err, '加入书架失败'))
   } finally {
@@ -204,13 +217,26 @@ async function addRemoteBook(book, shouldRead) {
 function findExistingBook(book) {
   return bookshelf.books.find(item => (
     Number(item.sourceId || 0) === Number(book.sourceId || 0)
-    && String(item.bookUrl || '') === String(book.bookUrl || '')
+    && String(item.url || item.bookUrl || '') === String(book.bookUrl || '')
   )) || null
 }
 
 function openExistingDetail(book) {
   overlay.closeBookInfo()
   router.push({ name: 'book-detail', params: { id: book.id } })
+}
+
+function openExistingInfo(book, sourceName = '') {
+  overlay.openBookInfo(book, {
+    sourceName,
+    statusLabel: '已在书架',
+    statusType: 'warning',
+    progress: book.progress?.percent || 0,
+    actions: [
+      { label: '完整详情', plain: true, handler: () => openExistingDetail(book) },
+      { label: '继续阅读', type: 'primary', handler: () => openExistingReader(book) },
+    ],
+  })
 }
 
 function openExistingReader(book) {

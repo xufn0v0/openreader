@@ -753,11 +753,19 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 	group := strings.TrimSpace(c.Query("group"))
 	limit := parseBoundedInt(c.Query("limit"), 10, 1, 80)
 	offset := parseBoundedInt(c.Query("offset"), 0, 0, 10000)
+	paged := c.Query("paged") == "1" || c.Query("paged") == "true"
 
 	var sources []models.BookSource
 	query := s.db.Where("enabled = ?", true)
 	if group != "" {
 		query = query.Where("COALESCE(\"group\", '') = ?", group)
+	}
+	var totalSources int64
+	if paged {
+		if err := query.Model(&models.BookSource{}).Count(&totalSources).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count sources"})
+			return
+		}
 	}
 	if err := query.Order("id asc").Offset(offset).Limit(limit).Find(&sources).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load sources"})
@@ -850,6 +858,17 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 		if len(results) >= 120 {
 			break
 		}
+	}
+
+	if paged {
+		c.JSON(http.StatusOK, gin.H{
+			"list":       results,
+			"offset":     offset,
+			"nextOffset": offset + len(sources),
+			"hasMore":    int64(offset+len(sources)) < totalSources,
+			"total":      totalSources,
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, results)

@@ -54,9 +54,18 @@
 
     <div class="setting-row">
       <label class="setting-label">字体</label>
-      <el-select v-model="fontFamilyModel" size="small" @change="setFontFamily">
-        <el-option v-for="font in fontOptions" :key="font.value" :label="font.label" :value="font.value" />
-      </el-select>
+      <div class="font-family-grid">
+        <button
+          v-for="font in fontOptions"
+          :key="font.value"
+          class="font-family-option"
+          :class="{ active: fontFamilyModel === font.value }"
+          type="button"
+          @click="setFontFamily(font.value)"
+        >
+          {{ font.label }}
+        </button>
+      </div>
     </div>
 
     <div class="setting-row">
@@ -65,6 +74,18 @@
         <el-button size="small" :icon="Minus" circle @click="changeFontSize(-1)" />
         <el-slider v-model="fontSizeModel" :min="8" :max="36" size="small" class="font-slider" @input="setFontSize" @change="setFontSize" />
         <el-button size="small" :icon="Plus" circle @click="changeFontSize(1)" />
+      </div>
+      <div class="font-size-presets">
+        <button
+          v-for="size in fontSizePresets"
+          :key="size"
+          class="font-size-preset"
+          :class="{ active: reader.fontSize === size }"
+          type="button"
+          @click="setFontSize(size)"
+        >
+          {{ size }}
+        </button>
       </div>
     </div>
 
@@ -153,6 +174,8 @@ const emit = defineEmits([
   'ttsVoiceChange',
   'openReplaceRules',
 ])
+
+const fontSizePresets = [14, 16, 18, 20, 22, 24, 28, 32]
 
 const localCustomBg = computed({
   get: () => props.customBg,
@@ -267,5 +290,54 @@ function changeFontSize(delta) {
 
 .font-slider {
   flex: 1;
+}
+
+.font-family-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.font-family-option {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  color: #5f564a;
+  background: #fffaf0;
+  border: 1px solid #eadfca;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.font-family-option.active {
+  color: #0f5451;
+  background: #e6f2ee;
+  border-color: #2f6f6d;
+  font-weight: 700;
+}
+
+.font-size-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.font-size-preset {
+  min-width: 0;
+  min-height: 32px;
+  color: #5f564a;
+  background: #fffaf0;
+  border: 1px solid #eadfca;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.font-size-preset.active {
+  color: #0f5451;
+  background: #e6f2ee;
+  border-color: #2f6f6d;
+  font-weight: 700;
 }
 </style>

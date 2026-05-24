@@ -18,7 +18,7 @@
       <el-option v-for="item in groups" :key="item" :label="item" :value="item" />
     </el-select>
     <el-button size="small" :loading="loading" @click="$emit('refresh')">刷新</el-button>
-    <el-button size="small" :loading="loading" @click="$emit('loadMore')">加载更多</el-button>
+    <el-button v-if="hasMore" size="small" :loading="loading" @click="$emit('loadMore')">加载更多</el-button>
     <el-button v-if="showInfoButton" size="small" @click="$emit('showInfo')">书籍信息</el-button>
   </div>
   <section v-if="book" class="current-source-card">
@@ -57,6 +57,10 @@ defineProps({
     default: () => [],
   },
   loading: {
+    type: Boolean,
+    default: false,
+  },
+  hasMore: {
     type: Boolean,
     default: false,
   },

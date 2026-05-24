@@ -128,8 +128,6 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="json">导出书籍数据</el-dropdown-item>
-                <el-dropdown-item disabled>导出为TXT（后端未实现）</el-dropdown-item>
-                <el-dropdown-item disabled>导出为Epub（后端未实现）</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -1216,7 +1214,8 @@ async function cacheBook(book, command) {
   }
   cachingBookId.value = book.id
   try {
-    const { data } = await cacheBookContent(book.id, { all: true, count: 50 })
+    const chapterIndex = cacheStartChapterIndex(book)
+    const { data } = await cacheBookContent(book.id, { all: true, count: 50, chapterIndex })
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
     await bookshelf.loadBooks()
   } catch (err) {
@@ -1224,6 +1223,12 @@ async function cacheBook(book, command) {
   } finally {
     cachingBookId.value = null
   }
+}
+
+function cacheStartChapterIndex(book) {
+  const progress = reader.progressByBook[book.id] || book.progress
+  const chapterIndex = Number(progress?.chapterIndex)
+  return Number.isInteger(chapterIndex) && chapterIndex > 0 ? chapterIndex : 0
 }
 
 async function clearBookCache(book) {

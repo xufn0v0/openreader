@@ -75,6 +75,7 @@
       <el-table-column label="操作" width="210" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.importable" size="small" text type="primary" @click="importOne(row)">导入</el-button>
+          <el-button v-else-if="row.isDir" size="small" text type="primary" @click="importDirectory(row)">导入目录</el-button>
           <el-button size="small" text @click="renameItem(row)">重命名</el-button>
           <el-button size="small" text type="danger" @click="deleteItem(row)">删除</el-button>
         </template>
@@ -110,6 +111,7 @@
         </div>
         <footer>
           <el-button v-if="row.importable" size="small" text type="primary" @click="importOne(row)">导入</el-button>
+          <el-button v-else-if="row.isDir" size="small" text type="primary" @click="importDirectory(row)">导入目录</el-button>
           <el-button size="small" text @click="renameItem(row)">重命名</el-button>
           <el-button size="small" text type="danger" @click="deleteItem(row)">删除</el-button>
         </footer>
@@ -293,6 +295,19 @@ async function importOne(row) {
     await load()
   } catch (err) {
     ElMessage.error(readError(err, '导入失败'))
+  } finally {
+    importing.value = false
+  }
+}
+
+async function importDirectory(row) {
+  if (!row.isDir) return
+  importing.value = true
+  try {
+    await importPaths([row.path])
+    await load()
+  } catch (err) {
+    ElMessage.error(readError(err, '导入目录失败'))
   } finally {
     importing.value = false
   }
