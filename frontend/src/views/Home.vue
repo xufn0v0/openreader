@@ -21,10 +21,20 @@
       <b>{{ progressLabel(recentBook) }}</b>
     </button>
 
-    <div class="book-group-wrapper app-panel">
-      <el-tabs v-model="selectedGroup" stretch>
-        <el-tab-pane v-for="item in groupItems" :key="item.id" :label="`${item.name} ${item.count}`" :name="item.id" />
-      </el-tabs>
+    <div class="book-group-wrapper app-panel" role="tablist" aria-label="书架分组">
+      <button
+        v-for="item in groupItems"
+        :key="item.id"
+        class="group-chip"
+        :class="{ active: selectedGroup === item.id }"
+        type="button"
+        role="tab"
+        :aria-selected="selectedGroup === item.id"
+        @click="selectedGroup = item.id"
+      >
+        <span>{{ item.name }}</span>
+        <b>{{ item.count }}</b>
+      </button>
     </div>
 
     <main class="shelf-main">
@@ -372,27 +382,53 @@ function readError(err, fallback) {
 }
 
 .book-group-wrapper {
+  display: flex;
   min-width: 0;
-  padding: 0 10px;
-  overflow: hidden;
-}
-
-.book-group-wrapper :deep(.el-tabs__header) {
-  margin: 0;
-}
-
-.book-group-wrapper :deep(.el-tabs__item) {
-  height: 42px;
-  font-size: 14px;
-}
-
-.book-group-wrapper :deep(.el-tabs__nav-scroll) {
+  max-width: 100%;
+  gap: 8px;
+  padding: 8px 10px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.book-group-wrapper :deep(.el-tabs__nav) {
+.book-group-wrapper::-webkit-scrollbar {
+  display: none;
+}
+
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
+  max-width: 132px;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  color: var(--app-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.group-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-chip b {
+  color: var(--app-text-subtle);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.group-chip.active {
+  color: var(--app-primary-strong);
+  background: var(--app-primary-soft);
+  font-weight: 700;
 }
 
 .shelf-toolbar {
@@ -527,12 +563,7 @@ function readError(err, fallback) {
   }
 
   .book-group-wrapper {
-    padding: 0 6px;
-  }
-
-  .book-group-wrapper :deep(.el-tabs__item) {
-    height: 34px;
-    font-size: 12px;
+    padding: 6px;
   }
 
   .book-row {
@@ -607,19 +638,12 @@ function readError(err, fallback) {
     padding: 0 6px;
   }
 
-  .book-group-wrapper :deep(.el-tabs__nav-wrap),
-  .book-group-wrapper :deep(.el-tabs__nav-scroll) {
-    max-width: 100%;
-    min-width: 0;
-  }
-
-  .book-group-wrapper :deep(.el-tabs__item) {
-    min-width: 52px;
-    max-width: 96px;
+  .group-chip {
+    max-width: 94px;
+    height: 32px;
     padding: 0 8px;
+    gap: 4px;
     font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .shelf-title {
