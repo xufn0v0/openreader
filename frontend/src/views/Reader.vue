@@ -1484,7 +1484,7 @@ function scrollToTop() {
 
 function scrollToBottom() {
   if (reader.mode === 'flip' || reader.mode === 'page') { page.value = Math.max(0, pageCount.value - 1); return }
-  if (contentEl.value) contentEl.value.scrollTop = contentEl.value.scrollHeight
+  if (contentEl.value) contentEl.value.scrollTop = Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
 }
 
 // ---- Keyboard ----
@@ -1768,6 +1768,11 @@ function readError(err, fallback) {
   scroll-padding-bottom: 180px;
 }
 .reader-body { transition: transform 180ms ease; }
+.reader-shell.scroll .reader-body::after {
+  content: "";
+  display: block;
+  height: 120px;
+}
 .reader-content h1 {
   font-size: var(--reader-heading-size);
   line-height: 1.35;
