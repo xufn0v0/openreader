@@ -537,8 +537,8 @@ onBeforeUnmount(() => {
   }
 
   .app-workspace {
-    width: auto;
-    max-width: none;
+    width: calc(100vw - 78px);
+    max-width: calc(100vw - 78px);
     margin-left: 78px;
     padding-left: 0;
   }
@@ -638,8 +638,8 @@ onBeforeUnmount(() => {
   }
 
   .app-workspace {
-    width: auto;
-    max-width: none;
+    width: calc(100vw - 72px);
+    max-width: calc(100vw - 72px);
     margin-left: 72px;
   }
 
