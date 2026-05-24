@@ -44,10 +44,10 @@ export const useReaderStore = defineStore('reader', {
   },
   actions: {
     setMode(mode) {
-      this.mode = mode
+      this.mode = ['scroll', 'flip', 'page'].includes(mode) ? mode : 'scroll'
     },
     setFontFamily(fontFamily) {
-      this.fontFamily = fontFamily
+      this.fontFamily = ['system', 'serif', 'kai', 'mono'].includes(fontFamily) ? fontFamily : 'system'
     },
     setFontSize(fontSize) {
       this.fontSize = Math.max(8, Math.min(36, Number(fontSize) || 18))
@@ -89,13 +89,25 @@ export const useReaderStore = defineStore('reader', {
       this.columnWidth = Math.max(320, Math.min(1200, Number(columnWidth) || 670))
     },
     normalizeSettings() {
-      if ((this.settingsVersion || 0) >= 4) return
-      this.fontSize = 18
-      this.fontWeight = 400
-      this.lineHeight = 1.8
-      this.paragraphSpace = 0.2
-      this.columnWidth = 800
-      this.settingsVersion = 4
+      if (!['scroll', 'flip', 'page'].includes(this.mode)) this.mode = 'scroll'
+      if (!['system', 'serif', 'kai', 'mono'].includes(this.fontFamily)) this.fontFamily = 'system'
+      this.setFontSize(this.fontSize)
+      this.setFontWeight(this.fontWeight)
+      this.setLineHeight(this.lineHeight)
+      this.setParagraphSpace(this.paragraphSpace)
+      this.setColumnWidth(this.columnWidth)
+      this.setBrightness(this.brightness)
+      this.setAutoReadSpeed(this.autoReadSpeed)
+      this.setTTSRate(this.ttsRate)
+      this.setTTSPitch(this.ttsPitch)
+      if ((this.settingsVersion || 0) < 4) {
+        this.fontSize = 18
+        this.fontWeight = 400
+        this.lineHeight = 1.8
+        this.paragraphSpace = 0.2
+        this.columnWidth = 800
+      }
+      this.settingsVersion = 5
     },
     applyProgress(progress) {
       if (!progress?.bookId) return

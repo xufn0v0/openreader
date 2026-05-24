@@ -10,10 +10,13 @@ RUN apk add --no-cache build-base
 WORKDIR /src/backend
 ARG TARGETOS=linux
 ARG TARGETARCH
+ARG BUILD_DATE=unknown
+ARG VCS_REF=unknown
+ARG VERSION=dev
 COPY backend/go.mod backend/go.sum* ./
 RUN go mod download
 COPY backend/ ./
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -trimpath -ldflags="-s -w" -o /out/openreader .
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -trimpath -ldflags="-s -w -X openreader/backend/api.Version=${VERSION} -X openreader/backend/api.Commit=${VCS_REF} -X openreader/backend/api.BuildDate=${BUILD_DATE}" -o /out/openreader .
 
 FROM alpine:3.20
 ARG BUILD_DATE=unknown

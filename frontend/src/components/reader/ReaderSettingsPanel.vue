@@ -44,12 +44,12 @@
 
     <div class="setting-row">
       <label class="setting-label">亮度</label>
-      <el-slider v-model="reader.brightness" :min="50" :max="150" size="small" @input="reader.setBrightness" />
+      <el-slider v-model="brightnessModel" :min="50" :max="150" size="small" @input="setBrightness" @change="setBrightness" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">自动阅读速度 ({{ reader.autoReadSpeed }}px)</label>
-      <el-slider v-model="reader.autoReadSpeed" :min="2" :max="40" :step="1" size="small" @input="reader.setAutoReadSpeed($event)" />
+      <el-slider v-model="autoReadSpeedModel" :min="2" :max="40" :step="1" size="small" @input="setAutoReadSpeed" @change="setAutoReadSpeed" />
     </div>
 
     <div class="setting-row">
@@ -106,7 +106,7 @@
 
     <div class="setting-row">
       <label class="setting-label">阅读宽度 ({{ reader.columnWidth }}px)</label>
-      <el-slider v-model="reader.columnWidth" :min="560" :max="1080" :step="20" size="small" @input="reader.setColumnWidth($event)" />
+      <el-slider v-model="columnWidthModel" :min="560" :max="1080" :step="20" size="small" @input="setColumnWidth" @change="setColumnWidth" />
     </div>
 
     <div class="setting-row">
@@ -117,23 +117,23 @@
 
     <div class="setting-row">
       <label class="setting-label">朗读语速 ({{ reader.ttsRate }})</label>
-      <el-slider v-model="reader.ttsRate" :min="0.5" :max="3" :step="0.1" size="small" @input="$emit('ttsRateChange', $event)" />
+      <el-slider v-model="ttsRateModel" :min="0.5" :max="3" :step="0.1" size="small" @input="setTTSRate" @change="setTTSRate" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">朗读音调 ({{ reader.ttsPitch }})</label>
-      <el-slider v-model="reader.ttsPitch" :min="0.5" :max="2" :step="0.1" size="small" @input="$emit('ttsPitchChange', $event)" />
+      <el-slider v-model="ttsPitchModel" :min="0.5" :max="2" :step="0.1" size="small" @input="setTTSPitch" @change="setTTSPitch" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">朗读语音</label>
       <el-select
-        v-model="reader.ttsVoiceURI"
+        v-model="ttsVoiceModel"
         size="small"
         clearable
         :disabled="!tts.state.supported || !ttsVoices.length"
         placeholder="浏览器默认"
-        @change="$emit('ttsVoiceChange', $event)"
+        @change="setTTSVoice"
       >
         <el-option label="浏览器默认" value="" />
         <el-option
@@ -207,6 +207,36 @@ const paragraphSpaceModel = computed({
   set: value => props.reader.setParagraphSpace(value),
 })
 
+const brightnessModel = computed({
+  get: () => props.reader.brightness,
+  set: value => props.reader.setBrightness(value),
+})
+
+const autoReadSpeedModel = computed({
+  get: () => props.reader.autoReadSpeed,
+  set: value => props.reader.setAutoReadSpeed(value),
+})
+
+const columnWidthModel = computed({
+  get: () => props.reader.columnWidth,
+  set: value => props.reader.setColumnWidth(value),
+})
+
+const ttsRateModel = computed({
+  get: () => props.reader.ttsRate,
+  set: value => emit('ttsRateChange', value),
+})
+
+const ttsPitchModel = computed({
+  get: () => props.reader.ttsPitch,
+  set: value => emit('ttsPitchChange', value),
+})
+
+const ttsVoiceModel = computed({
+  get: () => props.reader.ttsVoiceURI,
+  set: value => emit('ttsVoiceChange', value),
+})
+
 function setFontFamily(value) {
   props.reader.setFontFamily(value)
 }
@@ -230,6 +260,30 @@ function setParagraphSpace(value) {
 
 function changeFontSize(delta) {
   props.reader.setFontSize(props.reader.fontSize + delta)
+}
+
+function setBrightness(value) {
+  props.reader.setBrightness(value)
+}
+
+function setAutoReadSpeed(value) {
+  props.reader.setAutoReadSpeed(value)
+}
+
+function setColumnWidth(value) {
+  props.reader.setColumnWidth(value)
+}
+
+function setTTSRate(value) {
+  emit('ttsRateChange', value)
+}
+
+function setTTSPitch(value) {
+  emit('ttsPitchChange', value)
+}
+
+function setTTSVoice(value) {
+  emit('ttsVoiceChange', value)
 }
 </script>
 

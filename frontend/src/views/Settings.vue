@@ -35,6 +35,10 @@
             <el-tag :type="syncConnected ? 'success' : 'info'" effect="plain">
               {{ syncConnected ? '同步在线' : '等待连接' }}
             </el-tag>
+            <dl v-if="healthInfo" class="info-list service-info">
+              <div><dt>构建时间</dt><dd>{{ healthInfo.buildDate || '-' }}</dd></div>
+              <div><dt>提交版本</dt><dd>{{ shortCommit(healthInfo.commit) }}</dd></div>
+            </dl>
           </article>
         </section>
       </el-tab-pane>
@@ -204,7 +208,7 @@
             <div class="reader-setting-list">
               <label>
                 <span>阅读模式</span>
-                <el-radio-group v-model="readerStore.mode" size="small" @change="readerStore.setMode($event)">
+                <el-radio-group v-model="readerModeModel" size="small" @change="readerStore.setMode($event)">
                   <el-radio-button value="scroll">滚动</el-radio-button>
                   <el-radio-button value="flip">左右翻页</el-radio-button>
                   <el-radio-button value="page">上下分页</el-radio-button>
@@ -212,45 +216,45 @@
               </label>
               <label>
                 <span>字体</span>
-                <el-select v-model="readerStore.fontFamily" size="small" @change="readerStore.setFontFamily($event)">
+                <el-select v-model="readerFontFamilyModel" size="small" @change="readerStore.setFontFamily($event)">
                   <el-option v-for="font in fontOptions" :key="font.value" :label="font.label" :value="font.value" />
                 </el-select>
               </label>
               <label>
                 <span>亮度 {{ readerStore.brightness }}%</span>
-                <el-slider v-model="readerStore.brightness" :min="50" :max="150" @input="readerStore.setBrightness($event)" />
+                <el-slider v-model="readerBrightnessModel" :min="50" :max="150" @input="readerStore.setBrightness($event)" @change="readerStore.setBrightness($event)" />
               </label>
               <label>
                 <span>自动阅读速度 {{ readerStore.autoReadSpeed }}px</span>
-                <el-slider v-model="readerStore.autoReadSpeed" :min="2" :max="40" :step="1" @input="readerStore.setAutoReadSpeed($event)" />
+                <el-slider v-model="readerAutoReadSpeedModel" :min="2" :max="40" :step="1" @input="readerStore.setAutoReadSpeed($event)" @change="readerStore.setAutoReadSpeed($event)" />
               </label>
               <label>
                 <span>字号 {{ readerStore.fontSize }}px</span>
-                <el-slider v-model="readerStore.fontSize" :min="8" :max="36" @input="readerStore.setFontSize($event)" />
+                <el-slider v-model="readerFontSizeModel" :min="8" :max="36" @input="readerStore.setFontSize($event)" @change="readerStore.setFontSize($event)" />
               </label>
               <label>
                 <span>字重 {{ readerStore.fontWeight }}</span>
-                <el-slider v-model="readerStore.fontWeight" :min="300" :max="900" :step="100" @input="readerStore.setFontWeight($event)" />
+                <el-slider v-model="readerFontWeightModel" :min="300" :max="900" :step="100" @input="readerStore.setFontWeight($event)" @change="readerStore.setFontWeight($event)" />
               </label>
               <label>
                 <span>行高 {{ readerStore.lineHeight }}</span>
-                <el-slider v-model="readerStore.lineHeight" :min="1" :max="5" :step="0.2" @input="readerStore.setLineHeight($event)" />
+                <el-slider v-model="readerLineHeightModel" :min="1" :max="5" :step="0.2" @input="readerStore.setLineHeight($event)" @change="readerStore.setLineHeight($event)" />
               </label>
               <label>
                 <span>段落间距 {{ readerStore.paragraphSpace }}em</span>
-                <el-slider v-model="readerStore.paragraphSpace" :min="0" :max="3" :step="0.1" @input="readerStore.setParagraphSpace($event)" />
+                <el-slider v-model="readerParagraphSpaceModel" :min="0" :max="3" :step="0.1" @input="readerStore.setParagraphSpace($event)" @change="readerStore.setParagraphSpace($event)" />
               </label>
               <label>
                 <span>阅读宽度 {{ readerStore.columnWidth }}px</span>
-                <el-slider v-model="readerStore.columnWidth" :min="560" :max="1080" :step="20" @input="readerStore.setColumnWidth($event)" />
+                <el-slider v-model="readerColumnWidthModel" :min="560" :max="1080" :step="20" @input="readerStore.setColumnWidth($event)" @change="readerStore.setColumnWidth($event)" />
               </label>
               <label>
                 <span>朗读语速 {{ readerStore.ttsRate }}</span>
-                <el-slider v-model="readerStore.ttsRate" :min="0.5" :max="3" :step="0.1" @input="readerStore.setTTSRate($event)" />
+                <el-slider v-model="readerTTSRateModel" :min="0.5" :max="3" :step="0.1" @input="readerStore.setTTSRate($event)" @change="readerStore.setTTSRate($event)" />
               </label>
               <label>
                 <span>朗读音调 {{ readerStore.ttsPitch }}</span>
-                <el-slider v-model="readerStore.ttsPitch" :min="0.5" :max="2" :step="0.1" @input="readerStore.setTTSPitch($event)" />
+                <el-slider v-model="readerTTSPitchModel" :min="0.5" :max="2" :step="0.1" @input="readerStore.setTTSPitch($event)" @change="readerStore.setTTSPitch($event)" />
               </label>
             </div>
           </article>
@@ -582,15 +586,61 @@ const rssDraft = ref({ title: '', url: '', enabled: true })
 const rssArticleDialog = ref(false)
 const selectedRSSArticle = ref(null)
 const rssArticleFilter = ref('all')
+const healthInfo = ref(null)
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 
 const fontOptions = [
-  { label: '系统默认', value: 'system' },
+  { label: '系统黑体', value: 'system' },
   { label: '宋体', value: 'serif' },
-  { label: '黑体', value: 'sans-serif' },
-  { label: '等宽', value: 'monospace' },
+  { label: '楷体', value: 'kai' },
+  { label: '仿宋', value: 'mono' },
 ]
+
+const readerModeModel = computed({
+  get: () => readerStore.mode,
+  set: value => readerStore.setMode(value),
+})
+const readerFontFamilyModel = computed({
+  get: () => readerStore.fontFamily,
+  set: value => readerStore.setFontFamily(value),
+})
+const readerBrightnessModel = computed({
+  get: () => readerStore.brightness,
+  set: value => readerStore.setBrightness(value),
+})
+const readerAutoReadSpeedModel = computed({
+  get: () => readerStore.autoReadSpeed,
+  set: value => readerStore.setAutoReadSpeed(value),
+})
+const readerFontSizeModel = computed({
+  get: () => readerStore.fontSize,
+  set: value => readerStore.setFontSize(value),
+})
+const readerFontWeightModel = computed({
+  get: () => readerStore.fontWeight,
+  set: value => readerStore.setFontWeight(value),
+})
+const readerLineHeightModel = computed({
+  get: () => readerStore.lineHeight,
+  set: value => readerStore.setLineHeight(value),
+})
+const readerParagraphSpaceModel = computed({
+  get: () => readerStore.paragraphSpace,
+  set: value => readerStore.setParagraphSpace(value),
+})
+const readerColumnWidthModel = computed({
+  get: () => readerStore.columnWidth,
+  set: value => readerStore.setColumnWidth(value),
+})
+const readerTTSRateModel = computed({
+  get: () => readerStore.ttsRate,
+  set: value => readerStore.setTTSRate(value),
+})
+const readerTTSPitchModel = computed({
+  get: () => readerStore.ttsPitch,
+  set: value => readerStore.setTTSPitch(value),
+})
 
 const webdavBreadcrumbs = computed(() => {
   if (!webdavPath.value) return []
@@ -601,6 +651,7 @@ const webdavImportSelection = computed(() => webdavSelection.value.filter(row =>
 const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
 
 onMounted(() => {
+  readerStore.normalizeSettings()
   window.addEventListener('resize', updateWindowWidth, { passive: true })
   loadBackups()
   loadWebDAV()
@@ -629,13 +680,20 @@ watch(
 async function checkHealth() {
   checking.value = true
   try {
-    await api.get('/health')
-    ElMessage.success('服务连接正常')
+    const { data } = await api.get('/health')
+    healthInfo.value = data
+    const buildText = data.buildDate && data.buildDate !== 'unknown' ? `，构建 ${data.buildDate}` : ''
+    ElMessage.success(`服务连接正常${buildText}`)
   } catch (err) {
     ElMessage.error(readError(err, '服务检查失败'))
   } finally {
     checking.value = false
   }
+}
+
+function shortCommit(value) {
+  if (!value || value === 'unknown') return '-'
+  return String(value).slice(0, 12)
 }
 
 async function runBackup() {
@@ -1296,7 +1354,16 @@ function readError(err, fallback) {
 }
 
 .info-list dd {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-info {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .backup-table {

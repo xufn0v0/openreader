@@ -81,6 +81,24 @@ func authHeader(t *testing.T, router *gin.Engine) string {
 	return "Bearer " + resp.Token
 }
 
+func TestHealthIncludesBuildInfo(t *testing.T) {
+	router, _ := setupTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("health: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["app"] != "openreader" || resp["buildDate"] == "" || resp["commit"] == "" {
+		t.Fatalf("health missing build info: %+v", resp)
+	}
+}
+
 func TestRegisterAndLogin(t *testing.T) {
 	router, _ := setupTestServer(t)
 
