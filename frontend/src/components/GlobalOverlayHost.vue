@@ -34,7 +34,7 @@
       <el-button plain @click="openContentSearch(overlay.bookInfoBook)">搜正文</el-button>
       <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
       <el-button plain @click="setBookGroup(overlay.bookInfoBook)">设置分组</el-button>
-      <el-button plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
+      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存后续20章</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>

@@ -9,7 +9,7 @@
         <el-icon :size="18"><Notebook /></el-icon>
         <span>书架</span>
       </button>
-      <button class="rail-item" type="button" title="书源" @click="goSourcePanel">
+      <button class="rail-item" type="button" :disabled="!isRemoteBook" :title="isRemoteBook ? '书源' : '本地书无可切换书源'" @click="goSourcePanel">
         <el-icon :size="18"><Grid /></el-icon>
         <span>书源</span>
       </button>
@@ -44,7 +44,7 @@
       <button class="round-tool" type="button" title="添加笔记" @click="openNoteDialog">
         <el-icon :size="18"><EditPen /></el-icon>
       </button>
-      <button class="round-tool" type="button" title="缓存本章" @click="cacheCurrentChapter">
+      <button class="round-tool" type="button" :disabled="!isRemoteBook" :title="isRemoteBook ? '缓存本章' : '本地书无需服务器缓存'" @click="cacheCurrentChapter">
         <el-icon :size="18"><Download /></el-icon>
       </button>
       <button class="round-tool" type="button" title="重新载入章节" @click="reloadChapter">
@@ -248,7 +248,7 @@
           <el-icon :size="22"><Notebook /></el-icon>
           <span>书架</span>
         </button>
-        <button type="button" class="mobile-more-item" @click="runMobileAction(goSourcePanel)">
+        <button v-if="isRemoteBook" type="button" class="mobile-more-item" @click="runMobileAction(goSourcePanel)">
           <el-icon :size="22"><Grid /></el-icon>
           <span>书源</span>
         </button>
@@ -260,7 +260,7 @@
           <el-icon :size="22"><EditPen /></el-icon>
           <span>笔记</span>
         </button>
-        <button type="button" class="mobile-more-item" @click="runMobileAction(cacheCurrentChapter)">
+        <button v-if="isRemoteBook" type="button" class="mobile-more-item" @click="runMobileAction(cacheCurrentChapter)">
           <el-icon :size="22"><Download /></el-icon>
           <span>缓存</span>
         </button>
@@ -466,6 +466,7 @@ const currentSourceName = computed(() => {
   if (!book.value?.sourceId) return '本地书籍'
   return sourceGroupOptions.value.find(source => Number(source.id) === Number(book.value.sourceId))?.name || '当前来源'
 })
+const isRemoteBook = computed(() => Number(book.value?.sourceId || 0) > 0)
 
 const lines = computed(() => content.value.split('\n').map(l => l.trim()).filter(Boolean))
 
@@ -774,20 +775,22 @@ async function refreshReaderShelf() {
 
 function openReaderBookInfo() {
   if (!book.value) return
+  const hasRemoteSource = isRemoteBook.value
+  const actions = [
+    { label: '目录', plain: true, handler: openInfoToc },
+    { label: '书签', plain: true, handler: openInfoBookmarks },
+    { label: '搜正文', plain: true, handler: openInfoSearch },
+    hasRemoteSource ? { label: '书源', plain: true, handler: openInfoSources } : null,
+    { label: '分组', plain: true, handler: openInfoGroup },
+    hasRemoteSource ? { label: '刷新目录', plain: true, handler: refreshReaderBookCatalog } : null,
+    { label: '设置', plain: true, handler: openInfoSettings },
+    { label: '完整详情', type: 'primary', handler: () => { overlay.closeBookInfo(); goBookDetail() } },
+  ].filter(Boolean)
   overlay.openBookInfo(book.value, {
     statusLabel: `阅读中 · ${bookProgressLabel.value}`,
     statusType: 'success',
     progress: bookProgress.value,
-    actions: [
-      { label: '目录', plain: true, handler: openInfoToc },
-      { label: '书签', plain: true, handler: openInfoBookmarks },
-      { label: '搜正文', plain: true, handler: openInfoSearch },
-      { label: '书源', plain: true, handler: openInfoSources },
-      { label: '分组', plain: true, handler: openInfoGroup },
-      { label: '刷新目录', plain: true, handler: refreshReaderBookCatalog },
-      { label: '设置', plain: true, handler: openInfoSettings },
-      { label: '完整详情', type: 'primary', handler: () => { overlay.closeBookInfo(); goBookDetail() } },
-    ],
+    actions,
   })
 }
 
@@ -812,6 +815,7 @@ function openInfoSearch() {
 }
 
 function openInfoSources() {
+  if (!isRemoteBook.value) return
   closeInfoAndMobileChrome()
   showSourceDrawer.value = true
 }
@@ -845,7 +849,7 @@ function categoryName(id) {
 }
 
 async function refreshReaderBookCatalog() {
-  if (!book.value?.id) return
+  if (!book.value?.id || Number(book.value.sourceId || 0) <= 0) return
   try {
     const { data } = await refreshBook(book.value.id)
     const updated = data?.book || data
@@ -863,6 +867,7 @@ async function refreshReaderBookCatalog() {
 }
 
 function goSourcePanel() {
+  if (!isRemoteBook.value) return
   showSourceDrawer.value = true
 }
 
@@ -1050,6 +1055,7 @@ async function reloadChapter() {
 }
 
 async function cacheCurrentChapter() {
+  if (!isRemoteBook.value) return
   try {
     const { data } = await cacheBookContent(bookId.value, { chapterIndex: currentIndex.value })
     await loadChapters()
@@ -1680,6 +1686,11 @@ function readError(err, fallback) {
 .rail-item:hover {
   color: #1e1f22;
   background: rgba(255, 253, 240, 0.78);
+}
+
+.rail-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .rail-home {
