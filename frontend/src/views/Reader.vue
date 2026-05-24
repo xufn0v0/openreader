@@ -2101,21 +2101,26 @@ function readError(err, fallback) {
   .reader-shell {
     --reader-frame-width: 100vw;
     --reader-content-width: calc(100vw - 44px);
+    min-height: 100dvh;
     overflow: hidden;
     padding: 0;
   }
-  .reader-page { border: 0; width: 100vw; }
+  .reader-page {
+    height: 100dvh;
+    border: 0;
+    width: 100vw;
+  }
   .reader-page-head { display: none; }
   .reader-content {
     box-sizing: border-box;
     width: 100vw;
     font-size: var(--reader-font-size);
-    padding: 42px 22px calc(86px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(86px + env(safe-area-inset-bottom));
+    padding: 42px 22px calc(116px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(116px + env(safe-area-inset-bottom));
   }
   .reader-shell.mobile-chrome-visible .reader-content {
-    padding-bottom: calc(182px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(182px + env(safe-area-inset-bottom));
+    padding-bottom: calc(212px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(212px + env(safe-area-inset-bottom));
   }
   .reader-content h1 { font-size: var(--reader-heading-size); margin-bottom: 28px; }
   .reader-left-rail,
@@ -2167,18 +2172,19 @@ function readError(err, fallback) {
   }
   .reader-mobile-bottom {
     position: fixed;
-    right: 0;
-    bottom: 0;
-    left: 0;
+    right: 10px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+    left: 10px;
     z-index: 8;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     align-items: center;
     gap: 7px 4px;
-    min-height: calc(74px + env(safe-area-inset-bottom));
-    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+    min-height: 74px;
+    padding: 8px 10px;
     background: rgba(255, 252, 239, 0.92);
     border-top: 1px solid rgba(148, 132, 87, 0.35);
+    border-radius: 10px;
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
     transition: transform 180ms ease;
   }
@@ -2196,7 +2202,7 @@ function readError(err, fallback) {
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
   }
   .reader-shell.mobile-chrome-visible .reader-mobile-top,
-  .reader-shell.mobile-chrome-visible .reader-mobile-top {
+  .reader-shell.mobile-chrome-visible .reader-mobile-bottom {
     transform: translateY(0);
   }
   .mobile-chapter-step {
