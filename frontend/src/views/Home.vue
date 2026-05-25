@@ -1,5 +1,5 @@
 <template>
-  <section class="app-page shelf-page">
+  <section class="app-page shelf-page" :class="{ 'mobile-shelf': isMobileShelf }">
     <button v-if="recentBook" class="recent-strip app-panel" type="button" @click="continueRead(recentBook)">
       <span>
         <small>上次阅读</small>
@@ -97,7 +97,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
@@ -116,6 +116,9 @@ const keyword = ref('')
 const selectedGroup = ref('')
 const showBookEditButton = ref(false)
 const refreshLoading = ref(false)
+const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const coarsePointer = ref(false)
+const touchDevice = ref(false)
 
 const groupItems = computed(() => {
   const countByCategory = new Map()
@@ -153,6 +156,7 @@ const displayedBooks = computed(() => {
 })
 
 const recentBook = computed(() => sortedBooks.value[0] || null)
+const isMobileShelf = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
 
 const emptyText = computed(() => {
   if (keyword.value.trim()) return '没有匹配的书籍'
@@ -161,11 +165,19 @@ const emptyText = computed(() => {
 })
 
 onMounted(async () => {
+  updateViewportFlags()
+  window.addEventListener('resize', updateViewportFlags)
+  window.addEventListener('orientationchange', updateViewportFlags)
   try {
     await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks()])
   } catch (err) {
     ElMessage.error(readError(err, '加载书架失败'))
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportFlags)
+  window.removeEventListener('orientationchange', updateViewportFlags)
 })
 
 watch(
@@ -258,6 +270,17 @@ function coverStyle(book) {
   ]
   const [fg, bg] = palettes[Number(book.id || 1) % palettes.length]
   return { color: fg, background: bg }
+}
+
+function updateViewportFlags() {
+  windowWidth.value = window.innerWidth
+  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  touchDevice.value = Number(navigator.maxTouchPoints || 0) > 0
+}
+
+function isMobileUA() {
+  if (typeof navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod|Mobile|Tablet|Mobi/i.test(navigator.userAgent || '')
 }
 
 function readError(err, fallback) {
@@ -505,6 +528,122 @@ function readError(err, fallback) {
 
 .skeleton-row {
   grid-template-columns: 1fr;
+}
+
+.shelf-page.mobile-shelf {
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 0 18px;
+  overflow-x: hidden;
+}
+
+.shelf-page.mobile-shelf .shelf-main {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.shelf-page.mobile-shelf .shelf-title,
+.shelf-page.mobile-shelf .shelf-toolbar,
+.shelf-page.mobile-shelf .recent-strip,
+.shelf-page.mobile-shelf .book-group-wrapper,
+.shelf-page.mobile-shelf .book-list,
+.shelf-page.mobile-shelf .empty-panel {
+  max-width: 100%;
+  border-radius: 0;
+  border-right: 0;
+  border-left: 0;
+  box-shadow: none;
+}
+
+.shelf-page.mobile-shelf .shelf-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.shelf-page.mobile-shelf .shelf-toolbar {
+  padding: 6px 8px;
+}
+
+.shelf-page.mobile-shelf .recent-strip {
+  padding: 8px 10px;
+}
+
+.shelf-page.mobile-shelf .recent-strip strong {
+  font-size: 13px;
+}
+
+.shelf-page.mobile-shelf .recent-strip b {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+  font-size: 12px;
+}
+
+.shelf-page.mobile-shelf .book-group-wrapper {
+  padding: 6px;
+}
+
+.shelf-page.mobile-shelf .book-row {
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 8px;
+  contain: layout paint;
+}
+
+.shelf-page.mobile-shelf .list-cover {
+  width: 40px;
+  height: 54px;
+}
+
+.shelf-page.mobile-shelf .book-operation {
+  position: static;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+
+.shelf-page.mobile-shelf .read-button {
+  display: none;
+}
+
+.shelf-page.mobile-shelf .mobile-row-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(28px, auto) minmax(28px, auto);
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  color: var(--app-primary-strong);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.shelf-page.mobile-shelf .mobile-row-actions span,
+.shelf-page.mobile-shelf .mobile-row-actions button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-page.mobile-shelf .mobile-row-actions button {
+  max-width: 44px;
+  padding: 0;
+  color: var(--app-text-subtle);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 12px;
 }
 
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {

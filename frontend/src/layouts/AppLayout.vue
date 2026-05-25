@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'mobile-shell': isMobileShell }">
     <div v-if="offline" class="app-offline">网络已断开，部分同步能力会在恢复连接后继续。</div>
 
     <aside class="app-sidebar">
@@ -128,6 +128,9 @@ const bookshelf = useBookshelfStore()
 const reader = useReaderStore()
 const quickSearch = ref('')
 const offline = ref(false)
+const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const coarsePointer = ref(false)
+const touchDevice = ref(false)
 const { connected: syncConnected, connect, disconnect } = useSync()
 
 const navSections = computed(() => [
@@ -187,6 +190,7 @@ const navSections = computed(() => [
 ])
 
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
+const isMobileShell = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
 const recentBook = computed(() => {
   const rows = [...(Array.isArray(bookshelf.books) ? bookshelf.books : [])]
   rows.sort((a, b) => compareRecentBook(a, b, reader.progressByBook))
@@ -256,6 +260,17 @@ function setOnline() {
   offline.value = false
 }
 
+function updateViewportFlags() {
+  windowWidth.value = window.innerWidth
+  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  touchDevice.value = Number(navigator.maxTouchPoints || 0) > 0
+}
+
+function isMobileUA() {
+  if (typeof navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod|Mobile|Tablet|Mobi/i.test(navigator.userAgent || '')
+}
+
 watch(
   () => userStore.token,
   (token) => {
@@ -269,8 +284,11 @@ watch(
 )
 
 onMounted(() => {
+  updateViewportFlags()
   window.addEventListener('offline', setOffline)
   window.addEventListener('online', setOnline)
+  window.addEventListener('resize', updateViewportFlags)
+  window.addEventListener('orientationchange', updateViewportFlags)
   offline.value = !navigator.onLine
   if (userStore.token && !userStore.profile) {
     userStore.loadMe().catch(() => {})
@@ -283,6 +301,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('offline', setOffline)
   window.removeEventListener('online', setOnline)
+  window.removeEventListener('resize', updateViewportFlags)
+  window.removeEventListener('orientationchange', updateViewportFlags)
 })
 </script>
 
@@ -528,6 +548,111 @@ onBeforeUnmount(() => {
   overflow-x: hidden;
 }
 
+.app-shell.mobile-shell .app-sidebar {
+  --mobile-sidebar-width: 78px;
+  width: var(--mobile-sidebar-width);
+  overflow-y: auto;
+  padding: 8px 6px;
+  scrollbar-width: none;
+}
+
+.app-shell.mobile-shell .app-workspace {
+  width: calc(100vw - var(--mobile-sidebar-width));
+  width: calc(100dvw - var(--mobile-sidebar-width));
+  max-width: calc(100vw - var(--mobile-sidebar-width));
+  max-width: calc(100dvw - var(--mobile-sidebar-width));
+  margin-left: var(--mobile-sidebar-width);
+  padding-left: 0;
+}
+
+.app-shell.mobile-shell .app-content {
+  min-height: 100vh;
+}
+
+.app-shell.mobile-shell .app-brand {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 8px 0 14px;
+}
+
+.app-shell.mobile-shell .app-brand > div:last-child,
+.app-shell.mobile-shell .app-shell-search,
+.app-shell.mobile-shell .app-sidebar-footer {
+  display: none;
+}
+
+.app-shell.mobile-shell .app-brand-mark {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+  border-radius: 4px;
+}
+
+.app-shell.mobile-shell .app-nav {
+  gap: 0;
+  overflow-y: visible;
+  padding: 0 0 12px;
+}
+
+.app-shell.mobile-shell .app-nav-section {
+  gap: 0;
+}
+
+.app-shell.mobile-shell .app-nav-title {
+  margin: 9px 0 3px;
+  overflow: hidden;
+  color: #a09282;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.app-shell.mobile-shell .app-nav-item {
+  display: grid;
+  height: 60px;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  padding: 0;
+  border-radius: 0;
+}
+
+.app-shell.mobile-shell .app-nav-item span {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.app-shell.mobile-shell .app-nav-item + .app-nav-item {
+  border-top: 1px solid #e4d9c8;
+}
+
+.app-shell.mobile-shell .sidebar-recent {
+  margin: 0 0 8px;
+}
+
+.app-shell.mobile-shell .sidebar-recent .app-nav-title,
+.app-shell.mobile-shell .sidebar-recent-book small {
+  display: none;
+}
+
+.app-shell.mobile-shell .sidebar-recent-book {
+  min-height: 58px;
+  padding: 5px;
+  place-items: center;
+  text-align: center;
+}
+
+.app-shell.mobile-shell .sidebar-recent-book span {
+  display: -webkit-box;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
   .app-sidebar {
     --mobile-sidebar-width: 78px;
@@ -636,11 +761,13 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 420px), (hover: none) and (pointer: coarse) and (max-width: 520px) {
+  .app-shell.mobile-shell .app-sidebar,
   .app-sidebar {
     --mobile-sidebar-width: 72px;
     width: var(--mobile-sidebar-width);
   }
 
+  .app-shell.mobile-shell .app-workspace,
   .app-workspace {
     width: calc(100vw - var(--mobile-sidebar-width));
     width: calc(100dvw - var(--mobile-sidebar-width));
@@ -649,10 +776,12 @@ onBeforeUnmount(() => {
     margin-left: var(--mobile-sidebar-width);
   }
 
+  .app-shell.mobile-shell .app-nav-item,
   .app-nav-item {
     height: 58px;
   }
 
+  .app-shell.mobile-shell .app-nav-item span,
   .app-nav-item span {
     font-size: 11px;
   }
