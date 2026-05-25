@@ -1469,6 +1469,67 @@ func TestSearchBookContentUsesCachedChapter(t *testing.T) {
 	}
 }
 
+func TestChapterContentRecoversMovedLocalBookCache(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	book := models.Book{
+		UserID:      user.ID,
+		SourceID:    0,
+		Title:       "迁移本地书",
+		LibraryPath: filepath.Join("data", "testuser", "moved-book"),
+	}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	contentPath := filepath.Join("aa", "chapter.txt")
+	currentPath := filepath.Join(server.cfg.LibraryDir, book.LibraryPath, "content", contentPath)
+	if err := os.MkdirAll(filepath.Dir(currentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(currentPath, []byte("迁移后的本地正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldContainerPath := filepath.Join(string(os.PathSeparator), "old-openreader", "library", book.LibraryPath, "content", contentPath)
+	chapter := models.Chapter{BookID: book.ID, Index: 0, Title: "第一章", CachePath: oldContainerPath}
+	if err := server.db.Create(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("chapter content: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "迁移后的本地正文" {
+		t.Fatalf("unexpected content %q", resp.Content)
+	}
+
+	var updated models.Chapter
+	if err := server.db.First(&updated, chapter.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.CachePath != currentPath {
+		t.Fatalf("expected cache path self-healed to %q, got %q", currentPath, updated.CachePath)
+	}
+}
+
 func TestSearchBookContentPaged(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

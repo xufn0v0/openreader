@@ -107,7 +107,7 @@ func (importer Importer) Import(request ImportRequest) (models.Book, error) {
 			if err != nil {
 				return err
 			}
-			cachePath := filepath.Join(contentDir, contentPath)
+			cachePath := filepath.Join("content", contentPath)
 
 			chapter := models.Chapter{
 				BookID:    book.ID,

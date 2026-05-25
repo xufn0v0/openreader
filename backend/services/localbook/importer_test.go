@@ -61,4 +61,15 @@ func TestImporterArchivesLocalBookByUserNamespace(t *testing.T) {
 	if chapterCount != 2 {
 		t.Fatalf("chapter count = %d, want 2", chapterCount)
 	}
+
+	var chapter models.Chapter
+	if err := database.Where("book_id = ?", book.ID).Order("`index` asc").First(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if filepath.IsAbs(chapter.CachePath) {
+		t.Fatalf("chapter cache path should be portable, got absolute path %q", chapter.CachePath)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.LibraryDir, book.LibraryPath, chapter.CachePath)); err != nil {
+		t.Fatalf("chapter content was not created at portable path %q: %v", chapter.CachePath, err)
+	}
 }

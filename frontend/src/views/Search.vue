@@ -3,19 +3,26 @@
     <header class="search-head">
       <div>
         <p class="eyebrow">Search</p>
-        <h1 class="app-page-title">搜索书籍</h1>
-        <p class="app-page-subtitle">按上游阅读器的逻辑，选择书源范围后并发搜索并加入书架。</p>
+        <h1 class="app-page-title">{{ searchMode === 'local' ? '搜索本地书籍' : '搜索书源书籍' }}</h1>
+        <p class="app-page-subtitle">{{ searchMode === 'local' ? '搜索服务端 localStore 里的本地书文件，和远程书源搜索分开处理。' : '按上游阅读器的逻辑，选择书源范围后并发搜索并加入书架。' }}</p>
       </div>
-      <el-button :icon="Connection" @click="router.push({ name: 'sources' })">书源管理</el-button>
+      <el-button :icon="searchMode === 'local' ? FolderOpened : Connection" @click="searchMode === 'local' ? router.push({ name: 'local-store' }) : router.push({ name: 'sources' })">
+        {{ searchMode === 'local' ? '本地书仓' : '书源管理' }}
+      </el-button>
     </header>
 
     <section class="search-console app-panel">
-      <el-input v-model="keyword" placeholder="输入书名或作者" size="large" clearable @keyup.enter="doSearch">
+      <el-radio-group v-model="searchMode" size="large" class="mode-switch" @change="switchSearchMode">
+        <el-radio-button value="remote">书源搜索</el-radio-button>
+        <el-radio-button value="local">本地书籍</el-radio-button>
+      </el-radio-group>
+
+      <el-input v-model="keyword" :placeholder="searchMode === 'local' ? '输入本地文件名或路径，留空显示全部可导入文件' : '输入书名或作者'" size="large" clearable @keyup.enter="doSearch">
         <template #prefix><el-icon><SearchIcon /></el-icon></template>
       </el-input>
       <el-button type="primary" size="large" :loading="searching" @click="doSearch">搜索</el-button>
 
-      <div class="search-options">
+      <div v-if="searchMode === 'remote'" class="search-options">
         <el-radio-group v-model="searchType" size="small" @change="syncSelection">
           <el-radio-button value="all">全部书源</el-radio-button>
           <el-radio-button value="group">按分组</el-radio-button>
@@ -37,7 +44,21 @@
         </el-select>
       </div>
 
-      <el-collapse v-if="searchType === 'custom'" class="source-collapse">
+      <div v-else class="search-options local-search-options">
+        <el-select v-model="targetCategoryId" placeholder="导入到书架分组（可选）" clearable size="small">
+          <el-option label="未分组" value="" />
+          <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
+        </el-select>
+        <el-switch v-model="localRecursiveScan" inline-prompt active-text="子目录" inactive-text="当前层" />
+        <el-button size="small" :disabled="!checkedLocalPaths.length || importingLocal" :loading="importingLocal" @click="importSelectedLocal">
+          导入选中 {{ checkedLocalPaths.length }}
+        </el-button>
+        <el-button size="small" :disabled="!shownLocalImportablePaths.length || importingLocal" :loading="importingLocal" @click="importShownLocal">
+          导入命中 {{ shownLocalImportablePaths.length }}
+        </el-button>
+      </div>
+
+      <el-collapse v-if="searchMode === 'remote' && searchType === 'custom'" class="source-collapse">
         <el-collapse-item :title="`自选书源（${selectedIds.length}/${enabledSources.length}）`">
           <el-checkbox :model-value="allSelected" @change="toggleAll">全选</el-checkbox>
           <el-checkbox-group v-model="selectedIds" class="source-checks">
@@ -47,14 +68,20 @@
       </el-collapse>
     </section>
 
-    <section class="search-status">
+    <section v-if="searchMode === 'remote'" class="search-status">
       <el-tag effect="plain">启用书源 {{ enabledSources.length }}</el-tag>
       <el-tag effect="plain">本次搜索 {{ selectedIds.length }}</el-tag>
       <el-tag v-if="searched" :type="results.length ? 'success' : 'info'" effect="plain">结果 {{ results.length }}</el-tag>
     </section>
+    <section v-else class="search-status">
+      <el-tag effect="plain">本地书仓 {{ localItems.length }}</el-tag>
+      <el-tag effect="plain">可导入 {{ localImportableCount }}</el-tag>
+      <el-tag effect="plain">已选 {{ checkedLocalPaths.length }}</el-tag>
+      <el-tag v-if="searched" :type="shownLocalResults.length ? 'success' : 'info'" effect="plain">命中 {{ shownLocalResults.length }}</el-tag>
+    </section>
 
     <div v-loading="searching" class="result-area">
-      <div v-if="groupedResults.length" class="source-result-list">
+      <div v-if="searchMode === 'remote' && groupedResults.length" class="source-result-list">
         <section v-for="group in groupedResults" :key="group.sourceId" class="source-result-group">
           <header class="source-result-head">
             <h2>{{ group.sourceName }}</h2>
@@ -80,8 +107,31 @@
         </section>
       </div>
 
-      <el-empty v-else-if="searched && !searching" description="没有找到相关书籍" />
-      <el-empty v-else description="输入关键词后开始搜索" />
+      <div v-else-if="searchMode === 'local' && shownLocalResults.length" class="local-result-list">
+        <article
+          v-for="item in shownLocalResults"
+          :key="item.path"
+          class="local-result-card app-panel"
+          :class="{ selected: checkedLocalPaths.includes(item.path) }"
+        >
+          <el-checkbox :model-value="checkedLocalPaths.includes(item.path)" @change="value => toggleLocalPath(item.path, value)" />
+          <el-icon class="local-file-icon"><Document /></el-icon>
+          <div class="result-main">
+            <div class="result-title">
+              <h3>{{ localBookTitle(item) }}</h3>
+              <el-tag size="small" effect="plain">{{ item.extension || '文件' }}</el-tag>
+            </div>
+            <p>{{ item.path }}</p>
+            <p class="latest-chapter">大小：{{ formatSize(item.size) }}</p>
+          </div>
+          <div class="result-actions" @click.stop>
+            <el-button type="primary" size="small" :loading="importingLocal" @click="importLocalOne(item)">导入书架</el-button>
+          </div>
+        </article>
+      </div>
+
+      <el-empty v-else-if="searched && !searching" :description="searchMode === 'local' ? '没有找到本地书籍文件' : '没有找到相关书籍'" />
+      <el-empty v-else :description="searchMode === 'local' ? '输入关键词搜索本地书仓，或直接搜索显示全部可导入文件' : '输入关键词后开始搜索书源'" />
     </div>
 
   </section>
@@ -91,8 +141,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Connection, Search as SearchIcon } from '@element-plus/icons-vue'
+import { Connection, Document, FolderOpened, Search as SearchIcon } from '@element-plus/icons-vue'
 import { createRemoteBook } from '../api/books'
+import { importFromLocalStore, listLocalStore } from '../api/localStore'
 import api from '../api/client'
 import BookCover from '../components/BookCover.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
@@ -104,6 +155,7 @@ const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 
 const keyword = ref('')
+const searchMode = ref(route.query.mode === 'local' ? 'local' : 'remote')
 const sources = ref([])
 const selectedIds = ref([])
 const selectedGroup = ref('')
@@ -114,6 +166,10 @@ const results = ref([])
 const searching = ref(false)
 const searched = ref(false)
 const addingBook = ref(null)
+const localItems = ref([])
+const checkedLocalPaths = ref([])
+const localRecursiveScan = ref(true)
+const importingLocal = ref(false)
 
 const enabledSources = computed(() => sources.value.filter(source => source.enabled))
 const allSelected = computed(() => enabledSources.value.length > 0 && selectedIds.value.length === enabledSources.value.length)
@@ -142,14 +198,30 @@ const sourceGroups = computed(() => {
   return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
 })
 
+const localImportableCount = computed(() => localItems.value.filter(item => item.importable).length)
+const shownLocalResults = computed(() => {
+  if (!searched.value || searchMode.value !== 'local') return []
+  const value = keyword.value.trim().toLowerCase()
+  return localItems.value.filter(item => {
+    if (!item.importable) return false
+    if (!value) return true
+    return `${item.name || ''} ${item.path || ''}`.toLowerCase().includes(value)
+  })
+})
+const shownLocalImportablePaths = computed(() => shownLocalResults.value.map(item => item.path))
+
 onMounted(async () => {
   await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
   keyword.value = route.query.q || ''
   syncSelection()
-  if (keyword.value) doSearch()
+  if (keyword.value || searchMode.value === 'local') doSearch()
 })
 
 watch(searchType, syncSelection)
+watch(() => route.query.mode, (mode) => {
+  const nextMode = mode === 'local' ? 'local' : 'remote'
+  if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
+})
 
 async function loadSources() {
   const { data } = await api.get('/sources')
@@ -174,7 +246,28 @@ function toggleAll() {
   selectedIds.value = allSelected.value ? [] : enabledSources.value.map(source => source.id)
 }
 
+function switchSearchMode(mode, updateRoute = true) {
+  searchMode.value = mode
+  searched.value = false
+  results.value = []
+  checkedLocalPaths.value = []
+  if (mode === 'remote') syncSelection()
+  if (updateRoute) {
+    router.replace({
+      name: 'search',
+      query: {
+        ...route.query,
+        mode: mode === 'local' ? 'local' : undefined,
+      },
+    })
+  }
+}
+
 async function doSearch() {
+  if (searchMode.value === 'local') {
+    await searchLocalBooks()
+    return
+  }
   const value = keyword.value.trim()
   if (!value) return
   if (!selectedIds.value.length) {
@@ -194,6 +287,77 @@ async function doSearch() {
   } finally {
     searching.value = false
   }
+}
+
+async function searchLocalBooks() {
+  searching.value = true
+  searched.value = false
+  results.value = []
+  checkedLocalPaths.value = []
+  try {
+    const { data } = await listLocalStore('', localRecursiveScan.value)
+    localItems.value = data.items || []
+    searched.value = true
+    ElMessage.success(shownLocalResults.value.length ? `找到 ${shownLocalResults.value.length} 个本地文件` : '没有找到本地书籍文件')
+  } catch (err) {
+    ElMessage.error(readError(err, '搜索本地书仓失败'))
+  } finally {
+    searching.value = false
+  }
+}
+
+function toggleLocalPath(path, checked) {
+  if (checked) {
+    if (!checkedLocalPaths.value.includes(path)) checkedLocalPaths.value.push(path)
+    return
+  }
+  checkedLocalPaths.value = checkedLocalPaths.value.filter(item => item !== path)
+}
+
+async function importSelectedLocal() {
+  if (!checkedLocalPaths.value.length) return
+  await importLocalPaths(checkedLocalPaths.value)
+}
+
+async function importShownLocal() {
+  if (!shownLocalImportablePaths.value.length) return
+  await importLocalPaths(shownLocalImportablePaths.value)
+}
+
+async function importLocalOne(item) {
+  if (!item?.importable) return
+  await importLocalPaths([item.path])
+}
+
+async function importLocalPaths(paths) {
+  importingLocal.value = true
+  try {
+    const categoryId = targetCategoryId.value ? Number(targetCategoryId.value) : null
+    const { data } = await importFromLocalStore(paths, categoryId)
+    const imported = data.imported || []
+    imported.forEach(item => {
+      if (item.book) bookshelf.upsertBook(item.book)
+    })
+    checkedLocalPaths.value = checkedLocalPaths.value.filter(path => !paths.includes(path))
+    const success = imported.filter(item => item.book).length
+    const failed = imported.filter(item => item.error).length
+    ElMessage.success(`导入 ${success} 本` + (failed ? `，${failed} 本失败` : ''))
+  } catch (err) {
+    ElMessage.error(readError(err, '导入本地书失败'))
+  } finally {
+    importingLocal.value = false
+  }
+}
+
+function localBookTitle(item) {
+  return String(item?.name || '未命名本地书').replace(/\.[^.]+$/, '')
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 async function addRemoteBook(item, shouldRead) {
@@ -326,6 +490,10 @@ function readError(err, fallback) {
   padding: 14px;
 }
 
+.mode-switch {
+  max-width: 100%;
+}
+
 .search-console > .el-input {
   min-width: min(260px, 100%);
   flex: 1;
@@ -357,7 +525,8 @@ function readError(err, fallback) {
 }
 
 .source-result-list,
-.result-list {
+.result-list,
+.local-result-list {
   display: grid;
   min-width: 0;
   gap: 12px;
@@ -380,14 +549,34 @@ function readError(err, fallback) {
   font-size: 16px;
 }
 
-.result-card {
+.result-card,
+.local-result-card {
   padding: 14px;
   align-items: start;
   cursor: pointer;
 }
 
-.result-card:hover {
+.result-card:hover,
+.local-result-card:hover,
+.local-result-card.selected {
   border-color: var(--app-primary);
+}
+
+.local-result-card {
+  display: flex;
+  gap: 12px;
+}
+
+.local-file-icon {
+  display: grid;
+  width: 42px;
+  height: 54px;
+  place-items: center;
+  flex: 0 0 42px;
+  color: var(--app-primary-strong);
+  background: var(--app-primary-soft);
+  border-radius: 5px;
+  font-size: 24px;
 }
 
 .result-main {
@@ -475,20 +664,24 @@ function readError(err, fallback) {
 
   .search-console > .el-input,
   .search-console > :deep(.el-button),
+  .mode-switch,
   .search-options :deep(.el-select),
   .search-options :deep(.el-radio-group) {
     width: 100%;
   }
 
-  .search-options {
+  .search-options,
+  .local-search-options {
     gap: 8px;
   }
 
+  .mode-switch,
   .search-options :deep(.el-radio-group) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .mode-switch :deep(.el-radio-button__inner),
   .search-options :deep(.el-radio-button__inner) {
     display: block;
     min-height: 36px;
@@ -521,7 +714,8 @@ function readError(err, fallback) {
   }
 
   .source-result-list,
-  .result-list {
+  .result-list,
+  .local-result-list {
     gap: 8px;
   }
 
@@ -541,10 +735,22 @@ function readError(err, fallback) {
     margin-left: 0;
   }
 
-  .result-card {
+  .result-card,
+  .local-result-card {
     grid-template-columns: 42px minmax(0, 1fr);
     gap: 10px;
     padding: 10px;
+  }
+
+  .local-result-card {
+    display: grid;
+    grid-template-columns: auto 34px minmax(0, 1fr);
+  }
+
+  .local-file-icon {
+    width: 34px;
+    height: 46px;
+    font-size: 20px;
   }
 
   .result-title {

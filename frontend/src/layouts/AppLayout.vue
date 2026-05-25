@@ -146,7 +146,8 @@ const navSections = computed(() => [
   {
     title: '搜索设置',
     items: [
-      { key: 'search', label: '搜索', icon: Search, route: 'search' },
+      { key: 'search', label: '书源搜索', icon: Search, route: 'search' },
+      { key: 'localSearch', label: '本地书籍', icon: FolderOpened, route: 'search', query: { mode: 'local' } },
       { key: 'discover', label: '书海', icon: Compass, route: 'discover' },
     ],
   },

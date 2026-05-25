@@ -1268,12 +1268,12 @@ func excerptAround(content string, bytePosition int, keyword string) string {
 func (s *Server) loadChapterText(book models.Book, chapter *models.Chapter) string {
 	content := ""
 	if chapter.CachePath != "" {
-		path := chapter.CachePath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(s.cfg.CacheDir, path)
-		}
-		if bytes, err := os.ReadFile(path); err == nil {
+		if bytes, path, err := s.readChapterCache(book, chapter.CachePath); err == nil {
 			content = string(bytes)
+			if book.SourceID == 0 && path != "" && path != chapter.CachePath {
+				chapter.CachePath = path
+				_ = s.db.Save(chapter)
+			}
 		}
 	}
 
@@ -1293,6 +1293,104 @@ func (s *Server) loadChapterText(book models.Book, chapter *models.Chapter) stri
 	}
 	content = s.applyUserReplaceRules(book.UserID, content)
 	return content
+}
+
+func (s *Server) readChapterCache(book models.Book, cachePath string) ([]byte, string, error) {
+	var lastErr error
+	for _, path := range s.chapterCacheCandidates(book, cachePath) {
+		bytes, err := os.ReadFile(path)
+		if err == nil {
+			return bytes, path, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = os.ErrNotExist
+	}
+	return nil, "", lastErr
+}
+
+func (s *Server) chapterCacheCandidates(book models.Book, cachePath string) []string {
+	cachePath = strings.TrimSpace(cachePath)
+	if cachePath == "" {
+		return nil
+	}
+
+	candidates := make([]string, 0, 5)
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == path {
+				return
+			}
+		}
+		candidates = append(candidates, path)
+	}
+
+	if filepath.IsAbs(cachePath) {
+		add(cachePath)
+	} else {
+		add(filepath.Join(s.cfg.CacheDir, cachePath))
+	}
+
+	if book.SourceID == 0 && strings.TrimSpace(book.LibraryPath) != "" {
+		libraryRoot := filepath.Join(s.cfg.LibraryDir, book.LibraryPath)
+		contentRoot := filepath.Join(libraryRoot, "content")
+		if filepath.IsAbs(cachePath) {
+			if suffix, ok := suffixAfterPathSegment(cachePath, "content"); ok {
+				add(filepath.Join(contentRoot, suffix))
+			}
+			if suffix, ok := suffixAfterPathSegment(cachePath, book.LibraryPath); ok {
+				add(filepath.Join(libraryRoot, suffix))
+			}
+		} else {
+			add(filepath.Join(libraryRoot, cachePath))
+			add(filepath.Join(contentRoot, cachePath))
+		}
+	}
+
+	return candidates
+}
+
+func suffixAfterPathSegment(path string, segment string) (string, bool) {
+	segment = strings.Trim(segment, `/\`)
+	if segment == "" {
+		return "", false
+	}
+	segmentParts := splitPathSegments(segment)
+	pathParts := splitPathSegments(filepath.Clean(path))
+	if len(segmentParts) == 0 || len(pathParts) <= len(segmentParts) {
+		return "", false
+	}
+	for i := 0; i+len(segmentParts) < len(pathParts); i++ {
+		match := true
+		for j := range segmentParts {
+			if pathParts[i+j] != segmentParts[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return filepath.Join(pathParts[i+len(segmentParts):]...), true
+		}
+	}
+	return "", false
+}
+
+func splitPathSegments(path string) []string {
+	parts := strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	filtered := parts[:0]
+	for _, part := range parts {
+		if part != "" && part != "." {
+			filtered = append(filtered, part)
+		}
+	}
+	return filtered
 }
 
 func (s *Server) applyUserReplaceRules(userID uint, content string) string {
