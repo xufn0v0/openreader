@@ -84,8 +84,11 @@
       <article ref="contentEl" class="reader-content" :style="readerContentStyle" @scroll.passive="onScroll">
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
           <h1>{{ chapter?.title || '正文' }}</h1>
-          <p v-for="(line, index) in lines" :key="index">{{ line }}</p>
-          <p v-if="lines.length === 0" class="empty-hint">当前章节暂无缓存内容</p>
+          <p v-if="chapterLoading" class="empty-hint">正在加载章节...</p>
+          <template v-else>
+            <p v-for="(line, index) in lines" :key="index">{{ line }}</p>
+            <p v-if="lines.length === 0" class="empty-hint">当前章节暂无缓存内容</p>
+          </template>
         </div>
       </article>
       <div class="reader-tap-zones" aria-hidden="true">
@@ -352,7 +355,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDownBold,
@@ -405,6 +408,7 @@ const chapters = ref([])
 const chapter = ref(null)
 const bookmarks = ref([])
 const content = ref('')
+const chapterLoading = ref(false)
 const contentEl = ref(null)
 const contentBody = ref(null)
 const pageEl = ref(null)
@@ -577,6 +581,8 @@ onMounted(async () => {
   reader.normalizeSettings()
   await loadReaderBook()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('pagehide', handleReaderPageHide)
+  document.addEventListener('visibilitychange', handleReaderVisibilityChange)
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   sliderLineHeight.value = reader.lineHeight
 })
@@ -586,7 +592,13 @@ onBeforeUnmount(() => {
   stopAutoReading()
   saveCurrentProgress({ force: true })
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('pagehide', handleReaderPageHide)
+  document.removeEventListener('visibilitychange', handleReaderVisibilityChange)
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
+})
+
+onBeforeRouteLeave(async () => {
+  await saveCurrentProgress({ force: true })
 })
 
 watch(bookId, async () => {
@@ -660,31 +672,37 @@ async function loadReaderBook() {
 async function loadChapter(index, offset = 0, options = {}) {
   currentIndex.value = Math.max(0, Math.min(index, Math.max(chapters.value.length - 1, 0)))
   mobileChromeVisible.value = false
-  const { data } = await api.get(`/books/${bookId.value}/chapters/${currentIndex.value}/content`)
-  chapter.value = data.chapter
-  content.value = data.content || ''
-  page.value = 0
-  await nextTick()
-  updateFlipLayout()
-  const restorePercent = Number(options.restorePercent)
-  const hasRestorePercent = Number.isFinite(restorePercent)
-  if (reader.mode === 'flip' || reader.mode === 'page') {
-    page.value = offset === CHAPTER_END_OFFSET
-      ? Math.max(0, pageCount.value - 1)
-      : (hasRestorePercent
-          ? Math.round(Math.max(0, Math.min(1, restorePercent)) * Math.max(0, pageCount.value - 1))
-          : Math.min(Math.max(offset, 0), pageCount.value - 1))
-  } else if (contentEl.value) {
-    if (offset === CHAPTER_END_OFFSET) {
-      contentEl.value.scrollTop = contentEl.value.scrollHeight
-    } else if (hasRestorePercent) {
-      const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
-      contentEl.value.scrollTop = Math.round(Math.max(0, Math.min(1, restorePercent)) * bottom)
-    } else {
-      contentEl.value.scrollTop = Math.max(offset, 0)
+  chapterLoading.value = true
+  content.value = ''
+  try {
+    const { data } = await api.get(`/books/${bookId.value}/chapters/${currentIndex.value}/content`)
+    chapter.value = data.chapter
+    content.value = data.content || ''
+    page.value = 0
+    await nextTick()
+    updateFlipLayout()
+    const restorePercent = Number(options.restorePercent)
+    const hasRestorePercent = Number.isFinite(restorePercent)
+    if (reader.mode === 'flip' || reader.mode === 'page') {
+      page.value = offset === CHAPTER_END_OFFSET
+        ? Math.max(0, pageCount.value - 1)
+        : (hasRestorePercent
+            ? Math.round(Math.max(0, Math.min(1, restorePercent)) * Math.max(0, pageCount.value - 1))
+            : Math.min(Math.max(offset, 0), pageCount.value - 1))
+    } else if (contentEl.value) {
+      if (offset === CHAPTER_END_OFFSET) {
+        contentEl.value.scrollTop = contentEl.value.scrollHeight
+      } else if (hasRestorePercent) {
+        const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
+        contentEl.value.scrollTop = Math.round(Math.max(0, Math.min(1, restorePercent)) * bottom)
+      } else {
+        contentEl.value.scrollTop = Math.max(offset, 0)
+      }
     }
+    saveCurrentProgress()
+  } finally {
+    chapterLoading.value = false
   }
-  saveCurrentProgress()
 }
 
 async function handleReplaceRulesUpdated() {
@@ -744,8 +762,15 @@ function openSettingsDrawer() {
   showSettingsDrawer.value = true
 }
 
-function goBookDetail() { router.push({ name: 'book-detail', params: { id: bookId.value } }) }
-function goShelf() { router.push({ name: 'home' }) }
+async function goBookDetail() {
+  await saveCurrentProgress({ force: true })
+  router.push({ name: 'book-detail', params: { id: bookId.value } })
+}
+
+async function goShelf() {
+  await saveCurrentProgress({ force: true })
+  router.push({ name: 'home' })
+}
 async function openShelfPanel() {
   showShelfDrawer.value = true
   if (bookshelf.books.length) return
@@ -1366,6 +1391,14 @@ function handleResize() {
   updateFlipLayout()
 }
 
+function handleReaderPageHide() {
+  saveCurrentProgress({ force: true })
+}
+
+function handleReaderVisibilityChange() {
+  if (document.hidden) saveCurrentProgress({ force: true })
+}
+
 function onScroll() {
   if (reader.mode !== 'scroll') return
   progressVersion.value += 1
@@ -1424,7 +1457,11 @@ async function saveCurrentProgress(options = {}) {
   const key = progressSaveKey(payload)
   if (key === lastProgressSaveKey) return
   pendingProgressPayload = payload
-  if (savingProgress) return
+  if (savingProgress) {
+    if (!force) return
+    await waitForProgressSaveIdle()
+    if (savingProgress) return
+  }
   savingProgress = true
   try {
     while (pendingProgressPayload) {
@@ -1445,6 +1482,20 @@ async function saveCurrentProgress(options = {}) {
   } finally {
     savingProgress = false
   }
+}
+
+function waitForProgressSaveIdle(timeout = 1500) {
+  const started = Date.now()
+  return new Promise(resolve => {
+    const tick = () => {
+      if (!savingProgress || Date.now() - started >= timeout) {
+        resolve()
+        return
+      }
+      window.setTimeout(tick, 40)
+    }
+    tick()
+  })
 }
 
 function progressSaveKey(payload) {
