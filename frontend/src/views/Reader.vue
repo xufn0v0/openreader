@@ -82,6 +82,7 @@
       @touchstart.passive="handleReaderTouchStart"
       @touchmove.passive="handleReaderTouchMove"
       @touchend.passive="handleReaderTouchEnd"
+      @wheel="handleReaderWheel"
       @click="handleReaderContentClick"
     >
       <header class="reader-page-head">
@@ -115,11 +116,11 @@
 
     <footer class="reader-page-control">
       <div class="progress-box">{{ bookProgressLabel }}</div>
-      <button class="page-step" type="button" :title="pageBackTitle" @click="previousPage">
-        <el-icon :size="24"><component :is="pageBackIcon" /></el-icon>
+      <button class="page-step chapter-step" type="button" title="上一章" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
+        <span>上一章</span>
       </button>
-      <button class="page-step" type="button" :title="pageForwardTitle" @click="nextPage">
-        <el-icon :size="24"><component :is="pageForwardIcon" /></el-icon>
+      <button class="page-step chapter-step" type="button" title="下一章" :disabled="currentIndex >= chapters.length - 1" @click="goChapter(currentIndex + 1)">
+        <span>下一章</span>
       </button>
     </footer>
 
@@ -390,7 +391,6 @@ import { ElMessage } from 'element-plus'
 import {
   ArrowDownBold,
   ArrowLeft,
-  ArrowRight,
   ArrowUpBold,
   CollectionTag,
   Delete,
@@ -511,6 +511,7 @@ let readerTouchStart = null
 let readerTouchMoved = false
 let ignoreNextContentClick = false
 let lastLocalProgressKey = ''
+let lastWheelPageAt = 0
 
 const fontOptions = readerFontOptions
 
@@ -615,11 +616,8 @@ const bookSearchStatus = computed(() => {
 })
 const mobileChromeVisible = ref(false)
 const CHAPTER_END_OFFSET = -1
+const NEARBY_PRELOAD_RADIUS = 2
 
-const pageBackIcon = computed(() => reader.mode === 'flip' ? ArrowLeft : ArrowUpBold)
-const pageForwardIcon = computed(() => reader.mode === 'flip' ? ArrowRight : ArrowDownBold)
-const pageBackTitle = computed(() => reader.mode === 'flip' ? '上一页' : '上一屏')
-const pageForwardTitle = computed(() => reader.mode === 'flip' ? '下一页' : '下一屏')
 const isOverlayOpen = computed(() => (
   showTocDrawer.value ||
   showSettingsDrawer.value ||
@@ -722,10 +720,7 @@ async function loadReaderBook() {
   }
   const hasRouteOffset = route.query.offset !== undefined
   const initialOffset = hasRouteOffset ? Number(route.query.offset || 0) : Number(saved?.offset || 0)
-  const restorePercent = !hasRouteOffset && saved?.percent
-    ? chapterPercentFromBookProgress(saved)
-    : null
-  await loadChapter(currentIndex.value, initialOffset, { restorePercent, saveAfterLoad: false })
+  await loadChapter(currentIndex.value, initialOffset, { saveAfterLoad: false })
   await jumpToRouteLine()
 }
 
@@ -741,9 +736,11 @@ async function loadChapter(index, offset = 0, options = {}) {
     chapter.value = data.chapter
     content.value = data.content || ''
     page.value = 0
+    chapterLoading.value = false
     await nextTick()
     updateFlipLayout()
     await restoreReadingPosition(offset, options)
+    preloadNearbyChapters(currentIndex.value)
     if (options.saveAfterLoad) {
       await saveCurrentProgress({ force: true })
     } else {
@@ -767,6 +764,20 @@ async function loadChapterContent(index, options = {}) {
     browserCachedChapters.value = { ...browserCachedChapters.value, [index]: true }
   }
   return data
+}
+
+function preloadNearbyChapters(index) {
+  if (!book.value || !chapters.value.length) return
+  const targets = []
+  for (let distance = 1; distance <= NEARBY_PRELOAD_RADIUS; distance += 1) {
+    targets.push(index + distance, index - distance)
+  }
+  targets
+    .filter(target => target >= 0 && target < chapters.value.length)
+    .forEach(target => {
+      if (getChapterContentFromMemory(target)) return
+      loadChapterContent(target).catch(() => {})
+    })
 }
 
 function getChapterContentFromMemory(index) {
@@ -797,15 +808,15 @@ async function restoreReadingPosition(offset = 0, options = {}) {
   await nextFrame()
   updateFlipLayout()
   const chapterOffset = Number(offset || 0)
+  if (chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) {
+    return
+  }
   if (reader.mode === 'flip' || reader.mode === 'page') {
     page.value = chapterOffset === CHAPTER_END_OFFSET
       ? Math.max(0, pageCount.value - 1)
       : (hasRestorePercent
           ? Math.round(Math.max(0, Math.min(1, restorePercent)) * Math.max(0, pageCount.value - 1))
           : Math.min(Math.max(chapterOffset, 0), pageCount.value - 1))
-    return
-  }
-  if (chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) {
     return
   }
   if (!contentEl.value) return
@@ -848,13 +859,6 @@ async function handleReplaceRulesUpdated() {
   } catch (err) {
     ElMessage.error(readError(err, '刷新当前章节失败'))
   }
-}
-
-function chapterPercentFromBookProgress(progress) {
-  const total = Math.max(chapters.value.length, 1)
-  const percent = Number(progress?.percent || 0)
-  const chapterIndex = Number(progress?.chapterIndex ?? currentIndex.value)
-  return Math.max(0, Math.min(1, percent * total - chapterIndex))
 }
 
 function setTheme(theme) { reader.setTheme(theme) }
@@ -1610,6 +1614,22 @@ function handleTapPoint(point) {
   else previousPage()
 }
 
+function handleReaderWheel(event) {
+  if (isOverlayOpen.value) return
+  if (reader.mode === 'scroll') return
+  event.preventDefault()
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  if (Math.abs(delta) < 4) return
+  const now = Date.now()
+  if (now - lastWheelPageAt < Math.max(140, reader.animateDuration + 40)) return
+  lastWheelPageAt = now
+  if (delta > 0) {
+    nextPage()
+  } else {
+    previousPage()
+  }
+}
+
 function toggleReaderChrome() {
   if (isMobileReader.value) {
     mobileChromeVisible.value = !mobileChromeVisible.value
@@ -1696,7 +1716,6 @@ function currentChapterPercent() {
 }
 
 function currentOffset() {
-  if (reader.mode === 'flip' || reader.mode === 'page') return page.value
   return currentChapterPosition()
 }
 
@@ -2388,6 +2407,16 @@ function readError(err, fallback) {
   .reader-tap-zones {
     display: block;
   }
+  .tap-zone {
+    display: none;
+  }
+  .tap-center {
+    display: block;
+  }
+  .reader-shell.flip .tap-left,
+  .reader-shell.flip .tap-right {
+    display: block;
+  }
 }
 
 .reader-page-head {
@@ -2457,7 +2486,7 @@ function readError(err, fallback) {
   bottom: 0;
   z-index: 4;
   display: grid;
-  width: 42px;
+  width: 74px;
   background: rgba(255, 250, 226, 0.72);
   border: 1px solid rgba(148, 132, 87, 0.38);
   border-bottom: 0;
@@ -2477,6 +2506,16 @@ function readError(err, fallback) {
 
 .page-step {
   cursor: pointer;
+}
+
+.chapter-step {
+  padding: 0 6px;
+  font-size: 14px;
+}
+
+.chapter-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .page-step:hover {

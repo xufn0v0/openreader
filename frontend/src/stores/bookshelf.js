@@ -40,6 +40,9 @@ export const useBookshelfStore = defineStore('bookshelf', {
       }
       const requestKey = JSON.stringify(params)
       const now = Date.now()
+      if (!force && this.books.length > 0 && this.booksLoadedKey === requestKey) {
+        return this.books
+      }
       if (!force && this.booksLoadedKey === requestKey && this.booksLoadedAt > 0 && now - this.booksLoadedAt < REFRESH_DEDUPE_MS) {
         return this.books
       }

@@ -176,7 +176,7 @@ export async function cacheFirstRequest(requestFunc, cacheKey, options = {}) {
   }
   const response = await requestFunc()
   if (response?.data && (!options.validate || options.validate(response.data))) {
-    setBrowserCache(cacheKey, response.data)
+    await setBrowserCache(cacheKey, response.data)
   }
   return response
 }
