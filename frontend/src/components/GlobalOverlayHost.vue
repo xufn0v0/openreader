@@ -270,6 +270,7 @@
       :status-text="contentSearchStatus"
       @search="searchCurrentBookContent"
       @load-more="loadMoreCurrentBookContent"
+      @load-all="searchAllCurrentBookContent"
       @jump="jumpToContentResult"
     />
   </el-drawer>
@@ -1449,7 +1450,11 @@ async function loadMoreCurrentBookContent() {
   return runCurrentBookContentSearch({ append: true })
 }
 
-async function runCurrentBookContentSearch({ append = false } = {}) {
+async function searchAllCurrentBookContent() {
+  return runCurrentBookContentSearch({ append: true, scanAll: true })
+}
+
+async function runCurrentBookContentSearch({ append = false, scanAll = false } = {}) {
   const book = overlay.searchBook
   const keyword = contentKeyword.value.trim()
   if (!book?.id || !keyword) return
@@ -1459,7 +1464,8 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
   try {
     let lastIndex = append ? contentLastIndex.value : -1
     let nextResults = append ? [...contentResults.value] : []
-    const maxRounds = append ? 1 : (Number(book.sourceId || 0) > 0 ? 4 : 1)
+    const maxRounds = scanAll ? 80 : (append ? 1 : (Number(book.sourceId || 0) > 0 ? 4 : 1))
+    let previousLastIndex = lastIndex
     for (let round = 0; round < maxRounds; round += 1) {
       const { data } = await searchBookContent(book.id, keyword, {
         paged: 1,
@@ -1474,7 +1480,9 @@ async function runCurrentBookContentSearch({ append = false } = {}) {
       contentHasMore.value = Boolean(data?.hasMore)
       contentTotal.value = Number(data?.total || 0)
       lastIndex = contentLastIndex.value
-      if (rows.length || !contentHasMore.value) break
+      if (!scanAll && (rows.length || !contentHasMore.value)) break
+      if (scanAll && (!contentHasMore.value || lastIndex <= previousLastIndex)) break
+      previousLastIndex = lastIndex
     }
   } catch (err) {
     ElMessage.error(readError(err, '搜索正文失败'))
