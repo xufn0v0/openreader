@@ -75,7 +75,15 @@
       <span class="mobile-reader-progress">{{ bookProgressLabel }}</span>
     </header>
 
-    <section ref="pageEl" class="reader-page" :style="readerStyle">
+    <section
+      ref="pageEl"
+      class="reader-page"
+      :style="readerStyle"
+      @touchstart.passive="handleReaderTouchStart"
+      @touchmove.passive="handleReaderTouchMove"
+      @touchend.passive="handleReaderTouchEnd"
+      @click="handleReaderContentClick"
+    >
       <header class="reader-page-head">
         <span>{{ book?.title || '阅读中' }}</span>
         <span>{{ chapterLabel }}</span>
@@ -86,10 +94,6 @@
         class="reader-content"
         :style="readerContentStyle"
         @scroll.passive="onScroll"
-        @touchstart.passive="handleReaderTouchStart"
-        @touchmove.passive="handleReaderTouchMove"
-        @touchend.passive="handleReaderTouchEnd"
-        @click="handleReaderContentClick"
       >
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
           <h1>{{ chapter?.title || '正文' }}</h1>
@@ -700,7 +704,7 @@ async function loadReaderBook() {
   }
   const hasRouteOffset = route.query.offset !== undefined
   const initialOffset = hasRouteOffset ? Number(route.query.offset || 0) : Number(saved?.offset || 0)
-  const restorePercent = !hasRouteOffset && saved?.mode && saved.mode !== reader.mode
+  const restorePercent = !hasRouteOffset && saved?.percent
     ? chapterPercentFromBookProgress(saved)
     : null
   await loadChapter(currentIndex.value, initialOffset, { restorePercent, saveAfterLoad: false })
@@ -1467,7 +1471,7 @@ function handleTapZone(zone) {
 }
 
 function handleReaderContentClick(event) {
-  if (!isMobileReader.value || isOverlayOpen.value || !contentEl.value) return
+  if (!isMobileReader.value || isOverlayOpen.value || !pageEl.value) return
   if (ignoreNextContentClick) {
     ignoreNextContentClick = false
     return
@@ -1475,11 +1479,13 @@ function handleReaderContentClick(event) {
   if (event.defaultPrevented || event.button !== 0) return
   const target = event.target
   if (target?.closest?.('button, a, input, textarea, select, [role="button"]')) return
-  const rect = contentEl.value.getBoundingClientRect()
+  const rect = pageEl.value.getBoundingClientRect()
   handleTapPoint({
     rect,
     relX: event.clientX - rect.left,
     relY: event.clientY - rect.top,
+    clientX: event.clientX,
+    clientY: event.clientY,
   })
 }
 
@@ -1506,14 +1512,16 @@ function handleReaderTouchEnd(event) {
   setTimeout(() => {
     ignoreNextContentClick = false
   }, 320)
-  if (!readerTouchMoved && !isOverlayOpen.value && contentEl.value) {
+  if (!readerTouchMoved && !isOverlayOpen.value && pageEl.value) {
     const touch = event.changedTouches?.[0]
     if (touch) {
-      const rect = contentEl.value.getBoundingClientRect()
+      const rect = pageEl.value.getBoundingClientRect()
       handleTapPoint({
         rect,
         relX: touch.clientX - rect.left,
         relY: touch.clientY - rect.top,
+        clientX: touch.clientX,
+        clientY: touch.clientY,
       })
     }
   }
@@ -1523,10 +1531,14 @@ function handleReaderTouchEnd(event) {
 
 function handleTapPoint(point) {
   if (isOverlayOpen.value || !point?.rect) return
-  const midX = point.rect.width / 2
-  const midY = point.rect.height / 2
-  const inMenuZone = Math.abs(point.relX - midX) <= point.rect.width * 0.2
-    && Math.abs(point.relY - midY) <= point.rect.height * 0.2
+  const viewportWidth = window.innerWidth || point.rect.width
+  const viewportHeight = window.innerHeight || point.rect.height
+  const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
+  const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
+  const midX = viewportWidth / 2
+  const midY = viewportHeight / 2
+  const inMenuZone = Math.abs(pointX - midX) <= viewportWidth * 0.2
+    && Math.abs(pointY - midY) <= viewportHeight * 0.2
 
   if (inMenuZone) {
     toggleReaderChrome()
@@ -1546,12 +1558,12 @@ function handleTapPoint(point) {
 
   mobileChromeVisible.value = false
   if (reader.mode === 'flip') {
-    if (point.relX > midX) nextPage()
+    if (pointX > midX) nextPage()
     else previousPage()
     return
   }
 
-  if (point.relY > midY) nextPage()
+  if (pointY > midY) nextPage()
   else previousPage()
 }
 
@@ -1630,15 +1642,29 @@ function currentChapterPercent() {
   if (reader.mode === 'flip' || reader.mode === 'page') {
     return pageCount.value <= 1 ? 0 : page.value / (pageCount.value - 1)
   }
-  // 滚动：以滚动位置为单位
   const el = contentEl.value
   if (!el) return 0
-  return el.scrollTop / Math.max(el.scrollHeight - el.clientHeight, 1)
+  const bottom = Math.max(el.scrollHeight - el.clientHeight, 1)
+  const scrollTop = Number(el.scrollTop || 0)
+  if (scrollTop > 0) return scrollTop / bottom
+  return currentOffset() / bottom
 }
 
 function currentOffset() {
   if (reader.mode === 'flip' || reader.mode === 'page') return page.value
-  return Math.round(contentEl.value?.scrollTop || 0)
+  const el = contentEl.value
+  if (!el) return 0
+  const scrollTop = Number(el.scrollTop || 0)
+  if (scrollTop > 0) return Math.round(scrollTop)
+  const heading = contentBody.value?.querySelector('h1')
+  const viewport = el.getBoundingClientRect()
+  const headingRect = heading?.getBoundingClientRect()
+  if (headingRect && headingRect.bottom >= viewport.top && headingRect.top <= viewport.bottom) return 0
+  const paragraph = currentVisibleParagraph()
+  if (paragraph?.offsetTop) {
+    return Math.max(0, Math.round(paragraph.offsetTop - 44))
+  }
+  return 0
 }
 
 function currentVisibleParagraph() {
