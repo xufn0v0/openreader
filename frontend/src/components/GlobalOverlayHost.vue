@@ -1059,8 +1059,6 @@ function readerRouteQuery(book) {
   if (Number.isFinite(chapterIndex)) query.chapter = Math.max(0, Math.floor(chapterIndex))
   const offset = Number(progress.offset)
   if (Number.isFinite(offset) && offset > 0) query.offset = Math.floor(offset)
-  const percent = Number(progress.percent)
-  if (Number.isFinite(percent) && percent > 0) query.percent = Math.max(0, Math.min(1, percent))
   return query
 }
 

@@ -96,11 +96,11 @@
         @scroll.passive="onScroll"
       >
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
-          <h1>{{ chapter?.title || '正文' }}</h1>
+          <h1 data-pos="0">{{ chapter?.title || '正文' }}</h1>
           <p v-if="chapterLoading" class="empty-hint">正在加载章节...</p>
           <template v-else>
-            <p v-for="(line, index) in lines" :key="index">{{ line }}</p>
-            <p v-if="lines.length === 0" class="empty-hint">当前章节暂无缓存内容</p>
+            <p v-for="(line, index) in chapterParagraphs" :key="index" :data-pos="line.pos">{{ line.text }}</p>
+            <p v-if="chapterParagraphs.length === 0" class="empty-hint">当前章节暂无缓存内容</p>
           </template>
         </div>
       </article>
@@ -533,7 +533,24 @@ const currentSourceName = computed(() => {
 })
 const isRemoteBook = computed(() => Number(book.value?.sourceId || 0) > 0)
 
-const lines = computed(() => content.value.split('\n').map(l => l.trim()).filter(Boolean))
+const chapterParagraphs = computed(() => {
+  let wordCount = 0
+  return content.value.split(/\n+/).reduce((items, rawLine) => {
+    const text = rawLine.trim()
+    if (!text) return items
+    const pos = wordCount
+    wordCount += text.length + 2
+    items.push({ text, pos })
+    return items
+  }, [])
+})
+const lines = computed(() => chapterParagraphs.value.map(item => item.text))
+const chapterTextLength = computed(() => {
+  const paragraphs = chapterParagraphs.value
+  if (!paragraphs.length) return 0
+  const last = paragraphs[paragraphs.length - 1]
+  return last.pos + last.text.length
+})
 
 const fontStack = computed(() => {
   return readerFontStack(reader.fontFamily)
@@ -779,29 +796,43 @@ async function restoreReadingPosition(offset = 0, options = {}) {
   await nextTick()
   await nextFrame()
   updateFlipLayout()
+  const chapterOffset = Number(offset || 0)
   if (reader.mode === 'flip' || reader.mode === 'page') {
-    page.value = offset === CHAPTER_END_OFFSET
+    page.value = chapterOffset === CHAPTER_END_OFFSET
       ? Math.max(0, pageCount.value - 1)
       : (hasRestorePercent
           ? Math.round(Math.max(0, Math.min(1, restorePercent)) * Math.max(0, pageCount.value - 1))
-          : Math.min(Math.max(offset, 0), pageCount.value - 1))
+          : Math.min(Math.max(chapterOffset, 0), pageCount.value - 1))
+    return
+  }
+  if (chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) {
     return
   }
   if (!contentEl.value) return
   const applyScroll = () => {
     if (!contentEl.value) return
-    if (offset === CHAPTER_END_OFFSET) {
+    if (chapterOffset === CHAPTER_END_OFFSET) {
       contentEl.value.scrollTop = Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
     } else if (hasRestorePercent) {
       const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
       contentEl.value.scrollTop = Math.round(Math.max(0, Math.min(1, restorePercent)) * bottom)
     } else {
-      contentEl.value.scrollTop = Math.max(offset, 0)
+      contentEl.value.scrollTop = Math.max(chapterOffset, 0)
     }
   }
   applyScroll()
   await nextFrame()
   applyScroll()
+}
+
+function restoreByChapterPosition(position) {
+  if (!contentBody.value || !Number.isFinite(position) || position <= 0) return false
+  const nodes = [...contentBody.value.querySelectorAll('h1[data-pos], p[data-pos]')]
+  if (!nodes.length) return false
+  const target = nodes.find(node => Number(node.dataset.pos) >= position) || nodes[nodes.length - 1]
+  if (!target) return false
+  jumpToParagraph(target, { save: false, flash: false })
+  return true
 }
 
 function nextFrame() {
@@ -922,8 +953,6 @@ function readerRouteQueryForBook(item) {
   if (Number.isFinite(chapterIndex)) query.chapter = Math.max(0, Math.floor(chapterIndex))
   const offset = Number(progress.offset)
   if (Number.isFinite(offset) && offset > 0) query.offset = Math.floor(offset)
-  const percent = Number(progress.percent)
-  if (Number.isFinite(percent) && percent > 0) query.percent = Math.max(0, Math.min(1, percent))
   return query
 }
 
@@ -1662,23 +1691,31 @@ function currentChapterPercent() {
   const bottom = Math.max(el.scrollHeight - el.clientHeight, 1)
   const scrollTop = Number(el.scrollTop || 0)
   if (scrollTop > 0) return scrollTop / bottom
-  return currentOffset() / bottom
+  const textLength = Math.max(chapterTextLength.value, 1)
+  return currentChapterPosition() / textLength
 }
 
 function currentOffset() {
   if (reader.mode === 'flip' || reader.mode === 'page') return page.value
+  return currentChapterPosition()
+}
+
+function currentChapterPosition() {
   const el = contentEl.value
   if (!el) return 0
-  const scrollTop = Number(el.scrollTop || 0)
-  if (scrollTop > 0) return Math.round(scrollTop)
   const heading = contentBody.value?.querySelector('h1')
   const viewport = el.getBoundingClientRect()
   const headingRect = heading?.getBoundingClientRect()
   if (headingRect && headingRect.bottom >= viewport.top && headingRect.top <= viewport.bottom) return 0
   const paragraph = currentVisibleParagraph()
-  if (paragraph?.offsetTop) {
-    return Math.max(0, Math.round(paragraph.offsetTop - 44))
+  const paragraphPos = Number(paragraph?.dataset?.pos)
+  if (Number.isFinite(paragraphPos)) {
+    return Math.max(0, Math.round(paragraphPos))
   }
+  const bottom = Math.max(el.scrollHeight - el.clientHeight, 1)
+  const textLength = Math.max(chapterTextLength.value, 1)
+  const scrollPercent = Math.max(0, Math.min(1, Number(el.scrollTop || 0) / bottom))
+  if (scrollPercent > 0) return Math.round(scrollPercent * textLength)
   return 0
 }
 
@@ -1965,7 +2002,7 @@ function jumpToLine(index) {
   jumpToParagraph(lineEl)
 }
 
-function jumpToParagraph(lineEl) {
+function jumpToParagraph(lineEl, options = {}) {
   if (!lineEl) return
   showSearchDrawer.value = false
   if (reader.mode === 'flip') {
@@ -1975,8 +2012,8 @@ function jumpToParagraph(lineEl) {
   } else if (contentEl.value) {
     contentEl.value.scrollTop = Math.max(0, lineEl.offsetTop - 80)
   }
-  flashParagraph(lineEl)
-  saveCurrentProgress()
+  if (options.flash !== false) flashParagraph(lineEl)
+  if (options.save !== false) saveCurrentProgress()
 }
 
 async function jumpToRouteLine() {
