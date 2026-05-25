@@ -212,9 +212,9 @@
               <label>
                 <span>阅读模式</span>
                 <el-radio-group v-model="readerModeModel" size="small" @change="readerStore.setMode($event)">
-                  <el-radio-button value="scroll">滚动</el-radio-button>
-                  <el-radio-button value="flip">左右翻页</el-radio-button>
-                  <el-radio-button value="page">上下分页</el-radio-button>
+                  <el-radio-button value="page">上下滑动</el-radio-button>
+                  <el-radio-button value="flip">左右滑动</el-radio-button>
+                  <el-radio-button value="scroll">上下滚动</el-radio-button>
                 </el-radio-group>
               </label>
               <label>
@@ -417,7 +417,7 @@
             <el-table-column prop="username" label="用户名" min-width="140" />
             <el-table-column prop="role" label="角色" width="90" />
             <el-table-column prop="bookCount" label="书籍" width="80" />
-            <el-table-column prop="sourceCount" label="书源" width="80" />
+            <el-table-column prop="sourceCount" label="全局书源" width="100" />
             <el-table-column label="权限" min-width="260">
               <template #default="{ row }">
                 <div class="permission-row">
@@ -432,7 +432,7 @@
               <header>
                 <div>
                   <strong>{{ user.username }}</strong>
-                  <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 书源 {{ user.sourceCount || 0 }}</span>
+                  <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
                 </div>
               </header>
               <div class="mobile-permission-row">

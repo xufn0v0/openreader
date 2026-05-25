@@ -2,10 +2,10 @@
   <div class="settings-body">
     <div class="setting-row">
       <label class="setting-label">阅读模式</label>
-      <el-radio-group v-model="reader.mode" size="small" @change="$emit('modeChange', $event)">
-        <el-radio-button value="scroll">滚动</el-radio-button>
-        <el-radio-button value="flip">左右翻页</el-radio-button>
-        <el-radio-button value="page">上下分页</el-radio-button>
+      <el-radio-group v-model="reader.mode" size="small" class="read-method-group" @change="$emit('modeChange', $event)">
+        <el-radio-button value="page">上下滑动</el-radio-button>
+        <el-radio-button value="flip">左右滑动</el-radio-button>
+        <el-radio-button value="scroll">上下滚动</el-radio-button>
       </el-radio-group>
     </div>
 
@@ -108,7 +108,7 @@
       <el-slider v-model="paragraphSpaceModel" :min="0" :max="3" :step="0.1" size="small" @input="setParagraphSpace" @change="setParagraphSpace" />
     </div>
 
-    <div class="setting-row">
+    <div v-if="!miniInterface" class="setting-row">
       <label class="setting-label">阅读宽度 ({{ reader.columnWidth }}px)</label>
       <el-slider v-model="columnWidthModel" :min="560" :max="1080" :step="20" size="small" @input="setColumnWidth" @change="setColumnWidth" />
     </div>
@@ -165,6 +165,7 @@ const props = defineProps({
   themePresets: { type: Object, default: () => ({}) },
   customBg: { type: String, default: '' },
   lineHeight: { type: Number, default: 2.12 },
+  miniInterface: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -303,6 +304,11 @@ function setTTSVoice(value) {
   display: grid;
   gap: 20px;
   min-width: 0;
+}
+
+.read-method-group {
+  display: flex;
+  flex-wrap: wrap;
 }
 
 .setting-row {

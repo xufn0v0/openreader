@@ -44,9 +44,13 @@ func (s *Server) listUsers(c *gin.Context) {
 		CanEditSources bool      `json:"canEditSources"`
 		CanAccessStore bool      `json:"canAccessStore"`
 		BookCount      int64     `json:"bookCount"`
+		SourceCount    int64     `json:"sourceCount"`
 		LastActiveAt   time.Time `json:"lastActiveAt"`
 		CreatedAt      time.Time `json:"createdAt"`
 	}
+
+	var sourceCount int64
+	_ = s.db.Model(&models.BookSource{}).Count(&sourceCount).Error
 
 	results := make([]userSummary, 0, len(users))
 	for _, u := range users {
@@ -61,6 +65,7 @@ func (s *Server) listUsers(c *gin.Context) {
 			CanEditSources: u.CanEditSources,
 			CanAccessStore: u.CanAccessStore,
 			BookCount:      bookCount,
+			SourceCount:    sourceCount,
 			LastActiveAt:   u.LastActiveAt,
 			CreatedAt:      u.CreatedAt,
 		})

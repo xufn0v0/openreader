@@ -528,18 +528,21 @@ onBeforeUnmount(() => {
   overflow-x: hidden;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1024px), (hover: none) and (pointer: coarse) {
   .app-sidebar {
-    width: 78px;
+    --mobile-sidebar-width: 78px;
+    width: var(--mobile-sidebar-width);
     overflow-y: auto;
     padding: 8px 6px;
     scrollbar-width: none;
   }
 
   .app-workspace {
-    width: calc(100dvw - 78px);
-    max-width: calc(100dvw - 78px);
-    margin-left: 78px;
+    width: calc(100vw - var(--mobile-sidebar-width));
+    width: calc(100dvw - var(--mobile-sidebar-width));
+    max-width: calc(100vw - var(--mobile-sidebar-width));
+    max-width: calc(100dvw - var(--mobile-sidebar-width));
+    margin-left: var(--mobile-sidebar-width);
     padding-left: 0;
   }
 
@@ -634,13 +637,16 @@ onBeforeUnmount(() => {
 
 @media (max-width: 420px), (hover: none) and (pointer: coarse) and (max-width: 520px) {
   .app-sidebar {
-    width: 72px;
+    --mobile-sidebar-width: 72px;
+    width: var(--mobile-sidebar-width);
   }
 
   .app-workspace {
-    width: calc(100dvw - 72px);
-    max-width: calc(100dvw - 72px);
-    margin-left: 72px;
+    width: calc(100vw - var(--mobile-sidebar-width));
+    width: calc(100dvw - var(--mobile-sidebar-width));
+    max-width: calc(100vw - var(--mobile-sidebar-width));
+    max-width: calc(100dvw - var(--mobile-sidebar-width));
+    margin-left: var(--mobile-sidebar-width);
   }
 
   .app-nav-item {

@@ -112,10 +112,10 @@
         <button class="mobile-chapter-step" type="button" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
           上一章
         </button>
-        <div class="mobile-chapter-progress">
+        <button class="mobile-chapter-progress" type="button" @click="toggleReaderChrome">
           <strong>{{ bookProgressLabel }}</strong>
           <span>{{ chapterLabel }}</span>
-        </div>
+        </button>
         <button class="mobile-chapter-step" type="button" :disabled="currentIndex >= chapters.length - 1" @click="goChapter(currentIndex + 1)">
           下一章
         </button>
@@ -317,6 +317,7 @@
         :tts-voices="ttsVoices"
         :font-options="fontOptions"
         :theme-presets="themePresets"
+        :mini-interface="isMobileReader"
         @mode-change="onModeChange"
         @theme-change="setTheme"
         @pick-bg-image="pickBgImage"
@@ -2197,8 +2198,8 @@ function readError(err, fallback) {
 /* ---- 响应式 ---- */
 @media (max-width: 860px), (hover: none) and (pointer: coarse) {
   .reader-shell {
-    --reader-frame-width: 100vw;
-    --reader-content-width: calc(100vw - 44px);
+    --reader-frame-width: 100dvw;
+    --reader-content-width: calc(100dvw - 44px);
     min-height: 100dvh;
     overflow: hidden;
     padding: 0;
@@ -2206,12 +2207,12 @@ function readError(err, fallback) {
   .reader-page {
     height: 100dvh;
     border: 0;
-    width: 100vw;
+    width: 100dvw;
   }
   .reader-page-head { display: none; }
   .reader-content {
     box-sizing: border-box;
-    width: 100vw;
+    width: 100dvw;
     font-size: var(--reader-font-size);
     padding: 42px 22px calc(132px + env(safe-area-inset-bottom));
     scroll-padding-bottom: calc(132px + env(safe-area-inset-bottom));
@@ -2322,6 +2323,10 @@ function readError(err, fallback) {
     min-width: 0;
     justify-items: center;
     gap: 2px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
   }
   .mobile-chapter-progress strong,
   .mobile-chapter-progress span {

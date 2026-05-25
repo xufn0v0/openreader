@@ -507,7 +507,7 @@ function readError(err, fallback) {
   grid-template-columns: 1fr;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1024px), (hover: none) and (pointer: coarse) {
   .shelf-page {
     gap: 8px;
     width: 100%;

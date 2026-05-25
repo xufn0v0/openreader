@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"openreader/backend/engine"
+	"openreader/backend/middleware"
 	"openreader/backend/models"
 )
 
@@ -50,6 +51,10 @@ func (p bookSourcePayload) toModel() models.BookSource {
 }
 
 func (s *Server) createSource(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	var req bookSourcePayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source payload"})
@@ -72,6 +77,10 @@ func (s *Server) createSource(c *gin.Context) {
 }
 
 func (s *Server) updateSource(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	id, ok := parseUintParam(c, "id")
 	if !ok {
 		return
@@ -113,6 +122,10 @@ func (s *Server) updateSource(c *gin.Context) {
 }
 
 func (s *Server) deleteSource(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	id, ok := parseUintParam(c, "id")
 	if !ok {
 		return
@@ -131,6 +144,10 @@ func (s *Server) deleteSource(c *gin.Context) {
 }
 
 func (s *Server) clearSources(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	result := s.db.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&models.BookSource{})
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear sources"})
@@ -145,6 +162,10 @@ type batchSourcesRequest struct {
 }
 
 func (s *Server) batchSources(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	var req batchSourcesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "action and sourceIds are required"})
@@ -180,6 +201,10 @@ func (s *Server) batchSources(c *gin.Context) {
 }
 
 func (s *Server) importSources(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
@@ -226,6 +251,10 @@ type remoteSourceRequest struct {
 }
 
 func (s *Server) importRemoteSource(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
 	var req remoteSourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
@@ -319,6 +348,30 @@ func (s *Server) importBookSources(sources []models.BookSource) gin.H {
 		imported++
 	}
 	return gin.H{"imported": imported, "updated": updated, "skipped": skipped}
+}
+
+func (s *Server) requireSourceEdit(c *gin.Context) bool {
+	userID, ok := middleware.UserID(c)
+	if !ok {
+		unauthorized(c, "missing user")
+		return false
+	}
+
+	var user models.User
+	err := s.db.Select("can_edit_sources").First(&user, userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		unauthorized(c, "user not found")
+		return false
+	}
+	if err != nil {
+		internalError(c, "failed to load user")
+		return false
+	}
+	if !user.CanEditSources {
+		c.JSON(http.StatusForbidden, errResp("FORBIDDEN", "source editing is disabled for this user"))
+		return false
+	}
+	return true
 }
 
 func decodeBookSources(data []byte) ([]models.BookSource, error) {

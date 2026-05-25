@@ -492,7 +492,7 @@
         <el-table-column prop="username" label="用户名" min-width="140" />
         <el-table-column prop="role" label="角色" width="90" />
         <el-table-column prop="bookCount" label="书籍" width="80" />
-        <el-table-column prop="sourceCount" label="书源" width="80" />
+        <el-table-column prop="sourceCount" label="全局书源" width="100" />
         <el-table-column label="权限" min-width="300">
           <template #default="{ row }">
             <div class="permission-row">
@@ -506,7 +506,7 @@
         <article v-for="user in users" :key="user.id" class="mobile-user-card">
           <header>
             <strong>{{ user.username }}</strong>
-            <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 书源 {{ user.sourceCount || 0 }}</span>
+            <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
           </header>
           <div class="permission-row">
             <el-switch v-model="user.canEditSources" size="small" active-text="书源" @change="updateUserPermission(user)" />

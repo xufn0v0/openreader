@@ -133,6 +133,43 @@ func TestRegisterAndLogin(t *testing.T) {
 	}
 }
 
+func TestAdminUsersIncludesGlobalSourceCount(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&user).Update("role", "admin").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.BookSource{Name: "源一", Enabled: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.BookSource{Name: "源二", Enabled: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin users: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var users []struct {
+		Username    string `json:"username"`
+		SourceCount int64  `json:"sourceCount"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].Username != "testuser" || users[0].SourceCount != 2 {
+		t.Fatalf("unexpected admin users response: %+v", users)
+	}
+}
+
 func TestBookCRUD(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
@@ -605,6 +642,32 @@ func TestCreateSourceRespectsEnabledFlag(t *testing.T) {
 	}
 	if source.Enabled {
 		t.Fatalf("expected source to remain disabled: %+v", source)
+	}
+}
+
+func TestSourceEditingPermissionBlocksMutations(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	if err := server.db.Model(&models.User{}).Where("username = ?", "testuser").Update("can_edit_sources", false).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sources", strings.NewReader(`{"name":"禁止新增"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("create source without permission: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/sources", nil)
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("list sources without edit permission: expected 200, got %d: %s", w2.Code, w2.Body.String())
 	}
 }
 
