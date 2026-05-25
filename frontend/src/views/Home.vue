@@ -58,8 +58,8 @@
             class="book-row"
             role="button"
             tabindex="0"
-            @click="openDetail(book)"
-            @keyup.enter="openDetail(book)"
+            @click="handleBookRowClick(book)"
+            @keyup.enter="handleBookRowClick(book)"
           >
             <span class="list-cover" :style="coverStyle(book)">{{ coverInitial(book) }}</span>
             <span class="list-main">
@@ -77,11 +77,6 @@
               <small>{{ book.author || '未知作者' }}<template v-if="book.chapterCount"> · 共{{ book.chapterCount }}章</template></small>
               <small v-if="readChapterTitle(book)">已读：{{ readChapterTitle(book) }}</small>
               <small v-if="book.lastChapter">最新：{{ book.lastChapter }}</small>
-              <span class="mobile-row-actions">
-                <span>{{ progressLabel(book) }}</span>
-                <button type="button" @click.stop="continueRead(book)">阅读</button>
-                <button type="button" @click.stop="openDetail(book)">详情</button>
-              </span>
             </span>
             <el-button class="read-button" size="small" type="primary" plain @click.stop="continueRead(book)">阅读</el-button>
           </article>
@@ -224,6 +219,14 @@ function openDetail(book) {
 
 function continueRead(book) {
   router.push({ name: 'reader', params: { id: book.id } })
+}
+
+function handleBookRowClick(book) {
+  if (isMobileShelf.value) {
+    continueRead(book)
+    return
+  }
+  openDetail(book)
 }
 
 function readChapterTitle(book) {
@@ -516,10 +519,6 @@ function readError(err, fallback) {
   justify-items: end;
 }
 
-.mobile-row-actions {
-  display: none;
-}
-
 .empty-panel {
   display: grid;
   min-height: 360px;
@@ -569,11 +568,11 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .shelf-toolbar {
-  padding: 6px 8px;
+  display: none;
 }
 
 .shelf-page.mobile-shelf .recent-strip {
-  padding: 8px 10px;
+  display: none;
 }
 
 .shelf-page.mobile-shelf .recent-strip strong {
@@ -614,36 +613,6 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .read-button {
   display: none;
-}
-
-.shelf-page.mobile-shelf .mobile-row-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(28px, auto) minmax(28px, auto);
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 6px;
-  color: var(--app-primary-strong);
-  font-size: 12px;
-  overflow: hidden;
-}
-
-.shelf-page.mobile-shelf .mobile-row-actions span,
-.shelf-page.mobile-shelf .mobile-row-actions button {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shelf-page.mobile-shelf .mobile-row-actions button {
-  max-width: 44px;
-  padding: 0;
-  color: var(--app-text-subtle);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font-size: 12px;
 }
 
 @media (max-width: 1024px), (hover: none) and (pointer: coarse) {
@@ -697,7 +666,7 @@ function readError(err, fallback) {
   }
 
   .shelf-toolbar {
-    padding: 6px 8px;
+    display: none;
   }
 
   .shelf-toolbar :deep(.el-input__wrapper) {
@@ -705,18 +674,7 @@ function readError(err, fallback) {
   }
 
   .recent-strip {
-    padding: 8px 10px;
-  }
-
-  .recent-strip strong {
-    font-size: 13px;
-  }
-
-  .recent-strip b {
-    width: 38px;
-    height: 38px;
-    flex-basis: 38px;
-    font-size: 12px;
+    display: none;
   }
 
   .book-group-wrapper {
@@ -763,43 +721,6 @@ function readError(err, fallback) {
     display: none;
   }
 
-  .mobile-row-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(28px, auto) minmax(28px, auto);
-    min-width: 0;
-    max-width: 100%;
-    align-items: center;
-    gap: 6px;
-    color: var(--app-primary-strong);
-    font-size: 12px;
-    overflow: hidden;
-  }
-
-  .mobile-row-actions span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .mobile-row-actions button {
-    min-width: 0;
-    max-width: 44px;
-    overflow: hidden;
-    padding: 0;
-    color: var(--app-text-subtle);
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .mobile-row-actions button:first-of-type {
-    color: var(--app-primary-strong);
-    font-weight: 700;
-  }
 }
 
 @media (max-width: 520px) {

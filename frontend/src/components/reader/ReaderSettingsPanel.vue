@@ -10,6 +10,15 @@
     </div>
 
     <div class="setting-row">
+      <label class="setting-label">全屏点击</label>
+      <el-radio-group v-model="reader.clickMethod" size="small" class="read-method-group" @change="reader.setClickMethod($event)">
+        <el-radio-button value="next">下一页</el-radio-button>
+        <el-radio-button value="auto">自动</el-radio-button>
+        <el-radio-button value="none">不翻页</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">主题</label>
       <div class="theme-grid">
         <span

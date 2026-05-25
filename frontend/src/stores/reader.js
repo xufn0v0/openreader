@@ -12,6 +12,7 @@ export const themePresets = {
 export const useReaderStore = defineStore('reader', {
   state: () => ({
     mode: 'scroll',
+    clickMethod: 'auto',
     fontFamily: 'system',
     fontSize: 18,
     fontWeight: 400,
@@ -26,7 +27,7 @@ export const useReaderStore = defineStore('reader', {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 4,
+    settingsVersion: 6,
     progressByBook: {},
   }),
   persist: true,
@@ -45,6 +46,9 @@ export const useReaderStore = defineStore('reader', {
   actions: {
     setMode(mode) {
       this.mode = ['scroll', 'flip', 'page'].includes(mode) ? mode : 'scroll'
+    },
+    setClickMethod(method) {
+      this.clickMethod = ['next', 'auto', 'none'].includes(method) ? method : 'auto'
     },
     setFontFamily(fontFamily) {
       this.fontFamily = ['system', 'serif', 'kai', 'mono'].includes(fontFamily) ? fontFamily : 'system'
@@ -90,6 +94,7 @@ export const useReaderStore = defineStore('reader', {
     },
     normalizeSettings() {
       if (!['scroll', 'flip', 'page'].includes(this.mode)) this.mode = 'scroll'
+      if (!['next', 'auto', 'none'].includes(this.clickMethod)) this.clickMethod = 'auto'
       if (!['system', 'serif', 'kai', 'mono'].includes(this.fontFamily)) this.fontFamily = 'system'
       this.setFontSize(this.fontSize)
       this.setFontWeight(this.fontWeight)
@@ -107,7 +112,7 @@ export const useReaderStore = defineStore('reader', {
         this.paragraphSpace = 0.2
         this.columnWidth = 800
       }
-      this.settingsVersion = 5
+      this.settingsVersion = 6
     },
     applyProgress(progress) {
       if (!progress?.bookId) return

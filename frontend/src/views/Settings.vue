@@ -218,6 +218,14 @@
                 </el-radio-group>
               </label>
               <label>
+                <span>全屏点击</span>
+                <el-radio-group v-model="readerClickMethodModel" size="small" @change="readerStore.setClickMethod($event)">
+                  <el-radio-button value="next">下一页</el-radio-button>
+                  <el-radio-button value="auto">自动</el-radio-button>
+                  <el-radio-button value="none">不翻页</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
                 <span>字体</span>
                 <el-select v-model="readerFontFamilyModel" size="small" @change="readerStore.setFontFamily($event)">
                   <el-option v-for="font in fontOptions" :key="font.value" :label="font.label" :value="font.value" />
@@ -599,6 +607,10 @@ const fontOptions = readerFontOptions
 const readerModeModel = computed({
   get: () => readerStore.mode,
   set: value => readerStore.setMode(value),
+})
+const readerClickMethodModel = computed({
+  get: () => readerStore.clickMethod,
+  set: value => readerStore.setClickMethod(value),
 })
 const readerFontFamilyModel = computed({
   get: () => readerStore.fontFamily,

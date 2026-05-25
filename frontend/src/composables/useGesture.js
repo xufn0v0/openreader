@@ -8,6 +8,7 @@ export function useGesture(elementRef, handlers) {
   const {
     onSwipeLeft, onSwipeRight,
     onSwipeUp, onSwipeDown,
+    onTapPoint,
     onCenterTap, onEdgeLeftTap, onEdgeRightTap, onUpperTap, onLowerTap,
     onPinchIn, onPinchOut,
   } = handlers
@@ -79,6 +80,11 @@ export function useGesture(elementRef, handlers) {
     const rect = el.getBoundingClientRect()
     const relX = clientX - rect.left
     const relY = clientY - rect.top
+
+    if (onTapPoint) {
+      onTapPoint({ clientX, clientY, relX, relY, rect })
+      return
+    }
 
     if (relX < EDGE_WIDTH) {
       onEdgeLeftTap?.()

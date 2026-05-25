@@ -1248,21 +1248,63 @@ function handleTapZone(zone) {
     toggleReaderChrome()
     return
   }
-  if (zone === 'left') {
-    if (reader.mode === 'flip' || reader.mode === 'scroll') previousPage()
+
+  if (reader.clickMethod === 'next') {
+    mobileChromeVisible.value = false
+    nextPage()
     return
   }
-  if (zone === 'right') {
-    if (reader.mode === 'flip' || reader.mode === 'scroll') nextPage()
+
+  if (reader.clickMethod === 'none') {
+    toggleReaderChrome()
     return
   }
+
+  if (reader.mode === 'flip') {
+    if (zone === 'left') previousPage()
+    if (zone === 'right') nextPage()
+    return
+  }
+
   if (zone === 'upper') {
-    if (reader.mode === 'scroll' || reader.mode === 'page') previousPage()
+    previousPage()
     return
   }
-  if (zone === 'lower') {
-    if (reader.mode === 'scroll' || reader.mode === 'page') nextPage()
+  if (zone === 'lower') nextPage()
+}
+
+function handleTapPoint(point) {
+  if (isOverlayOpen.value || !point?.rect) return
+  const midX = point.rect.width / 2
+  const midY = point.rect.height / 2
+  const inMenuZone = Math.abs(point.relX - midX) <= point.rect.width * 0.2
+    && Math.abs(point.relY - midY) <= point.rect.height * 0.2
+
+  if (inMenuZone) {
+    toggleReaderChrome()
+    return
   }
+
+  if (reader.clickMethod === 'next') {
+    mobileChromeVisible.value = false
+    nextPage()
+    return
+  }
+
+  if (reader.clickMethod === 'none') {
+    toggleReaderChrome()
+    return
+  }
+
+  mobileChromeVisible.value = false
+  if (reader.mode === 'flip') {
+    if (point.relX > midX) nextPage()
+    else previousPage()
+    return
+  }
+
+  if (point.relY > midY) nextPage()
+  else previousPage()
 }
 
 function toggleReaderChrome() {
@@ -1665,6 +1707,7 @@ useKeyboard({
 })
 
 useGesture(pageEl, {
+  onTapPoint: handleTapPoint,
   onSwipeLeft: () => {
     if (reader.mode === 'flip') nextPage()
   },
@@ -1676,29 +1719,6 @@ useGesture(pageEl, {
   },
   onSwipeDown: () => {
     if (reader.mode === 'page') previousPage()
-  },
-  onCenterTap: () => {
-    toggleReaderChrome()
-  },
-  onEdgeLeftTap: () => {
-    if (reader.mode === 'flip') {
-      previousPage()
-      return
-    }
-    if (reader.mode === 'scroll') previousPage()
-  },
-  onEdgeRightTap: () => {
-    if (reader.mode === 'flip') {
-      nextPage()
-      return
-    }
-    if (reader.mode === 'scroll') nextPage()
-  },
-  onUpperTap: () => {
-    if (reader.mode === 'page' || reader.mode === 'scroll') previousPage()
-  },
-  onLowerTap: () => {
-    if (reader.mode === 'page' || reader.mode === 'scroll') nextPage()
   },
   onPinchOut: () => reader.setFontSize(reader.fontSize + 2),
   onPinchIn: () => reader.setFontSize(reader.fontSize - 2),
@@ -1969,6 +1989,26 @@ function readError(err, fallback) {
   bottom: 0;
   left: 24%;
   height: 35%;
+}
+
+.reader-shell.scroll .tap-left,
+.reader-shell.scroll .tap-right,
+.reader-shell.page .tap-left,
+.reader-shell.page .tap-right {
+  display: none;
+}
+
+.reader-shell.scroll .tap-upper,
+.reader-shell.scroll .tap-lower,
+.reader-shell.page .tap-upper,
+.reader-shell.page .tap-lower {
+  right: 0;
+  left: 0;
+}
+
+.reader-shell.flip .tap-upper,
+.reader-shell.flip .tap-lower {
+  display: none;
 }
 
 @media (hover: hover) and (pointer: fine) {
