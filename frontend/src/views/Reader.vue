@@ -150,6 +150,7 @@
       </el-button>
       <el-button text class="tts-btn" @click="tts.skipForward">›</el-button>
       <el-button text class="tts-btn" @click="ttsStop">⏹</el-button>
+      <span class="tts-progress">{{ ttsProgressLabel }}</span>
       <span class="tts-label">语速</span>
       <input :value="tts.state.rate" max="3" min="0.5" step="0.1" type="range" class="tts-slider" @input="setTTSRate($event.target.value)" />
       <span class="tts-label">音调</span>
@@ -1704,6 +1705,11 @@ useGesture(pageEl, {
 // ---- TTS ----
 const tts = useTTS()
 const ttsVoices = computed(() => tts.voices.value)
+const ttsProgressLabel = computed(() => {
+  const total = tts.total.value || 0
+  if (!tts.state.playing || total <= 0) return '段落 - / -'
+  return `段落 ${Math.min(tts.currentIndex.value + 1, total)} / ${total}`
+})
 tts.setRate(reader.ttsRate)
 tts.setPitch(reader.ttsPitch)
 tts.setVoice(reader.ttsVoiceURI)
@@ -2062,6 +2068,7 @@ function readError(err, fallback) {
 }
 .tts-btn { color: #fff !important; font-size: 18px; }
 .tts-label { color: rgba(255,255,255,0.7); font-size: 12px; }
+.tts-progress { color: #fff; font-size: 12px; white-space: nowrap; }
 .tts-slider { width: 60px; accent-color: #fff; }
 
 /* ---- Toast ---- */

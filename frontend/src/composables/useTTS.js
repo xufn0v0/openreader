@@ -12,6 +12,7 @@ export function useTTS() {
     voiceURI: '',
   })
   const currentIndex = ref(-1)
+  const total = ref(0)
   let paragraphs = []
   let pending = false
 
@@ -39,6 +40,7 @@ export function useTTS() {
     state.playing = false
     state.paused = false
     currentIndex.value = -1
+    total.value = 0
     pending = false
     activeOnEnd = null
     activeOnStart = null
@@ -69,6 +71,7 @@ export function useTTS() {
     state.playing = true
     state.paused = false
     currentIndex.value = 0
+    total.value = paragraphs.length
     pending = false
     activeOnEnd = onEnd
     activeOnStart = onStart
@@ -162,6 +165,7 @@ export function useTTS() {
     state,
     voices,
     currentIndex,
+    total,
     speak,
     stop,
     pause,
