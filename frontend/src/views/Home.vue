@@ -10,7 +10,12 @@
     </button>
 
     <div class="shelf-title app-panel">
-      <strong>书架 ({{ displayedBooks.length }})</strong>
+      <div class="shelf-title-main">
+        <button v-if="isMobileShelf" class="mobile-menu-trigger" type="button" aria-label="打开侧边栏" @click.stop="toggleMobileNavigation">
+          <el-icon><Menu /></el-icon>
+        </button>
+        <strong>书架 ({{ displayedBooks.length }})</strong>
+      </div>
       <div class="title-actions">
         <button type="button" @click="showBookEditButton = !showBookEditButton">
           {{ showBookEditButton ? '取消' : '编辑' }}
@@ -95,7 +100,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Menu, Search } from '@element-plus/icons-vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
@@ -286,6 +291,10 @@ function isMobileUA() {
   return /Android|iPhone|iPad|iPod|Mobile|Tablet|Mobi/i.test(navigator.userAgent || '')
 }
 
+function toggleMobileNavigation() {
+  window.dispatchEvent(new CustomEvent('openreader:toggle-mobile-nav'))
+}
+
 function readError(err, fallback) {
   return err?.response?.data?.error?.message || err?.response?.data?.error || fallback
 }
@@ -367,6 +376,33 @@ function readError(err, fallback) {
 
 .shelf-title strong {
   font-size: 18px;
+}
+
+.shelf-title-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.shelf-title-main strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-menu-trigger {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  flex: 0 0 30px;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 
 .title-actions {
@@ -628,7 +664,9 @@ function readError(err, fallback) {
   max-height: 45px;
   font-size: 16px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
   white-space: normal;
+  word-break: break-word;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -636,6 +674,8 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .list-main small {
   font-size: 13px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .shelf-page.mobile-shelf .read-button {
@@ -757,7 +797,9 @@ function readError(err, fallback) {
     padding-right: 48px;
     font-size: 16px;
     line-height: 1.35;
+    overflow-wrap: anywhere;
     white-space: normal;
+    word-break: break-word;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }
@@ -765,6 +807,8 @@ function readError(err, fallback) {
   .list-main small {
     font-size: 13px;
     line-height: 1.35;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .read-button {

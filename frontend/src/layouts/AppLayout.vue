@@ -91,7 +91,7 @@
       </div>
     </aside>
 
-    <div class="app-workspace">
+    <div class="app-workspace" @click="closeMobileNavigation">
       <main class="app-content">
         <slot />
       </main>
@@ -330,6 +330,18 @@ function handleTouchEnd() {
   touchMoveX.value = 0
 }
 
+function closeMobileNavigation() {
+  if (isMobileShell.value && mobileNavigationVisible.value) {
+    mobileNavigationVisible.value = false
+  }
+}
+
+function toggleMobileNavigation() {
+  if (isMobileShell.value) {
+    mobileNavigationVisible.value = !mobileNavigationVisible.value
+  }
+}
+
 watch(
   () => userStore.token,
   (token) => {
@@ -348,6 +360,7 @@ onMounted(() => {
   window.addEventListener('online', setOnline)
   window.addEventListener('resize', updateViewportFlags)
   window.addEventListener('orientationchange', updateViewportFlags)
+  window.addEventListener('openreader:toggle-mobile-nav', toggleMobileNavigation)
   offline.value = !navigator.onLine
   if (userStore.token && !userStore.profile) {
     userStore.loadMe().catch(() => {})
@@ -362,6 +375,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', setOnline)
   window.removeEventListener('resize', updateViewportFlags)
   window.removeEventListener('orientationchange', updateViewportFlags)
+  window.removeEventListener('openreader:toggle-mobile-nav', toggleMobileNavigation)
 })
 </script>
 
@@ -607,9 +621,22 @@ onBeforeUnmount(() => {
   overflow-x: hidden;
 }
 
+.app-shell.mobile-shell {
+  display: flex;
+  flex-direction: row;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
 .app-shell.mobile-shell .app-sidebar {
+  position: relative;
+  inset: auto;
   width: 260px;
   min-width: 260px;
+  height: 100vh;
+  height: 100dvh;
+  flex: 0 0 260px;
   margin-left: -260px;
   overflow-y: auto;
   padding: max(20px, env(safe-area-inset-top)) 36px 66px;
@@ -618,6 +645,8 @@ onBeforeUnmount(() => {
 }
 
 .app-shell.mobile-shell .app-workspace {
+  flex: 0 0 100vw;
+  flex-basis: 100dvw;
   width: 100vw;
   width: 100dvw;
   max-width: 100vw;

@@ -81,7 +81,16 @@
         <span>{{ chapterLabel }}</span>
       </header>
 
-      <article ref="contentEl" class="reader-content" :style="readerContentStyle" @scroll.passive="onScroll">
+      <article
+        ref="contentEl"
+        class="reader-content"
+        :style="readerContentStyle"
+        @scroll.passive="onScroll"
+        @touchstart.passive="handleReaderTouchStart"
+        @touchmove.passive="handleReaderTouchMove"
+        @touchend.passive="handleReaderTouchEnd"
+        @click="handleReaderContentClick"
+      >
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
           <h1>{{ chapter?.title || '正文' }}</h1>
           <p v-if="chapterLoading" class="empty-hint">正在加载章节...</p>
@@ -494,6 +503,9 @@ let lastProgressRequestAt = 0
 let restoringPosition = false
 let chapterContentCache = null
 let cachingContentCancelled = false
+let readerTouchStart = null
+let readerTouchMoved = false
+let ignoreNextContentClick = false
 
 const fontOptions = readerFontOptions
 
@@ -1452,6 +1464,52 @@ function handleTapZone(zone) {
     return
   }
   if (zone === 'lower') nextPage()
+}
+
+function handleReaderContentClick(event) {
+  if (!isMobileReader.value || isOverlayOpen.value || !contentEl.value) return
+  if (ignoreNextContentClick) {
+    ignoreNextContentClick = false
+    return
+  }
+  if (event.defaultPrevented || event.button !== 0) return
+  const target = event.target
+  if (target?.closest?.('button, a, input, textarea, select, [role="button"]')) return
+  const rect = contentEl.value.getBoundingClientRect()
+  handleTapPoint({
+    rect,
+    relX: event.clientX - rect.left,
+    relY: event.clientY - rect.top,
+  })
+}
+
+function handleReaderTouchStart(event) {
+  if (!isMobileReader.value || event.touches?.length !== 1) return
+  const touch = event.touches[0]
+  readerTouchStart = { x: touch.clientX, y: touch.clientY }
+  readerTouchMoved = false
+}
+
+function handleReaderTouchMove(event) {
+  if (!isMobileReader.value || !readerTouchStart || event.touches?.length !== 1) return
+  const touch = event.touches[0]
+  const moveX = touch.clientX - readerTouchStart.x
+  const moveY = touch.clientY - readerTouchStart.y
+  if (Math.abs(moveX) > 6 || Math.abs(moveY) > 6) {
+    readerTouchMoved = true
+  }
+}
+
+function handleReaderTouchEnd() {
+  if (!isMobileReader.value) return
+  if (readerTouchMoved) {
+    ignoreNextContentClick = true
+    setTimeout(() => {
+      ignoreNextContentClick = false
+    }, 320)
+  }
+  readerTouchStart = null
+  readerTouchMoved = false
 }
 
 function handleTapPoint(point) {
@@ -2545,7 +2603,7 @@ function readError(err, fallback) {
     box-shadow: 0 8px 24px rgba(73, 57, 27, 0.08);
     opacity: 0;
     pointer-events: none;
-    transform: translateY(-110%);
+    transform: translate3d(0, calc(-100% - 16px), 0);
     visibility: hidden;
     transition: transform 180ms ease, opacity 180ms ease, visibility 0s linear 180ms;
   }
@@ -2591,7 +2649,7 @@ function readError(err, fallback) {
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
     opacity: 0;
     pointer-events: none;
-    transform: translateY(110%);
+    transform: translate3d(0, calc(100% + 16px), 0);
     visibility: hidden;
     transition: transform 180ms ease, opacity 180ms ease, visibility 0s linear 180ms;
   }
@@ -2612,7 +2670,7 @@ function readError(err, fallback) {
   .reader-shell.mobile-chrome-visible .reader-mobile-bottom {
     opacity: 1;
     pointer-events: auto;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
     visibility: visible;
     transition: transform 180ms ease, opacity 180ms ease;
   }
