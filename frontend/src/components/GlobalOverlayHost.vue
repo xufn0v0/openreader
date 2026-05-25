@@ -320,6 +320,10 @@
           <span>{{ webdavPath || '/' }}</span>
         </div>
         <div class="file-actions">
+          <el-select v-model="webdavTargetCategoryId" size="small" placeholder="导入分组" clearable class="webdav-category-select">
+            <el-option label="未分组" value="" />
+            <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
+          </el-select>
           <el-button size="small" :icon="Refresh" :loading="webdavLoading" @click="loadWebDAV">刷新</el-button>
           <el-button size="small" :icon="FolderOpened" @click="createWebDAVFolder">新建目录</el-button>
           <el-upload :show-file-list="false" :auto-upload="false" @change="uploadWebDAVFile">
@@ -796,6 +800,7 @@ const webdavRestoring = ref('')
 const webdavImporting = ref(false)
 const webdavImportResultDialog = ref(false)
 const webdavImportResults = ref([])
+const webdavTargetCategoryId = ref('')
 const backups = ref([])
 const backupLoading = ref(false)
 const backupListLoading = ref(false)
@@ -1750,6 +1755,7 @@ function formatDate(value) {
 async function loadWebDAV() {
   webdavLoading.value = true
   try {
+    if (!bookshelf.categories.length) await bookshelf.loadCategories()
     const { data } = await listWebDAV(webdavPath.value)
     webdavItems.value = parseWebDAVListing(data)
     webdavSelection.value = []
@@ -1909,7 +1915,8 @@ async function importSelectedWebDAVBooks() {
 async function importWebDAVBooks(paths) {
   webdavImporting.value = true
   try {
-    const { data } = await importFromWebDAV(paths)
+    const categoryId = webdavTargetCategoryId.value ? Number(webdavTargetCategoryId.value) : null
+    const { data } = await importFromWebDAV(paths, categoryId)
     webdavImportResults.value = data.imported || []
     const success = webdavImportResults.value.filter(item => item.book).length
     const failed = webdavImportResults.value.filter(item => item.error).length
@@ -2431,6 +2438,10 @@ function readError(err, fallback) {
   gap: 8px;
 }
 
+.webdav-category-select {
+  width: 140px;
+}
+
 .file-breadcrumb button,
 .file-name,
 .mobile-file-name {
@@ -2904,6 +2915,10 @@ function readError(err, fallback) {
 
   .file-actions {
     justify-content: flex-start;
+  }
+
+  .webdav-category-select {
+    width: 100%;
   }
 
   .desktop-file-table {
