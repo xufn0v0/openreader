@@ -635,8 +635,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
 })
 
-onBeforeRouteLeave(() => {
-  saveCurrentProgress({ force: true })
+onBeforeRouteLeave(async () => {
+  await saveCurrentProgress({ force: true })
 })
 
 watch(bookId, async () => {
@@ -876,13 +876,13 @@ function openCacheDrawer() {
 }
 
 async function goBookDetail() {
-  saveCurrentProgress({ force: true })
-  router.push({ name: 'book-detail', params: { id: bookId.value } })
+  await saveCurrentProgress({ force: true })
+  await router.push({ name: 'book-detail', params: { id: bookId.value } })
 }
 
 async function goShelf() {
-  saveCurrentProgress({ force: true })
-  router.push({ name: 'home' })
+  await saveCurrentProgress({ force: true })
+  await router.push({ name: 'home' })
 }
 async function openShelfPanel() {
   showShelfDrawer.value = true
@@ -900,7 +900,7 @@ async function openShelfPanel() {
 async function changeBookFromShelf(item) {
   showShelfDrawer.value = false
   if (item.id === bookId.value) return
-  saveCurrentProgress({ force: true })
+  await saveCurrentProgress({ force: true })
   await router.push({ name: 'reader', params: { id: item.id } })
 }
 
@@ -1500,13 +1500,22 @@ function handleReaderTouchMove(event) {
   }
 }
 
-function handleReaderTouchEnd() {
+function handleReaderTouchEnd(event) {
   if (!isMobileReader.value) return
-  if (readerTouchMoved) {
-    ignoreNextContentClick = true
-    setTimeout(() => {
-      ignoreNextContentClick = false
-    }, 320)
+  ignoreNextContentClick = true
+  setTimeout(() => {
+    ignoreNextContentClick = false
+  }, 320)
+  if (!readerTouchMoved && !isOverlayOpen.value && contentEl.value) {
+    const touch = event.changedTouches?.[0]
+    if (touch) {
+      const rect = contentEl.value.getBoundingClientRect()
+      handleTapPoint({
+        rect,
+        relX: touch.clientX - rect.left,
+        relY: touch.clientY - rect.top,
+      })
+    }
   }
   readerTouchStart = null
   readerTouchMoved = false
