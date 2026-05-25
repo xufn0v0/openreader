@@ -591,24 +591,51 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .book-row {
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 8px;
-  padding: 9px 8px;
+  display: flex;
+  min-height: 132px;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 20px;
   contain: layout paint;
 }
 
 .shelf-page.mobile-shelf .list-cover {
-  width: 40px;
-  height: 54px;
+  width: 84px;
+  height: 112px;
+  flex: 0 0 84px;
 }
 
 .shelf-page.mobile-shelf .book-operation {
-  position: static;
+  position: absolute;
+  top: 10px;
+  right: 20px;
   display: flex;
   min-width: 0;
   min-height: 0;
   justify-content: flex-end;
   overflow: hidden;
+}
+
+.shelf-page.mobile-shelf .list-main {
+  min-height: 112px;
+  justify-content: space-between;
+  gap: 4px;
+  padding-right: 48px;
+}
+
+.shelf-page.mobile-shelf .list-main strong {
+  display: -webkit-box;
+  max-height: 45px;
+  font-size: 16px;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.shelf-page.mobile-shelf .list-main small {
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .shelf-page.mobile-shelf .read-button {
@@ -682,19 +709,24 @@ function readError(err, fallback) {
   }
 
   .book-row {
-    grid-template-columns: 40px minmax(0, 1fr);
-    gap: 8px;
-    padding: 9px 8px;
+    display: flex;
+    min-height: 132px;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 20px;
     contain: layout paint;
   }
 
   .list-cover {
-    width: 40px;
-    height: 54px;
+    width: 84px;
+    height: 112px;
+    flex: 0 0 84px;
   }
 
   .book-operation {
-    position: static;
+    position: absolute;
+    top: 10px;
+    right: 20px;
     display: flex;
     min-width: 0;
     min-height: 0;
@@ -713,8 +745,26 @@ function readError(err, fallback) {
   .list-main {
     width: 100%;
     max-width: 100%;
+    min-height: 112px;
+    justify-content: space-between;
     padding-right: 0;
     overflow: hidden;
+  }
+
+  .list-main strong {
+    display: -webkit-box;
+    max-height: 45px;
+    padding-right: 48px;
+    font-size: 16px;
+    line-height: 1.35;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .list-main small {
+    font-size: 13px;
+    line-height: 1.35;
   }
 
   .read-button {

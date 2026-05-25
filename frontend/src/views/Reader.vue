@@ -2261,6 +2261,7 @@ function readError(err, fallback) {
     font-size: var(--reader-font-size);
     padding: 42px 22px calc(42px + env(safe-area-inset-bottom));
     scroll-padding-bottom: calc(42px + env(safe-area-inset-bottom));
+    touch-action: pan-y pinch-zoom;
   }
   .reader-shell.mobile-chrome-visible .reader-content {
     padding-bottom: calc(220px + env(safe-area-inset-bottom));
@@ -2288,8 +2289,11 @@ function readError(err, fallback) {
     background: rgba(255, 252, 239, 0.94);
     border-bottom: 1px solid rgba(148, 132, 87, 0.28);
     box-shadow: 0 8px 24px rgba(73, 57, 27, 0.08);
+    opacity: 0;
+    pointer-events: none;
     transform: translateY(-110%);
-    transition: transform 180ms ease;
+    visibility: hidden;
+    transition: transform 180ms ease, opacity 180ms ease, visibility 0s linear 180ms;
   }
   .mobile-reader-title {
     display: grid;
@@ -2331,8 +2335,11 @@ function readError(err, fallback) {
     border-top: 1px solid rgba(148, 132, 87, 0.35);
     border-radius: 10px 10px 0 0;
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
+    opacity: 0;
+    pointer-events: none;
     transform: translateY(110%);
-    transition: transform 180ms ease;
+    visibility: hidden;
+    transition: transform 180ms ease, opacity 180ms ease, visibility 0s linear 180ms;
   }
   .reader-mobile-progress-panel {
     display: grid;
@@ -2349,7 +2356,11 @@ function readError(err, fallback) {
   }
   .reader-shell.mobile-chrome-visible .reader-mobile-top,
   .reader-shell.mobile-chrome-visible .reader-mobile-bottom {
+    opacity: 1;
+    pointer-events: auto;
     transform: translateY(0);
+    visibility: visible;
+    transition: transform 180ms ease, opacity 180ms ease;
   }
   .mobile-chapter-step {
     min-width: 0;

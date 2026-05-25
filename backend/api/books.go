@@ -1277,6 +1277,10 @@ func (s *Server) loadChapterText(book models.Book, chapter *models.Chapter) stri
 		}
 	}
 
+	if content == "" && book.SourceID == 0 {
+		content = s.rebuildLocalChapterText(book, chapter)
+	}
+
 	if content == "" && chapter.URL != "" && book.SourceID > 0 {
 		var source models.BookSource
 		if err := s.db.First(&source, book.SourceID).Error; err == nil {
@@ -1293,6 +1297,129 @@ func (s *Server) loadChapterText(book models.Book, chapter *models.Chapter) stri
 	}
 	content = s.applyUserReplaceRules(book.UserID, content)
 	return content
+}
+
+func (s *Server) rebuildLocalChapterText(book models.Book, chapter *models.Chapter) string {
+	sourcePath, ok := s.localBookSourcePath(book)
+	if !ok {
+		return ""
+	}
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return ""
+	}
+	chapters, err := parseLocalBookChapters(filepath.Ext(sourcePath), data)
+	if err != nil || chapter.Index < 0 || chapter.Index >= len(chapters) {
+		return ""
+	}
+	content := strings.TrimSpace(chapters[chapter.Index].Content)
+	if content == "" {
+		return ""
+	}
+
+	chapterURL := strings.TrimSpace(chapter.URL)
+	if chapterURL == "" {
+		chapterURL = fmt.Sprintf("local://book_%d/chapter_%d", book.ID, chapter.Index)
+		chapter.URL = chapterURL
+	}
+	bookURL := strings.TrimSpace(book.URL)
+	if bookURL == "" {
+		bookURL = fmt.Sprintf("local://book_%d", book.ID)
+	}
+	if strings.TrimSpace(book.LibraryPath) != "" {
+		contentDir := filepath.Join(s.cfg.LibraryDir, book.LibraryPath, "content")
+		if cachePath, err := engine.WriteChapterCache(contentDir, bookURL, chapterURL, content); err == nil {
+			chapter.CachePath = filepath.Join("content", cachePath)
+			_ = s.db.Save(chapter)
+		}
+	}
+	return content
+}
+
+func parseLocalBookChapters(ext string, data []byte) ([]engine.TXTChapter, error) {
+	switch strings.ToLower(strings.TrimSpace(ext)) {
+	case ".txt", ".text", ".md":
+		return engine.ParseTXT(data)
+	case ".epub":
+		book, err := engine.ParseEPUB(data)
+		return book.Chapters, err
+	case ".pdf":
+		book, err := engine.ParsePDF(data)
+		return book.Chapters, err
+	case ".umd":
+		book, err := engine.ParseUMD(data)
+		return book.Chapters, err
+	default:
+		return nil, fmt.Errorf("unsupported local book extension: %s", ext)
+	}
+}
+
+func (s *Server) localBookSourcePath(book models.Book) (string, bool) {
+	candidates := make([]string, 0, 4)
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == path {
+				return
+			}
+		}
+		candidates = append(candidates, path)
+	}
+
+	libraryRoot := ""
+	if strings.TrimSpace(book.LibraryPath) != "" {
+		libraryRoot = filepath.Join(s.cfg.LibraryDir, book.LibraryPath)
+	}
+	originalFile := strings.TrimSpace(book.OriginalFile)
+	if filepath.IsAbs(originalFile) {
+		add(originalFile)
+		if libraryRoot != "" {
+			if suffix, ok := suffixAfterPathSegment(originalFile, book.LibraryPath); ok {
+				add(filepath.Join(libraryRoot, suffix))
+			}
+			add(filepath.Join(libraryRoot, filepath.Base(originalFile)))
+		}
+	} else if originalFile != "" {
+		add(filepath.Join(s.cfg.LibraryDir, originalFile))
+		if libraryRoot != "" {
+			add(filepath.Join(libraryRoot, filepath.Base(originalFile)))
+		}
+	}
+
+	for _, path := range candidates {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() && isSupportedLocalBookFile(path) {
+			return path, true
+		}
+	}
+	if libraryRoot == "" {
+		return "", false
+	}
+	entries, err := os.ReadDir(libraryRoot)
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(libraryRoot, entry.Name())
+		if isSupportedLocalBookFile(path) {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func isSupportedLocalBookFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".txt", ".text", ".md", ".epub", ".pdf", ".umd":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) readChapterCache(book models.Book, cachePath string) ([]byte, string, error) {

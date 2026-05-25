@@ -1530,6 +1530,71 @@ func TestChapterContentRecoversMovedLocalBookCache(t *testing.T) {
 	}
 }
 
+func TestChapterContentRebuildsMissingLocalBookCacheFromSourceFile(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	libraryPath := filepath.Join("data", "testuser", "source-book")
+	originalFile := filepath.Join(libraryPath, "源书.txt")
+	sourcePath := filepath.Join(server.cfg.LibraryDir, originalFile)
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("第一章 起\n第一章正文。\n第二章 承\n第二章正文。"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	book := models.Book{
+		UserID:       user.ID,
+		SourceID:     0,
+		Title:        "源文件本地书",
+		URL:          "local://book_source",
+		LibraryPath:  libraryPath,
+		OriginalFile: originalFile,
+	}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	chapter := models.Chapter{BookID: book.ID, Index: 1, Title: "第二章 承", URL: "local://book_source/chapter_1", CachePath: filepath.Join("content", "missing.txt")}
+	if err := server.db.Create(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/1/content", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("chapter content: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Content != "第二章正文。" {
+		t.Fatalf("unexpected rebuilt content %q", resp.Content)
+	}
+
+	var updated models.Chapter
+	if err := server.db.First(&updated, chapter.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.CachePath == chapter.CachePath || !strings.HasPrefix(updated.CachePath, "content") {
+		t.Fatalf("expected cache path rebuilt under content, got %q", updated.CachePath)
+	}
+	if _, err := os.Stat(filepath.Join(server.cfg.LibraryDir, book.LibraryPath, updated.CachePath)); err != nil {
+		t.Fatalf("expected rebuilt cache file, stat err=%v", err)
+	}
+}
+
 func TestSearchBookContentPaged(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
