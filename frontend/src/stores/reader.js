@@ -21,6 +21,7 @@ export const useReaderStore = defineStore('reader', {
     customBgImage: '',
     brightness: 100,
     autoReadSpeed: 12,
+    animateDuration: 180,
     ttsRate: 1,
     ttsPitch: 1,
     ttsVoiceURI: '',
@@ -74,6 +75,10 @@ export const useReaderStore = defineStore('reader', {
     setAutoReadSpeed(speed) {
       this.autoReadSpeed = Math.max(2, Math.min(40, Number(speed) || 12))
     },
+    setAnimateDuration(duration) {
+      const value = Number(duration)
+      this.animateDuration = Math.max(0, Math.min(1000, Number.isFinite(value) ? value : 180))
+    },
     setTTSRate(rate) {
       this.ttsRate = Math.max(0.5, Math.min(3, Number(rate) || 1))
     },
@@ -103,6 +108,7 @@ export const useReaderStore = defineStore('reader', {
       this.setColumnWidth(this.columnWidth)
       this.setBrightness(this.brightness)
       this.setAutoReadSpeed(this.autoReadSpeed)
+      this.setAnimateDuration(this.animateDuration)
       this.setTTSRate(this.ttsRate)
       this.setTTSPitch(this.ttsPitch)
       if ((this.settingsVersion || 0) < 4) {

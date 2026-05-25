@@ -13,7 +13,7 @@ A self-hosted, lightweight ebook reader with multi-device sync. Read your own bo
 
 - **Multi-format Import** — TXT, EPUB, Markdown, PDF, UMD files with automatic chapter detection
 - **Online Sources** — Add custom book sources (CSS selectors / XPath), browse catalogs, and pull chapters from the web
-- **Reading Experience** — Three reading modes: scroll, paginated, and page-turn. Bookmarks, reading progress, and chapter caching
+- **Reading Experience** — Upstream-aligned reading modes: vertical paging, horizontal swiping, and vertical scrolling. Bookmarks, reading progress, and chapter caching
 - **Content Cleaning** — Regex-based replace rules to clean up ad text, watermarks, and formatting noise
 - **Library Management** — Categories, search, batch operations, and local file storage with WebDAV access
 - **RSS Reader** — Subscribe to feeds and read articles within the app
@@ -36,11 +36,17 @@ Open `http://localhost:8080`. Register an account and start reading.
 
 ### Publish Docker Image
 
-The image is published as a multi-arch manifest for both Intel/AMD servers and Apple Silicon Macs:
+Development builds default to `linux/arm64`, which is faster for Apple Silicon Macs:
 
 ```bash
 docker login ghcr.io
 ./scripts/docker-build-push.sh
+```
+
+For final releases, publish a multi-arch manifest for both Intel/AMD servers and Apple Silicon Macs:
+
+```bash
+RELEASE=1 ./scripts/docker-build-push.sh
 ```
 
 Useful overrides:
@@ -49,6 +55,7 @@ Useful overrides:
 TAG=manual-test ./scripts/docker-build-push.sh
 IMAGE=ghcr.io/changshengyu/openreader TAG=$(git rev-parse --short HEAD) ./scripts/docker-build-push.sh
 PUSH=0 PLATFORMS=linux/arm64 ./scripts/docker-build-push.sh
+PLATFORMS=linux/amd64,linux/arm64 ./scripts/docker-build-push.sh
 docker buildx imagetools inspect ghcr.io/changshengyu/openreader:latest
 ```
 

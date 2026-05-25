@@ -505,6 +505,7 @@ const readerStyle = computed(() => ({
   '--reader-paragraph-space': `${reader.paragraphSpace}em`,
   '--reader-read-width': `${reader.columnWidth}px`,
   '--reader-bg-image': reader.customBgImage ? `url(${reader.customBgImage})` : '',
+  '--reader-animate-duration': `${reader.animateDuration}ms`,
 }))
 
 const readerContentStyle = computed(() => ({
@@ -1211,8 +1212,8 @@ async function previousPage() {
   if (reader.mode === 'scroll' && contentEl.value) {
     const el = contentEl.value
     if (el.scrollTop > 8) {
-      el.scrollBy({ top: -scrollStep(), behavior: 'smooth' })
-      setTimeout(saveCurrentProgress, 240)
+      el.scrollBy({ top: -scrollStep(), behavior: readerScrollBehavior() })
+      setTimeout(saveCurrentProgress, reader.animateDuration + 60)
       return
     }
   }
@@ -1230,8 +1231,8 @@ async function nextPage() {
     const el = contentEl.value
     const bottom = el.scrollHeight - el.clientHeight
     if (el.scrollTop < bottom - 8) {
-      el.scrollBy({ top: scrollStep(), behavior: 'smooth' })
-      setTimeout(saveCurrentProgress, 240)
+      el.scrollBy({ top: scrollStep(), behavior: readerScrollBehavior() })
+      setTimeout(saveCurrentProgress, reader.animateDuration + 60)
       return
     }
   }
@@ -1240,6 +1241,10 @@ async function nextPage() {
 
 function scrollStep() {
   return Math.max(240, Math.floor(readableViewportSize().height * 0.9))
+}
+
+function readerScrollBehavior() {
+  return reader.animateDuration > 0 ? 'smooth' : 'auto'
 }
 
 function handleTapZone(zone) {
@@ -2033,7 +2038,7 @@ function readError(err, fallback) {
   box-sizing: border-box;
   scroll-padding-bottom: 180px;
 }
-.reader-body { transition: transform 180ms ease; }
+.reader-body { transition: transform var(--reader-animate-duration, 180ms) ease; }
 .reader-shell.scroll .reader-body::after {
   content: "";
   display: block;

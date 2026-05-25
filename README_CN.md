@@ -13,7 +13,7 @@
 
 - **多格式导入** — 支持 TXT、EPUB、Markdown、PDF、UMD，自动识别中文章节标题
 - **在线书源** — 自定义书源（CSS 选择器 / XPath），浏览目录，在线拉取章节内容
-- **阅读体验** — 三种阅读模式：滚动、翻页、分页。支持书签、阅读进度和章节缓存
+- **阅读体验** — 对齐上游翻页方式：上下滑动、左右滑动、上下滚动。支持书签、阅读进度和章节缓存
 - **内容清洗** — 基于正则的替换规则，去除广告、水印和排版噪音
 - **书架管理** — 分类、搜索、批量操作，本地文件存储并支持 WebDAV 访问
 - **RSS 阅读器** — 订阅 RSS 源，在应用内阅读文章
@@ -33,6 +33,33 @@ docker compose up -d
 ```
 
 打开 `http://localhost:8080`，注册账号即可开始阅读。
+
+### 发布 Docker 镜像
+
+开发期默认只构建并推送 `linux/arm64`，适合 Apple Silicon Mac，速度更快：
+
+```bash
+docker login ghcr.io
+./scripts/docker-build-push.sh
+```
+
+最终发布时再构建双架构镜像：
+
+```bash
+RELEASE=1 ./scripts/docker-build-push.sh
+```
+
+常用覆盖参数：
+
+```bash
+TAG=manual-test ./scripts/docker-build-push.sh
+IMAGE=ghcr.io/changshengyu/openreader TAG=$(git rev-parse --short HEAD) ./scripts/docker-build-push.sh
+PUSH=0 PLATFORMS=linux/arm64 ./scripts/docker-build-push.sh
+PLATFORMS=linux/amd64,linux/arm64 ./scripts/docker-build-push.sh
+docker buildx imagetools inspect ghcr.io/changshengyu/openreader:latest
+```
+
+脚本会把 `VERSION`、`VCS_REF` 和 `BUILD_DATE` 写入 Go 二进制和 OCI 镜像标签，设置页显示的构建信息不再是 `unknown`。
 
 ### 本地开发
 

@@ -1,12 +1,14 @@
 <template>
   <div class="settings-body">
     <div class="setting-row">
-      <label class="setting-label">阅读模式</label>
+      <label class="setting-label">翻页方式</label>
       <el-radio-group v-model="reader.mode" size="small" class="read-method-group" @change="$emit('modeChange', $event)">
         <el-radio-button value="page">上下滑动</el-radio-button>
-        <el-radio-button value="flip">左右滑动</el-radio-button>
+        <el-radio-button v-if="miniInterface" value="flip">左右滑动</el-radio-button>
         <el-radio-button value="scroll">上下滚动</el-radio-button>
+        <el-radio-button value="scroll2" disabled title="上游多章节连续滚动尚未补齐">上下滚动2</el-radio-button>
       </el-radio-group>
+      <small class="setting-help">上下滚动2对应上游多章节连续滚动，补齐前保持禁用。</small>
     </div>
 
     <div class="setting-row">
@@ -59,6 +61,11 @@
     <div class="setting-row">
       <label class="setting-label">自动阅读速度 ({{ reader.autoReadSpeed }}px)</label>
       <el-slider v-model="autoReadSpeedModel" :min="2" :max="40" :step="1" size="small" @input="setAutoReadSpeed" @change="setAutoReadSpeed" />
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">动画时长 ({{ reader.animateDuration }}ms)</label>
+      <el-slider v-model="animateDurationModel" :min="0" :max="1000" :step="20" size="small" @input="setAnimateDuration" @change="setAnimateDuration" />
     </div>
 
     <div class="setting-row">
@@ -238,6 +245,11 @@ const autoReadSpeedModel = computed({
   set: value => props.reader.setAutoReadSpeed(value),
 })
 
+const animateDurationModel = computed({
+  get: () => props.reader.animateDuration,
+  set: value => props.reader.setAnimateDuration(value),
+})
+
 const columnWidthModel = computed({
   get: () => props.reader.columnWidth,
   set: value => props.reader.setColumnWidth(value),
@@ -289,6 +301,10 @@ function setBrightness(value) {
 
 function setAutoReadSpeed(value) {
   props.reader.setAutoReadSpeed(value)
+}
+
+function setAnimateDuration(value) {
+  props.reader.setAnimateDuration(value)
 }
 
 function setColumnWidth(value) {

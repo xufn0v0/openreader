@@ -210,11 +210,11 @@
             </div>
             <div class="reader-setting-list">
               <label>
-                <span>阅读模式</span>
+                <span>翻页方式</span>
                 <el-radio-group v-model="readerModeModel" size="small" @change="readerStore.setMode($event)">
                   <el-radio-button value="page">上下滑动</el-radio-button>
-                  <el-radio-button value="flip">左右滑动</el-radio-button>
                   <el-radio-button value="scroll">上下滚动</el-radio-button>
+                  <el-radio-button value="scroll2" disabled title="上游多章节连续滚动尚未补齐">上下滚动2</el-radio-button>
                 </el-radio-group>
               </label>
               <label>
@@ -238,6 +238,10 @@
               <label>
                 <span>自动阅读速度 {{ readerStore.autoReadSpeed }}px</span>
                 <el-slider v-model="readerAutoReadSpeedModel" :min="2" :max="40" :step="1" @input="readerStore.setAutoReadSpeed($event)" @change="readerStore.setAutoReadSpeed($event)" />
+              </label>
+              <label>
+                <span>动画时长 {{ readerStore.animateDuration }}ms</span>
+                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" @input="readerStore.setAnimateDuration($event)" @change="readerStore.setAnimateDuration($event)" />
               </label>
               <label>
                 <span>字号 {{ readerStore.fontSize }}px</span>
@@ -623,6 +627,10 @@ const readerBrightnessModel = computed({
 const readerAutoReadSpeedModel = computed({
   get: () => readerStore.autoReadSpeed,
   set: value => readerStore.setAutoReadSpeed(value),
+})
+const readerAnimateDurationModel = computed({
+  get: () => readerStore.animateDuration,
+  set: value => readerStore.setAnimateDuration(value),
 })
 const readerFontSizeModel = computed({
   get: () => readerStore.fontSize,
