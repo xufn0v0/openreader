@@ -73,9 +73,10 @@
       <el-tag effect="plain">本次搜索 {{ selectedIds.length }}</el-tag>
       <el-tag v-if="searched" :type="results.length ? 'success' : 'info'" effect="plain">结果 {{ results.length }}</el-tag>
     </section>
-    <section v-else class="search-status">
+      <section v-else class="search-status">
+      <el-tag effect="plain">本地书架 {{ localShelfBooks.length }}</el-tag>
       <el-tag effect="plain">本地书仓 {{ localItems.length }}</el-tag>
-      <el-tag effect="plain">可导入 {{ localImportableCount }}</el-tag>
+      <el-tag effect="plain">可导入文件 {{ localImportableCount }}</el-tag>
       <el-tag effect="plain">已选 {{ checkedLocalPaths.length }}</el-tag>
       <el-tag v-if="searched" :type="shownLocalResults.length ? 'success' : 'info'" effect="plain">命中 {{ shownLocalResults.length }}</el-tag>
     </section>
@@ -110,22 +111,31 @@
       <div v-else-if="searchMode === 'local' && shownLocalResults.length" class="local-result-list">
         <article
           v-for="item in shownLocalResults"
-          :key="item.path"
+          :key="localResultKey(item)"
           class="local-result-card app-panel"
-          :class="{ selected: checkedLocalPaths.includes(item.path) }"
+          :class="{ selected: item.importable && checkedLocalPaths.includes(item.path) }"
         >
-          <el-checkbox :model-value="checkedLocalPaths.includes(item.path)" @change="value => toggleLocalPath(item.path, value)" />
+          <el-checkbox
+            v-if="item.importable"
+            :model-value="checkedLocalPaths.includes(item.path)"
+            @change="value => toggleLocalPath(item.path, value)"
+          />
+          <span v-else class="local-result-spacer" />
           <el-icon class="local-file-icon"><Document /></el-icon>
           <div class="result-main">
             <div class="result-title">
               <h3>{{ localBookTitle(item) }}</h3>
-              <el-tag size="small" effect="plain">{{ item.extension || '文件' }}</el-tag>
+              <el-tag size="small" :type="item.book ? 'success' : 'info'" effect="plain">{{ item.book ? '已在书架' : (item.extension || '文件') }}</el-tag>
             </div>
-            <p>{{ item.path }}</p>
-            <p class="latest-chapter">大小：{{ formatSize(item.size) }}</p>
+            <p>{{ localBookSubline(item) }}</p>
+            <p class="latest-chapter">{{ localBookMeta(item) }}</p>
           </div>
           <div class="result-actions" @click.stop>
-            <el-button type="primary" size="small" :loading="importingLocal" @click="importLocalOne(item)">导入书架</el-button>
+            <template v-if="item.book">
+              <el-button type="primary" size="small" @click="readLocalShelfBook(item.book)">阅读</el-button>
+              <el-button size="small" @click="openLocalShelfDetail(item.book)">详情</el-button>
+            </template>
+            <el-button v-else type="primary" size="small" :loading="importingLocal" @click="importLocalOne(item)">导入书架</el-button>
           </div>
         </article>
       </div>
@@ -199,16 +209,30 @@ const sourceGroups = computed(() => {
 })
 
 const localImportableCount = computed(() => localItems.value.filter(item => item.importable).length)
+const localShelfBooks = computed(() => (bookshelf.books || []).filter(book => Number(book.sourceId || 0) === 0))
 const shownLocalResults = computed(() => {
   if (!searched.value || searchMode.value !== 'local') return []
   const value = keyword.value.trim().toLowerCase()
-  return localItems.value.filter(item => {
-    if (!item.importable) return false
-    if (!value) return true
-    return `${item.name || ''} ${item.path || ''}`.toLowerCase().includes(value)
-  })
+  const shelfResults = localShelfBooks.value
+    .filter(book => !value || localShelfSearchText(book).includes(value))
+    .map(book => ({
+      type: 'shelf',
+      book,
+      name: book.title,
+      path: book.originalFile || book.libraryPath || book.url || '',
+      extension: fileExtension(book.originalFile || book.libraryPath || book.title),
+      importable: false,
+    }))
+  const storeResults = localItems.value
+    .filter(item => {
+      if (!item.importable) return false
+      if (!value) return true
+      return `${item.name || ''} ${item.path || ''}`.toLowerCase().includes(value)
+    })
+    .map(item => ({ ...item, type: 'file' }))
+  return [...shelfResults, ...storeResults]
 })
-const shownLocalImportablePaths = computed(() => shownLocalResults.value.map(item => item.path))
+const shownLocalImportablePaths = computed(() => shownLocalResults.value.filter(item => item.importable).map(item => item.path))
 
 onMounted(async () => {
   await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
@@ -298,7 +322,7 @@ async function searchLocalBooks() {
     const { data } = await listLocalStore('', localRecursiveScan.value)
     localItems.value = data.items || []
     searched.value = true
-    ElMessage.success(shownLocalResults.value.length ? `找到 ${shownLocalResults.value.length} 个本地文件` : '没有找到本地书籍文件')
+    ElMessage.success(shownLocalResults.value.length ? `找到 ${shownLocalResults.value.length} 条本地结果` : '没有找到本地书籍')
   } catch (err) {
     ElMessage.error(readError(err, '搜索本地书仓失败'))
   } finally {
@@ -350,7 +374,58 @@ async function importLocalPaths(paths) {
 }
 
 function localBookTitle(item) {
+  if (item?.book) return item.book.title || '未命名本地书'
   return String(item?.name || '未命名本地书').replace(/\.[^.]+$/, '')
+}
+
+function localBookSubline(item) {
+  if (item?.book) {
+    const parts = []
+    if (item.book.author) parts.push(item.book.author)
+    if (item.book.chapterCount) parts.push(`共${item.book.chapterCount}章`)
+    return parts.join(' · ') || item.path || '本地书籍'
+  }
+  return item?.path || ''
+}
+
+function localBookMeta(item) {
+  if (item?.book) {
+    if (item.book.lastChapter) return `最新：${item.book.lastChapter}`
+    if (item.path) return `来源：${item.path}`
+    return '已导入书架'
+  }
+  return `大小：${formatSize(item?.size)}`
+}
+
+function localResultKey(item) {
+  return item?.book ? `shelf-${item.book.id}` : `file-${item.path}`
+}
+
+function localShelfSearchText(book) {
+  return [
+    book.title,
+    book.author,
+    book.lastChapter,
+    book.originalFile,
+    book.libraryPath,
+    book.url,
+  ].filter(Boolean).join(' ').toLowerCase()
+}
+
+function fileExtension(value) {
+  const match = String(value || '').match(/\.([^.\\/]+)$/)
+  return match ? match[1].toUpperCase() : '本地'
+}
+
+function readLocalShelfBook(book) {
+  router.push({ name: 'reader', params: { id: book.id } })
+}
+
+function openLocalShelfDetail(book) {
+  overlay.openBookInfo(book, {
+    statusLabel: '本地书籍',
+    statusType: 'info',
+  })
 }
 
 function formatSize(bytes) {
