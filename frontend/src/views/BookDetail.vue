@@ -29,6 +29,7 @@
               <el-button type="primary" @click="startRead">开始阅读</el-button>
 	              <el-button @click="openBookEditor">编辑</el-button>
 	              <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
+	              <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
 	              <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
 	              <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存到浏览器</el-button>
 	              <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
@@ -163,7 +164,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Switch } from '@element-plus/icons-vue'
-import { cacheBookContent, changeBookSource, deleteBookmark, listBookmarks, listBookSourceCandidates, refreshBook, updateBook, updateBookCategory } from '../api/books'
+import { cacheBookContent, changeBookSource, deleteBookmark, listBookmarks, listBookSourceCandidates, refreshBook, refreshLocalBook, updateBook, updateBookCategory } from '../api/books'
 import api from '../api/client'
 import { uploadAsset } from '../api/uploads'
 import BookInfoPanel from '../components/BookInfoPanel.vue'
@@ -458,6 +459,22 @@ async function refreshCurrentBook() {
     ElMessage.success(data.added ? `新增 ${data.added} 章` : '目录已刷新')
   } catch (err) {
     ElMessage.error(readError(err, '刷新目录失败'))
+  } finally {
+    refreshingBook.value = false
+  }
+}
+
+async function refreshCurrentLocalBook() {
+  if (!book.value) return
+  refreshingBook.value = true
+  try {
+    const { data } = await refreshLocalBook(book.value.id)
+    book.value = data?.book || data
+    if (book.value?.id) bookshelf.upsertBook(book.value)
+    await reloadChapters()
+    ElMessage.success(`本地书已刷新，共 ${data?.chapterCount || book.value?.chapterCount || chapters.value.length} 章`)
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新本地书失败'))
   } finally {
     refreshingBook.value = false
   }

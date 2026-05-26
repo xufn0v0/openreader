@@ -2375,6 +2375,66 @@ func TestLocalStoreImportAcceptsCategory(t *testing.T) {
 	}
 }
 
+func TestRefreshLocalBookReparsesArchivedSource(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	if err := os.MkdirAll(server.cfg.LocalStoreDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(server.cfg.LocalStoreDir, "refresh.txt"), []byte("第一章 开始\n旧正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/local-store/import", strings.NewReader(`{"paths":["refresh.txt"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("local store import: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var book models.Book
+	if err := server.db.Where("title = ?", "refresh").First(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(server.cfg.LibraryDir, book.OriginalFile)
+	next := "第一章、开始\n新正文"
+	if err := os.WriteFile(sourcePath, []byte(next), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh-local", nil)
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh local book: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var refreshed models.Book
+	if err := server.db.First(&refreshed, book.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.ChapterCount != 1 || refreshed.LastChapter != "第一章、开始" {
+		t.Fatalf("unexpected refreshed book: %+v", refreshed)
+	}
+	var chapter models.Chapter
+	if err := server.db.Where("book_id = ? AND `index` = ?", book.ID, 0).First(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("chapter content: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "新正文") || chapter.CachePath == "" {
+		t.Fatalf("expected refreshed chapter content and cache, chapter=%+v body=%s", chapter, w.Body.String())
+	}
+}
+
 func TestLocalStoreImportDirectoryRecursively(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

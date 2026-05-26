@@ -36,6 +36,7 @@
       <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
       <el-button plain @click="setBookGroup(overlay.bookInfoBook)">设置分组</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
+      <el-button v-else plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshLocalBookInfo(overlay.bookInfoBook)">刷新本地书</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存到浏览器</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存到服务器</el-button>
@@ -729,7 +730,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
-import { cacheBookContent, changeBookSource, checkBookUpdates, deleteBookmark, listBookSourceCandidates, listBookmarks, listChapters, refreshBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
+import { cacheBookContent, changeBookSource, checkBookUpdates, deleteBookmark, listBookSourceCandidates, listBookmarks, listChapters, refreshBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, restoreWebDAVBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { createRSSSource, deleteRSSSource, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
@@ -1298,6 +1299,26 @@ async function refreshBookInfo(book) {
     ElMessage.success(`目录已刷新，共 ${data?.chapterCount || updatedBook?.chapterCount || 0} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '刷新目录失败'))
+  } finally {
+    refreshingBookId.value = null
+  }
+}
+
+async function refreshLocalBookInfo(book) {
+  if (!book?.id) return
+  refreshingBookId.value = book.id
+  try {
+    const { data } = await refreshLocalBook(book.id)
+    const updatedBook = data?.book || data
+    if (updatedBook?.id) {
+      bookshelf.upsertBook(updatedBook)
+      overlay.bookInfoBook = updatedBook
+    } else {
+      await bookshelf.loadBooks({ force: true })
+    }
+    ElMessage.success(`本地书已刷新，共 ${data?.chapterCount || updatedBook?.chapterCount || 0} 章`)
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新本地书失败'))
   } finally {
     refreshingBookId.value = null
   }

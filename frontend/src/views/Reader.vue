@@ -1722,7 +1722,7 @@ function handleReaderTouchMove(event) {
   const touch = event.touches[0]
   const moveX = touch.clientX - readerTouchStart.x
   const moveY = touch.clientY - readerTouchStart.y
-  if (Math.abs(moveX) > 18 || Math.abs(moveY) > 18) {
+  if (Math.abs(moveX) > 6 || Math.abs(moveY) > 6) {
     readerTouchMoved = true
   }
 }
@@ -1732,7 +1732,7 @@ function handleReaderTouchEnd(event) {
   const touch = event.changedTouches?.[0]
   const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
   const isTap = !readerTouchMoved && elapsed < 650 && Boolean(touch)
-  ignoreNextContentClick = isTap
+  ignoreNextContentClick = Boolean(touch)
   if (isTap) handledTouchTapAt = Date.now()
   setTimeout(() => {
     ignoreNextContentClick = false
@@ -2317,10 +2317,12 @@ useKeyboard({
   onPageUp: () => previousPage(),
   onPageDown: () => nextPage(),
   onArrowLeft: () => {
-    if (reader.mode === 'flip' || isScrollRead.value) previousPage()
+    if (reader.mode === 'flip') previousPage()
+    else if (currentIndex.value > 0) goChapter(currentIndex.value - 1, CHAPTER_END_OFFSET)
   },
   onArrowRight: () => {
-    if (reader.mode === 'flip' || isScrollRead.value) nextPage()
+    if (reader.mode === 'flip') nextPage()
+    else if (currentIndex.value < chapters.value.length - 1) goChapter(currentIndex.value + 1)
   },
   onArrowUp: () => {
     if (reader.mode === 'page' || isScrollRead.value) previousPage()

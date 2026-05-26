@@ -69,6 +69,7 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 	protected.PUT("/books/:id", server.updateBook)
 	protected.DELETE("/books/:id", server.deleteBook)
 	protected.POST("/books/:id/refresh", server.refreshBook)
+	protected.POST("/books/:id/refresh-local", server.refreshLocalBook)
 	protected.POST("/books/:id/cache", server.cacheBookContent)
 	protected.GET("/books/:id/source-candidates", server.listBookSourceCandidates)
 	protected.PUT("/books/:id/category", server.updateBookCategory)
