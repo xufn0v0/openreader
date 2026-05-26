@@ -1,5 +1,5 @@
 <template>
-  <main class="reader-shell" :class="[reader.mode, { 'mobile-chrome-visible': mobileChromeVisible }]" :style="readerStyle">
+  <main ref="shellEl" class="reader-shell" :class="[reader.mode, { 'mobile-chrome-visible': mobileChromeVisible }]" :style="readerStyle">
     <aside class="reader-left-rail">
       <button class="rail-item rail-home" type="button" title="返回首页" @click="goShelf">
         <el-icon :size="18"><ArrowLeft /></el-icon>
@@ -82,7 +82,6 @@
       @touchstart.passive="handleReaderTouchStart"
       @touchmove.passive="handleReaderTouchMove"
       @touchend.passive="handleReaderTouchEnd"
-      @wheel="handleReaderWheel"
       @click="handleReaderContentClick"
     >
       <header class="reader-page-head">
@@ -117,10 +116,10 @@
     <footer class="reader-page-control">
       <div class="progress-box">{{ bookProgressLabel }}</div>
       <button class="page-step chapter-step" type="button" title="上一章" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
-        <span>上一章</span>
+        <el-icon :size="24"><ArrowLeft /></el-icon>
       </button>
       <button class="page-step chapter-step" type="button" title="下一章" :disabled="currentIndex >= chapters.length - 1" @click="goChapter(currentIndex + 1)">
-        <span>下一章</span>
+        <el-icon :size="24"><ArrowRight /></el-icon>
       </button>
     </footer>
 
@@ -391,6 +390,7 @@ import { ElMessage } from 'element-plus'
 import {
   ArrowDownBold,
   ArrowLeft,
+  ArrowRight,
   ArrowUpBold,
   CollectionTag,
   Delete,
@@ -443,6 +443,7 @@ const chapterLoading = ref(false)
 const contentEl = ref(null)
 const contentBody = ref(null)
 const pageEl = ref(null)
+const shellEl = ref(null)
 const currentIndex = ref(Number(route.query.chapter || 0))
 const page = ref(0)
 const pageCount = ref(1)
@@ -639,6 +640,7 @@ onMounted(async () => {
   reader.normalizeSettings()
   await loadReaderBook()
   window.addEventListener('resize', handleResize)
+  window.addEventListener('wheel', handleReaderWheel, { passive: false })
   window.addEventListener('pagehide', handleReaderPageHide)
   document.addEventListener('visibilitychange', handleReaderVisibilityChange)
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
@@ -650,6 +652,7 @@ onBeforeUnmount(() => {
   stopAutoReading()
   saveCurrentProgress({ force: true })
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('wheel', handleReaderWheel)
   window.removeEventListener('pagehide', handleReaderPageHide)
   document.removeEventListener('visibilitychange', handleReaderVisibilityChange)
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
@@ -1616,10 +1619,18 @@ function handleTapPoint(point) {
 
 function handleReaderWheel(event) {
   if (isOverlayOpen.value) return
-  if (reader.mode === 'scroll') return
-  event.preventDefault()
+  if (!shellEl.value?.contains(event.target)) return
+  const target = event.target
+  if (target?.closest?.('button, a, input, textarea, select, [role="button"], .el-drawer, .el-dialog') && !target?.closest?.('.tap-zone')) return
   const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
   if (Math.abs(delta) < 4) return
+  if (reader.mode === 'scroll') {
+    if (!contentEl.value) return
+    event.preventDefault()
+    contentEl.value.scrollTop += delta
+    return
+  }
+  event.preventDefault()
   const now = Date.now()
   if (now - lastWheelPageAt < Math.max(140, reader.animateDuration + 40)) return
   lastWheelPageAt = now
@@ -2413,6 +2424,12 @@ function readError(err, fallback) {
   .tap-center {
     display: block;
   }
+  .reader-shell.scroll .tap-upper,
+  .reader-shell.scroll .tap-lower,
+  .reader-shell.page .tap-upper,
+  .reader-shell.page .tap-lower {
+    display: block;
+  }
   .reader-shell.flip .tap-left,
   .reader-shell.flip .tap-right {
     display: block;
@@ -2486,7 +2503,7 @@ function readError(err, fallback) {
   bottom: 0;
   z-index: 4;
   display: grid;
-  width: 74px;
+  width: 42px;
   background: rgba(255, 250, 226, 0.72);
   border: 1px solid rgba(148, 132, 87, 0.38);
   border-bottom: 0;
@@ -2509,8 +2526,8 @@ function readError(err, fallback) {
 }
 
 .chapter-step {
-  padding: 0 6px;
-  font-size: 14px;
+  padding: 0;
+  font-size: 16px;
 }
 
 .chapter-step:disabled {
