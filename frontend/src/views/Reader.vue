@@ -505,6 +505,7 @@ const pageHeight = ref(600)
 const pageWidth = ref(600)
 const windowWidth = ref(window.innerWidth)
 const coarsePointer = ref(window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
+const touchDevice = ref(Number(navigator.maxTouchPoints || 0) > 0)
 const mobileReaderMaxWidth = 860
 const SAVE_PROGRESS_MIN_INTERVAL = 1200
 
@@ -613,7 +614,7 @@ const bodyStyle = computed(() => {
 })
 
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
-const isMobileReader = computed(() => windowWidth.value <= mobileReaderMaxWidth || coarsePointer.value)
+const isMobileReader = computed(() => windowWidth.value <= mobileReaderMaxWidth || coarsePointer.value || touchDevice.value || isMobileUA())
 const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
 const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
 const bookProgress = computed(() => {
@@ -1868,7 +1869,13 @@ function readableViewportSize() {
 function handleResize() {
   windowWidth.value = window.innerWidth
   coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  touchDevice.value = Number(navigator.maxTouchPoints || 0) > 0
   updateFlipLayout()
+}
+
+function isMobileUA() {
+  if (typeof navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod|Mobile|Tablet|Mobi/i.test(navigator.userAgent || '')
 }
 
 function handleReaderPageHide() {

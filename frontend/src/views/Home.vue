@@ -143,9 +143,9 @@ const groupItems = computed(() => {
 const sortedBooks = computed(() => sortByShelfOrder(Array.isArray(bookshelf.books) ? bookshelf.books : [], reader.progressByBook))
 
 const displayedBooks = computed(() => {
-  const value = keyword.value.trim().toLowerCase()
+  const value = normalizeShelfSearch(keyword.value)
   const filtered = sortedBooks.value.filter(book => {
-    const matchesKeyword = !value || `${book.title || ''} ${book.author || ''}`.toLowerCase().includes(value)
+    const matchesKeyword = !value || shelfSearchText(book).includes(value)
     if (!matchesKeyword) return false
     if (!selectedGroup.value) return true
     if (selectedGroup.value === 'none') return !book.categoryId
@@ -183,6 +183,14 @@ watch(
   () => route.query.import,
   (value) => {
     if (value === '1') overlay.openImportBook()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.query.shelfQ,
+  (value) => {
+    keyword.value = typeof value === 'string' ? value : ''
   },
   { immediate: true },
 )
@@ -261,6 +269,25 @@ function bookAuthorLine(book) {
 
 function latestChapterTitle(book) {
   return book.lastChapter || book.latestChapterTitle || book.latestChapter || ''
+}
+
+function shelfSearchText(book) {
+  return normalizeShelfSearch([
+    book.title,
+    book.author,
+    readChapterTitle(book),
+    latestChapterTitle(book),
+    book.originalFile,
+    book.libraryPath,
+    book.url,
+    categoryName(book.categoryId),
+  ].filter(Boolean).join(' '))
+}
+
+function normalizeShelfSearch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\s·•._\-—–:：，,。.!！?？()[\]【】《》"'“”‘’/\\]+/g, '')
 }
 
 function latestChapterLabel(book) {
@@ -663,7 +690,8 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .book-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: clamp(64px, 20vw, 84px) minmax(0, 1fr);
   min-height: 132px;
   align-items: center;
   gap: 18px;
@@ -672,9 +700,9 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .list-cover {
-  width: 84px;
-  height: 112px;
-  flex: 0 0 84px;
+  width: clamp(64px, 20vw, 84px);
+  aspect-ratio: 3 / 4;
+  height: auto;
 }
 
 .shelf-page.mobile-shelf .book-operation {
@@ -689,10 +717,12 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .list-main {
-  min-height: 112px;
+  width: auto;
+  min-height: clamp(86px, 26.6vw, 112px);
   justify-content: space-between;
   gap: 4px;
   padding-right: 48px;
+  overflow: hidden;
 }
 
 .shelf-page.mobile-shelf .list-main strong {
@@ -785,7 +815,8 @@ function readError(err, fallback) {
   }
 
   .book-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: clamp(64px, 20vw, 84px) minmax(0, 1fr);
     min-height: 132px;
     align-items: center;
     gap: 18px;
@@ -794,9 +825,9 @@ function readError(err, fallback) {
   }
 
   .list-cover {
-    width: 84px;
-    height: 112px;
-    flex: 0 0 84px;
+    width: clamp(64px, 20vw, 84px);
+    aspect-ratio: 3 / 4;
+    height: auto;
   }
 
   .book-operation {
@@ -819,9 +850,9 @@ function readError(err, fallback) {
   }
 
   .list-main {
-    width: 100%;
+    width: auto;
     max-width: 100%;
-    min-height: 112px;
+    min-height: clamp(86px, 26.6vw, 112px);
     justify-content: space-between;
     padding-right: 0;
     overflow: hidden;

@@ -123,6 +123,7 @@ export const useReaderStore = defineStore('reader', {
     applyProgress(progress) {
       if (!progress?.bookId) return
       this.progressByBook[progress.bookId] = progress
+      persistLocalChapterProgress(progress)
     },
     async saveProgress(payload) {
       const optimistic = {
@@ -136,7 +137,7 @@ export const useReaderStore = defineStore('reader', {
       return data
     },
     async loadProgress(bookId, options = {}) {
-      const local = this.progressByBook[bookId]
+      const local = newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
       if (options.preferLocal && local?.bookId) {
         api.get(`/progress/${bookId}`)
           .then(({ data }) => {
@@ -156,6 +157,7 @@ export const useReaderStore = defineStore('reader', {
       }
       if (data?.bookId) {
         if (progressUpdatedAt(local) > progressUpdatedAt(data)) {
+          this.applyProgress(local)
           return local
         }
         this.applyProgress(data)
@@ -170,4 +172,51 @@ function progressUpdatedAt(progress) {
   if (!progress?.updatedAt) return 0
   const timestamp = Date.parse(progress.updatedAt)
   return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function newestProgress(a, b) {
+  if (!a) return b || null
+  if (!b) return a
+  return progressUpdatedAt(b) > progressUpdatedAt(a) ? b : a
+}
+
+function localChapterProgressKey(bookId) {
+  return `openreader_chapter_progress@${bookId}`
+}
+
+function persistLocalChapterProgress(progress) {
+  if (typeof localStorage === 'undefined' || !progress?.bookId) return
+  try {
+    localStorage.setItem(localChapterProgressKey(progress.bookId), JSON.stringify({
+      bookId: progress.bookId,
+      chapterId: progress.chapterId || 0,
+      chapterIndex: Number(progress.chapterIndex || 0),
+      offset: Math.max(0, Math.floor(Number(progress.offset || 0))),
+      percent: Math.max(0, Math.min(1, Number(progress.percent || 0))),
+      mode: progress.mode || '',
+      chapterTitle: progress.chapterTitle || '',
+      updatedAt: progress.updatedAt || new Date().toISOString(),
+    }))
+  } catch {
+    // localStorage may be unavailable in private or restricted browser modes.
+  }
+}
+
+function readLocalChapterProgress(bookId) {
+  if (typeof localStorage === 'undefined' || !bookId) return null
+  try {
+    const raw = localStorage.getItem(localChapterProgressKey(bookId))
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (!data || Number(data.bookId) !== Number(bookId)) return null
+    return {
+      ...data,
+      bookId: Number(data.bookId),
+      chapterIndex: Math.max(0, Math.floor(Number(data.chapterIndex || 0))),
+      offset: Math.max(0, Math.floor(Number(data.offset || 0))),
+      percent: Math.max(0, Math.min(1, Number(data.percent || 0))),
+    }
+  } catch {
+    return null
+  }
 }

@@ -20,7 +20,7 @@
       <div class="app-shell-search">
         <el-input
           v-model="quickSearch"
-          placeholder="搜索远程书籍"
+          placeholder="搜索书籍"
           clearable
           @keyup.enter="goSearch"
         >
@@ -253,7 +253,7 @@ function isNavActive(item) {
 function goSearch() {
   const keyword = quickSearch.value.trim()
   if (!keyword) return
-  router.push({ name: 'search', query: { q: keyword } })
+  router.push({ name: 'home', query: { shelfQ: keyword } })
   quickSearch.value = ''
 }
 
