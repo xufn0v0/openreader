@@ -1525,8 +1525,9 @@ func TestChapterContentRecoversMovedLocalBookCache(t *testing.T) {
 	if err := server.db.First(&updated, chapter.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if updated.CachePath != currentPath {
-		t.Fatalf("expected cache path self-healed to %q, got %q", currentPath, updated.CachePath)
+	expectedCachePath := filepath.Join("content", contentPath)
+	if updated.CachePath != expectedCachePath {
+		t.Fatalf("expected cache path self-healed to portable path %q, got %q", expectedCachePath, updated.CachePath)
 	}
 }
 

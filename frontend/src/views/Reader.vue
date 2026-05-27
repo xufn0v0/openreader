@@ -449,7 +449,7 @@ const chapter = ref(null)
 const bookmarks = ref([])
 const content = ref('')
 const chapterBlocks = ref([])
-const chapterLoading = ref(false)
+const chapterLoading = ref(true)
 const contentEl = ref(null)
 const contentBody = ref(null)
 const pageEl = ref(null)
@@ -786,10 +786,15 @@ async function loadChapter(index, offset = 0, options = {}) {
   restoringPosition = true
   clearTimeout(saveTimer)
   clearTimeout(chapterLoadingTimer)
-  chapterLoading.value = false
-  chapterLoadingTimer = setTimeout(() => {
-    chapterLoading.value = true
-  }, 120)
+  const cachedBeforeLoad = !options.refresh && getChapterContentFromMemory(currentIndex.value)
+  chapterLoading.value = !cachedBeforeLoad
+  if (cachedBeforeLoad) {
+    chapterLoadingTimer = null
+  } else {
+    chapterLoadingTimer = setTimeout(() => {
+      chapterLoading.value = true
+    }, 120)
+  }
   try {
     const data = await loadChapterContent(currentIndex.value, { refresh: Boolean(options.refresh) })
     chapter.value = data.chapter

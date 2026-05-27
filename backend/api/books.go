@@ -1414,8 +1414,17 @@ func (s *Server) loadChapterText(book models.Book, chapter *models.Chapter) stri
 	if chapter.CachePath != "" {
 		if bytes, path, err := s.readChapterCache(book, chapter.CachePath); err == nil {
 			content = string(bytes)
-			if book.SourceID == 0 && path != "" && path != chapter.CachePath {
-				chapter.CachePath = path
+			if book.SourceID == 0 {
+				if normalizedPath := s.localChapterCachePath(book, path); normalizedPath != "" && normalizedPath != chapter.CachePath {
+					chapter.CachePath = normalizedPath
+					_ = s.db.Save(chapter)
+				}
+			} else if path != "" && path != chapter.CachePath {
+				if normalizedPath := s.remoteChapterCachePath(path); normalizedPath != "" {
+					chapter.CachePath = normalizedPath
+				} else {
+					chapter.CachePath = path
+				}
 				_ = s.db.Save(chapter)
 			}
 		}
@@ -1441,6 +1450,49 @@ func (s *Server) loadChapterText(book models.Book, chapter *models.Chapter) stri
 	}
 	content = s.applyUserReplaceRules(book.UserID, content)
 	return content
+}
+
+func (s *Server) localChapterCachePath(book models.Book, fullPath string) string {
+	fullPath = strings.TrimSpace(fullPath)
+	if fullPath == "" {
+		return ""
+	}
+	if !filepath.IsAbs(fullPath) {
+		return fullPath
+	}
+	if strings.TrimSpace(book.LibraryPath) != "" {
+		libraryRoot := filepath.Join(s.cfg.LibraryDir, book.LibraryPath)
+		if rel, ok := relativePathInside(libraryRoot, fullPath); ok {
+			return rel
+		}
+	}
+	return s.remoteChapterCachePath(fullPath)
+}
+
+func (s *Server) remoteChapterCachePath(fullPath string) string {
+	if rel, ok := relativePathInside(s.cfg.CacheDir, fullPath); ok {
+		return rel
+	}
+	return ""
+}
+
+func relativePathInside(root string, path string) (string, bool) {
+	cleanRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	cleanPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) {
+		return "", false
+	}
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", false
+	}
+	return rel, true
 }
 
 func (s *Server) rebuildLocalChapterText(book models.Book, chapter *models.Chapter) string {

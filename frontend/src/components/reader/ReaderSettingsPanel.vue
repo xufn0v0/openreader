@@ -8,7 +8,6 @@
         <el-radio-button value="scroll">上下滚动</el-radio-button>
         <el-radio-button value="scroll2">上下滚动2</el-radio-button>
       </el-radio-group>
-      <small class="setting-help">上下滚动2按上游逻辑连续显示相邻章节，并按当前段落保存进度。</small>
     </div>
 
     <div class="setting-row">
@@ -84,7 +83,7 @@
         </button>
       </div>
       <div class="font-preview" :style="fontPreviewStyle">
-        夜色沉静，字形、字号与行距会立即应用到正文。
+        春风过处，纸页微明。
       </div>
     </div>
 
@@ -132,7 +131,6 @@
     <div class="setting-row">
       <label class="setting-label">替换规则</label>
       <el-button size="small" plain @click="$emit('openReplaceRules')">管理全局替换规则</el-button>
-      <small class="setting-help">保存或启停规则后会刷新当前章节，适合清理广告、乱码和固定干扰文本。</small>
     </div>
 
     <div class="setting-row">
