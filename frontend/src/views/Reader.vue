@@ -563,7 +563,7 @@ const chapterTextLength = computed(() => {
   const last = paragraphs[paragraphs.length - 1]
   return last.pos + last.text.length
 })
-const isScrollRead = computed(() => reader.mode === 'scroll' || reader.mode === 'scroll2')
+const isScrollRead = computed(() => reader.mode === 'page' || reader.mode === 'scroll' || reader.mode === 'scroll2')
 const displayedChapterBlocks = computed(() => {
   if (reader.mode === 'scroll2' && chapterBlocks.value.length) return chapterBlocks.value
   return [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
@@ -607,9 +607,6 @@ const bodyStyle = computed(() => {
       '--reader-page-width': `${pageWidth.value}px`,
       transform: `translateX(-${page.value * pageWidth.value}px)`,
     }
-  }
-  if (reader.mode === 'page') {
-    return { ...baseStyle, transform: `translateY(-${page.value * pageHeight.value}px)` }
   }
   return baseStyle
 })
@@ -916,7 +913,7 @@ async function restoreReadingPosition(offset = 0, options = {}) {
   await nextFrame()
   updateFlipLayout()
   const chapterOffset = Number(offset || 0)
-  if (reader.mode === 'flip' || reader.mode === 'page') {
+  if (reader.mode === 'flip') {
     page.value = chapterOffset === CHAPTER_END_OFFSET
       ? Math.max(0, pageCount.value - 1)
       : (hasRestorePercent
@@ -1621,7 +1618,7 @@ function toggleNight() {
 }
 
 async function previousPage() {
-  if ((reader.mode === 'flip' || reader.mode === 'page') && page.value > 0) {
+  if (reader.mode === 'flip' && page.value > 0) {
     page.value -= 1
     progressVersion.value += 1
     saveCurrentProgress()
@@ -1639,7 +1636,7 @@ async function previousPage() {
 }
 
 async function nextPage() {
-  if ((reader.mode === 'flip' || reader.mode === 'page') && page.value < pageCount.value - 1) {
+  if (reader.mode === 'flip' && page.value < pageCount.value - 1) {
     page.value += 1
     progressVersion.value += 1
     saveCurrentProgress()
@@ -1848,8 +1845,9 @@ function updateFlipLayout() {
   }
   if (reader.mode === 'page') {
     pageHeight.value = viewport.height
-    pageCount.value = Math.max(1, Math.ceil(contentBody.value.scrollHeight / pageHeight.value))
-    page.value = Math.min(page.value, pageCount.value - 1)
+    const scrollBottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 1)
+    pageCount.value = Math.max(1, Math.ceil(contentEl.value.scrollHeight / pageHeight.value))
+    page.value = Math.max(0, Math.min(pageCount.value - 1, Math.round((contentEl.value.scrollTop / scrollBottom) * Math.max(pageCount.value - 1, 0))))
     return
   }
   // 滚动模式
@@ -1896,6 +1894,7 @@ function onScroll() {
   if (restoringPosition || chapterLoading.value) return
   updateCurrentChapterFromScroll()
   maybeAppendShowChapter()
+  updateFlipLayout()
   progressVersion.value += 1
   applyLocalProgressSnapshot()
   clearTimeout(saveTimer)
@@ -1904,7 +1903,7 @@ function onScroll() {
 
 function currentChapterPercent() {
   progressVersion.value
-  if (reader.mode === 'flip' || reader.mode === 'page') {
+  if (reader.mode === 'flip') {
     return pageCount.value <= 1 ? 0 : page.value / (pageCount.value - 1)
   }
   const el = contentEl.value
@@ -1919,7 +1918,7 @@ function currentChapterPercent() {
 }
 
 function currentOffset() {
-  if (reader.mode === 'flip' || reader.mode === 'page') {
+  if (reader.mode === 'flip') {
     return Math.max(0, Math.floor(page.value || 0))
   }
   return currentChapterPosition()
@@ -2324,12 +2323,12 @@ function flashParagraph(lineEl) {
 }
 
 function scrollToTop() {
-  if (reader.mode === 'flip' || reader.mode === 'page') { page.value = 0; return }
+  if (reader.mode === 'flip') { page.value = 0; return }
   if (contentEl.value) contentEl.value.scrollTop = 0
 }
 
 function scrollToBottom() {
-  if (reader.mode === 'flip' || reader.mode === 'page') { page.value = Math.max(0, pageCount.value - 1); return }
+  if (reader.mode === 'flip') { page.value = Math.max(0, pageCount.value - 1); return }
   if (contentEl.value) contentEl.value.scrollTop = Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
 }
 
@@ -2369,12 +2368,6 @@ useGesture(pageEl, {
   },
   onSwipeRight: () => {
     if (reader.mode === 'flip') previousPage()
-  },
-  onSwipeUp: () => {
-    if (reader.mode === 'page') nextPage()
-  },
-  onSwipeDown: () => {
-    if (reader.mode === 'page') previousPage()
   },
   onPinchOut: () => reader.setFontSize(reader.fontSize + 2),
   onPinchIn: () => reader.setFontSize(reader.fontSize - 2),
@@ -2741,9 +2734,8 @@ function readError(err, fallback) {
   transition: background 160ms ease, box-shadow 160ms ease;
 }
 
-/* 翻页 & 分页模式 */
-.reader-shell.flip .reader-content,
-.reader-shell.page .reader-content {
+/* 翻页模式 */
+.reader-shell.flip .reader-content {
   overflow: hidden;
 }
 .reader-shell.flip .reader-body {
@@ -2756,8 +2748,7 @@ function readError(err, fallback) {
 .reader-shell.flip .reader-body p {
   break-inside: avoid;
 }
-.reader-shell.flip .reader-body,
-.reader-shell.page .reader-body {
+.reader-shell.flip .reader-body {
   transition: transform var(--reader-animate-duration, 180ms) ease;
 }
 
