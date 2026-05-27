@@ -123,6 +123,20 @@
 
     <footer class="reader-page-control">
       <div class="progress-box">{{ bookProgressLabel }}</div>
+      <label class="desktop-progress-control" title="拖动定位当前章节进度">
+        <input
+          class="desktop-progress-slider"
+          type="range"
+          min="0"
+          max="1000"
+          step="1"
+          :value="desktopChapterSliderValue"
+          :aria-label="`当前章节进度 ${desktopChapterProgressLabel}`"
+          @input="handleDesktopProgressInput"
+          @change="handleDesktopProgressChange"
+        />
+        <span>{{ desktopChapterProgressLabel }}</span>
+      </label>
       <button class="page-step chapter-step" type="button" title="上一章" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
         <el-icon :size="24"><ArrowLeft /></el-icon>
       </button>
@@ -620,6 +634,11 @@ const bookProgress = computed(() => {
   return Math.min(1, Math.max(0, (currentIndex.value + currentChapterPercent()) / total))
 })
 const bookProgressLabel = computed(() => `${Math.round(bookProgress.value * 100)}%`)
+const desktopChapterSliderValue = computed(() => {
+  progressVersion.value
+  return Math.round(Math.max(0, Math.min(1, currentChapterPercent())) * 1000)
+})
+const desktopChapterProgressLabel = computed(() => `${Math.round(desktopChapterSliderValue.value / 10)}%`)
 const bookSearchStatus = computed(() => {
   if (!searchedBookContent.value) return ''
   const scanned = bookSearchLastIndex.value >= 0 ? bookSearchLastIndex.value + 1 : 0
@@ -1662,6 +1681,43 @@ function readerScrollBehavior() {
   return reader.animateDuration > 0 ? 'smooth' : 'auto'
 }
 
+function handleDesktopProgressInput(event) {
+  seekCurrentChapterPercent(Number(event.target.value || 0) / 1000, { save: false })
+}
+
+function handleDesktopProgressChange(event) {
+  seekCurrentChapterPercent(Number(event.target.value || 0) / 1000, { save: true })
+}
+
+function seekCurrentChapterPercent(percent, options = {}) {
+  const value = Math.max(0, Math.min(1, Number(percent) || 0))
+  if (reader.mode === 'flip') {
+    page.value = Math.round(value * Math.max(0, pageCount.value - 1))
+    progressVersion.value += 1
+    if (options.save !== false) saveCurrentProgress()
+    return
+  }
+  if (!contentEl.value) return
+  if (reader.mode === 'scroll2') {
+    const chapterEl = contentBody.value?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`)
+    if (chapterEl) {
+      const room = Math.max(chapterEl.offsetHeight - contentEl.value.clientHeight, 0)
+      contentEl.value.scrollTop = Math.max(0, chapterEl.offsetTop + Math.round(value * room))
+    }
+  } else {
+    const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
+    contentEl.value.scrollTop = Math.round(value * bottom)
+  }
+  progressVersion.value += 1
+  applyLocalProgressSnapshot()
+  clearTimeout(saveTimer)
+  if (options.save === false) {
+    saveTimer = setTimeout(saveCurrentProgress, 500)
+  } else {
+    saveCurrentProgress()
+  }
+}
+
 function handleTapZone(zone) {
   if (isOverlayOpen.value) return
   if (zone === 'center') {
@@ -2287,8 +2343,6 @@ function jumpToParagraph(lineEl, options = {}) {
   }
   if (reader.mode === 'flip') {
     page.value = Math.min(pageCount.value - 1, Math.floor(lineEl.offsetLeft / Math.max(pageWidth.value, 1)))
-  } else if (reader.mode === 'page') {
-    page.value = Math.min(pageCount.value - 1, Math.floor(lineEl.offsetTop / Math.max(pageHeight.value, 1)))
   } else if (contentEl.value) {
     contentEl.value.scrollTop = Math.max(0, lineEl.offsetTop - 80)
   }
@@ -2776,6 +2830,31 @@ function readError(err, fallback) {
   border: 0;
   border-bottom: 1px solid rgba(148, 132, 87, 0.32);
   font-size: 16px;
+}
+
+.desktop-progress-control {
+  display: grid;
+  min-height: 158px;
+  place-items: center;
+  gap: 7px;
+  padding: 9px 0;
+  color: #121212;
+  background: rgba(255, 253, 240, 0.5);
+  border-bottom: 1px solid rgba(148, 132, 87, 0.32);
+  font-size: 12px;
+}
+
+.desktop-progress-control span {
+  line-height: 1;
+}
+
+.desktop-progress-slider {
+  width: 124px;
+  height: 18px;
+  margin: 52px -42px;
+  accent-color: #2f6f6d;
+  cursor: pointer;
+  transform: rotate(-90deg);
 }
 
 .page-step {
