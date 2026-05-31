@@ -60,7 +60,12 @@
             @click="handleBookRowClick(book)"
             @keyup.enter="handleBookRowClick(book)"
           >
-            <span class="list-cover" :style="coverStyle(book)" @click.stop="openDetail(book)">{{ coverInitial(book) }}</span>
+            <span
+              class="list-cover"
+              :class="{ 'has-cover': Boolean(book.coverUrl) }"
+              :style="coverStyle(book)"
+              @click.stop="openDetail(book)"
+            >{{ coverInitial(book) }}</span>
             <span class="list-main">
               <span class="book-operation">
                 <el-button v-if="showBookEditButton" size="small" text type="danger" @click.stop="deleteManagedBook(book)">删除</el-button>
@@ -318,21 +323,14 @@ function categoryName(id) {
 }
 
 function coverInitial(book) {
-  return (book.title || '?').slice(0, 1)
+  return book.coverUrl ? '' : '暂无封面'
 }
 
 function coverStyle(book) {
   if (book.coverUrl) {
     return { backgroundImage: `url(${book.coverUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', color: 'transparent' }
   }
-  const palettes = [
-    ['#2f6f6d', '#d9ece7'],
-    ['#9c5b34', '#f2decf'],
-    ['#5a4f8f', '#dedaf1'],
-    ['#406c3d', '#dfead9'],
-  ]
-  const [fg, bg] = palettes[Number(book.id || 1) % palettes.length]
-  return { color: fg, background: bg }
+  return {}
 }
 
 function updateViewportFlags() {
@@ -511,6 +509,19 @@ function readError(err, fallback) {
   display: grid;
   place-items: center;
   font-weight: 900;
+  color: #8f866f;
+  background:
+    radial-gradient(circle at 76% 18%, rgba(203, 186, 132, 0.22), transparent 24%),
+    linear-gradient(135deg, #fbfaf4 0%, #f4f0df 100%);
+  border: 1px solid rgba(190, 178, 142, 0.32);
+  line-height: 1.35;
+  text-align: center;
+  writing-mode: vertical-rl;
+}
+
+.list-cover.has-cover {
+  border-color: transparent;
+  writing-mode: initial;
 }
 
 .list-main small {
@@ -771,6 +782,10 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .title-actions button {
   flex: 0 0 auto;
+}
+
+.shelf-page.mobile-shelf .title-actions .view-switch {
+  display: none;
 }
 
 .shelf-page.mobile-shelf .recent-strip {

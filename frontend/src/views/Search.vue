@@ -36,6 +36,10 @@
           <el-option v-for="source in enabledSources" :key="source.id" :label="source.name" :value="source.id" />
         </el-select>
 
+        <el-select v-if="searchType !== 'single'" v-model="concurrentCount" placeholder="并发线程" size="small">
+          <el-option v-for="count in concurrentOptions" :key="count" :label="`${count}并发线程`" :value="count" />
+        </el-select>
+
         <el-select v-model="targetCategoryId" placeholder="加入书架分组（可选）" clearable size="small">
           <el-option label="未分组" value="" />
           <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
@@ -169,10 +173,12 @@ const keyword = ref('')
 const searchMode = ref(route.query.mode === 'local' ? 'local' : 'remote')
 const sources = ref([])
 const selectedIds = ref([])
-const selectedGroup = ref('')
-const singleSourceId = ref(null)
+const selectedGroup = ref(typeof route.query.group === 'string' ? route.query.group : '')
+const singleSourceId = ref(Number(route.query.sourceId || 0) || null)
 const targetCategoryId = ref('')
-const searchType = ref('all')
+const searchType = ref(['all', 'group', 'single', 'custom'].includes(route.query.searchType) ? route.query.searchType : 'all')
+const concurrentOptions = [8, 16, 32, 60]
+const concurrentCount = ref(concurrentOptions.includes(Number(route.query.concurrent)) ? Number(route.query.concurrent) : 60)
 const results = ref([])
 const searching = ref(false)
 const searched = ref(false)
@@ -259,6 +265,25 @@ watch(() => route.query.q, (value) => {
   if (next && route.name === 'search') doSearch()
 })
 
+watch(
+  () => [route.query.searchType, route.query.group, route.query.sourceId],
+  ([type, group, sourceId]) => {
+    if (['all', 'group', 'single', 'custom'].includes(type)) searchType.value = type
+    selectedGroup.value = typeof group === 'string' ? group : selectedGroup.value
+    const nextSourceId = Number(sourceId || 0)
+    if (Number.isFinite(nextSourceId) && nextSourceId > 0) singleSourceId.value = nextSourceId
+    syncSelection()
+  },
+)
+
+watch(
+  () => route.query.concurrent,
+  (value) => {
+    const next = Number(value || 0)
+    if (concurrentOptions.includes(next)) concurrentCount.value = next
+  },
+)
+
 async function loadSources() {
   const { data } = await api.get('/sources')
   sources.value = data
@@ -322,7 +347,11 @@ async function doSearch() {
   searched.value = false
   results.value = []
   try {
-    const { data } = await api.post('/search', { keyword: value, sourceIds: selectedIds.value })
+    const { data } = await api.post('/search', {
+      keyword: value,
+      sourceIds: selectedIds.value,
+      concurrentCount: searchType.value === 'single' ? 1 : concurrentCount.value,
+    })
     results.value = data
     searched.value = true
     ElMessage.success(data.length ? `找到 ${data.length} 条结果` : '没有找到相关书籍')

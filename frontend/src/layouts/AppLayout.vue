@@ -31,6 +31,39 @@
         </el-input>
       </div>
 
+      <section class="app-search-setting">
+        <p class="app-nav-title">搜索设置</p>
+        <el-select v-model="sidebarSearchType" size="small" class="setting-select" @change="saveSearchSetting">
+          <el-option label="多源搜索" value="all" />
+          <el-option label="分组搜索" value="group" />
+          <el-option label="单源搜索" value="single" />
+        </el-select>
+        <el-select
+          v-if="sidebarSearchType === 'group'"
+          v-model="sidebarSearchGroup"
+          size="small"
+          class="setting-select"
+          placeholder="全部分组"
+          @change="saveSearchSetting"
+        >
+          <el-option v-for="group in sidebarSourceGroups" :key="group.value" :label="`${group.label} (${group.count})`" :value="group.value" />
+        </el-select>
+        <el-select
+          v-if="sidebarSearchType === 'single'"
+          v-model="sidebarSourceId"
+          size="small"
+          class="setting-select"
+          filterable
+          placeholder="选择书源"
+          @change="saveSearchSetting"
+        >
+          <el-option v-for="source in sidebarEnabledSources" :key="source.id" :label="source.name" :value="source.id" />
+        </el-select>
+        <el-select v-model="sidebarConcurrent" size="small" class="setting-select" @change="saveSearchSetting">
+          <el-option v-for="count in concurrentOptions" :key="count" :label="`${count}并发线程`" :value="count" />
+        </el-select>
+      </section>
+
       <section class="sidebar-recent">
         <p class="app-nav-title">最近阅读</p>
         <button
@@ -125,6 +158,7 @@ import { useOverlayStore } from '../stores/overlay'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 import { useSync } from '../composables/useSync'
+import { listSources } from '../api/sources'
 import { compareRecentBook } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
@@ -148,7 +182,7 @@ const { connected: syncConnected, connect, disconnect } = useSync()
 
 const navSections = computed(() => [
   {
-    title: '搜索设置',
+    title: '搜索入口',
     items: [
       { key: 'search', label: '书源搜索', icon: Search, route: 'search' },
       { key: 'localSearch', label: '本地书籍', icon: FolderOpened, route: 'search', query: { mode: 'local' } },
@@ -204,6 +238,22 @@ const navSections = computed(() => [
 ])
 
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
+const concurrentOptions = [8, 16, 32, 60]
+const initialSidebarSearchSetting = readSidebarSearchSetting()
+const sidebarSources = ref([])
+const sidebarSearchType = ref(initialSidebarSearchSetting.searchType)
+const sidebarSearchGroup = ref(initialSidebarSearchSetting.group)
+const sidebarSourceId = ref(initialSidebarSearchSetting.sourceId)
+const sidebarConcurrent = ref(initialSidebarSearchSetting.concurrent)
+const sidebarEnabledSources = computed(() => sidebarSources.value.filter(source => source.enabled))
+const sidebarSourceGroups = computed(() => {
+  const groups = new Map()
+  for (const source of sidebarEnabledSources.value) {
+    const name = source.group || '默认分组'
+    groups.set(name, (groups.get(name) || 0) + 1)
+  }
+  return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
+})
 const isMobileShell = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
 const mobileNavigationWidth = computed(() => {
   const viewport = Math.max(320, windowWidth.value || 0)
@@ -242,7 +292,10 @@ function runNavAction(item) {
     return
   }
   if (item.route) {
-    router.push({ name: item.route, query: item.query || (item.panel ? { panel: item.panel } : {}) })
+    const query = item.key === 'search'
+      ? searchRouteQuery()
+      : (item.query || (item.panel ? { panel: item.panel } : {}))
+    router.push({ name: item.route, query })
     if (isMobileShell.value) mobileNavigationVisible.value = false
   }
 }
@@ -259,17 +312,66 @@ function isNavActive(item) {
 
 function goSearch() {
   const keyword = quickSearch.value.trim()
+  const query = searchRouteQuery(keyword)
   if (!keyword) {
-    router.push({ name: 'search' })
+    router.push({ name: 'search', query })
     return
   }
-  router.push({ name: 'search', query: { q: keyword } })
+  router.push({ name: 'search', query })
+}
+
+function searchRouteQuery(keyword = '') {
+  const query = {}
+  if (keyword) query.q = keyword
+  query.searchType = sidebarSearchType.value
+  query.concurrent = sidebarConcurrent.value
+  if (sidebarSearchType.value === 'group' && sidebarSearchGroup.value) query.group = sidebarSearchGroup.value
+  if (sidebarSearchType.value === 'single' && sidebarSourceId.value) query.sourceId = sidebarSourceId.value
+  return query
 }
 
 function clearShelfSearch() {
   if (route.name === 'search' && route.query.q !== undefined) {
     const { q, ...query } = route.query
     router.replace({ name: 'search', query })
+  }
+}
+
+function saveSearchSetting() {
+  try {
+    localStorage.setItem('openreader_sidebar_search', JSON.stringify({
+      searchType: sidebarSearchType.value,
+      group: sidebarSearchGroup.value,
+      sourceId: sidebarSourceId.value,
+      concurrent: sidebarConcurrent.value,
+    }))
+  } catch {
+    // Ignore restricted storage; search still works for the current session.
+  }
+}
+
+function readSidebarSearchSetting() {
+  try {
+    const data = JSON.parse(localStorage.getItem('openreader_sidebar_search') || '{}')
+    return {
+      searchType: ['all', 'group', 'single'].includes(data.searchType) ? data.searchType : 'all',
+      group: data.group || '',
+      sourceId: data.sourceId || '',
+      concurrent: concurrentOptions.includes(Number(data.concurrent)) ? Number(data.concurrent) : 60,
+    }
+  } catch {
+    return { searchType: 'all', group: '', sourceId: '', concurrent: 60 }
+  }
+}
+
+async function loadSidebarSources() {
+  try {
+    const { data } = await listSources()
+    sidebarSources.value = Array.isArray(data) ? data : []
+    if (!sidebarSearchGroup.value && sidebarSourceGroups.value.length) sidebarSearchGroup.value = sidebarSourceGroups.value[0].value
+    if (!sidebarSourceId.value && sidebarEnabledSources.value.length) sidebarSourceId.value = sidebarEnabledSources.value[0].id
+  } catch {
+    sidebarSources.value = []
   }
 }
 
@@ -409,6 +511,7 @@ onMounted(() => {
   if (userStore.token && !bookshelf.books.length) {
     Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })]).catch(() => {})
   }
+  if (userStore.token) loadSidebarSources()
 })
 
 onBeforeUnmount(() => {
@@ -498,6 +601,23 @@ onBeforeUnmount(() => {
 .app-shell-search :deep(.el-input__wrapper) {
   min-height: 28px;
   border-radius: 14px;
+  box-shadow: 0 0 0 1px #e6e6e6 inset;
+}
+
+.app-search-setting {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 28px;
+}
+
+.setting-select {
+  width: 100%;
+}
+
+.setting-select :deep(.el-select__wrapper) {
+  min-height: 28px;
+  background: #fffdf8;
+  border-radius: 4px;
   box-shadow: 0 0 0 1px #e6e6e6 inset;
 }
 
@@ -732,6 +852,11 @@ onBeforeUnmount(() => {
 .app-shell.mobile-shell .app-shell-search {
   display: block;
   margin: 0 0 18px;
+}
+
+.app-shell.mobile-shell .app-search-setting {
+  margin: 0 0 22px;
+  gap: 10px;
 }
 
 .app-shell.mobile-shell .app-sidebar-footer {
