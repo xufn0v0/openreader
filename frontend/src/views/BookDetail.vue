@@ -98,6 +98,7 @@
                 @group-change="changeSourceGroup"
                 @change="changeSource"
               />
+              <p v-if="changeMessage" :class="changeError ? 'msg-error' : 'msg-success'">{{ changeMessage }}</p>
             </section>
           </el-tab-pane>
 
@@ -116,26 +117,6 @@
         </el-tabs>
       </template>
     </div>
-
-    <el-dialog v-model="showChangeSource" title="换源" width="460px" :fullscreen="isMobileDialog">
-      <SourceSwitchPanel
-        :book="book"
-        :sources="sourceCandidates"
-        :loading="loadingSourceCandidates"
-        :changing-source="changingSource"
-        :current-source-name="currentSource?.name || ''"
-        :group="sourceGroup"
-        :groups="sourceGroups"
-        :has-more="sourceHasMore"
-        :stats="sourceStats"
-        :show-info-button="false"
-        @refresh="loadSourceCandidates"
-        @load-more="loadMoreSourceCandidates"
-        @group-change="changeSourceGroup"
-        @change="changeSource"
-      />
-      <p v-if="changeMessage" :class="changeError ? 'msg-error' : 'msg-success'">{{ changeMessage }}</p>
-    </el-dialog>
 
     <el-dialog v-model="showBookEditor" title="编辑书籍" width="540px" :fullscreen="isMobileDialog">
       <el-form label-position="top" class="book-editor">
@@ -201,7 +182,6 @@ const tocLocateKey = ref(0)
 const tocReverse = ref(false)
 const browserCachedChapters = ref({})
 const categoryDraft = ref('')
-const showChangeSource = ref(false)
 const showBookEditor = ref(false)
 const savingBook = ref(false)
 const uploadingCover = ref(false)
@@ -619,7 +599,7 @@ function mergeSourceCandidates(existing, incoming) {
 }
 
 async function openChangeSource() {
-  showChangeSource.value = true
+  activeTab.value = 'sources'
   if (!sourceCandidates.value.length) {
     await loadSourceCandidates()
   }

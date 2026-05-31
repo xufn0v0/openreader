@@ -29,7 +29,7 @@ export function useSync() {
         reader.applyProgress(message.payload)
       }
       if (message.type === 'bookshelf_update') {
-        bookshelf.loadBooks()
+        bookshelf.loadBooks({ all: true })
       }
     })
   }

@@ -2,9 +2,7 @@
   <section class="app-page discover-page">
     <header class="discover-head">
       <div>
-        <p class="eyebrow">Explore</p>
         <h1 class="app-page-title">书海探索</h1>
-        <p class="app-page-subtitle">仅显示配置了 exploreUrl 的书源，按书源真实发现页加载书籍。</p>
       </div>
       <el-button :icon="Refresh" :loading="loadingSources" @click="loadSources">刷新书源</el-button>
     </header>
@@ -88,7 +86,7 @@ const filteredSources = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
+  await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })])
   if (selectedSourceId.value) await loadBooks()
 })
 
@@ -354,10 +352,6 @@ function readError(err, fallback) {
     display: grid;
     gap: 8px;
     justify-content: stretch;
-  }
-
-  .discover-head .app-page-subtitle {
-    display: none;
   }
 
   .discover-toolbar {

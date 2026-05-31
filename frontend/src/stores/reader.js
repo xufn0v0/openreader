@@ -133,8 +133,14 @@ export const useReaderStore = defineStore('reader', {
       }
       this.applyProgress(optimistic)
       const { data } = await api.put('/progress', { ...payload, mode: this.mode })
-      this.applyProgress(data)
-      return data
+      const merged = data?.bookId ? {
+        ...data,
+        chapterPercent: Number.isFinite(Number(data.chapterPercent))
+          ? Number(data.chapterPercent)
+          : optimistic.chapterPercent,
+      } : data
+      this.applyProgress(merged)
+      return merged
     },
     async loadProgress(bookId, options = {}) {
       const local = newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
@@ -186,8 +192,9 @@ function localChapterProgressKey(bookId) {
 
 function persistLocalChapterProgress(progress) {
   if (typeof localStorage === 'undefined' || !progress?.bookId) return
+  const chapterPercent = Number(progress.chapterPercent)
   try {
-    localStorage.setItem(localChapterProgressKey(progress.bookId), JSON.stringify({
+    const payload = {
       bookId: progress.bookId,
       chapterId: progress.chapterId || 0,
       chapterIndex: Number(progress.chapterIndex || 0),
@@ -196,7 +203,11 @@ function persistLocalChapterProgress(progress) {
       mode: progress.mode || '',
       chapterTitle: progress.chapterTitle || '',
       updatedAt: progress.updatedAt || new Date().toISOString(),
-    }))
+    }
+    if (Number.isFinite(chapterPercent)) {
+      payload.chapterPercent = Math.max(0, Math.min(1, chapterPercent))
+    }
+    localStorage.setItem(localChapterProgressKey(progress.bookId), JSON.stringify(payload))
   } catch {
     // localStorage may be unavailable in private or restricted browser modes.
   }
@@ -209,13 +220,18 @@ function readLocalChapterProgress(bookId) {
     if (!raw) return null
     const data = JSON.parse(raw)
     if (!data || Number(data.bookId) !== Number(bookId)) return null
-    return {
+    const progress = {
       ...data,
       bookId: Number(data.bookId),
       chapterIndex: Math.max(0, Math.floor(Number(data.chapterIndex || 0))),
       offset: Math.max(0, Math.floor(Number(data.offset || 0))),
       percent: Math.max(0, Math.min(1, Number(data.percent || 0))),
     }
+    if (data.chapterPercent !== undefined && data.chapterPercent !== null) {
+      const chapterPercent = Number(data.chapterPercent)
+      if (Number.isFinite(chapterPercent)) progress.chapterPercent = Math.max(0, Math.min(1, chapterPercent))
+    }
+    return progress
   } catch {
     return null
   }

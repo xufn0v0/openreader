@@ -2,9 +2,7 @@
   <section class="app-page settings-page">
     <header class="settings-head">
       <div>
-        <p class="eyebrow">Settings</p>
         <h1 class="app-page-title">设置</h1>
-        <p class="app-page-subtitle">账户、同步、备份、WebDAV 和管理员能力集中在这里。</p>
       </div>
       <el-button :icon="Refresh" :loading="checking" @click="checkHealth">检查服务</el-button>
     </header>
@@ -91,7 +89,6 @@
               <el-icon><Files /></el-icon>
               <h2>远程章节缓存</h2>
             </div>
-            <p class="panel-text">这里只统计远程书源章节缓存。本地书导入后正文存放在书库目录，不计入这里。</p>
             <dl class="info-list">
               <div><dt>缓存目录</dt><dd>{{ cacheStats.path || '-' }}</dd></div>
               <div><dt>缓存文件</dt><dd>{{ cacheStats.files || 0 }}</dd></div>
@@ -1331,14 +1328,6 @@ function readError(err, fallback) {
 
 .settings-head {
   justify-content: space-between;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
 }
 
 .settings-grid {

@@ -2,9 +2,7 @@
   <section class="app-page search-page">
     <header class="search-head">
       <div>
-        <p class="eyebrow">Search</p>
         <h1 class="app-page-title">{{ searchMode === 'local' ? '搜索本地书籍' : '搜索书源书籍' }}</h1>
-        <p class="app-page-subtitle">{{ searchMode === 'local' ? '搜索服务端 localStore 里的本地书文件，和远程书源搜索分开处理。' : '按上游阅读器的逻辑，选择书源范围后并发搜索并加入书架。' }}</p>
       </div>
       <el-button :icon="searchMode === 'local' ? FolderOpened : Connection" @click="searchMode === 'local' ? router.push({ name: 'local-store' }) : router.push({ name: 'sources' })">
         {{ searchMode === 'local' ? '本地书仓' : '书源管理' }}
@@ -158,12 +156,14 @@ import api from '../api/client'
 import BookCover from '../components/BookCover.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
+import { useReaderStore } from '../stores/reader'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
 const route = useRoute()
 const router = useRouter()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
+const reader = useReaderStore()
 
 const keyword = ref('')
 const searchMode = ref(route.query.mode === 'local' ? 'local' : 'remote')
@@ -236,7 +236,12 @@ const shownLocalResults = computed(() => {
 const shownLocalImportablePaths = computed(() => shownLocalResults.value.filter(item => item.importable).map(item => item.path))
 
 onMounted(async () => {
-  await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
+  await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })])
+  if (searchMode.value === 'remote') {
+    await loadSources()
+  } else {
+    loadSources().catch(() => {})
+  }
   keyword.value = route.query.q || ''
   syncSelection()
   if (keyword.value || searchMode.value === 'local') doSearch()
@@ -246,6 +251,12 @@ watch(searchType, syncSelection)
 watch(() => route.query.mode, (mode) => {
   const nextMode = mode === 'local' ? 'local' : 'remote'
   if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
+})
+
+watch(() => route.query.q, (value) => {
+  const next = typeof value === 'string' ? value : ''
+  if (next !== keyword.value) keyword.value = next
+  if (next && route.name === 'search') doSearch()
 })
 
 async function loadSources() {
@@ -276,7 +287,15 @@ function switchSearchMode(mode, updateRoute = true) {
   searched.value = false
   results.value = []
   checkedLocalPaths.value = []
-  if (mode === 'remote') syncSelection()
+  if (mode === 'remote') {
+    if (!sources.value.length) {
+      loadSources()
+        .then(syncSelection)
+        .catch(err => ElMessage.error(readError(err, '加载书源失败')))
+    } else {
+      syncSelection()
+    }
+  }
   if (updateRoute) {
     router.replace({
       name: 'search',
@@ -320,7 +339,10 @@ async function searchLocalBooks() {
   results.value = []
   checkedLocalPaths.value = []
   try {
-    const { data } = await listLocalStore('', localRecursiveScan.value)
+    const [{ data }] = await Promise.all([
+      listLocalStore('', localRecursiveScan.value),
+      bookshelf.loadBooks({ force: true, all: true }),
+    ])
     localItems.value = data.items || []
     searched.value = true
     ElMessage.success(shownLocalResults.value.length ? `找到 ${shownLocalResults.value.length} 条本地结果` : '没有找到本地书籍')
@@ -454,7 +476,7 @@ function readerRouteQueryForLocalBook(book) {
 }
 
 function readerProgressForBook(book) {
-  return bookshelf.books.find(item => item.id === book?.id)?.progress || book?.progress || null
+  return reader.progressByBook[book?.id] || bookshelf.books.find(item => item.id === book?.id)?.progress || book?.progress || null
 }
 
 function openLocalShelfDetail(book) {
@@ -585,14 +607,6 @@ function readError(err, fallback) {
 .search-head,
 .result-title {
   justify-content: space-between;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
 }
 
 .search-console {
@@ -757,10 +771,6 @@ function readError(err, fallback) {
 
   .search-head {
     gap: 6px;
-  }
-
-  .search-head .app-page-subtitle {
-    display: none;
   }
 
   .search-head :deep(.el-button),

@@ -13,6 +13,9 @@ export function readerRouteQueryFromBook(book, progressOverride = null, totalCha
 }
 
 export function savedBookChapterPercent(progress, totalChapters) {
+  if (progress?.chapterPercent !== undefined && progress?.chapterPercent !== null && Number.isFinite(Number(progress.chapterPercent))) {
+    return Math.max(0, Math.min(1, Number(progress.chapterPercent)))
+  }
   if (!progress || !Number.isFinite(Number(progress.percent))) return null
   const chapterIndex = Number(progress.chapterIndex)
   if (!Number.isFinite(chapterIndex)) return null

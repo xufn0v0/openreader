@@ -2,9 +2,7 @@
   <section class="app-page sources-page">
     <header class="sources-head">
       <div>
-        <p class="eyebrow">Sources</p>
         <h1 class="app-page-title">书源管理</h1>
-        <p class="app-page-subtitle">管理书源、分组筛选、导入导出，并调试搜索、目录和正文规则。</p>
       </div>
       <div class="head-actions">
         <el-button type="primary" :icon="Plus" @click="openEditor()">新增</el-button>
@@ -16,13 +14,6 @@
         <el-button type="danger" plain :disabled="!sources.length" @click="clearAllSources">清空</el-button>
       </div>
     </header>
-
-    <section class="source-summary">
-      <article class="app-panel stat"><span>全部</span><strong>{{ sources.length }}</strong></article>
-      <article class="app-panel stat"><span>启用</span><strong>{{ enabledCount }}</strong></article>
-      <article class="app-panel stat"><span>分组</span><strong>{{ groups.length }}</strong></article>
-      <article class="app-panel stat"><span>本次显示</span><strong>{{ shownSources.length }}</strong></article>
-    </section>
 
     <section class="source-toolbar app-panel">
       <el-input v-model="keyword" placeholder="搜索书源名称、地址或分组" clearable>
@@ -299,7 +290,6 @@ const handledRouteAction = ref('')
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
 
-const enabledCount = computed(() => sources.value.filter(source => source.enabled).length)
 const groups = computed(() => [...new Set(sources.value.map(source => source.group || '默认分组'))].sort())
 const healthSummary = computed(() => {
   const rows = Object.values(health.value)
@@ -734,35 +724,9 @@ function readError(err, fallback) {
   justify-content: flex-end;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.source-summary {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.stat {
-  display: grid;
-  gap: 6px;
-  padding: 16px;
-}
-
-.stat span,
 .muted,
 .debug-title span {
   color: var(--app-text-muted);
-}
-
-.stat strong {
-  font-size: 26px;
 }
 
 .source-toolbar {
@@ -941,10 +905,6 @@ function readError(err, fallback) {
 
   .debug-next-actions {
     display: grid;
-  }
-
-  .source-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .desktop-source-table {
