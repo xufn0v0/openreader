@@ -317,6 +317,17 @@
   </el-dialog>
 
   <el-drawer
+    v-model="overlay.localStoreVisible"
+    title="本地书仓"
+    :direction="wideDrawerDirection"
+    :size="wideDrawerSize"
+    class="global-local-store-drawer"
+    destroy-on-close
+  >
+    <LocalStore embedded />
+  </el-drawer>
+
+  <el-drawer
     v-model="overlay.webdavVisible"
     title="WebDAV"
     :direction="wideDrawerDirection"
@@ -725,7 +736,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
@@ -741,12 +752,14 @@ import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
-import { sortByShelfOrder } from '../utils/bookOrder'
+import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import BookInfoDialog from './BookInfoDialog.vue'
 import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
 import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
 import SourceSwitchPanel from './reader/SourceSwitchPanel.vue'
+
+const LocalStore = defineAsyncComponent(() => import('../views/LocalStore.vue'))
 
 const router = useRouter()
 const route = useRoute()
@@ -834,9 +847,9 @@ const replaceRuleTestText = ref('广告123\n正文内容')
 const replaceRuleTestResult = ref(null)
 const manageKeyword = ref('')
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
+const coarsePointer = ref(isCoarsePointer())
 
-const isMobileOverlay = computed(() => windowWidth.value <= 860 || coarsePointer.value)
+const isMobileOverlay = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -859,7 +872,7 @@ const sourceSwitchGroups = computed(() => {
 })
 const bookInfoProgress = computed(() => {
   const book = overlay.bookInfoBook
-  return book ? (reader.progressByBook[book.id]?.percent || book.progress?.percent || 0) : 0
+  return bookProgress(book)?.percent || 0
 })
 const bookInfoBrowserCacheCount = computed(() => (
   overlay.bookInfoBook?.sourceId ? localCacheCount(overlay.bookInfoBook) : -1
@@ -894,7 +907,13 @@ onBeforeUnmount(() => {
 
 function updateWindowWidth() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  coarsePointer.value = isCoarsePointer()
+}
+
+function isCoarsePointer() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
+    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 async function loadImportCategories() {
@@ -943,7 +962,7 @@ watch(
       return
     }
     try {
-      await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks()])
+      await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })])
       if (overlay.bookManageVisible) await refreshManagedBrowserCacheCounts()
       if (overlay.bookGroupVisible && overlay.bookGroupMode === 'set') {
         settingCategoryId.value = overlay.bookInfoBook?.categoryId ? String(overlay.bookInfoBook.categoryId) : ''
@@ -1032,7 +1051,7 @@ function categoryName(id) {
 }
 
 function progressLabel(book) {
-  const progress = reader.progressByBook[book.id] || book.progress
+  const progress = bookProgress(book)
   return `${Math.round((progress?.percent || 0) * 100)}%`
 }
 
@@ -1077,14 +1096,13 @@ function goDetail(book) {
 }
 
 function readerRouteQuery(book) {
-  const progress = reader.progressByBook[book?.id] || book?.progress
-  return readerRouteQueryFromBook(book, progress)
+  return readerRouteQueryFromBook(book, bookProgress(book))
 }
 
 function setBookGroup(book) {
   overlay.openBookGroup('set', book, {
     categoryName: categoryName(book.categoryId),
-    progress: (reader.progressByBook[book.id]?.percent || book.progress?.percent || 0),
+    progress: bookProgress(book)?.percent || 0,
   })
 }
 
@@ -1104,7 +1122,7 @@ async function saveBookGroupSetting() {
     overlay.bookInfoOptions = {
       ...overlay.bookInfoOptions,
       categoryName: categoryName(data.categoryId),
-      progress: reader.progressByBook[data.id]?.percent || data.progress?.percent || 0,
+      progress: bookProgress(data)?.percent || 0,
     }
     overlay.bookGroupVisible = false
     ElMessage.success('分组已设置')
@@ -1262,7 +1280,7 @@ function reopenSourceSwitchBookInfo() {
   sourceSwitchVisible.value = false
   overlay.openBookInfo(sourceSwitchBook.value, {
     categoryName: categoryName(sourceSwitchBook.value.categoryId),
-    progress: reader.progressByBook[sourceSwitchBook.value.id]?.percent || sourceSwitchBook.value.progress?.percent || 0,
+    progress: bookProgress(sourceSwitchBook.value)?.percent || 0,
   })
 }
 
@@ -1270,7 +1288,7 @@ async function refreshShelf() {
   loadingUpdates.value = true
   try {
     const { data } = await checkBookUpdates()
-    await bookshelf.loadBooks({ force: true })
+    await bookshelf.loadBooks({ force: true, all: true })
     ElMessage.success(data?.newChapters ? `发现 ${data.newChapters} 个新章节` : '暂未发现新章节')
   } catch (err) {
     ElMessage.error(readError(err, '刷新失败'))
@@ -1289,7 +1307,7 @@ async function refreshBookInfo(book) {
       bookshelf.upsertBook(updatedBook)
       overlay.bookInfoBook = updatedBook
     } else {
-      await bookshelf.loadBooks({ force: true })
+      await bookshelf.loadBooks({ force: true, all: true })
     }
     ElMessage.success(`目录已刷新，共 ${data?.chapterCount || updatedBook?.chapterCount || 0} 章`)
   } catch (err) {
@@ -1309,7 +1327,7 @@ async function refreshLocalBookInfo(book) {
       bookshelf.upsertBook(updatedBook)
       overlay.bookInfoBook = updatedBook
     } else {
-      await bookshelf.loadBooks({ force: true })
+      await bookshelf.loadBooks({ force: true, all: true })
     }
     ElMessage.success(`本地书已刷新，共 ${data?.chapterCount || updatedBook?.chapterCount || 0} 章`)
   } catch (err) {
@@ -1502,7 +1520,7 @@ async function cacheBook(book, command) {
     const chapterIndex = cacheStartChapterIndex(book)
     const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
-    await bookshelf.loadBooks({ force: true })
+    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '缓存失败'))
   } finally {
@@ -1530,16 +1548,20 @@ async function cacheBookLocal(book) {
 }
 
 function cacheStartChapterIndex(book) {
-  const progress = reader.progressByBook[book.id] || book.progress
+  const progress = bookProgress(book)
   const chapterIndex = Number(progress?.chapterIndex)
   return Number.isInteger(chapterIndex) && chapterIndex > 0 ? chapterIndex : 0
+}
+
+function bookProgress(book) {
+  return newestBookProgress(book, reader.progressByBook)
 }
 
 async function clearBookCache(book) {
   cachingBookId.value = book.id
   try {
     const data = await bookshelf.batchClearCache([book.id])
-    await bookshelf.loadBooks({ force: true })
+    await bookshelf.loadBooks({ force: true, all: true })
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
   } catch (err) {
     ElMessage.error(readError(err, '清理缓存失败'))
@@ -2061,7 +2083,7 @@ async function importWebDAVBooks(paths) {
     const failed = webdavImportResults.value.filter(item => item.error).length
     ElMessage.success(`导入 ${success} 本` + (failed ? `，${failed} 本失败` : ''))
     webdavImportResultDialog.value = true
-    await bookshelf.loadBooks({ force: true })
+    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '导入 WebDAV 文件失败'))
   } finally {
@@ -2131,7 +2153,7 @@ async function restoreBackup(data) {
     form.append('file', file)
     const { data: result } = await restoreLegadoBackup(form)
     ElMessage.success(`恢复完成：书源 ${result.sources || 0}，书籍 ${result.books || 0}，进度 ${result.progress || 0}`)
-    await bookshelf.loadBooks({ force: true })
+    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '恢复备份失败'))
   } finally {
@@ -2955,7 +2977,7 @@ function readError(err, fallback) {
   white-space: pre-wrap;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
   .desktop-manage-table {
     display: none;
   }

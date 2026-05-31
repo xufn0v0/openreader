@@ -8,6 +8,9 @@ html,
 body,
 #app {
   min-height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 html,
@@ -91,7 +94,7 @@ a {
   color: #a09282;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
   .app-page {
     padding: 18px 14px 82px;
   }

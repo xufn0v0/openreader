@@ -13,8 +13,9 @@ import (
 )
 
 type searchRequest struct {
-	Keyword   string `json:"keyword" binding:"required"`
-	SourceIDs []uint `json:"sourceIds"`
+	Keyword         string `json:"keyword" binding:"required"`
+	SourceIDs       []uint `json:"sourceIds"`
+	ConcurrentCount int    `json:"concurrentCount"`
 }
 
 func (s *Server) search(c *gin.Context) {
@@ -43,11 +44,11 @@ func (s *Server) search(c *gin.Context) {
 		return
 	}
 
-	results := concurrentSearch(sources, req.Keyword)
+	results := concurrentSearch(sources, req.Keyword, req.ConcurrentCount)
 	c.JSON(http.StatusOK, results)
 }
 
-func concurrentSearch(sources []models.BookSource, keyword string) []engine.SearchResult {
+func concurrentSearch(sources []models.BookSource, keyword string, concurrentCount int) []engine.SearchResult {
 	type searchOutcome struct {
 		Results []engine.SearchResult
 		Error   error
@@ -56,12 +57,25 @@ func concurrentSearch(sources []models.BookSource, keyword string) []engine.Sear
 	var wg sync.WaitGroup
 	channel := make(chan searchOutcome, len(sources))
 	timeout := 15 * time.Second
+	limit := concurrentCount
+	if limit <= 0 {
+		limit = 60
+	}
+	if limit > len(sources) {
+		limit = len(sources)
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	workerGate := make(chan struct{}, limit)
 
 	for _, source := range sources {
 		wg.Add(1)
 		source := source
 		go func() {
 			defer wg.Done()
+			workerGate <- struct{}{}
+			defer func() { <-workerGate }()
 			done := make(chan searchOutcome, 1)
 			go func() {
 				results, err := engine.SearchBooks(source, keyword)

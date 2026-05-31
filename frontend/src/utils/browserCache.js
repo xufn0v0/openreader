@@ -180,3 +180,19 @@ export async function cacheFirstRequest(requestFunc, cacheKey, options = {}) {
   }
   return response
 }
+
+export async function networkFirstRequest(requestFunc, cacheKey, options = {}) {
+  try {
+    const response = await requestFunc()
+    if (response?.data && (!options.validate || options.validate(response.data))) {
+      await setBrowserCache(cacheKey, response.data)
+    }
+    return response
+  } catch (err) {
+    const cached = await getBrowserCache(cacheKey)
+    if (cached && (!options.validate || options.validate(cached))) {
+      return { data: cached, fromCache: true }
+    }
+    throw err
+  }
+}

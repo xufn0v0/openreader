@@ -2,9 +2,7 @@
   <section class="app-page search-page">
     <header class="search-head">
       <div>
-        <p class="eyebrow">Search</p>
         <h1 class="app-page-title">{{ searchMode === 'local' ? '搜索本地书籍' : '搜索书源书籍' }}</h1>
-        <p class="app-page-subtitle">{{ searchMode === 'local' ? '搜索服务端 localStore 里的本地书文件，和远程书源搜索分开处理。' : '按上游阅读器的逻辑，选择书源范围后并发搜索并加入书架。' }}</p>
       </div>
       <el-button :icon="searchMode === 'local' ? FolderOpened : Connection" @click="searchMode === 'local' ? router.push({ name: 'local-store' }) : router.push({ name: 'sources' })">
         {{ searchMode === 'local' ? '本地书仓' : '书源管理' }}
@@ -36,6 +34,10 @@
 
         <el-select v-if="searchType === 'single'" v-model="singleSourceId" placeholder="选择书源" filterable size="small" @change="syncSelection">
           <el-option v-for="source in enabledSources" :key="source.id" :label="source.name" :value="source.id" />
+        </el-select>
+
+        <el-select v-if="searchType !== 'single'" v-model="concurrentCount" placeholder="并发线程" size="small">
+          <el-option v-for="count in concurrentOptions" :key="count" :label="`${count}并发线程`" :value="count" />
         </el-select>
 
         <el-select v-model="targetCategoryId" placeholder="加入书架分组（可选）" clearable size="small">
@@ -158,21 +160,26 @@ import api from '../api/client'
 import BookCover from '../components/BookCover.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
+import { useReaderStore } from '../stores/reader'
+import { newestBookProgress } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
 const route = useRoute()
 const router = useRouter()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
+const reader = useReaderStore()
 
 const keyword = ref('')
 const searchMode = ref(route.query.mode === 'local' ? 'local' : 'remote')
 const sources = ref([])
 const selectedIds = ref([])
-const selectedGroup = ref('')
-const singleSourceId = ref(null)
+const selectedGroup = ref(typeof route.query.group === 'string' ? route.query.group : '')
+const singleSourceId = ref(Number(route.query.sourceId || 0) || null)
 const targetCategoryId = ref('')
-const searchType = ref('all')
+const searchType = ref(['all', 'group', 'single', 'custom'].includes(route.query.searchType) ? route.query.searchType : 'all')
+const concurrentOptions = [8, 16, 32, 60]
+const concurrentCount = ref(concurrentOptions.includes(Number(route.query.concurrent)) ? Number(route.query.concurrent) : 60)
 const results = ref([])
 const searching = ref(false)
 const searched = ref(false)
@@ -236,7 +243,12 @@ const shownLocalResults = computed(() => {
 const shownLocalImportablePaths = computed(() => shownLocalResults.value.filter(item => item.importable).map(item => item.path))
 
 onMounted(async () => {
-  await Promise.all([loadSources(), bookshelf.loadCategories(), bookshelf.loadBooks()])
+  await Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })])
+  if (searchMode.value === 'remote') {
+    await loadSources()
+  } else {
+    loadSources().catch(() => {})
+  }
   keyword.value = route.query.q || ''
   syncSelection()
   if (keyword.value || searchMode.value === 'local') doSearch()
@@ -247,6 +259,31 @@ watch(() => route.query.mode, (mode) => {
   const nextMode = mode === 'local' ? 'local' : 'remote'
   if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
 })
+
+watch(() => route.query.q, (value) => {
+  const next = typeof value === 'string' ? value : ''
+  if (next !== keyword.value) keyword.value = next
+  if (next && route.name === 'search') doSearch()
+})
+
+watch(
+  () => [route.query.searchType, route.query.group, route.query.sourceId],
+  ([type, group, sourceId]) => {
+    if (['all', 'group', 'single', 'custom'].includes(type)) searchType.value = type
+    selectedGroup.value = typeof group === 'string' ? group : selectedGroup.value
+    const nextSourceId = Number(sourceId || 0)
+    if (Number.isFinite(nextSourceId) && nextSourceId > 0) singleSourceId.value = nextSourceId
+    syncSelection()
+  },
+)
+
+watch(
+  () => route.query.concurrent,
+  (value) => {
+    const next = Number(value || 0)
+    if (concurrentOptions.includes(next)) concurrentCount.value = next
+  },
+)
 
 async function loadSources() {
   const { data } = await api.get('/sources')
@@ -276,7 +313,15 @@ function switchSearchMode(mode, updateRoute = true) {
   searched.value = false
   results.value = []
   checkedLocalPaths.value = []
-  if (mode === 'remote') syncSelection()
+  if (mode === 'remote') {
+    if (!sources.value.length) {
+      loadSources()
+        .then(syncSelection)
+        .catch(err => ElMessage.error(readError(err, '加载书源失败')))
+    } else {
+      syncSelection()
+    }
+  }
   if (updateRoute) {
     router.replace({
       name: 'search',
@@ -303,7 +348,11 @@ async function doSearch() {
   searched.value = false
   results.value = []
   try {
-    const { data } = await api.post('/search', { keyword: value, sourceIds: selectedIds.value })
+    const { data } = await api.post('/search', {
+      keyword: value,
+      sourceIds: selectedIds.value,
+      concurrentCount: searchType.value === 'single' ? 1 : concurrentCount.value,
+    })
     results.value = data
     searched.value = true
     ElMessage.success(data.length ? `找到 ${data.length} 条结果` : '没有找到相关书籍')
@@ -320,7 +369,10 @@ async function searchLocalBooks() {
   results.value = []
   checkedLocalPaths.value = []
   try {
-    const { data } = await listLocalStore('', localRecursiveScan.value)
+    const [{ data }] = await Promise.all([
+      listLocalStore('', localRecursiveScan.value),
+      bookshelf.loadBooks({ force: true, all: true }),
+    ])
     localItems.value = data.items || []
     searched.value = true
     ElMessage.success(shownLocalResults.value.length ? `找到 ${shownLocalResults.value.length} 条本地结果` : '没有找到本地书籍')
@@ -454,7 +506,9 @@ function readerRouteQueryForLocalBook(book) {
 }
 
 function readerProgressForBook(book) {
-  return bookshelf.books.find(item => item.id === book?.id)?.progress || book?.progress || null
+  const shelfBook = bookshelf.books.find(item => item.id === book?.id)
+  const mergedBook = shelfBook ? { ...book, progress: shelfBook.progress || book?.progress } : book
+  return newestBookProgress(mergedBook, reader.progressByBook)
 }
 
 function openLocalShelfDetail(book) {
@@ -515,7 +569,7 @@ function openPreview(item) {
     sourceName: item.sourceName,
     statusLabel: existing ? '已在书架' : '搜索结果',
     statusType: existing ? 'warning' : 'success',
-    progress: existing?.progress?.percent || 0,
+    progress: readerProgressForBook(existing)?.percent || 0,
     actions: existing
       ? [
           { label: '查看详情', plain: true, handler: () => openExistingInfo(existing, item.sourceName) },
@@ -545,7 +599,7 @@ function openExistingInfo(book, sourceName = '') {
     sourceName,
     statusLabel: '已在书架',
     statusType: 'warning',
-    progress: book.progress?.percent || 0,
+    progress: readerProgressForBook(book)?.percent || 0,
     actions: [
       { label: '完整详情', plain: true, handler: () => openExistingDetail(book) },
       { label: '继续阅读', type: 'primary', handler: () => openExistingReader(book) },
@@ -585,14 +639,6 @@ function readError(err, fallback) {
 .search-head,
 .result-title {
   justify-content: space-between;
-}
-
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
 }
 
 .search-console {
@@ -741,7 +787,7 @@ function readError(err, fallback) {
   flex: 1;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
   .search-page {
     gap: 8px;
     padding-bottom: 14px;
@@ -757,10 +803,6 @@ function readError(err, fallback) {
 
   .search-head {
     gap: 6px;
-  }
-
-  .search-head .app-page-subtitle {
-    display: none;
   }
 
   .search-head :deep(.el-button),

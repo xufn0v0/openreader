@@ -14,12 +14,14 @@ import (
 )
 
 type progressRequest struct {
-	BookID       uint    `json:"bookId" binding:"required"`
-	ChapterID    uint    `json:"chapterId"`
-	ChapterIndex int     `json:"chapterIndex"`
-	Offset       int     `json:"offset"`
-	Percent      float64 `json:"percent"`
-	Mode         string  `json:"mode"`
+	BookID         uint    `json:"bookId" binding:"required"`
+	ChapterID      uint    `json:"chapterId"`
+	ChapterIndex   int     `json:"chapterIndex"`
+	Offset         int     `json:"offset"`
+	Percent        float64 `json:"percent"`
+	ChapterPercent float64 `json:"chapterPercent"`
+	ChapterTitle   string  `json:"chapterTitle"`
+	Mode           string  `json:"mode"`
 }
 
 func (s *Server) getProgress(c *gin.Context) {
@@ -59,14 +61,16 @@ func (s *Server) updateProgress(c *gin.Context) {
 	}
 
 	progress := models.ReadingProgress{
-		UserID:       userID,
-		BookID:       request.BookID,
-		ChapterID:    request.ChapterID,
-		ChapterIndex: request.ChapterIndex,
-		Offset:       request.Offset,
-		Percent:      request.Percent,
-		Mode:         request.Mode,
-		UpdatedAt:    time.Now(),
+		UserID:         userID,
+		BookID:         request.BookID,
+		ChapterID:      request.ChapterID,
+		ChapterIndex:   request.ChapterIndex,
+		Offset:         request.Offset,
+		Percent:        clampProgressPercent(request.Percent),
+		ChapterPercent: clampProgressPercent(request.ChapterPercent),
+		ChapterTitle:   request.ChapterTitle,
+		Mode:           request.Mode,
+		UpdatedAt:      time.Now(),
 	}
 
 	err := s.db.Where("user_id = ? AND book_id = ?", userID, request.BookID).
@@ -83,4 +87,14 @@ func (s *Server) updateProgress(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, progress)
+}
+
+func clampProgressPercent(percent float64) float64 {
+	if percent < 0 {
+		return 0
+	}
+	if percent > 1 {
+		return 1
+	}
+	return percent
 }

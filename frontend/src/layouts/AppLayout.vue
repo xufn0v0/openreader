@@ -31,6 +31,39 @@
         </el-input>
       </div>
 
+      <section class="app-search-setting">
+        <p class="app-nav-title">搜索设置</p>
+        <el-select v-model="sidebarSearchType" size="small" class="setting-select" @change="saveSearchSetting">
+          <el-option label="多源搜索" value="all" />
+          <el-option label="分组搜索" value="group" />
+          <el-option label="单源搜索" value="single" />
+        </el-select>
+        <el-select
+          v-if="sidebarSearchType === 'group'"
+          v-model="sidebarSearchGroup"
+          size="small"
+          class="setting-select"
+          placeholder="全部分组"
+          @change="saveSearchSetting"
+        >
+          <el-option v-for="group in sidebarSourceGroups" :key="group.value" :label="`${group.label} (${group.count})`" :value="group.value" />
+        </el-select>
+        <el-select
+          v-if="sidebarSearchType === 'single'"
+          v-model="sidebarSourceId"
+          size="small"
+          class="setting-select"
+          filterable
+          placeholder="选择书源"
+          @change="saveSearchSetting"
+        >
+          <el-option v-for="source in sidebarEnabledSources" :key="source.id" :label="source.name" :value="source.id" />
+        </el-select>
+        <el-select v-model="sidebarConcurrent" size="small" class="setting-select" @change="saveSearchSetting">
+          <el-option v-for="count in concurrentOptions" :key="count" :label="`${count}并发线程`" :value="count" />
+        </el-select>
+      </section>
+
       <section class="sidebar-recent">
         <p class="app-nav-title">最近阅读</p>
         <button
@@ -103,11 +136,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowUp,
   Box,
   Compass,
   Connection,
+  Delete,
   Edit,
   Files,
   FolderOpened,
@@ -125,7 +160,9 @@ import { useOverlayStore } from '../stores/overlay'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 import { useSync } from '../composables/useSync'
-import { compareRecentBook } from '../utils/bookOrder'
+import { clearCache, getCacheStats } from '../api/cache'
+import { listSources } from '../api/sources'
+import { compareRecentBook, newestBookProgress } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
 const router = useRouter()
@@ -137,19 +174,21 @@ const reader = useReaderStore()
 const quickSearch = ref('')
 const offline = ref(false)
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(false)
+const coarsePointer = ref(isCoarsePointer())
 const touchDevice = ref(false)
 const mobileNavigationVisible = ref(false)
 const touchStart = ref(null)
 const touchMoveX = ref(0)
-const MOBILE_NAV_WIDTH = 260
+const cacheStats = ref({})
+const cacheLoading = ref(false)
+const cacheClearing = ref(false)
 const MOBILE_NAV_EDGE = 48
 const MOBILE_NAV_TRIGGER = 72
 const { connected: syncConnected, connect, disconnect } = useSync()
 
 const navSections = computed(() => [
   {
-    title: '搜索设置',
+    title: '搜索入口',
     items: [
       { key: 'search', label: '书源搜索', icon: Search, route: 'search' },
       { key: 'localSearch', label: '本地书籍', icon: FolderOpened, route: 'search', query: { mode: 'local' } },
@@ -159,7 +198,7 @@ const navSections = computed(() => [
   {
     title: '后端设定',
     items: [
-      { key: 'backendStatus', label: syncConnected.value ? '同步在线' : '同步未连', icon: Connection, action: refreshShelfData },
+      { key: 'backendStatus', label: syncConnected.value ? '同步在线' : '同步未连接', icon: Connection, action: refreshShelfData },
     ],
   },
   {
@@ -177,7 +216,7 @@ const navSections = computed(() => [
       { key: 'bookManage', label: '书籍管理', icon: Files, action: () => overlay.openBookManage() },
       { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
       { key: 'importBook', label: '导入书籍', icon: Upload, action: () => overlay.openImportBook() },
-      { key: 'localStore', label: '浏览书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
+      { key: 'localStore', label: '浏览书仓', icon: FolderOpened, action: () => overlay.openLocalStore() },
       { key: 'refreshShelf', label: '刷新书架', icon: Refresh, action: refreshShelfData },
       { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules() },
     ],
@@ -197,6 +236,13 @@ const navSections = computed(() => [
     ],
   },
   {
+    title: '本地缓存',
+    items: [
+      { key: 'cacheStats', label: cacheStatsLabel.value, icon: Files, action: loadCacheStats },
+      { key: 'clearCache', label: cacheClearing.value ? '清理中' : '清空章节缓存', icon: Delete, action: clearSystemCache },
+    ],
+  },
+  {
     title: 'RSS',
     items: [
       { key: 'rss', label: 'RSS', icon: Connection, action: () => overlay.openRSS() },
@@ -205,16 +251,44 @@ const navSections = computed(() => [
 ])
 
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
+const concurrentOptions = [8, 16, 32, 60]
+const initialSidebarSearchSetting = readSidebarSearchSetting()
+const sidebarSources = ref([])
+const sidebarSearchType = ref(initialSidebarSearchSetting.searchType)
+const sidebarSearchGroup = ref(initialSidebarSearchSetting.group)
+const sidebarSourceId = ref(initialSidebarSearchSetting.sourceId)
+const sidebarConcurrent = ref(initialSidebarSearchSetting.concurrent)
+const sidebarEnabledSources = computed(() => sidebarSources.value.filter(source => source.enabled))
+const sidebarSourceGroups = computed(() => {
+  const groups = new Map()
+  for (const source of sidebarEnabledSources.value) {
+    const name = source.group || '默认分组'
+    groups.set(name, (groups.get(name) || 0) + 1)
+  }
+  return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
+})
+const cacheStatsLabel = computed(() => {
+  if (cacheLoading.value) return '缓存读取中'
+  const size = formatSize(cacheStats.value?.size || 0)
+  const chapters = Number(cacheStats.value?.cachedChapters || 0)
+  return `章节缓存 ${size}${chapters ? ` / ${chapters}章` : ''}`
+})
 const isMobileShell = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
+const mobileNavigationWidth = computed(() => {
+  const viewport = Math.max(320, windowWidth.value || 0)
+  return Math.round(Math.min(300, Math.max(252, viewport * 0.72)))
+})
 const mobileNavigationStyle = computed(() => {
-  if (!isMobileShell.value || !touchMoveX.value) return {}
-  if (!mobileNavigationVisible.value && touchMoveX.value > 0 && touchMoveX.value <= MOBILE_NAV_WIDTH) {
-    return { transform: `translateX(${touchMoveX.value - MOBILE_NAV_WIDTH}px)` }
+  const width = mobileNavigationWidth.value
+  const base = { '--mobile-nav-width': `${width}px` }
+  if (!isMobileShell.value || !touchMoveX.value) return base
+  if (!mobileNavigationVisible.value && touchMoveX.value > 0 && touchMoveX.value <= width) {
+    return { ...base, transform: `translateX(${touchMoveX.value - width}px)` }
   }
-  if (mobileNavigationVisible.value && touchMoveX.value < 0 && touchMoveX.value >= -MOBILE_NAV_WIDTH) {
-    return { transform: `translateX(${touchMoveX.value}px)` }
+  if (mobileNavigationVisible.value && touchMoveX.value < 0 && touchMoveX.value >= -width) {
+    return { ...base, transform: `translateX(${touchMoveX.value}px)` }
   }
-  return {}
+  return base
 })
 const recentBook = computed(() => {
   const rows = [...(Array.isArray(bookshelf.books) ? bookshelf.books : [])]
@@ -237,7 +311,10 @@ function runNavAction(item) {
     return
   }
   if (item.route) {
-    router.push({ name: item.route, query: item.query || (item.panel ? { panel: item.panel } : {}) })
+    const query = item.key === 'search'
+      ? searchRouteQuery()
+      : (item.query || (item.panel ? { panel: item.panel } : {}))
+    router.push({ name: item.route, query })
     if (isMobileShell.value) mobileNavigationVisible.value = false
   }
 }
@@ -254,15 +331,102 @@ function isNavActive(item) {
 
 function goSearch() {
   const keyword = quickSearch.value.trim()
-  if (!keyword) return
-  router.push({ name: 'home', query: { shelfQ: keyword } })
+  const query = searchRouteQuery(keyword)
+  if (!keyword) {
+    router.push({ name: 'search', query })
+    return
+  }
+  router.push({ name: 'search', query })
+}
+
+function searchRouteQuery(keyword = '') {
+  const query = {}
+  if (keyword) query.q = keyword
+  query.searchType = sidebarSearchType.value
+  query.concurrent = sidebarConcurrent.value
+  if (sidebarSearchType.value === 'group' && sidebarSearchGroup.value) query.group = sidebarSearchGroup.value
+  if (sidebarSearchType.value === 'single' && sidebarSourceId.value) query.sourceId = sidebarSourceId.value
+  return query
 }
 
 function clearShelfSearch() {
-  if (route.name === 'home' && route.query.shelfQ !== undefined) {
-    const { shelfQ, ...query } = route.query
-    router.replace({ name: 'home', query })
+  if (route.name === 'search' && route.query.q !== undefined) {
+    const { q, ...query } = route.query
+    router.replace({ name: 'search', query })
   }
+}
+
+function saveSearchSetting() {
+  try {
+    localStorage.setItem('openreader_sidebar_search', JSON.stringify({
+      searchType: sidebarSearchType.value,
+      group: sidebarSearchGroup.value,
+      sourceId: sidebarSourceId.value,
+      concurrent: sidebarConcurrent.value,
+    }))
+  } catch {
+    // Ignore restricted storage; search still works for the current session.
+  }
+}
+
+function readSidebarSearchSetting() {
+  try {
+    const data = JSON.parse(localStorage.getItem('openreader_sidebar_search') || '{}')
+    return {
+      searchType: ['all', 'group', 'single'].includes(data.searchType) ? data.searchType : 'all',
+      group: data.group || '',
+      sourceId: data.sourceId || '',
+      concurrent: concurrentOptions.includes(Number(data.concurrent)) ? Number(data.concurrent) : 60,
+    }
+  } catch {
+    return { searchType: 'all', group: '', sourceId: '', concurrent: 60 }
+  }
+}
+
+async function loadSidebarSources() {
+  try {
+    const { data } = await listSources()
+    sidebarSources.value = Array.isArray(data) ? data : []
+    if (!sidebarSearchGroup.value && sidebarSourceGroups.value.length) sidebarSearchGroup.value = sidebarSourceGroups.value[0].value
+    if (!sidebarSourceId.value && sidebarEnabledSources.value.length) sidebarSourceId.value = sidebarEnabledSources.value[0].id
+  } catch {
+    sidebarSources.value = []
+  }
+}
+
+async function loadCacheStats() {
+  cacheLoading.value = true
+  try {
+    const { data } = await getCacheStats()
+    cacheStats.value = data || {}
+  } catch {
+    cacheStats.value = {}
+  } finally {
+    cacheLoading.value = false
+  }
+}
+
+async function clearSystemCache() {
+  try {
+    await ElMessageBox.confirm('确定清理全部章节缓存吗？清理后阅读时会重新加载章节内容。', '清理缓存', { type: 'warning' })
+    cacheClearing.value = true
+    const { data } = await clearCache()
+    ElMessage.success(`已清理 ${data.clearedFiles || 0} 个文件，释放 ${formatSize(data.clearedSize || 0)}`)
+    await loadCacheStats()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '清理缓存失败'))
+  } finally {
+    cacheClearing.value = false
+  }
+}
+
+function formatSize(bytes) {
+  const value = Number(bytes || 0)
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 function openRecentBook() {
@@ -271,15 +435,18 @@ function openRecentBook() {
 }
 
 function recentSubTitle(book) {
-  const progress = reader.progressByBook[book.id] || book.progress
+  const progress = progressForBook(book)
   if (progress?.chapterTitle) return progress.chapterTitle
   if (Number.isInteger(progress?.chapterIndex)) return `第 ${progress.chapterIndex + 1} 章`
   return book.lastChapter || book.author || '继续阅读'
 }
 
 function readerRouteQuery(book) {
-  const progress = reader.progressByBook[book?.id] || book?.progress
-  return readerRouteQueryFromBook(book, progress)
+  return readerRouteQueryFromBook(book, progressForBook(book))
+}
+
+function progressForBook(book) {
+  return newestBookProgress(book, reader.progressByBook)
 }
 
 function handleLogout() {
@@ -288,7 +455,7 @@ function handleLogout() {
 }
 
 async function refreshShelfData() {
-  await Promise.all([bookshelf.loadCategories({ force: true }), bookshelf.loadBooks({ force: true })]).catch(() => {})
+  await Promise.all([bookshelf.loadCategories({ force: true }), bookshelf.loadBooks({ force: true, all: true })]).catch(() => {})
   router.push({ name: 'home' })
 }
 
@@ -302,8 +469,14 @@ function setOnline() {
 
 function updateViewportFlags() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  coarsePointer.value = isCoarsePointer()
   touchDevice.value = Number(navigator.maxTouchPoints || 0) > 0
+}
+
+function isCoarsePointer() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
+    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 function isMobileUA() {
@@ -335,7 +508,8 @@ function handleTouchMove(event) {
     touchMoveX.value = 0
     return
   }
-  if ((!mobileNavigationVisible.value && moveX > 0 && moveX <= MOBILE_NAV_WIDTH) || (mobileNavigationVisible.value && moveX < 0 && moveX >= -MOBILE_NAV_WIDTH)) {
+  const width = mobileNavigationWidth.value
+  if ((!mobileNavigationVisible.value && moveX > 0 && moveX <= width) || (mobileNavigationVisible.value && moveX < 0 && moveX >= -width)) {
     event.preventDefault()
     event.stopPropagation()
     touchMoveX.value = moveX
@@ -375,9 +549,13 @@ watch(
 )
 
 watch(
-  () => route.query.shelfQ,
-  (value) => {
-    if (route.name === 'home') quickSearch.value = typeof value === 'string' ? value : ''
+  () => [route.name, route.query.q],
+  ([name, value]) => {
+    if (name === 'search') {
+      quickSearch.value = typeof value === 'string' ? value : ''
+    } else if (name !== 'home') {
+      quickSearch.value = ''
+    }
   },
   { immediate: true },
 )
@@ -394,8 +572,10 @@ onMounted(() => {
     userStore.loadMe().catch(() => {})
   }
   if (userStore.token && !bookshelf.books.length) {
-    Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks()]).catch(() => {})
+    Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })]).catch(() => {})
   }
+  if (userStore.token) loadSidebarSources()
+  if (userStore.token) loadCacheStats()
 })
 
 onBeforeUnmount(() => {
@@ -438,63 +618,90 @@ onBeforeUnmount(() => {
   display: flex;
   width: var(--app-sidebar-width);
   flex-direction: column;
-  padding: 18px 14px;
+  padding: 20px 28px 24px;
   color: #24201b;
-  background: #f7f4ea;
-  border-right: 1px solid #e4d9c8;
+  background: #f7f7f7;
+  border-right: 1px solid #eee;
 }
 
 .app-brand {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 8px 18px;
+  padding: 0 0 18px;
   cursor: pointer;
 }
 
 .app-brand-mark {
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: 0;
+  height: 0;
   place-items: center;
-  flex: 0 0 38px;
-  color: #f7f4ea;
-  background: #24201b;
-  border-radius: var(--app-radius-md);
+  flex: 0 0 0;
+  overflow: hidden;
+  color: transparent;
+  background: transparent;
+  border-radius: 0;
   font-weight: 800;
 }
 
 .app-brand-title {
-  font-size: 17px;
+  color: #26394a;
+  font-size: 24px;
   font-weight: 800;
   line-height: 1.2;
 }
 
 .app-brand-subtitle {
-  margin-top: 3px;
-  color: #918575;
-  font-size: 12px;
+  margin-top: 18px;
+  color: #b5b5b5;
+  font-size: 16px;
 }
 
 .app-shell-search {
-  margin: 0 4px 18px;
+  margin: 0 0 28px;
+}
+
+.app-shell-search :deep(.el-input__wrapper) {
+  min-height: 28px;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px #e6e6e6 inset;
+}
+
+.app-search-setting {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 28px;
+}
+
+.setting-select {
+  width: 100%;
+}
+
+.setting-select :deep(.el-select__wrapper) {
+  min-height: 28px;
+  background: #fffdf8;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px #e6e6e6 inset;
 }
 
 .sidebar-recent {
   display: grid;
   gap: 8px;
-  margin: 0 4px 18px;
+  margin: 0 0 28px;
 }
 
 .sidebar-recent-book {
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding: 9px 10px;
-  color: #24201b;
-  background: #fffdf8;
-  border: 1px solid #e4d9c8;
-  border-radius: 6px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 9px 12px;
+  color: #d39d3d;
+  background: #fffaf0;
+  border: 1px solid #fde6bd;
+  border-radius: 4px;
   cursor: pointer;
   text-align: left;
 }
@@ -506,9 +713,10 @@ onBeforeUnmount(() => {
 
 .sidebar-recent-book span,
 .sidebar-recent-book small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .sidebar-recent-book span {
@@ -523,48 +731,61 @@ onBeforeUnmount(() => {
 
 .app-nav {
   display: grid;
-  gap: 14px;
+  gap: 28px;
   overflow-y: auto;
-  padding: 0 4px 14px;
+  padding: 0 0 18px;
   scrollbar-width: thin;
 }
 
 .app-nav-section {
   display: grid;
-  gap: 4px;
+  grid-template-columns: repeat(2, minmax(78px, 1fr));
+  gap: 10px 12px;
 }
 
 .app-nav-title {
-  margin: 0 8px 4px;
-  color: #a09282;
-  font-size: 12px;
-  font-weight: 800;
+  grid-column: 1 / -1;
+  margin: 0 0 6px;
+  color: #b5b5b5;
+  font-size: 16px;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .app-nav-item {
   display: flex;
   width: 100%;
-  height: 42px;
+  max-width: 100%;
+  min-height: 36px;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  color: #766a5c;
-  background: transparent;
-  border: 0;
-  border-radius: var(--app-radius-sm);
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  color: #9aa1aa;
+  background: #fafafa;
+  border: 1px solid #e6e9ef;
+  border-radius: 4px;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
 }
 
 .app-nav-item:hover {
-  color: #1f5654;
-  background: #fffdf8;
+  color: #1f6feb;
+  background: #fff;
 }
 
 .app-nav-item.active {
-  color: #1f5654;
-  background: #d9ece7;
+  color: #1f6feb;
+  background: #eef6ff;
+  border-color: #bfdbfe;
+}
+
+.app-nav-item span {
+  min-width: 0;
+  overflow: visible;
+  font-size: 12px;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .app-sidebar-footer {
@@ -579,7 +800,7 @@ onBeforeUnmount(() => {
   gap: 7px;
   padding: 7px 9px;
   color: #766a5c;
-  background: #fffdf8;
+  background: #fafafa;
   border-radius: 999px;
   font-size: 12px;
 }
@@ -606,8 +827,8 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 9px;
   color: #24201b;
-  background: #fffdf8;
-  border: 1px solid #e4d9c8;
+  background: #fafafa;
+  border: 1px solid #e6e9ef;
   border-radius: var(--app-radius-md);
   cursor: pointer;
 }
@@ -658,13 +879,13 @@ onBeforeUnmount(() => {
 .app-shell.mobile-shell .app-sidebar {
   position: fixed;
   inset: 0 auto 0 0;
-  width: 260px;
+  width: var(--mobile-nav-width, 72vw);
   height: 100vh;
   height: 100dvh;
   overflow-y: auto;
-  padding: max(20px, env(safe-area-inset-top)) 36px 66px;
+  padding: max(20px, env(safe-area-inset-top)) 20px 66px;
   scrollbar-width: none;
-  transform: translateX(-260px);
+  transform: translateX(calc(-1 * var(--mobile-nav-width, 72vw)));
   transition: transform 0.3s;
   will-change: transform;
 }
@@ -697,15 +918,17 @@ onBeforeUnmount(() => {
   margin: 0 0 18px;
 }
 
+.app-shell.mobile-shell .app-search-setting {
+  margin: 0 0 22px;
+  gap: 10px;
+}
+
 .app-shell.mobile-shell .app-sidebar-footer {
   display: none;
 }
 
 .app-shell.mobile-shell .app-brand-mark {
-  width: 38px;
-  height: 38px;
-  flex-basis: 38px;
-  border-radius: 4px;
+  display: none;
 }
 
 .app-shell.mobile-shell .app-nav {
@@ -715,7 +938,8 @@ onBeforeUnmount(() => {
 }
 
 .app-shell.mobile-shell .app-nav-section {
-  gap: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
 }
 
 .app-shell.mobile-shell .app-nav-title {
@@ -732,20 +956,25 @@ onBeforeUnmount(() => {
   display: flex;
   width: 100%;
   min-width: 0;
-  height: 38px;
+  min-height: 38px;
+  height: auto;
   align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
+  justify-content: center;
+  gap: 5px;
   margin: 0;
-  padding: 0 8px;
+  padding: 8px 8px;
   background: #fffdf8;
   border: 1px solid #e4d9c8;
   border-radius: 4px;
 }
 
 .app-shell.mobile-shell .app-nav-item span {
-  font-size: 14px;
-  line-height: 1.2;
+  overflow: visible;
+  font-size: 13px;
+  line-height: 1.25;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: keep-all;
 }
 
 .app-shell.mobile-shell .sidebar-recent {
@@ -768,7 +997,7 @@ onBeforeUnmount(() => {
   display: block;
   font-size: 13px;
   line-height: 1.25;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .app-shell.mobile-shell.mobile-nav-open .app-sidebar {

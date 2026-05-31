@@ -1,10 +1,12 @@
 <template>
-  <section class="app-page store-page">
+  <section class="app-page store-page" :class="{ 'embedded-store': embedded }">
     <header class="store-head">
-      <div>
-        <p class="eyebrow">Local Store</p>
+      <div v-if="!embedded">
         <h1 class="app-page-title">本地书仓</h1>
-        <p class="app-page-subtitle">扫描服务端 localStore 目录，批量导入 TXT / EPUB / PDF / UMD 等本地文件。</p>
+      </div>
+      <div v-else class="embedded-store-title">
+        <strong>文件管理</strong>
+        <span>{{ currentPath || 'localStore' }}</span>
       </div>
       <div class="head-actions">
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
@@ -23,13 +25,6 @@
         </el-button>
       </div>
     </header>
-
-    <section class="store-summary">
-      <article class="app-panel stat"><span>项目</span><strong>{{ items.length }}</strong></article>
-      <article class="app-panel stat"><span>可导入</span><strong>{{ importableCount }}</strong></article>
-      <article class="app-panel stat"><span>已选</span><strong>{{ checkedRows.length }}</strong></article>
-      <article class="app-panel stat"><span>总大小</span><strong>{{ formatSize(totalSize) }}</strong></article>
-    </section>
 
     <section class="store-toolbar app-panel">
       <el-breadcrumb separator="/" class="store-breadcrumb">
@@ -144,6 +139,13 @@ import { Document, FolderOpened, Refresh, Search, Upload } from '@element-plus/i
 import { createLocalStoreDirectory, deleteFromLocalStore, downloadFromLocalStore, importFromLocalStore, listLocalStore, renameLocalStoreItem, uploadToLocalStore } from '../api/localStore'
 import { useBookshelfStore } from '../stores/bookshelf'
 
+defineProps({
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
+})
+
 const bookshelf = useBookshelfStore()
 const items = ref([])
 const checkedRows = ref([])
@@ -158,9 +160,8 @@ const uploading = ref(false)
 const resultDialog = ref(false)
 const importResults = ref([])
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
+const coarsePointer = ref(isCoarsePointer())
 
-const totalSize = computed(() => items.value.filter(item => !item.isDir).reduce((sum, item) => sum + (item.size || 0), 0))
 const extensions = computed(() => [...new Set(items.value.filter(item => item.importable).map(item => item.extension).filter(Boolean))].sort())
 const importableCount = computed(() => items.value.filter(item => item.importable).length)
 const breadcrumbs = computed(() => {
@@ -178,7 +179,7 @@ const shownItems = computed(() => {
   })
 })
 const shownImportablePaths = computed(() => shownItems.value.filter(item => item.importable).map(item => item.path))
-const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
+const isMobileDialog = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
@@ -189,7 +190,13 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
 
 function handleResize() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  coarsePointer.value = isCoarsePointer()
+}
+
+function isCoarsePointer() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
+    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 async function load() {
@@ -413,6 +420,14 @@ function readError(err, fallback) {
   gap: 16px;
 }
 
+.store-page.embedded-store {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+
 .store-head,
 .head-actions,
 .store-toolbar {
@@ -425,39 +440,32 @@ function readError(err, fallback) {
   justify-content: space-between;
 }
 
+.embedded-store-title {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.embedded-store-title strong {
+  color: var(--app-text);
+  font-size: 16px;
+}
+
+.embedded-store-title span {
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .head-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.store-summary {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.stat {
-  display: grid;
-  gap: 6px;
-  padding: 16px;
-}
-
-.stat span,
 .result-row small {
   color: var(--app-text-muted);
-}
-
-.stat strong {
-  font-size: 24px;
 }
 
 .store-toolbar {
@@ -589,7 +597,7 @@ function readError(err, fallback) {
   grid-column: 2;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
   .store-head,
   .store-toolbar {
     display: grid;
@@ -601,10 +609,6 @@ function readError(err, fallback) {
   .store-toolbar :deep(.el-select),
   .store-toolbar :deep(.el-button) {
     width: 100%;
-  }
-
-  .store-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .desktop-store-table {

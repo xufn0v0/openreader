@@ -2,9 +2,7 @@
   <section class="app-page sources-page">
     <header class="sources-head">
       <div>
-        <p class="eyebrow">Sources</p>
         <h1 class="app-page-title">书源管理</h1>
-        <p class="app-page-subtitle">管理书源、分组筛选、导入导出，并调试搜索、目录和正文规则。</p>
       </div>
       <div class="head-actions">
         <el-button type="primary" :icon="Plus" @click="openEditor()">新增</el-button>
@@ -16,13 +14,6 @@
         <el-button type="danger" plain :disabled="!sources.length" @click="clearAllSources">清空</el-button>
       </div>
     </header>
-
-    <section class="source-summary">
-      <article class="app-panel stat"><span>全部</span><strong>{{ sources.length }}</strong></article>
-      <article class="app-panel stat"><span>启用</span><strong>{{ enabledCount }}</strong></article>
-      <article class="app-panel stat"><span>分组</span><strong>{{ groups.length }}</strong></article>
-      <article class="app-panel stat"><span>本次显示</span><strong>{{ shownSources.length }}</strong></article>
-    </section>
 
     <section class="source-toolbar app-panel">
       <el-input v-model="keyword" placeholder="搜索书源名称、地址或分组" clearable>
@@ -297,9 +288,8 @@ const debugResult = ref(null)
 const testing = ref(false)
 const handledRouteAction = ref('')
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(typeof window === 'undefined' ? false : window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false)
+const coarsePointer = ref(isCoarsePointer())
 
-const enabledCount = computed(() => sources.value.filter(source => source.enabled).length)
 const groups = computed(() => [...new Set(sources.value.map(source => source.group || '默认分组'))].sort())
 const healthSummary = computed(() => {
   const rows = Object.values(health.value)
@@ -328,7 +318,7 @@ const shownSources = computed(() => {
 const debugResultText = computed(() => debugResult.value ? JSON.stringify(debugResult.value, null, 2) : '')
 const debugSearchRows = computed(() => Array.isArray(debugResult.value?.results) ? debugResult.value.results : [])
 const debugChapterRows = computed(() => Array.isArray(debugResult.value?.chapters) ? debugResult.value.chapters : [])
-const isMobileDialog = computed(() => windowWidth.value <= 860 || coarsePointer.value)
+const isMobileDialog = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
 const drawerDirection = computed(() => isMobileDialog.value ? 'btt' : 'rtl')
 const editorDrawerSize = computed(() => isMobileDialog.value ? '88%' : '520px')
 
@@ -367,7 +357,13 @@ function applyRouteAction() {
 
 function handleResize() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches || false
+  coarsePointer.value = isCoarsePointer()
+}
+
+function isCoarsePointer() {
+  if (typeof window === 'undefined' || !window.matchMedia) return false
+  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
+    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 async function toggleSource(source, enabled) {
@@ -734,35 +730,9 @@ function readError(err, fallback) {
   justify-content: flex-end;
 }
 
-.eyebrow {
-  margin: 0 0 4px;
-  color: var(--app-primary);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.source-summary {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.stat {
-  display: grid;
-  gap: 6px;
-  padding: 16px;
-}
-
-.stat span,
 .muted,
 .debug-title span {
   color: var(--app-text-muted);
-}
-
-.stat strong {
-  font-size: 26px;
 }
 
 .source-toolbar {
@@ -918,7 +888,7 @@ function readError(err, fallback) {
   align-items: center;
 }
 
-@media (max-width: 860px), (hover: none) and (pointer: coarse) {
+@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
   .sources-head,
   .debug-row,
   .source-toolbar,
@@ -941,10 +911,6 @@ function readError(err, fallback) {
 
   .debug-next-actions {
     display: grid;
-  }
-
-  .source-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .desktop-source-table {

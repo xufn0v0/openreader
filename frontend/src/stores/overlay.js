@@ -13,6 +13,7 @@ export const useOverlayStore = defineStore('overlay', {
     bookmarkBook: null,
     searchBookContentVisible: false,
     searchBook: null,
+    localStoreVisible: false,
     rssVisible: false,
     webdavVisible: false,
     userManageVisible: false,
@@ -59,8 +60,8 @@ export const useOverlayStore = defineStore('overlay', {
     openUserManage() {
       this.userManageVisible = true
     },
-    openLocalStore(router) {
-      router?.push?.({ name: 'local-store' })
+    openLocalStore() {
+      this.localStoreVisible = true
     },
     openWebDAV() {
       this.webdavVisible = true

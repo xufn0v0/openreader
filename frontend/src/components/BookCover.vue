@@ -1,5 +1,5 @@
 <template>
-  <span class="book-cover-shared" :class="`size-${size}`" :style="coverStyle">{{ initial }}</span>
+  <span class="book-cover-shared" :class="[`size-${size}`, { 'has-cover': hasCover }]" :style="coverStyle">{{ coverText }}</span>
 </template>
 
 <script setup>
@@ -16,10 +16,11 @@ const props = defineProps({
   },
 })
 
-const initial = computed(() => (props.book?.title || props.book?.name || '?').slice(0, 1))
+const hasCover = computed(() => Boolean(props.book?.coverUrl))
+const coverText = computed(() => (hasCover.value ? '' : '暂无封面'))
 
 const coverStyle = computed(() => {
-  if (props.book?.coverUrl) {
+  if (hasCover.value) {
     return {
       backgroundImage: `url(${props.book.coverUrl})`,
       backgroundPosition: 'center',
@@ -27,15 +28,7 @@ const coverStyle = computed(() => {
       color: 'transparent',
     }
   }
-  const palettes = [
-    ['#2f6f6d', '#d9ece7'],
-    ['#9c5b34', '#f2decf'],
-    ['#5a4f8f', '#dedaf1'],
-    ['#406c3d', '#dfead9'],
-  ]
-  const seed = Number(props.book?.id || props.book?.sourceId || props.book?.title?.length || 1)
-  const [color, background] = palettes[seed % palettes.length]
-  return { color, background }
+  return {}
 })
 </script>
 
@@ -47,15 +40,27 @@ const coverStyle = computed(() => {
   place-items: center;
   flex: 0 0 auto;
   border-radius: 5px;
+  color: #8f866f;
+  background:
+    radial-gradient(circle at 76% 18%, rgba(203, 186, 132, 0.22), transparent 24%),
+    linear-gradient(135deg, #fbfaf4 0%, #f4f0df 100%);
+  border: 1px solid rgba(190, 178, 142, 0.32);
   box-shadow: 0 10px 24px rgba(58, 41, 10, 0.12);
-  font-size: 30px;
-  font-weight: 900;
-  line-height: 1;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  writing-mode: vertical-rl;
+}
+
+.book-cover-shared.has-cover {
+  border-color: transparent;
+  writing-mode: initial;
 }
 
 .book-cover-shared.size-small {
   width: 44px;
   height: 58px;
-  font-size: 20px;
+  font-size: 13px;
 }
 </style>
