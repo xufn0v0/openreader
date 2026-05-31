@@ -123,20 +123,6 @@
 
     <footer class="reader-page-control">
       <div class="progress-box">{{ bookProgressLabel }}</div>
-      <label class="desktop-progress-control" title="拖动定位当前章节进度">
-        <input
-          class="desktop-progress-slider"
-          type="range"
-          min="0"
-          max="1000"
-          step="1"
-          :value="desktopChapterSliderValue"
-          :aria-label="`当前章节进度 ${desktopChapterProgressLabel}`"
-          @input="handleDesktopProgressInput"
-          @change="handleDesktopProgressChange"
-        />
-        <span>{{ desktopChapterProgressLabel }}</span>
-      </label>
       <button class="page-step chapter-step" type="button" title="上一章" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
         <el-icon :size="24"><ArrowLeft /></el-icon>
       </button>
@@ -144,6 +130,21 @@
         <el-icon :size="24"><ArrowRight /></el-icon>
       </button>
     </footer>
+
+    <label class="desktop-progress-control" title="拖动定位当前章节进度">
+      <input
+        class="desktop-progress-slider"
+        type="range"
+        min="0"
+        max="1000"
+        step="1"
+        :value="desktopChapterSliderValue"
+        :aria-label="`当前章节进度 ${desktopChapterProgressLabel}`"
+        @input="handleDesktopProgressInput"
+        @change="handleDesktopProgressChange"
+      />
+      <span>{{ desktopChapterProgressLabel }}</span>
+    </label>
 
     <footer class="reader-mobile-bottom">
       <div class="reader-mobile-progress-panel">
@@ -831,6 +832,7 @@ async function loadChapter(index, offset = 0, options = {}) {
     await nextTick()
     updateFlipLayout()
     await restoreReadingPosition(offset, options)
+    progressVersion.value += 1
     preloadNearbyChapters(currentIndex.value)
     if (options.saveAfterLoad) {
       await saveCurrentProgress({ force: true })
@@ -2833,8 +2835,14 @@ function readError(err, fallback) {
 }
 
 .desktop-progress-control {
+  position: fixed;
+  right: auto;
+  left: calc(50vw + var(--reader-frame-width) / 2 + 100px);
+  bottom: 0;
+  z-index: 4;
   display: grid;
-  min-height: 158px;
+  width: 42px;
+  min-height: 154px;
   place-items: center;
   gap: 7px;
   padding: 9px 0;
@@ -2854,7 +2862,7 @@ function readError(err, fallback) {
   margin: 52px -42px;
   accent-color: #2f6f6d;
   cursor: pointer;
-  transform: rotate(-90deg);
+  transform: rotate(90deg);
 }
 
 .page-step {
@@ -3080,6 +3088,7 @@ function readError(err, fallback) {
   .reader-left-rail,
   .reader-right-rail,
   .reader-page-control,
+  .desktop-progress-control,
   .reader-tap-zones {
     display: none;
   }
