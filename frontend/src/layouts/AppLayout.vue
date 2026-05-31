@@ -136,11 +136,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowUp,
   Box,
   Compass,
   Connection,
+  Delete,
   Edit,
   Files,
   FolderOpened,
@@ -158,6 +160,7 @@ import { useOverlayStore } from '../stores/overlay'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 import { useSync } from '../composables/useSync'
+import { clearCache, getCacheStats } from '../api/cache'
 import { listSources } from '../api/sources'
 import { compareRecentBook } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
@@ -176,6 +179,9 @@ const touchDevice = ref(false)
 const mobileNavigationVisible = ref(false)
 const touchStart = ref(null)
 const touchMoveX = ref(0)
+const cacheStats = ref({})
+const cacheLoading = ref(false)
+const cacheClearing = ref(false)
 const MOBILE_NAV_EDGE = 48
 const MOBILE_NAV_TRIGGER = 72
 const { connected: syncConnected, connect, disconnect } = useSync()
@@ -192,7 +198,7 @@ const navSections = computed(() => [
   {
     title: '后端设定',
     items: [
-      { key: 'backendStatus', label: syncConnected.value ? '同步在线' : '同步未连', icon: Connection, action: refreshShelfData },
+      { key: 'backendStatus', label: syncConnected.value ? '同步在线' : '同步未连接', icon: Connection, action: refreshShelfData },
     ],
   },
   {
@@ -210,7 +216,7 @@ const navSections = computed(() => [
       { key: 'bookManage', label: '书籍管理', icon: Files, action: () => overlay.openBookManage() },
       { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
       { key: 'importBook', label: '导入书籍', icon: Upload, action: () => overlay.openImportBook() },
-      { key: 'localStore', label: '浏览书仓', icon: FolderOpened, action: () => overlay.openLocalStore(router), route: 'local-store' },
+      { key: 'localStore', label: '浏览书仓', icon: FolderOpened, action: () => overlay.openLocalStore() },
       { key: 'refreshShelf', label: '刷新书架', icon: Refresh, action: refreshShelfData },
       { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules() },
     ],
@@ -227,6 +233,13 @@ const navSections = computed(() => [
     items: [
       { key: 'webdav', label: '文件管理', icon: Upload, action: () => overlay.openWebDAV() },
       { key: 'backup', label: '保存备份', icon: Refresh, action: () => overlay.openBackup() },
+    ],
+  },
+  {
+    title: '本地缓存',
+    items: [
+      { key: 'cacheStats', label: cacheStatsLabel.value, icon: Files, action: loadCacheStats },
+      { key: 'clearCache', label: cacheClearing.value ? '清理中' : '清空章节缓存', icon: Delete, action: clearSystemCache },
     ],
   },
   {
@@ -253,6 +266,12 @@ const sidebarSourceGroups = computed(() => {
     groups.set(name, (groups.get(name) || 0) + 1)
   }
   return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
+})
+const cacheStatsLabel = computed(() => {
+  if (cacheLoading.value) return '缓存读取中'
+  const size = formatSize(cacheStats.value?.size || 0)
+  const chapters = Number(cacheStats.value?.cachedChapters || 0)
+  return `章节缓存 ${size}${chapters ? ` / ${chapters}章` : ''}`
 })
 const isMobileShell = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
 const mobileNavigationWidth = computed(() => {
@@ -373,6 +392,41 @@ async function loadSidebarSources() {
   } catch {
     sidebarSources.value = []
   }
+}
+
+async function loadCacheStats() {
+  cacheLoading.value = true
+  try {
+    const { data } = await getCacheStats()
+    cacheStats.value = data || {}
+  } catch {
+    cacheStats.value = {}
+  } finally {
+    cacheLoading.value = false
+  }
+}
+
+async function clearSystemCache() {
+  try {
+    await ElMessageBox.confirm('确定清理全部章节缓存吗？清理后阅读时会重新加载章节内容。', '清理缓存', { type: 'warning' })
+    cacheClearing.value = true
+    const { data } = await clearCache()
+    ElMessage.success(`已清理 ${data.clearedFiles || 0} 个文件，释放 ${formatSize(data.clearedSize || 0)}`)
+    await loadCacheStats()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '清理缓存失败'))
+  } finally {
+    cacheClearing.value = false
+  }
+}
+
+function formatSize(bytes) {
+  const value = Number(bytes || 0)
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 function openRecentBook() {
@@ -512,6 +566,7 @@ onMounted(() => {
     Promise.all([bookshelf.loadCategories(), bookshelf.loadBooks({ all: true })]).catch(() => {})
   }
   if (userStore.token) loadSidebarSources()
+  if (userStore.token) loadCacheStats()
 })
 
 onBeforeUnmount(() => {

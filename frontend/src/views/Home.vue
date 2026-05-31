@@ -130,6 +130,7 @@ const groupItems = computed(() => {
   }
   return [
     { id: '', name: '全部', count: books.length, builtin: true },
+    { id: 'local', name: '本地', count: books.filter(isLocalBook).length, builtin: true },
     { id: 'none', name: '未分组', count: countByCategory.get('none') || 0, builtin: true },
     ...categories.map(category => ({
       id: String(category.id),
@@ -149,6 +150,7 @@ const displayedBooks = computed(() => {
     const matchesKeyword = !value || shelfSearchText(book).includes(value)
     if (!matchesKeyword) return false
     if (!selectedGroup.value) return true
+    if (selectedGroup.value === 'local') return isLocalBook(book)
     if (selectedGroup.value === 'none') return !book.categoryId
     return String(book.categoryId) === selectedGroup.value
   })
@@ -287,6 +289,12 @@ function shelfSearchText(book) {
     book.url,
     categoryName(book.categoryId),
   ].filter(Boolean).join(' '))
+}
+
+function isLocalBook(book) {
+  if (!book) return false
+  if (Number(book.sourceId || 0) === 0) return true
+  return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
 }
 
 function normalizeShelfSearch(value) {

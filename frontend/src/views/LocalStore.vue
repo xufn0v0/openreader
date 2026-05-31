@@ -1,8 +1,12 @@
 <template>
-  <section class="app-page store-page">
+  <section class="app-page store-page" :class="{ 'embedded-store': embedded }">
     <header class="store-head">
-      <div>
+      <div v-if="!embedded">
         <h1 class="app-page-title">本地书仓</h1>
+      </div>
+      <div v-else class="embedded-store-title">
+        <strong>文件管理</strong>
+        <span>{{ currentPath || 'localStore' }}</span>
       </div>
       <div class="head-actions">
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
@@ -134,6 +138,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, FolderOpened, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { createLocalStoreDirectory, deleteFromLocalStore, downloadFromLocalStore, importFromLocalStore, listLocalStore, renameLocalStoreItem, uploadToLocalStore } from '../api/localStore'
 import { useBookshelfStore } from '../stores/bookshelf'
+
+defineProps({
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
+})
 
 const bookshelf = useBookshelfStore()
 const items = ref([])
@@ -403,6 +414,14 @@ function readError(err, fallback) {
   gap: 16px;
 }
 
+.store-page.embedded-store {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+}
+
 .store-head,
 .head-actions,
 .store-toolbar {
@@ -413,6 +432,25 @@ function readError(err, fallback) {
 
 .store-head {
   justify-content: space-between;
+}
+
+.embedded-store-title {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.embedded-store-title strong {
+  color: var(--app-text);
+  font-size: 16px;
+}
+
+.embedded-store-title span {
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .head-actions {

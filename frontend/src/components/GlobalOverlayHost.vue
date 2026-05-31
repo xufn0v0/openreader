@@ -317,6 +317,17 @@
   </el-dialog>
 
   <el-drawer
+    v-model="overlay.localStoreVisible"
+    title="本地书仓"
+    :direction="wideDrawerDirection"
+    :size="wideDrawerSize"
+    class="global-local-store-drawer"
+    destroy-on-close
+  >
+    <LocalStore embedded />
+  </el-drawer>
+
+  <el-drawer
     v-model="overlay.webdavVisible"
     title="WebDAV"
     :direction="wideDrawerDirection"
@@ -725,7 +736,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Document, Edit, FolderOpened, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
@@ -747,6 +758,8 @@ import BookInfoDialog from './BookInfoDialog.vue'
 import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
 import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
 import SourceSwitchPanel from './reader/SourceSwitchPanel.vue'
+
+const LocalStore = defineAsyncComponent(() => import('../views/LocalStore.vue'))
 
 const router = useRouter()
 const route = useRoute()
