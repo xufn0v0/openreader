@@ -495,6 +495,7 @@ func (s *Server) restoreBookshelfProgress(userID uint, bookID uint, chapterIndex
 		BookID:       bookID,
 		ChapterIndex: chapterIndex,
 		Offset:       offset,
+		ChapterTitle: chapterTitle,
 		Mode:         "scroll",
 		UpdatedAt:    time.Now(),
 	}
@@ -524,6 +525,8 @@ func (s *Server) restoreProgressFromZip(file *zip.File, userID uint) (int, error
 		ChapterIndex    int    `json:"chapterIndex"`
 		DurChapterPos   int    `json:"durChapterPos"`
 		Offset          int    `json:"offset"`
+		DurChapterTitle string `json:"durChapterTitle"`
+		ChapterTitle    string `json:"chapterTitle"`
 	}
 
 	var payloads []progressPayload
@@ -573,7 +576,11 @@ func (s *Server) restoreProgressFromZip(file *zip.File, userID uint) (int, error
 		if offset == 0 && payload.DurChapterPos > 0 {
 			offset = payload.DurChapterPos
 		}
-		if s.restoreBookshelfProgress(userID, book.ID, chapterIndex, offset, "") {
+		chapterTitle := strings.TrimSpace(payload.ChapterTitle)
+		if chapterTitle == "" {
+			chapterTitle = strings.TrimSpace(payload.DurChapterTitle)
+		}
+		if s.restoreBookshelfProgress(userID, book.ID, chapterIndex, offset, chapterTitle) {
 			count++
 		}
 	}

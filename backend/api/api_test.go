@@ -261,7 +261,7 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	if err := server.db.Create(&book).Error; err != nil {
 		t.Fatal(err)
 	}
-	progress := models.ReadingProgress{UserID: user.ID, BookID: book.ID, ChapterIndex: 3, Percent: 0.42}
+	progress := models.ReadingProgress{UserID: user.ID, BookID: book.ID, ChapterIndex: 3, Percent: 0.42, ChapterPercent: 0.73, ChapterTitle: "第三章"}
 	if err := server.db.Create(&progress).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -277,9 +277,11 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	var books []struct {
 		ID       uint `json:"id"`
 		Progress *struct {
-			BookID       uint    `json:"bookId"`
-			ChapterIndex int     `json:"chapterIndex"`
-			Percent      float64 `json:"percent"`
+			BookID         uint    `json:"bookId"`
+			ChapterIndex   int     `json:"chapterIndex"`
+			Percent        float64 `json:"percent"`
+			ChapterPercent float64 `json:"chapterPercent"`
+			ChapterTitle   string  `json:"chapterTitle"`
 		} `json:"progress"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &books); err != nil {
@@ -287,6 +289,60 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	}
 	if len(books) != 1 || books[0].Progress == nil || books[0].Progress.BookID != book.ID || books[0].Progress.ChapterIndex != 3 {
 		t.Fatalf("expected embedded progress, got %+v", books)
+	}
+	if books[0].Progress.ChapterPercent != 0.73 || books[0].Progress.ChapterTitle != "第三章" {
+		t.Fatalf("expected chapter progress embedded, got %+v", books[0].Progress)
+	}
+}
+
+func TestUpdateProgressPersistsChapterPosition(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "章节内进度"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	chapter := models.Chapter{BookID: book.ID, Index: 8, Title: "第九章"}
+	if err := server.db.Create(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body := fmt.Sprintf(`{"bookId":%d,"chapterId":%d,"chapterIndex":8,"offset":2048,"percent":0.021,"chapterPercent":0.638,"chapterTitle":"第九章","mode":"scroll"}`, book.ID, chapter.ID)
+	req := httptest.NewRequest(http.MethodPut, "/api/progress", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update progress: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var saved models.ReadingProgress
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Offset != 2048 || saved.ChapterPercent != 0.638 || saved.ChapterTitle != "第九章" {
+		t.Fatalf("unexpected saved progress: %+v", saved)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/progress/"+strconv.FormatUint(uint64(book.ID), 10), nil)
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get progress: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var loaded models.ReadingProgress
+	if err := json.Unmarshal(w.Body.Bytes(), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Offset != 2048 || loaded.ChapterPercent != 0.638 || loaded.ChapterTitle != "第九章" {
+		t.Fatalf("unexpected loaded progress: %+v", loaded)
 	}
 }
 

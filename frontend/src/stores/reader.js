@@ -138,6 +138,7 @@ export const useReaderStore = defineStore('reader', {
         chapterPercent: Number.isFinite(Number(data.chapterPercent))
           ? Number(data.chapterPercent)
           : optimistic.chapterPercent,
+        chapterTitle: data.chapterTitle || optimistic.chapterTitle,
       } : data
       this.applyProgress(merged)
       return merged

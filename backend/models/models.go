@@ -178,15 +178,17 @@ type Chapter struct {
 }
 
 type ReadingProgress struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
-	UserID       uint      `json:"userId" gorm:"not null;uniqueIndex:idx_user_book_progress"`
-	BookID       uint      `json:"bookId" gorm:"not null;uniqueIndex:idx_user_book_progress"`
-	ChapterID    uint      `json:"chapterId"`
-	ChapterIndex int       `json:"chapterIndex"`
-	Offset       int       `json:"offset"`
-	Percent      float64   `json:"percent"`
-	Mode         string    `json:"mode" gorm:"size:20"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID             uint      `json:"id" gorm:"primaryKey"`
+	UserID         uint      `json:"userId" gorm:"not null;uniqueIndex:idx_user_book_progress"`
+	BookID         uint      `json:"bookId" gorm:"not null;uniqueIndex:idx_user_book_progress"`
+	ChapterID      uint      `json:"chapterId"`
+	ChapterIndex   int       `json:"chapterIndex"`
+	Offset         int       `json:"offset"`
+	Percent        float64   `json:"percent"`
+	ChapterPercent float64   `json:"chapterPercent"`
+	ChapterTitle   string    `json:"chapterTitle" gorm:"size:240"`
+	Mode           string    `json:"mode" gorm:"size:20"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type Bookmark struct {

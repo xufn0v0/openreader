@@ -692,8 +692,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
 })
 
-onBeforeRouteLeave(() => {
-  saveCurrentProgress({ force: true, background: true })
+onBeforeRouteLeave(async () => {
+  await saveCurrentProgress({ force: true })
 })
 
 watch(bookId, async () => {
@@ -2213,6 +2213,7 @@ function progressSaveKey(payload) {
     payload.chapterIndex,
     payload.offset,
     Math.round(Number(payload.percent || 0) * 10000),
+    Math.round(Number(payload.chapterPercent || 0) * 10000),
     reader.mode,
   ].join(':')
 }
