@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1182,11 +1183,16 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	token := authHeader(t, router)
 
 	upstream := "https://source.test"
+	var searchMu sync.Mutex
+	searchQueries := make([]string, 0)
 	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			var body string
 			switch req.URL.Path {
 			case "/search":
+				searchMu.Lock()
+				searchQueries = append(searchQueries, req.URL.Query().Get("q"))
+				searchMu.Unlock()
 				body = `<html><body>
 					<div class="book">
 						<a class="link" href="/book-new"><span class="title">候选书</span></a>
@@ -1342,6 +1348,26 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	}
 	if len(pagedCandidates.List) == 0 {
 		t.Fatalf("expected paged candidates, got %+v", pagedCandidates)
+	}
+
+	queryReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/source-candidates?group=%E4%BC%98%E5%85%88&q=%E5%88%AB%E5%90%8D&limit=1", nil)
+	queryReq.Header.Set("Authorization", token)
+	queryW := httptest.NewRecorder()
+	router.ServeHTTP(queryW, queryReq)
+	if queryW.Code != http.StatusOK {
+		t.Fatalf("queried source candidates: expected 200, got %d: %s", queryW.Code, queryW.Body.String())
+	}
+	searchMu.Lock()
+	foundQuery := false
+	for _, query := range searchQueries {
+		if query == "别名" {
+			foundQuery = true
+			break
+		}
+	}
+	searchMu.Unlock()
+	if !foundQuery {
+		t.Fatalf("expected source candidate search to use custom query, got %#v", searchQueries)
 	}
 
 	body := `{"sourceId":` + strconv.FormatUint(uint64(target.SourceID), 10) + `,"bookUrl":` + strconv.Quote(target.BookURL) + `,"title":"候选书","author":"新作者"}`

@@ -917,6 +917,10 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 	}
 
 	group := strings.TrimSpace(c.Query("group"))
+	keyword := strings.TrimSpace(c.Query("q"))
+	if keyword == "" {
+		keyword = book.Title
+	}
 	limit := parseBoundedInt(c.Query("limit"), 10, 1, 80)
 	offset := parseBoundedInt(c.Query("offset"), 0, 0, 10000)
 	paged := c.Query("paged") == "1" || c.Query("paged") == "true"
@@ -985,7 +989,7 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 
 			done := make(chan sourceCandidateBatch, 1)
 			go func() {
-				searchResults, err := engine.SearchBooks(source, book.Title)
+				searchResults, err := engine.SearchBooks(source, keyword)
 				if err != nil {
 					done <- sourceCandidateBatch{Failed: true}
 					return

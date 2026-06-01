@@ -64,11 +64,13 @@
       :changing-source="sourceSwitchChanging"
       :current-source-name="sourceSwitchCurrentName"
       :group="sourceSwitchGroup"
+      :query="sourceSwitchQuery"
       :groups="sourceSwitchGroups"
       :stats="sourceSwitchStats"
       @refresh="refreshGlobalSourceCandidates"
       @load-more="loadMoreGlobalSourceCandidates"
       @group-change="changeGlobalSourceGroup"
+      @query-change="changeGlobalSourceQuery"
       @show-info="reopenSourceSwitchBookInfo"
       @change="changeGlobalBookSource"
     />
@@ -789,6 +791,7 @@ const sourceSwitchCandidates = ref([])
 const sourceSwitchLoading = ref(false)
 const sourceSwitchChanging = ref(null)
 const sourceSwitchGroup = ref('')
+const sourceSwitchQuery = ref('')
 const sourceSwitchOffset = ref(0)
 const sourceSwitchHasMore = ref(false)
 const sourceSwitchLoadedKey = ref('')
@@ -1170,6 +1173,7 @@ function openGlobalSourceSwitch(book) {
   if (!book?.id || Number(book.sourceId || 0) <= 0) return
   sourceSwitchBook.value = book
   sourceSwitchGroup.value = ''
+  sourceSwitchQuery.value = ''
   sourceSwitchOffset.value = 0
   sourceSwitchHasMore.value = false
   sourceSwitchLoadedKey.value = ''
@@ -1182,7 +1186,8 @@ function openGlobalSourceSwitch(book) {
 async function loadGlobalSourceCandidates({ append = false, force = false } = {}) {
   const book = sourceSwitchBook.value
   if (!book?.id || Number(book.sourceId || 0) <= 0) return
-  const key = `${book.id}:${sourceSwitchGroup.value || 'all'}`
+  const query = sourceSwitchQuery.value.trim()
+  const key = `${book.id}:${sourceSwitchGroup.value || 'all'}:${query || 'title'}`
   if (!append && !force && sourceSwitchLoadedKey.value === key && sourceSwitchCandidates.value.length) return
   sourceSwitchLoading.value = true
   try {
@@ -1190,6 +1195,7 @@ async function loadGlobalSourceCandidates({ append = false, force = false } = {}
     if (!append) sourceSwitchOffset.value = 0
     const { data } = await listBookSourceCandidates(book.id, {
       group: sourceSwitchGroup.value || undefined,
+      q: query || undefined,
       offset: sourceSwitchOffset.value,
       limit: 10,
       paged: 1,
@@ -1231,6 +1237,13 @@ function changeGlobalSourceGroup(value) {
   sourceSwitchHasMore.value = false
   sourceSwitchStats.value = null
   loadGlobalSourceCandidates({ force: true })
+}
+
+function changeGlobalSourceQuery(value) {
+  sourceSwitchQuery.value = value || ''
+  sourceSwitchLoadedKey.value = ''
+  sourceSwitchHasMore.value = false
+  sourceSwitchStats.value = null
 }
 
 function mergeSourceCandidates(existing, incoming) {
