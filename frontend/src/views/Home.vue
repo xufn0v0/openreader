@@ -741,6 +741,7 @@ function readError(err, fallback) {
 .list-main {
   display: grid;
   min-width: 0;
+  box-sizing: border-box;
   gap: 5px;
 }
 
@@ -852,7 +853,9 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .book-group-wrapper {
-  padding: 6px;
+  margin-right: 24px;
+  margin-left: 24px;
+  padding: 5px 0;
 }
 
 .shelf-page.mobile-shelf .book-row {
@@ -885,6 +888,7 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .list-main {
   width: auto;
   min-height: clamp(86px, 26.6vw, 112px);
+  box-sizing: border-box;
   justify-content: space-between;
   gap: 4px;
   padding-right: 48px;
@@ -985,7 +989,9 @@ function readError(err, fallback) {
   }
 
   .book-group-wrapper {
-    padding: 6px;
+    margin-right: 24px;
+    margin-left: 24px;
+    padding: 5px 0;
   }
 
   .book-row {
@@ -1019,6 +1025,7 @@ function readError(err, fallback) {
     width: auto;
     max-width: 100%;
     min-height: clamp(86px, 26.6vw, 112px);
+    box-sizing: border-box;
     justify-content: space-between;
     padding-right: 0;
     overflow: hidden;
@@ -1053,16 +1060,18 @@ function readError(err, fallback) {
 @media (max-width: 520px) {
   .shelf-page.mobile-shelf .book-group-wrapper,
   .book-group-wrapper {
-    padding: 0 6px;
+    margin-right: 24px;
+    margin-left: 24px;
+    padding: 5px 0;
   }
 
   .shelf-page.mobile-shelf .group-chip,
   .group-chip {
     max-width: none;
-    height: 32px;
+    height: 48px;
     flex: 1 0 25%;
     padding: 0 8px;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .shelf-page.mobile-shelf .shelf-title,
@@ -1096,9 +1105,10 @@ function readError(err, fallback) {
 
   .shelf-page.mobile-shelf .list-main,
   .list-main {
-    width: 100%;
+    width: auto;
     max-width: 100%;
     min-height: 112px;
+    box-sizing: border-box;
     gap: 4px;
     padding-right: 48px;
     overflow: hidden;

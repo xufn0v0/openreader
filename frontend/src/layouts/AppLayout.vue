@@ -277,8 +277,7 @@ const cacheStatsLabel = computed(() => {
 })
 const isMobileShell = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
 const mobileNavigationWidth = computed(() => {
-  const viewport = Math.max(320, windowWidth.value || 0)
-  return Math.round(Math.min(320, Math.max(260, viewport * 0.72)))
+  return 260
 })
 const mobileNavigationStyle = computed(() => {
   const width = mobileNavigationWidth.value
