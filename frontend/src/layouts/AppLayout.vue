@@ -287,7 +287,7 @@ const cacheStatsLabel = computed(() => {
   const chapters = Number(cacheStats.value?.cachedChapters || 0)
   return `章节缓存 ${size}${chapters ? ` / ${chapters}章` : ''}`
 })
-const isMobileShell = computed(() => windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileShell = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const mobileNavigationWidth = computed(() => {
   return 260
 })

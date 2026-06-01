@@ -59,7 +59,8 @@ export const useReaderStore = defineStore('reader', {
     },
     setPageMode(pageMode) {
       this.pageMode = pageMode === 'mobile' ? 'mobile' : 'auto'
-      this.markSettingsDirty()
+      this.settingsUpdatedAt = new Date().toISOString()
+      this.settingsSyncError = ''
     },
     setClickMethod(method) {
       this.clickMethod = ['next', 'auto', 'none'].includes(method) ? method : 'auto'
@@ -403,7 +404,6 @@ function clampNumber(value, min, max, fallback) {
 function readerSettingsPayload(state) {
   return {
     mode: state.mode,
-    pageMode: state.pageMode,
     clickMethod: state.clickMethod,
     fontFamily: state.fontFamily,
     fontSize: state.fontSize,
@@ -427,7 +427,6 @@ function readerSettingsPayload(state) {
 function sanitizeReaderSettings(payload) {
   const settings = {}
   if (['scroll', 'scroll2', 'flip', 'page'].includes(payload.mode)) settings.mode = payload.mode
-  if (['auto', 'mobile'].includes(payload.pageMode)) settings.pageMode = payload.pageMode
   if (['next', 'auto', 'none'].includes(payload.clickMethod)) settings.clickMethod = payload.clickMethod
   if (['system', 'serif', 'kai', 'mono'].includes(payload.fontFamily)) settings.fontFamily = payload.fontFamily
   if (typeof payload.theme === 'string') settings.theme = payload.theme

@@ -163,7 +163,7 @@ const displayedBooks = computed(() => {
   return filtered
 })
 
-const isMobileShelf = computed(() => windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileShelf = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const effectiveShelfView = computed(() => isMobileShelf.value ? 'list' : shelfView.value)
 
 const emptyText = computed(() => {

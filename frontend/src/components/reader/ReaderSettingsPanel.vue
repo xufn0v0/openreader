@@ -1,7 +1,7 @@
 <template>
   <div class="settings-body">
     <div class="setting-row">
-      <label class="setting-label">页面模式</label>
+      <label class="setting-label">页面模式（本机）</label>
       <el-radio-group v-model="reader.pageMode" size="small" class="read-method-group" @change="reader.setPageMode($event)">
         <el-radio-button value="auto">自适应</el-radio-button>
         <el-radio-button value="mobile">手机模式</el-radio-button>
