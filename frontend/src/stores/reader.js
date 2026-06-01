@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import api from '../api/client'
+import { currentUserScope } from '../utils/authScope'
 import { newestProgress as pickNewestProgress, progressUpdatedAt } from '../utils/bookOrder'
 
 let readerSettingsSyncTimer
@@ -346,6 +347,10 @@ function progressServerBaseUpdatedAt(progress) {
 }
 
 function localChapterProgressKey(bookId) {
+  return `openreader_chapter_progress@${currentUserScope()}@${bookId}`
+}
+
+function legacyLocalChapterProgressKey(bookId) {
   return `openreader_chapter_progress@${bookId}`
 }
 
@@ -379,7 +384,7 @@ function persistLocalChapterProgress(progress) {
 function readLocalChapterProgress(bookId) {
   if (typeof localStorage === 'undefined' || !bookId) return null
   try {
-    const raw = localStorage.getItem(localChapterProgressKey(bookId))
+    const raw = localStorage.getItem(localChapterProgressKey(bookId)) || localStorage.getItem(legacyLocalChapterProgressKey(bookId))
     if (!raw) return null
     const data = JSON.parse(raw)
     if (!data || Number(data.bookId) !== Number(bookId)) return null
