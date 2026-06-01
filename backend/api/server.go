@@ -36,6 +36,8 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 	protected.Use(middleware.AuthRequired(cfg.JWTSecret))
 	protected.Use(middleware.TrackActivity(database))
 	protected.GET("/me", server.me)
+	protected.GET("/settings/:key", server.getUserSetting)
+	protected.PUT("/settings/:key", server.updateUserSetting)
 	protected.GET("/admin/users", server.listUsers)
 	protected.PUT("/admin/users/:id", server.updateUser)
 	protected.POST("/admin/cleanup-inactive", server.cleanupInactiveUsers)

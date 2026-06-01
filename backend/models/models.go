@@ -19,6 +19,14 @@ type User struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+type UserSetting struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	UserID    uint      `json:"userId" gorm:"not null;uniqueIndex:idx_user_setting"`
+	Key       string    `json:"key" gorm:"size:80;not null;uniqueIndex:idx_user_setting"`
+	Value     string    `json:"value" gorm:"type:text;not null"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 type BookSource struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	Name      string    `json:"name" gorm:"size:120;not null"`

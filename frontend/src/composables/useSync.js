@@ -49,6 +49,9 @@ export function useSync() {
       if (message.type === 'bookshelf_update') {
         bookshelf.loadBooks({ force: true, all: true })
       }
+      if (message.type === 'settings_update' && message.payload?.key === 'reader') {
+        reader.loadReaderSettings().catch(() => {})
+      }
     })
   }
 

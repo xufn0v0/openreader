@@ -204,8 +204,16 @@
             <div class="card-head">
               <el-icon><View /></el-icon>
               <h2>阅读默认值</h2>
+              <span class="reader-sync-state" :class="{ error: readerStore.settingsSyncError }">{{ readerSettingsSyncText }}</span>
             </div>
             <div class="reader-setting-list">
+              <label>
+                <span>页面模式</span>
+                <el-radio-group v-model="readerPageModeModel" size="small" @change="readerStore.setPageMode($event)">
+                  <el-radio-button value="auto">自适应</el-radio-button>
+                  <el-radio-button value="mobile">手机模式</el-radio-button>
+                </el-radio-group>
+              </label>
               <label>
                 <span>翻页方式</span>
                 <el-radio-group v-model="readerModeModel" size="small" @change="readerStore.setMode($event)">
@@ -610,6 +618,10 @@ const readerModeModel = computed({
   get: () => readerStore.mode,
   set: value => readerStore.setMode(value),
 })
+const readerPageModeModel = computed({
+  get: () => readerStore.pageMode,
+  set: value => readerStore.setPageMode(value),
+})
 const readerClickMethodModel = computed({
   get: () => readerStore.clickMethod,
   set: value => readerStore.setClickMethod(value),
@@ -658,6 +670,12 @@ const readerTTSPitchModel = computed({
   get: () => readerStore.ttsPitch,
   set: value => readerStore.setTTSPitch(value),
 })
+const readerSettingsSyncText = computed(() => {
+  if (readerStore.settingsSyncing) return '同步中'
+  if (readerStore.settingsSyncError) return `同步失败：${readerStore.settingsSyncError}`
+  if (readerStore.settingsSyncBaseUpdatedAt) return '已同步'
+  return '本地设置'
+})
 
 const webdavBreadcrumbs = computed(() => {
   if (!webdavPath.value) return []
@@ -669,6 +687,7 @@ const isMobileDialog = computed(() => windowWidth.value <= 1180 || coarsePointer
 
 onMounted(() => {
   readerStore.normalizeSettings()
+  readerStore.loadReaderSettings().catch(() => {})
   window.addEventListener('resize', updateWindowWidth, { passive: true })
   loadBackups()
   loadWebDAV()
@@ -1357,6 +1376,16 @@ function readError(err, fallback) {
   margin: 0;
   color: var(--app-text);
   font-size: 17px;
+}
+
+.reader-sync-state {
+  margin-left: auto;
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.reader-sync-state.error {
+  color: #c45656;
 }
 
 .panel-text {
