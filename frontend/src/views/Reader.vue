@@ -629,7 +629,7 @@ const bodyStyle = computed(() => {
 })
 
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
-const isMobileReader = computed(() => windowWidth.value <= mobileReaderMaxWidth || coarsePointer.value || touchDevice.value || isMobileUA())
+const isMobileReader = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= mobileReaderMaxWidth || coarsePointer.value || touchDevice.value || isMobileUA())
 const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
 const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
 const bookProgress = computed(() => {
@@ -734,6 +734,12 @@ watch(() => reader.mode, async () => {
   await restoreReadingPosition(offset, { saveAfterLoad: false })
   saveCurrentProgress()
 })
+
+watch(isMobileReader, (mobile) => {
+  if (!mobile && reader.mode === 'flip') {
+    reader.setMode('page')
+  }
+}, { immediate: true })
 
 watch(() => [reader.fontFamily, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
   const offset = currentOffset()

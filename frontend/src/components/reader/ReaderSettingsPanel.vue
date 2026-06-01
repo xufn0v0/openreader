@@ -1,10 +1,18 @@
 <template>
   <div class="settings-body">
     <div class="setting-row">
+      <label class="setting-label">页面模式</label>
+      <el-radio-group v-model="reader.pageMode" size="small" class="read-method-group" @change="reader.setPageMode($event)">
+        <el-radio-button value="auto">自适应</el-radio-button>
+        <el-radio-button value="mobile">手机模式</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">翻页方式</label>
       <el-radio-group v-model="reader.mode" size="small" class="read-method-group" @change="$emit('modeChange', $event)">
         <el-radio-button value="page">上下滑动</el-radio-button>
-        <el-radio-button value="flip">{{ miniInterface ? '左右滑动' : '左右翻页' }}</el-radio-button>
+        <el-radio-button v-if="miniInterface" value="flip">左右滑动</el-radio-button>
         <el-radio-button value="scroll">上下滚动</el-radio-button>
         <el-radio-button value="scroll2">上下滚动2</el-radio-button>
       </el-radio-group>
