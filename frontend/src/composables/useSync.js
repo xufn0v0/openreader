@@ -43,8 +43,8 @@ export function useSync() {
         return
       }
       if (message.type === 'progress_update') {
-        reader.applyProgress(message.payload)
-        bookshelf.applyBookProgress(message.payload)
+        const progress = reader.applyServerProgress(message.payload) || message.payload
+        bookshelf.applyBookProgress(progress, { replace: true })
       }
       if (message.type === 'bookshelf_update') {
         bookshelf.loadBooks({ force: true, all: true })

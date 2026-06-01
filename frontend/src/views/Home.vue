@@ -294,6 +294,7 @@ function shelfSearchText(book) {
 function isLocalBook(book) {
   if (!book) return false
   if (Number(book.sourceId || 0) === 0) return true
+  if (String(book.url || '').startsWith('local://')) return true
   return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
 }
 
