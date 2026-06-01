@@ -80,7 +80,7 @@
       class="reader-page"
       :style="readerStyle"
       @touchstart.passive="handleReaderTouchStart"
-      @touchmove.passive="handleReaderTouchMove"
+      @touchmove="handleReaderTouchMove"
       @touchend.passive="handleReaderTouchEnd"
       @wheel="handleReaderWheel"
       @click="handleReaderContentClick"
@@ -539,6 +539,7 @@ let chapterContentCache = null
 let cachingContentCancelled = false
 let readerTouchStart = null
 let readerTouchMoved = false
+let readerTouchMove = { x: 0, y: 0 }
 let ignoreNextContentClick = false
 let handledTouchTapAt = 0
 let lastLocalProgressKey = ''
@@ -1142,12 +1143,13 @@ function openCacheDrawer() {
 }
 
 async function goBookDetail() {
-  saveCurrentProgress({ force: true, background: true })
+  await saveCurrentProgress({ force: true })
   await router.push({ name: 'book-detail', params: { id: bookId.value } })
 }
 
 async function goShelf() {
-  saveCurrentProgress({ force: true, background: true })
+  await saveCurrentProgress({ force: true })
+  bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
   await router.push({ name: 'home' })
 }
 async function openShelfPanel() {
@@ -1155,11 +1157,10 @@ async function openShelfPanel() {
   showShelfDrawer.value = true
   if (bookshelf.books.length) {
     window.setTimeout(locateReaderShelfCurrentBook, 0)
-    return
   }
   shelfLoading.value = true
   try {
-    await bookshelf.loadBooks({ all: true })
+    await bookshelf.loadBooks({ force: true, all: true })
     locateReaderShelfCurrentBook()
   } catch (err) {
     ElMessage.error(readError(err, '加载书架失败'))
@@ -1832,6 +1833,7 @@ function handleReaderTouchStart(event) {
   const touch = event.touches[0]
   readerTouchStart = { x: touch.clientX, y: touch.clientY, at: Date.now() }
   readerTouchMoved = false
+  readerTouchMove = { x: 0, y: 0 }
 }
 
 function handleReaderTouchMove(event) {
@@ -1839,8 +1841,13 @@ function handleReaderTouchMove(event) {
   const touch = event.touches[0]
   const moveX = touch.clientX - readerTouchStart.x
   const moveY = touch.clientY - readerTouchStart.y
+  readerTouchMove = { x: moveX, y: moveY }
   if (Math.abs(moveX) > 6 || Math.abs(moveY) > 6) {
     readerTouchMoved = true
+  }
+  if (reader.mode === 'flip' && Math.abs(moveX) > 12 && Math.abs(moveX) > Math.abs(moveY) + 8) {
+    event.preventDefault()
+    event.stopPropagation()
   }
 }
 
@@ -1854,7 +1861,10 @@ function handleReaderTouchEnd(event) {
   setTimeout(() => {
     ignoreNextContentClick = false
   }, 360)
-  if (!readerTouchMoved && !isOverlayOpen.value && pageEl.value) {
+  if (readerTouchMoved && !isOverlayOpen.value && shouldHandleHorizontalSwipe()) {
+    if (readerTouchMove.x > 0) previousPage()
+    else nextPage()
+  } else if (!readerTouchMoved && !isOverlayOpen.value && pageEl.value) {
     if (touch) {
       const rect = pageEl.value.getBoundingClientRect()
       handleTapPoint({
@@ -1868,6 +1878,14 @@ function handleReaderTouchEnd(event) {
   }
   readerTouchStart = null
   readerTouchMoved = false
+  readerTouchMove = { x: 0, y: 0 }
+}
+
+function shouldHandleHorizontalSwipe() {
+  if (reader.mode !== 'flip') return false
+  const moveX = Number(readerTouchMove.x || 0)
+  const moveY = Number(readerTouchMove.y || 0)
+  return Math.abs(moveX) >= 42 && Math.abs(moveX) > Math.abs(moveY) * 1.2
 }
 
 function handleTapPoint(point) {
@@ -1878,8 +1896,8 @@ function handleTapPoint(point) {
   const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
   const midX = viewportWidth / 2
   const midY = viewportHeight / 2
-  const centerWidthRatio = isMobileReader.value ? 0.32 : 0.2
-  const centerHeightRatio = isMobileReader.value ? 0.32 : 0.2
+  const centerWidthRatio = 0.2
+  const centerHeightRatio = 0.2
   const inMenuZone = Math.abs(pointX - midX) <= viewportWidth * centerWidthRatio
     && Math.abs(pointY - midY) <= viewportHeight * centerHeightRatio
 
@@ -1927,7 +1945,7 @@ function handleReaderWheel(event) {
   if (isScrollRead.value) {
     if (!contentEl.value) return
     event.preventDefault()
-    contentEl.value.scrollTop += delta
+    scrollReaderByWheel(delta)
     return
   }
   event.preventDefault()
@@ -1939,6 +1957,23 @@ function handleReaderWheel(event) {
   } else {
     previousPage()
   }
+}
+
+function scrollReaderByWheel(delta) {
+  const el = contentEl.value
+  if (!el) return
+  const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+  const atTop = el.scrollTop <= 2
+  const atBottom = el.scrollTop >= bottom - 2
+  if (delta < 0 && atTop) {
+    previousPage()
+    return
+  }
+  if (delta > 0 && atBottom) {
+    nextPage()
+    return
+  }
+  el.scrollTop = Math.max(0, Math.min(bottom, el.scrollTop + delta))
 }
 
 function toggleReaderChrome() {
@@ -2139,16 +2174,40 @@ async function saveCurrentProgress(options = {}) {
   if (!chapter.value) return
   const force = Boolean(options.force)
   const background = Boolean(options.background)
-  const payload = currentProgressPayload()
+  const baseUpdatedAt = progressServerBaseUpdatedAt()
+  const payload = {
+    ...currentProgressPayload(),
+    baseUpdatedAt,
+  }
   applyLocalProgressSnapshot(payload, { force })
   const key = progressSaveKey(payload)
   if (key === lastProgressSaveKey && !force) return
   pendingProgressPayload = payload
   if (background) {
+    sendProgressKeepAlive(payload)
     flushProgressQueue(force).catch(() => {})
     return
   }
   await flushProgressQueue(force)
+}
+
+function sendProgressKeepAlive(payload) {
+  if (typeof window === 'undefined' || typeof fetch !== 'function' || !payload?.bookId) return
+  const token = window.localStorage?.getItem('openreader_token')
+  if (!token) return
+  try {
+    fetch('/api/progress', {
+      method: 'PUT',
+      keepalive: true,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ ...payload, mode: reader.mode }),
+    }).catch(() => {})
+  } catch {
+    // The queued local progress remains pending and will sync on the next open.
+  }
 }
 
 async function flushProgressQueue(force = false) {
@@ -2172,7 +2231,7 @@ async function flushProgressQueue(force = false) {
       if (nextKey === lastProgressSaveKey && !force) continue
       lastProgressRequestAt = Date.now()
       const savedProgress = await reader.saveProgress(nextPayload)
-      bookshelf.applyBookProgress(savedProgress)
+      bookshelf.applyBookProgress(savedProgress, { replace: true })
       lastProgressSaveKey = nextKey
     }
   } finally {
@@ -2194,15 +2253,27 @@ function currentProgressPayload() {
 
 function applyLocalProgressSnapshot(payload = currentProgressPayload(), options = {}) {
   if (!payload?.bookId || !chapter.value) return
-  const key = progressSaveKey(payload)
+  const nextPayload = {
+    ...payload,
+    baseUpdatedAt: payload.baseUpdatedAt || progressServerBaseUpdatedAt(payload.bookId),
+  }
+  const key = progressSaveKey(nextPayload)
   if (key === lastLocalProgressKey && !options.force) return
   lastLocalProgressKey = key
   reader.applyProgress({
-    ...payload,
+    ...nextPayload,
     mode: reader.mode,
     updatedAt: new Date().toISOString(),
+    pendingSync: true,
   })
-  bookshelf.applyBookProgress(reader.progressByBook[payload.bookId])
+  bookshelf.applyBookProgress(reader.progressByBook[nextPayload.bookId])
+}
+
+function progressServerBaseUpdatedAt(targetBookId = bookId.value) {
+  const progress = reader.progressByBook[targetBookId]
+  if (!progress) return ''
+  if (progress.pendingSync) return progress.baseUpdatedAt || ''
+  return progress.updatedAt || ''
 }
 
 function waitForProgressSaveIdle(timeout = 1500) {

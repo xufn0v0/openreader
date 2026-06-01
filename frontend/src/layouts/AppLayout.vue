@@ -277,8 +277,7 @@ const cacheStatsLabel = computed(() => {
 })
 const isMobileShell = computed(() => windowWidth.value <= 1180 || coarsePointer.value || touchDevice.value || isMobileUA())
 const mobileNavigationWidth = computed(() => {
-  const viewport = Math.max(320, windowWidth.value || 0)
-  return Math.round(Math.min(300, Math.max(252, viewport * 0.72)))
+  return 260
 })
 const mobileNavigationStyle = computed(() => {
   const width = mobileNavigationWidth.value
@@ -921,6 +920,8 @@ onBeforeUnmount(() => {
   max-width: 100vw;
   max-width: 100dvw;
   padding-left: 0;
+  transition: transform 0.3s;
+  will-change: transform;
 }
 
 .app-shell.mobile-shell .app-content {
@@ -1027,5 +1028,9 @@ onBeforeUnmount(() => {
 
 .app-shell.mobile-shell.mobile-nav-open .app-sidebar {
   transform: translateX(0);
+}
+
+.app-shell.mobile-shell.mobile-nav-open .app-workspace {
+  transform: translateX(var(--mobile-nav-width, 72vw));
 }
 </style>

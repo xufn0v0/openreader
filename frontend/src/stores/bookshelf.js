@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { batchBooks, createBook, deleteBook, exportBooks, listBooks } from '../api/books'
 import { createCategory, deleteCategory, listCategories, reorderCategories, updateCategory } from '../api/categories'
 import api from '../api/client'
+import { useReaderStore } from './reader'
 import { newestProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { getBrowserCache, setBrowserCache } from '../utils/browserCache'
 
@@ -18,6 +19,7 @@ function sortBooks(books) {
 }
 
 const REFRESH_DEDUPE_MS = 1200
+const MEMORY_CACHE_MS = 5000
 const SHELF_CACHE_KEY = 'bookshelf@getBookshelf'
 const CATEGORY_CACHE_KEY = 'bookshelf@getCategories'
 let booksRequest = null
@@ -44,7 +46,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
       }
       const requestKey = JSON.stringify(params)
       const now = Date.now()
-      if (!force && this.books.length > 0 && this.booksLoadedKey === requestKey) {
+      if (!force && this.books.length > 0 && this.booksLoadedKey === requestKey && now - this.booksLoadedAt < MEMORY_CACHE_MS) {
         return this.books
       }
       if (!force && this.booksLoadedKey === requestKey && this.booksLoadedAt > 0 && now - this.booksLoadedAt < REFRESH_DEDUPE_MS) {
@@ -65,7 +67,9 @@ export const useBookshelfStore = defineStore('bookshelf', {
       booksRequestKey = requestKey
       const request = listBooks(params)
         .then(({ data }) => {
-          this.books = sortBooks(data)
+          const serverBooks = asList(data)
+          syncServerProgressFromBooks(serverBooks)
+          this.books = sortBooks(serverBooks)
           this.booksLoadedAt = Date.now()
           this.booksLoadedKey = requestKey
           writeShelfCache(`${SHELF_CACHE_KEY}:${requestKey}`, this.books)
@@ -160,12 +164,12 @@ export const useBookshelfStore = defineStore('bookshelf', {
       this.books = sortBooks(nextBooks)
       this.invalidateBooks()
     },
-    applyBookProgress(progress) {
+    applyBookProgress(progress, options = {}) {
       if (!progress?.bookId) return
       let changed = false
       const nextBooks = this.books.map(book => {
         if (Number(book.id) !== Number(progress.bookId)) return book
-        const nextProgress = newestProgress(book.progress || null, progress)
+        const nextProgress = options.replace ? progress : newestProgress(book.progress || null, progress)
         if (nextProgress === book.progress) return book
         changed = true
         return { ...book, progress: nextProgress }
@@ -243,4 +247,11 @@ async function readShelfCache(key) {
 
 function writeShelfCache(key, value) {
   setBrowserCache(key, asList(value)).catch(() => {})
+}
+
+function syncServerProgressFromBooks(books) {
+  const reader = useReaderStore()
+  asList(books).forEach(book => {
+    if (book?.progress?.bookId) reader.applyServerProgress(book.progress)
+  })
 }

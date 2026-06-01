@@ -346,6 +346,63 @@ func TestUpdateProgressPersistsChapterPosition(t *testing.T) {
 	}
 }
 
+func TestUpdateProgressRejectsStaleClientBase(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "多端进度"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	existing := models.ReadingProgress{
+		UserID:         user.ID,
+		BookID:         book.ID,
+		ChapterIndex:   12,
+		Offset:         4096,
+		Percent:        0.4,
+		ChapterPercent: 0.62,
+		ChapterTitle:   "第十三章",
+		UpdatedAt:      time.Now().UTC(),
+	}
+	if err := server.db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	staleBase := existing.UpdatedAt.Add(-time.Minute).Format(time.RFC3339Nano)
+	body := fmt.Sprintf(`{"bookId":%d,"chapterIndex":3,"offset":128,"percent":0.1,"chapterPercent":0.2,"chapterTitle":"第四章","baseUpdatedAt":%q}`, book.ID, staleBase)
+	req := httptest.NewRequest(http.MethodPut, "/api/progress", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update progress: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("X-OpenReader-Progress-Conflict") != "1" {
+		t.Fatalf("expected stale progress conflict header, got %q", w.Header().Get("X-OpenReader-Progress-Conflict"))
+	}
+
+	var returned models.ReadingProgress
+	if err := json.Unmarshal(w.Body.Bytes(), &returned); err != nil {
+		t.Fatal(err)
+	}
+	if returned.ChapterIndex != existing.ChapterIndex || returned.Offset != existing.Offset || returned.ChapterTitle != existing.ChapterTitle {
+		t.Fatalf("expected existing progress to be returned, got %+v", returned)
+	}
+
+	var saved models.ReadingProgress
+	if err := server.db.Where("user_id = ? AND book_id = ?", user.ID, book.ID).First(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.ChapterIndex != existing.ChapterIndex || saved.Offset != existing.Offset || saved.ChapterTitle != existing.ChapterTitle {
+		t.Fatalf("stale update overwrote progress: %+v", saved)
+	}
+}
+
 func TestListBooksOrdersByRecentProgressThenShelfTime(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

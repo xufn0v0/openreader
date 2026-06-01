@@ -55,6 +55,7 @@
             v-for="book in displayedBooks"
             :key="book.id"
             class="book-row"
+            :class="{ editing: showBookEditButton }"
             role="button"
             tabindex="0"
             @click="handleBookRowClick(book)"
@@ -68,8 +69,12 @@
             >{{ coverInitial(book) }}</span>
             <span class="list-main">
               <span class="book-operation">
-                <el-button v-if="showBookEditButton" size="small" text type="danger" @click.stop="deleteManagedBook(book)">删除</el-button>
-                <el-button v-if="showBookEditButton" size="small" text @click.stop="goEditBook(book)">编辑</el-button>
+                <button v-if="showBookEditButton" class="operation-icon danger" type="button" title="删除" @click.stop="deleteManagedBook(book)">
+                  <el-icon><Close /></el-icon>
+                </button>
+                <button v-if="showBookEditButton" class="operation-icon" type="button" title="编辑" @click.stop="goEditBook(book)">
+                  <el-icon><Edit /></el-icon>
+                </button>
                 <el-badge
                   v-if="!showBookEditButton && unreadCount(book) > 0"
                   class="unread-num-badge"
@@ -98,7 +103,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Grid, List, Menu } from '@element-plus/icons-vue'
+import { Close, Edit, Grid, List, Menu } from '@element-plus/icons-vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
@@ -294,6 +299,7 @@ function shelfSearchText(book) {
 function isLocalBook(book) {
   if (!book) return false
   if (Number(book.sourceId || 0) === 0) return true
+  if (String(book.url || '').startsWith('local://')) return true
   return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
 }
 
@@ -673,6 +679,10 @@ function readError(err, fallback) {
   -webkit-line-clamp: 2;
 }
 
+.shelf-main.grid-view .book-row.editing .list-main strong {
+  padding-right: 58px;
+}
+
 .shelf-main.grid-view .list-main small {
   color: #6b6b6b;
   font-size: 13px;
@@ -731,13 +741,38 @@ function readError(err, fallback) {
 .list-main {
   display: grid;
   min-width: 0;
+  box-sizing: border-box;
   gap: 5px;
 }
 
 .book-operation {
-  display: grid;
+  display: flex;
   min-height: 20px;
-  justify-items: end;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.operation-icon {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  flex: 0 0 22px;
+  padding: 0;
+  color: #969ba3;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.operation-icon:hover {
+  color: #1f6feb;
+}
+
+.operation-icon.danger:hover {
+  color: #b5463e;
 }
 
 .empty-panel {
@@ -818,7 +853,9 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .book-group-wrapper {
-  padding: 6px;
+  margin-right: 24px;
+  margin-left: 24px;
+  padding: 5px 0;
 }
 
 .shelf-page.mobile-shelf .book-row {
@@ -851,6 +888,7 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .list-main {
   width: auto;
   min-height: clamp(86px, 26.6vw, 112px);
+  box-sizing: border-box;
   justify-content: space-between;
   gap: 4px;
   padding-right: 48px;
@@ -951,7 +989,9 @@ function readError(err, fallback) {
   }
 
   .book-group-wrapper {
-    padding: 6px;
+    margin-right: 24px;
+    margin-left: 24px;
+    padding: 5px 0;
   }
 
   .book-row {
@@ -981,18 +1021,11 @@ function readError(err, fallback) {
     overflow: hidden;
   }
 
-  .book-operation :deep(.el-button) {
-    min-width: 0;
-    max-width: 38px;
-    overflow: hidden;
-    padding: 0 2px;
-    text-overflow: ellipsis;
-  }
-
   .list-main {
     width: auto;
     max-width: 100%;
     min-height: clamp(86px, 26.6vw, 112px);
+    box-sizing: border-box;
     justify-content: space-between;
     padding-right: 0;
     overflow: hidden;
@@ -1011,6 +1044,10 @@ function readError(err, fallback) {
     -webkit-line-clamp: 2;
   }
 
+  .book-row.editing .list-main strong {
+    padding-right: 58px;
+  }
+
   .list-main small {
     font-size: 13px;
     line-height: 1.35;
@@ -1023,16 +1060,18 @@ function readError(err, fallback) {
 @media (max-width: 520px) {
   .shelf-page.mobile-shelf .book-group-wrapper,
   .book-group-wrapper {
-    padding: 0 6px;
+    margin-right: 24px;
+    margin-left: 24px;
+    padding: 5px 0;
   }
 
   .shelf-page.mobile-shelf .group-chip,
   .group-chip {
     max-width: none;
-    height: 32px;
+    height: 48px;
     flex: 1 0 25%;
     padding: 0 8px;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .shelf-page.mobile-shelf .shelf-title,
@@ -1048,41 +1087,47 @@ function readError(err, fallback) {
   .shelf-page.mobile-shelf .book-row,
   .book-row {
     display: grid;
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 10px;
-    min-height: 96px;
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 20px;
+    min-height: 132px;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
-    padding: 8px 10px;
+    padding: 10px 20px;
   }
 
   .shelf-page.mobile-shelf .list-cover,
   .list-cover {
-    width: 64px;
-    height: 86px;
-    flex-basis: 64px;
+    width: 84px;
+    height: 112px;
+    flex-basis: 84px;
   }
 
   .shelf-page.mobile-shelf .list-main,
   .list-main {
-    width: 100%;
+    width: auto;
     max-width: 100%;
-    min-height: 86px;
+    min-height: 112px;
+    box-sizing: border-box;
     gap: 4px;
-    padding-right: 38px;
+    padding-right: 48px;
     overflow: hidden;
   }
 
   .shelf-page.mobile-shelf .book-operation,
   .book-operation {
-    top: 8px;
-    right: 10px;
+    top: 10px;
+    right: 20px;
   }
 
   .shelf-page.mobile-shelf .list-main strong,
   .list-main strong {
-    padding-right: 38px;
+    padding-right: 48px;
+  }
+
+  .shelf-page.mobile-shelf .book-row.editing .list-main strong,
+  .book-row.editing .list-main strong {
+    padding-right: 58px;
   }
 
   .shelf-page.mobile-shelf .list-main small,
