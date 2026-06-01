@@ -166,7 +166,36 @@ func (s *Server) listRSSArticles(c *gin.Context) {
 	if strings.TrimSpace(c.Query("favorite")) == "true" {
 		query = query.Where("favorite = ?", true)
 	}
+	page := parseBoundedInt(c.Query("page"), 0, 0, 100000)
+	limit := parseBoundedInt(c.Query("limit"), 0, 0, 100)
 	var articles []models.RSSArticle
+	if page > 0 || limit > 0 {
+		if page <= 0 {
+			page = 1
+		}
+		if limit <= 0 {
+			limit = 50
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		offset := (page - 1) * limit
+		if err := query.Order("published_at desc, updated_at desc").Limit(limit + 1).Offset(offset).Find(&articles).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list RSS articles"})
+			return
+		}
+		hasMore := len(articles) > limit
+		if hasMore {
+			articles = articles[:limit]
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"items":   articles,
+			"page":    page,
+			"limit":   limit,
+			"hasMore": hasMore,
+		})
+		return
+	}
 	if err := query.Order("published_at desc, updated_at desc").Limit(200).Find(&articles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list RSS articles"})
 		return

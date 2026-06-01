@@ -1,0 +1,537 @@
+<template>
+  <section class="rss-manager">
+    <article class="rss-panel">
+      <header class="rss-head">
+        <div>
+          <strong>RSS 源</strong>
+          <span>{{ sources.length }} 个订阅</span>
+        </div>
+        <div class="rss-actions">
+          <el-button size="small" type="primary" @click="openEditor()">新增</el-button>
+          <el-button size="small" :loading="sourcesLoading" @click="loadSources">刷新</el-button>
+        </div>
+      </header>
+      <div v-loading="sourcesLoading" class="rss-source-list">
+        <div
+          v-for="source in sources"
+          :key="source.id"
+          class="rss-source-row"
+          :class="{ active: selectedSourceId === source.id }"
+        >
+          <button type="button" @click="selectSource(source.id)">
+            <strong>{{ source.title || '未命名 RSS' }}</strong>
+            <small>{{ source.url }}</small>
+          </button>
+          <span class="rss-source-tools">
+            <el-tag size="small" :type="source.enabled === false ? 'info' : 'success'" effect="plain">
+              {{ source.enabled === false ? '停用' : '启用' }}
+            </el-tag>
+            <el-button size="small" text :loading="refreshingSourceId === source.id" @click="refreshSource(source)">刷新</el-button>
+            <el-button size="small" text @click="openEditor(source)">编辑</el-button>
+            <el-button size="small" text type="danger" @click="removeSource(source)">删除</el-button>
+          </span>
+        </div>
+        <el-empty v-if="!sourcesLoading && !sources.length" description="暂无 RSS 源" />
+      </div>
+    </article>
+
+    <article class="rss-panel">
+      <header class="rss-head">
+        <div>
+          <strong>文章</strong>
+          <span>{{ articleCountText }}</span>
+        </div>
+        <div class="rss-actions">
+          <el-radio-group v-model="articleFilter" size="small" @change="loadArticles">
+            <el-radio-button value="all">全部</el-radio-button>
+            <el-radio-button value="unread">未读</el-radio-button>
+            <el-radio-button value="favorite">收藏</el-radio-button>
+          </el-radio-group>
+          <el-button size="small" :loading="articlesLoading" @click="loadArticles">刷新文章</el-button>
+        </div>
+      </header>
+      <div v-loading="articlesLoading" class="rss-article-list">
+        <article v-for="article in articles" :key="article.id" class="rss-article-row" :class="{ read: article.isRead }">
+          <button type="button" @click="openArticle(article)">
+            <strong>{{ article.title }}</strong>
+            <small>{{ formatDate(article.publishedAt || article.updatedAt) }} · {{ article.author || '未知作者' }}</small>
+            <span>{{ stripHTML(article.summary || article.content || '无摘要') }}</span>
+          </button>
+          <span class="rss-article-tools">
+            <el-button size="small" text @click="toggleRead(article)">
+              {{ article.isRead ? '标未读' : '标已读' }}
+            </el-button>
+            <el-button
+              size="small"
+              text
+              :type="article.favorite ? 'warning' : 'info'"
+              @click="toggleFavorite(article)"
+            >
+              {{ article.favorite ? '已收藏' : '收藏' }}
+            </el-button>
+          </span>
+        </article>
+        <button v-if="articles.length || hasMoreArticles" type="button" class="load-more-rss" :disabled="!hasMoreArticles || articlesLoadingMore" @click="loadMoreArticles">
+          {{ hasMoreArticles ? (articlesLoadingMore ? '加载中...' : '加载更多') : '没有更多啦' }}
+        </button>
+        <el-empty v-if="!articlesLoading && !articles.length" description="暂无 RSS 文章" />
+      </div>
+    </article>
+
+    <el-dialog v-model="editorVisible" :title="editingSourceId ? '编辑 RSS 源' : '新增 RSS 源'" width="520px" :fullscreen="isMobile">
+      <el-form label-position="top">
+        <el-form-item label="名称"><el-input v-model="draft.title" /></el-form-item>
+        <el-form-item label="订阅地址"><el-input v-model="draft.url" /></el-form-item>
+        <el-form-item><el-switch v-model="draft.enabled" active-text="启用" inactive-text="停用" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editorVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingSource" @click="saveSource">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="articleDialogVisible" title="RSS 文章" width="720px" class="rss-reader-dialog" :fullscreen="isMobile">
+      <article v-if="selectedArticle" class="rss-reader">
+        <h2>{{ selectedArticle.title }}</h2>
+        <small>{{ formatDate(selectedArticle.publishedAt || selectedArticle.updatedAt) }} · {{ selectedArticle.author || '未知作者' }}</small>
+        <div class="rss-reader-content" v-html="articleBodyHTML(selectedArticle)" />
+      </article>
+      <template #footer>
+        <el-button @click="articleDialogVisible = false">关闭</el-button>
+        <el-button v-if="selectedArticle" @click="toggleRead(selectedArticle)">
+          {{ selectedArticle.isRead ? '标为未读' : '标为已读' }}
+        </el-button>
+        <el-button v-if="selectedArticle" :type="selectedArticle.favorite ? 'warning' : 'default'" @click="toggleFavorite(selectedArticle)">
+          {{ selectedArticle.favorite ? '取消收藏' : '收藏' }}
+        </el-button>
+        <el-button v-if="selectedArticle?.link" type="primary" @click="openExternal(selectedArticle.link)">打开原文</el-button>
+      </template>
+    </el-dialog>
+  </section>
+</template>
+
+<script setup>
+import { computed, onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { createRSSSource, deleteRSSSource, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
+
+defineProps({
+  isMobile: {
+    type: Boolean,
+    default: false,
+  },
+})
+
+const ARTICLE_LIMIT = 50
+
+const sources = ref([])
+const articles = ref([])
+const selectedSourceId = ref('')
+const sourcesLoading = ref(false)
+const articlesLoading = ref(false)
+const articlesLoadingMore = ref(false)
+const refreshingSourceId = ref(null)
+const editorVisible = ref(false)
+const savingSource = ref(false)
+const editingSourceId = ref(null)
+const draft = ref({ title: '', url: '', enabled: true })
+const articleDialogVisible = ref(false)
+const selectedArticle = ref(null)
+const articleFilter = ref('all')
+const articlePage = ref(1)
+const hasMoreArticles = ref(false)
+
+const articleCountText = computed(() => `${articles.value.length} 篇${hasMoreArticles.value ? '+' : ''}`)
+
+onMounted(async () => {
+  await loadSources()
+  await loadArticles()
+})
+
+async function loadSources() {
+  sourcesLoading.value = true
+  try {
+    const { data } = await listRSSSources()
+    sources.value = data || []
+    if (!selectedSourceId.value && sources.value.length) selectedSourceId.value = sources.value[0].id
+    if (selectedSourceId.value && !sources.value.some(source => source.id === selectedSourceId.value)) {
+      selectedSourceId.value = sources.value[0]?.id || ''
+    }
+  } catch (err) {
+    ElMessage.error(readError(err, '加载 RSS 源失败'))
+  } finally {
+    sourcesLoading.value = false
+  }
+}
+
+async function selectSource(sourceId) {
+  selectedSourceId.value = sourceId
+  await loadArticles()
+}
+
+async function loadArticles() {
+  articlesLoading.value = true
+  articlePage.value = 1
+  try {
+    const { data } = await listRSSArticles(articleParams(articlePage.value))
+    const result = normalizeArticleResult(data, articlePage.value)
+    articles.value = result.items
+    hasMoreArticles.value = result.hasMore
+  } catch (err) {
+    ElMessage.error(readError(err, '加载 RSS 文章失败'))
+  } finally {
+    articlesLoading.value = false
+  }
+}
+
+async function loadMoreArticles() {
+  if (!hasMoreArticles.value || articlesLoadingMore.value) return
+  articlesLoadingMore.value = true
+  try {
+    const nextPage = articlePage.value + 1
+    const { data } = await listRSSArticles(articleParams(nextPage))
+    const result = normalizeArticleResult(data, nextPage)
+    const known = new Set(articles.value.map(article => article.id))
+    const nextItems = result.items.filter(article => !known.has(article.id))
+    articles.value = [...articles.value, ...nextItems]
+    articlePage.value = result.page || nextPage
+    hasMoreArticles.value = result.hasMore && nextItems.length > 0
+  } catch (err) {
+    ElMessage.error(readError(err, '加载更多 RSS 文章失败'))
+  } finally {
+    articlesLoadingMore.value = false
+  }
+}
+
+function articleParams(page) {
+  const params = { page, limit: ARTICLE_LIMIT }
+  if (selectedSourceId.value) params.sourceId = selectedSourceId.value
+  if (articleFilter.value === 'unread') params.unread = true
+  if (articleFilter.value === 'favorite') params.favorite = true
+  return params
+}
+
+function normalizeArticleResult(data, fallbackPage) {
+  if (Array.isArray(data)) return { items: data, page: fallbackPage, hasMore: false }
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    page: Number(data?.page || fallbackPage),
+    hasMore: !!data?.hasMore,
+  }
+}
+
+function openEditor(source = null) {
+  editingSourceId.value = source?.id || null
+  draft.value = {
+    title: source?.title || '',
+    url: source?.url || '',
+    enabled: source?.enabled ?? true,
+  }
+  editorVisible.value = true
+}
+
+async function saveSource() {
+  if (!draft.value.url.trim()) {
+    ElMessage.warning('RSS 地址不能为空')
+    return
+  }
+  savingSource.value = true
+  try {
+    const payload = { ...draft.value, url: draft.value.url.trim() }
+    if (editingSourceId.value) {
+      await updateRSSSource(editingSourceId.value, payload)
+      ElMessage.success('RSS 源已更新')
+    } else {
+      await createRSSSource(payload)
+      ElMessage.success('RSS 源已创建')
+    }
+    editorVisible.value = false
+    await loadSources()
+    await loadArticles()
+  } catch (err) {
+    ElMessage.error(readError(err, '保存 RSS 源失败'))
+  } finally {
+    savingSource.value = false
+  }
+}
+
+async function refreshSource(source) {
+  refreshingSourceId.value = source.id
+  try {
+    const { data } = await refreshRSSSource(source.id)
+    ElMessage.success(`已同步 ${data.imported || 0}/${data.total || 0} 篇文章`)
+    await loadArticles()
+  } catch (err) {
+    ElMessage.error(readError(err, '刷新 RSS 源失败'))
+  } finally {
+    refreshingSourceId.value = null
+  }
+}
+
+async function removeSource(source) {
+  try {
+    await ElMessageBox.confirm(`确定删除 RSS 源“${source.title}”吗？文章缓存也会删除。`, '删除 RSS 源', { type: 'warning' })
+    await deleteRSSSource(source.id)
+    sources.value = sources.value.filter(item => item.id !== source.id)
+    if (selectedSourceId.value === source.id) selectedSourceId.value = sources.value[0]?.id || ''
+    await loadArticles()
+    ElMessage.success('RSS 源已删除')
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '删除 RSS 源失败'))
+  }
+}
+
+async function openArticle(article) {
+  selectedArticle.value = article
+  articleDialogVisible.value = true
+  if (!article.isRead) await updateArticleState(article, { isRead: true }, { silent: true })
+}
+
+async function toggleFavorite(article) {
+  await updateArticleState(article, { favorite: !article.favorite })
+}
+
+async function toggleRead(article) {
+  await updateArticleState(article, { isRead: !article.isRead })
+}
+
+async function updateArticleState(article, payload, { silent = false } = {}) {
+  try {
+    const { data } = await updateRSSArticle(article.id, payload)
+    Object.assign(article, data)
+    if (selectedArticle.value?.id === article.id) selectedArticle.value = article
+    if (shouldHideArticle(article)) articles.value = articles.value.filter(item => item.id !== article.id)
+    if (!silent) ElMessage.success('文章状态已更新')
+  } catch (err) {
+    ElMessage.error(readError(err, '更新 RSS 文章失败'))
+  }
+}
+
+function shouldHideArticle(article) {
+  if (articleFilter.value === 'unread' && article.isRead) return true
+  if (articleFilter.value === 'favorite' && !article.favorite) return true
+  return false
+}
+
+function articleBodyHTML(article) {
+  return article?.content || article?.summary || '无正文内容'
+}
+
+function stripHTML(value) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim()
+}
+
+function openExternal(url) {
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function formatDate(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString()
+}
+
+function readError(err, fallback) {
+  return err?.response?.data?.error?.message || err?.response?.data?.error || fallback
+}
+</script>
+
+<style scoped>
+.rss-manager {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 14px;
+  min-height: calc(100vh - 150px);
+}
+
+.rss-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.rss-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.rss-head > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.rss-head span,
+.rss-source-row small,
+.rss-article-row small,
+.rss-article-row span {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.rss-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rss-source-list,
+.rss-article-list {
+  display: grid;
+  align-content: start;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+}
+
+.rss-source-row,
+.rss-article-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.rss-source-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.rss-source-row.active {
+  background: rgba(145, 118, 62, 0.12);
+}
+
+.rss-source-row button,
+.rss-article-row button {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 0;
+  color: var(--app-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.rss-source-row strong,
+.rss-source-row small,
+.rss-article-row strong,
+.rss-article-row small,
+.rss-article-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rss-source-tools,
+.rss-article-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rss-article-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.rss-article-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.rss-article-row.read {
+  opacity: 0.68;
+}
+
+.load-more-rss {
+  padding: 12px;
+  color: var(--app-primary-strong);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--app-border);
+  cursor: pointer;
+}
+
+.load-more-rss:disabled {
+  color: var(--app-text-muted);
+  cursor: default;
+}
+
+.rss-reader {
+  display: grid;
+  gap: 12px;
+}
+
+.rss-reader h2 {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 24px;
+  line-height: 1.35;
+}
+
+.rss-reader small {
+  color: var(--app-text-muted);
+}
+
+.rss-reader-content {
+  max-height: min(62vh, 680px);
+  overflow: auto;
+  color: var(--app-text);
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+.rss-reader-content :deep(img),
+.rss-reader-content :deep(video) {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 750px) {
+  .rss-manager {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .rss-source-list,
+  .rss-article-list {
+    max-height: 40vh;
+  }
+
+  .rss-source-row,
+  .rss-article-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rss-source-tools,
+  .rss-article-tools {
+    justify-content: flex-start;
+  }
+
+  .rss-reader-dialog :deep(.el-dialog) {
+    width: 94vw !important;
+    margin-top: 3vh;
+  }
+
+  .rss-reader-content {
+    max-height: 70vh;
+  }
+}
+</style>

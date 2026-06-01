@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1064,6 +1065,74 @@ func TestClearSources(t *testing.T) {
 	}
 }
 
+func TestSaveAndRestoreDefaultSources(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	if err := server.db.Create(&models.BookSource{Name: "默认源一", BaseURL: "https://one.example", Enabled: true, Group: "默认"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.BookSource{Name: "默认源二", BaseURL: "https://two.example", Enabled: false}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sources/default/save", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"count":2`) {
+		t.Fatalf("save default sources: expected count, got %d: %s", w.Code, w.Body.String())
+	}
+
+	reqClear := httptest.NewRequest(http.MethodDelete, "/api/sources", nil)
+	reqClear.Header.Set("Authorization", token)
+	wClear := httptest.NewRecorder()
+	router.ServeHTTP(wClear, reqClear)
+	if wClear.Code != http.StatusOK {
+		t.Fatalf("clear sources before restore: expected 200, got %d: %s", wClear.Code, wClear.Body.String())
+	}
+	if err := server.db.Create(&models.BookSource{Name: "临时源", BaseURL: "https://temp.example", Enabled: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	reqStatus := httptest.NewRequest(http.MethodGet, "/api/sources/default", nil)
+	reqStatus.Header.Set("Authorization", token)
+	wStatus := httptest.NewRecorder()
+	router.ServeHTTP(wStatus, reqStatus)
+	if wStatus.Code != http.StatusOK || !strings.Contains(wStatus.Body.String(), `"configured":true`) {
+		t.Fatalf("default source status: expected configured, got %d: %s", wStatus.Code, wStatus.Body.String())
+	}
+
+	reqRestore := httptest.NewRequest(http.MethodPost, "/api/sources/default/restore", nil)
+	reqRestore.Header.Set("Authorization", token)
+	wRestore := httptest.NewRecorder()
+	router.ServeHTTP(wRestore, reqRestore)
+	if wRestore.Code != http.StatusOK || !strings.Contains(wRestore.Body.String(), `"imported":2`) {
+		t.Fatalf("restore default sources: expected restored sources, got %d: %s", wRestore.Code, wRestore.Body.String())
+	}
+
+	var sources []models.BookSource
+	if err := server.db.Order("name asc").Find(&sources).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Name != "默认源一" || sources[0].Group != "默认" || sources[1].Name != "默认源二" || sources[1].Enabled {
+		t.Fatalf("unexpected restored sources: %+v", sources)
+	}
+}
+
+func TestRestoreDefaultSourcesRequiresSnapshot(t *testing.T) {
+	router, _ := setupTestServer(t)
+	token := authHeader(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sources/default/restore", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("restore default sources: expected 404 without snapshot, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestImportRemoteSourceUsesRawJSON(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -1182,11 +1251,16 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	token := authHeader(t, router)
 
 	upstream := "https://source.test"
+	var searchMu sync.Mutex
+	searchQueries := make([]string, 0)
 	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			var body string
 			switch req.URL.Path {
 			case "/search":
+				searchMu.Lock()
+				searchQueries = append(searchQueries, req.URL.Query().Get("q"))
+				searchMu.Unlock()
 				body = `<html><body>
 					<div class="book">
 						<a class="link" href="/book-new"><span class="title">候选书</span></a>
@@ -1342,6 +1416,26 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	}
 	if len(pagedCandidates.List) == 0 {
 		t.Fatalf("expected paged candidates, got %+v", pagedCandidates)
+	}
+
+	queryReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/source-candidates?group=%E4%BC%98%E5%85%88&q=%E5%88%AB%E5%90%8D&limit=1", nil)
+	queryReq.Header.Set("Authorization", token)
+	queryW := httptest.NewRecorder()
+	router.ServeHTTP(queryW, queryReq)
+	if queryW.Code != http.StatusOK {
+		t.Fatalf("queried source candidates: expected 200, got %d: %s", queryW.Code, queryW.Body.String())
+	}
+	searchMu.Lock()
+	foundQuery := false
+	for _, query := range searchQueries {
+		if query == "别名" {
+			foundQuery = true
+			break
+		}
+	}
+	searchMu.Unlock()
+	if !foundQuery {
+		t.Fatalf("expected source candidate search to use custom query, got %#v", searchQueries)
 	}
 
 	body := `{"sourceId":` + strconv.FormatUint(uint64(target.SourceID), 10) + `,"bookUrl":` + strconv.Quote(target.BookURL) + `,"title":"候选书","author":"新作者"}`
@@ -3328,6 +3422,50 @@ func TestRSSArticleStateCanBeUpdatedAndFiltered(t *testing.T) {
 	}
 }
 
+func TestRSSArticlesSupportPagination(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := models.RSSSource{UserID: user.ID, Title: "RSS", URL: "https://rss.example/feed.xml", Enabled: true}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		article := models.RSSArticle{
+			UserID:      user.ID,
+			SourceID:    source.ID,
+			Title:       fmt.Sprintf("分页文章%d", i+1),
+			Link:        fmt.Sprintf("https://rss.example/%d", i+1),
+			PublishedAt: time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC),
+		}
+		if err := server.db.Create(&article).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rss/articles?page=1&limit=2", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"hasMore":true`) || !strings.Contains(w.Body.String(), "分页文章3") {
+		t.Fatalf("rss page 1 should include newest rows and hasMore=true, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "分页文章1") {
+		t.Fatalf("rss page 1 should respect limit, got %s", w.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/rss/articles?page=2&limit=2", nil)
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK || !strings.Contains(w2.Body.String(), `"hasMore":false`) || !strings.Contains(w2.Body.String(), "分页文章1") {
+		t.Fatalf("rss page 2 should include remaining row, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
 func TestExploreBooksUsesExploreURL(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -3379,6 +3517,30 @@ func TestExploreBooksUsesExploreURL(t *testing.T) {
 	}
 }
 
+func TestExploreSourcesExposeExploreGroups(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	source := models.BookSource{Name: "分组探索源", BaseURL: "https://explore.example", Charset: "utf-8", Enabled: true, Group: "玄幻"}
+	if err := source.SetRules(models.BookSourceRule{
+		ExploreURL: "热门::https://explore.example/top/{page}\n完本::https://explore.example/done/{page}\n\n新书::https://explore.example/new/{page}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/explore/sources", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, `"exploreGroups"`) || !strings.Contains(body, `"热门"`) || !strings.Contains(body, `"新书"`) {
+		t.Fatalf("explore sources: expected parsed groups, got %d: %s", w.Code, body)
+	}
+}
+
 func TestExploreBooksSupportsPagePlaceholder(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -3421,6 +3583,52 @@ func TestExploreBooksSupportsPagePlaceholder(t *testing.T) {
 	}
 	if requested != "https://explore.example/top/2" {
 		t.Fatalf("expected page placeholder URL, got %q", requested)
+	}
+}
+
+func TestExploreBooksUsesSelectedExploreURL(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	var requested string
+
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requested = req.URL.String()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`<html><body>
+					<div class="book"><a class="link" href="/book-category"><span class="title">分类书</span></a></div>
+				</body></html>`)),
+				Header:  make(http.Header),
+				Request: req,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	source := models.BookSource{Name: "分类探索源", BaseURL: "https://explore.example", Charset: "utf-8", Enabled: true}
+	if err := source.SetRules(models.BookSourceRule{
+		ExploreURL:   "https://explore.example/top/{page}",
+		BookListRule: ".book",
+		BookNameRule: ".title|text",
+		BookURLRule:  ".link|attr:href",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	selected := url.QueryEscape("https://explore.example/category/{page}")
+	req := httptest.NewRequest(http.MethodGet, "/api/explore/"+strconv.FormatUint(uint64(source.ID), 10)+"?page=3&url="+selected, nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "分类书") {
+		t.Fatalf("explore selected url: expected result, got %d: %s", w.Code, w.Body.String())
+	}
+	if requested != "https://explore.example/category/3" {
+		t.Fatalf("expected selected explore URL, got %q", requested)
 	}
 }
 

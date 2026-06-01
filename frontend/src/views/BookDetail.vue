@@ -89,6 +89,7 @@
                 :changing-source="changingSource"
                 :current-source-name="currentSource?.name || ''"
                 :group="sourceGroup"
+                :query="sourceQuery"
                 :groups="sourceGroups"
                 :has-more="sourceHasMore"
                 :stats="sourceStats"
@@ -96,6 +97,7 @@
                 @refresh="loadSourceCandidates"
                 @load-more="loadMoreSourceCandidates"
                 @group-change="changeSourceGroup"
+                @query-change="changeSourceQuery"
                 @change="changeSource"
               />
               <p v-if="changeMessage" :class="changeError ? 'msg-error' : 'msg-success'">{{ changeMessage }}</p>
@@ -173,6 +175,7 @@ const availableSources = ref([])
 const sourceCandidates = ref([])
 const loadingSourceCandidates = ref(false)
 const sourceGroup = ref('')
+const sourceQuery = ref('')
 const sourceOffset = ref(0)
 const sourceHasMore = ref(false)
 const sourceStats = ref(null)
@@ -249,6 +252,9 @@ async function load() {
     chapters.value = chapterRes.data
     bookmarks.value = bookmarkRes.data
     availableSources.value = sourceRes.data.filter(source => source.enabled)
+    sourceQuery.value = ''
+    sourceCandidates.value = []
+    sourceOffset.value = 0
     await refreshBrowserCacheMap()
     await loadSourceCandidates()
     categoryDraft.value = book.value.categoryId ? String(book.value.categoryId) : ''
@@ -555,6 +561,7 @@ async function loadSourceCandidates({ append = false } = {}) {
     }
     const { data } = await listBookSourceCandidates(book.value.id, {
       group: sourceGroup.value || undefined,
+      q: sourceQuery.value.trim() || undefined,
       offset: sourceOffset.value,
       limit: 10,
       paged: 1,
@@ -586,6 +593,11 @@ function changeSourceGroup(value) {
   sourceGroup.value = value || ''
   sourceStats.value = null
   loadSourceCandidates()
+}
+
+function changeSourceQuery(value) {
+  sourceQuery.value = value || ''
+  sourceStats.value = null
 }
 
 function mergeSourceCandidates(existing, incoming) {

@@ -11,6 +11,10 @@
           <el-button :icon="Upload">导入</el-button>
         </el-upload>
         <el-button :icon="Link" @click="showRemote = true">远程书源</el-button>
+        <el-button plain :disabled="!sources.length" :loading="defaultSaving" @click="setCurrentAsDefault">设为默认</el-button>
+        <el-button plain :disabled="!defaultSource.configured" :loading="defaultRestoring" @click="restoreDefaults">
+          恢复默认{{ defaultSource.count ? ` ${defaultSource.count}` : '' }}
+        </el-button>
         <el-button type="danger" plain :disabled="!sources.length" @click="clearAllSources">清空</el-button>
       </div>
     </header>
@@ -230,12 +234,15 @@ import {
   batchTestSources,
   clearSources,
   createSource,
+  defaultSourceStatus,
   deleteSource as deleteSourceApi,
   exportSources as exportSourcesApi,
   importRemoteSource,
   importSources,
   listSources,
   previewRemoteSource,
+  restoreDefaultSources,
+  saveDefaultSources,
   testSourceChapter,
   testSourceContent,
   testSourceSearch,
@@ -252,6 +259,9 @@ const selection = ref([])
 const health = ref({})
 const checking = ref(false)
 const failedOnly = ref(false)
+const defaultSource = reactive({ configured: false, count: 0 })
+const defaultSaving = ref(false)
+const defaultRestoring = ref(false)
 
 const showRemote = ref(false)
 const remoteURL = ref('')
@@ -327,7 +337,7 @@ const editorDrawerSize = computed(() => isMobileDialog.value ? '88%' : '520px')
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
-  await loadSources()
+  await Promise.all([loadSources(), loadDefaultSourceStatus()])
   applyRouteAction()
 })
 
@@ -343,6 +353,17 @@ watch(
 async function loadSources() {
   const { data } = await listSources()
   sources.value = data
+}
+
+async function loadDefaultSourceStatus() {
+  try {
+    const { data } = await defaultSourceStatus()
+    defaultSource.configured = !!data?.configured
+    defaultSource.count = Number(data?.count || 0)
+  } catch {
+    defaultSource.configured = false
+    defaultSource.count = 0
+  }
 }
 
 function applyRouteAction() {
@@ -525,6 +546,50 @@ async function clearAllSources() {
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '清空书源失败'))
+  }
+}
+
+async function setCurrentAsDefault() {
+  if (!sources.value.length) return
+  defaultSaving.value = true
+  try {
+    await ElMessageBox.confirm(
+      `确定将当前 ${sources.value.length} 个书源保存为默认书源吗？之后“恢复默认”会用它替换当前书源。`,
+      '设为默认书源',
+      { type: 'warning' },
+    )
+    const { data } = await saveDefaultSources()
+    defaultSource.configured = true
+    defaultSource.count = Number(data.count || sources.value.length)
+    ElMessage.success(`已保存 ${defaultSource.count} 个默认书源`)
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '保存默认书源失败'))
+  } finally {
+    defaultSaving.value = false
+  }
+}
+
+async function restoreDefaults() {
+  if (!defaultSource.configured) return
+  defaultRestoring.value = true
+  try {
+    await ElMessageBox.confirm(
+      `确定恢复默认书源吗？当前书源会被默认快照中的 ${defaultSource.count || 0} 个书源替换。`,
+      '恢复默认书源',
+      { type: 'warning' },
+    )
+    const { data } = await restoreDefaultSources()
+    selection.value = []
+    health.value = {}
+    failedOnly.value = false
+    ElMessage.success(sourceImportMessage(data))
+    await Promise.all([loadSources(), loadDefaultSourceStatus()])
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '恢复默认书源失败'))
+  } finally {
+    defaultRestoring.value = false
   }
 }
 

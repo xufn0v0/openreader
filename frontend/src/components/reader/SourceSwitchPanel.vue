@@ -7,6 +7,16 @@
     title="按当前书名搜索候选书源，切换时会使用候选书籍地址重新抓取目录。"
   />
   <div class="drawer-actions">
+    <el-input
+      :model-value="query"
+      size="small"
+      clearable
+      class="source-query-input"
+      placeholder="搜索书名或别名"
+      @update:model-value="$emit('queryChange', $event || '')"
+      @keyup.enter="$emit('refresh')"
+      @clear="$emit('refresh')"
+    />
     <el-select
       :model-value="group"
       size="small"
@@ -71,6 +81,10 @@ defineProps({
     type: String,
     default: '',
   },
+  query: {
+    type: String,
+    default: '',
+  },
   groups: {
     type: Array,
     default: () => [],
@@ -93,7 +107,7 @@ defineProps({
   },
 })
 
-defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
+defineEmits(['refresh', 'loadMore', 'groupChange', 'queryChange', 'showInfo', 'change'])
 </script>
 
 <style scoped>
@@ -117,6 +131,10 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
 
 .source-group-select {
   width: 132px;
+}
+
+.source-query-input {
+  width: min(220px, 100%);
 }
 
 .source-switch-list {
@@ -209,6 +227,11 @@ defineEmits(['refresh', 'loadMore', 'groupChange', 'showInfo', 'change'])
   }
 
   .source-group-select {
+    width: auto;
+    grid-column: 1 / -1;
+  }
+
+  .source-query-input {
     width: auto;
     grid-column: 1 / -1;
   }
