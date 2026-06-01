@@ -3354,6 +3354,50 @@ func TestRSSArticleStateCanBeUpdatedAndFiltered(t *testing.T) {
 	}
 }
 
+func TestRSSArticlesSupportPagination(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := models.RSSSource{UserID: user.ID, Title: "RSS", URL: "https://rss.example/feed.xml", Enabled: true}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		article := models.RSSArticle{
+			UserID:      user.ID,
+			SourceID:    source.ID,
+			Title:       fmt.Sprintf("分页文章%d", i+1),
+			Link:        fmt.Sprintf("https://rss.example/%d", i+1),
+			PublishedAt: time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC),
+		}
+		if err := server.db.Create(&article).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rss/articles?page=1&limit=2", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"hasMore":true`) || !strings.Contains(w.Body.String(), "分页文章3") {
+		t.Fatalf("rss page 1 should include newest rows and hasMore=true, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "分页文章1") {
+		t.Fatalf("rss page 1 should respect limit, got %s", w.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/rss/articles?page=2&limit=2", nil)
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK || !strings.Contains(w2.Body.String(), `"hasMore":false`) || !strings.Contains(w2.Body.String(), "分页文章1") {
+		t.Fatalf("rss page 2 should include remaining row, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
 func TestExploreBooksUsesExploreURL(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
