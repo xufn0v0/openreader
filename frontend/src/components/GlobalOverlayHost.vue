@@ -220,6 +220,7 @@
       <span class="check-tip">已选择 {{ selectedBookIds.length }} 个</span>
       <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchCacheBooks">批量服务器缓存10章</el-button>
       <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchClearCache">批量清服务器缓存</el-button>
+      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchExportBooks">批量导出</el-button>
     </div>
   </el-drawer>
 
@@ -1486,6 +1487,21 @@ async function batchDeleteBooks() {
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '批量删除失败'))
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+async function batchExportBooks() {
+  if (!selectedBookIds.value.length) return
+  batchBusy.value = true
+  try {
+    const bookIds = [...selectedBookIds.value]
+    const blob = await bookshelf.exportSelectedBooks(bookIds)
+    downloadBlob(blob, `openreader-books-${bookIds.length}.json`)
+    ElMessage.success(`已导出 ${bookIds.length} 本书`)
+  } catch (err) {
+    ElMessage.error(readError(err, '批量导出失败'))
   } finally {
     batchBusy.value = false
   }

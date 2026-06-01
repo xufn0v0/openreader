@@ -18,7 +18,7 @@
 | 设置写入路径 | `ReadSettings.vue` `setReadMethod/setPageMode`、`Index.vue` 搜索设置 | 本批收敛为单一 computed setter 写入；阅读器设置抽屉、设置页、首页侧边栏搜索设置不再同时通过 `v-model`、`@input`、`@change` 双写同一项 | 本批完成 |
 | 目录定位 | `PopCatalog.vue` + `Reader.vue` 当前章节定位 | 已有打开目录时定位当前章节的逻辑；需继续真机/浏览器验证 | 待复验 |
 | 书籍信息 | `components/BookInfo.vue` | 已有全局 `BookInfoDialog/Panel`；书架、搜索、阅读器仍需逐个确认全部复用 | 继续对齐 |
-| 书架管理 | `components/BookManage.vue`、`BookGroup.vue` | 已有全局弹层雏形；批量缓存/导出/分组仍受后端能力限制 | 待补齐 |
+| 书架管理 | `components/BookManage.vue`、`BookGroup.vue` | 已有全局弹层；本批补齐批量导出入口，批量删除/分组/服务器缓存/清缓存均走真实后端接口 | 继续对齐移动端细节 |
 | 书源管理 | `components/BookSource.vue`、首页书源入口 | 基础管理和调试已有；导入预览、恢复默认、失效检测、阅读器换源搜索更多仍待补齐 | 待补齐 |
 | 本地书仓 | `components/LocalStore.vue` | 本地书已支持导入和正文搜索索引；文件浏览器完整操作仍需对齐 | 待补齐 |
 | WebDAV/备份 | `components/WebDAV.vue` | 设置页和全局弹层已有能力；仍需统一文件浏览器交互 | 待补齐 |
