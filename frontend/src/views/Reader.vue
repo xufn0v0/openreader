@@ -1927,7 +1927,7 @@ function handleReaderWheel(event) {
   if (isScrollRead.value) {
     if (!contentEl.value) return
     event.preventDefault()
-    contentEl.value.scrollTop += delta
+    scrollReaderByWheel(delta)
     return
   }
   event.preventDefault()
@@ -1939,6 +1939,23 @@ function handleReaderWheel(event) {
   } else {
     previousPage()
   }
+}
+
+function scrollReaderByWheel(delta) {
+  const el = contentEl.value
+  if (!el) return
+  const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+  const atTop = el.scrollTop <= 2
+  const atBottom = el.scrollTop >= bottom - 2
+  if (delta < 0 && atTop) {
+    previousPage()
+    return
+  }
+  if (delta > 0 && atBottom) {
+    nextPage()
+    return
+  }
+  el.scrollTop = Math.max(0, Math.min(bottom, el.scrollTop + delta))
 }
 
 function toggleReaderChrome() {
