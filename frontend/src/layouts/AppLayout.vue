@@ -184,6 +184,8 @@ const cacheLoading = ref(false)
 const cacheClearing = ref(false)
 const MOBILE_NAV_EDGE = 48
 const MOBILE_NAV_TRIGGER = 72
+const FOREGROUND_REFRESH_INTERVAL = 5000
+let lastForegroundRefreshAt = 0
 const { connected: syncConnected, connect, disconnect } = useSync()
 
 const navSections = computed(() => [
@@ -459,6 +461,25 @@ async function refreshShelfData() {
   router.push({ name: 'home' })
 }
 
+function refreshShelfInForeground() {
+  if (!userStore.token) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  const now = Date.now()
+  if (now - lastForegroundRefreshAt < FOREGROUND_REFRESH_INTERVAL) return
+  lastForegroundRefreshAt = now
+  Promise.all([
+    bookshelf.loadCategories({ force: true }),
+    bookshelf.loadBooks({ force: true, all: true }),
+  ]).catch(() => {})
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    connect()
+    refreshShelfInForeground()
+  }
+}
+
 function setOffline() {
   offline.value = true
 }
@@ -566,6 +587,8 @@ onMounted(() => {
   window.addEventListener('online', setOnline)
   window.addEventListener('resize', updateViewportFlags)
   window.addEventListener('orientationchange', updateViewportFlags)
+  window.addEventListener('focus', refreshShelfInForeground)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('openreader:toggle-mobile-nav', toggleMobileNavigation)
   offline.value = !navigator.onLine
   if (userStore.token && !userStore.profile) {
@@ -583,6 +606,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', setOnline)
   window.removeEventListener('resize', updateViewportFlags)
   window.removeEventListener('orientationchange', updateViewportFlags)
+  window.removeEventListener('focus', refreshShelfInForeground)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('openreader:toggle-mobile-nav', toggleMobileNavigation)
 })
 </script>

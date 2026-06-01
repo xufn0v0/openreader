@@ -169,12 +169,40 @@ export const useReaderStore = defineStore('reader', {
       if (data?.bookId) {
         if (progressUpdatedAt(local) > progressUpdatedAt(data)) {
           this.applyProgress(local)
+          this.syncLocalProgress(local)
           return local
         }
         this.applyProgress(data)
         return data
       }
+      if (local?.bookId) this.syncLocalProgress(local)
       return local || data
+    },
+    async syncLocalProgress(progress) {
+      if (!progress?.bookId) return null
+      try {
+        const { data } = await api.put('/progress', {
+          bookId: progress.bookId,
+          chapterId: progress.chapterId,
+          chapterIndex: progress.chapterIndex,
+          offset: progress.offset,
+          percent: progress.percent,
+          chapterPercent: progress.chapterPercent,
+          chapterTitle: progress.chapterTitle,
+          mode: progress.mode || this.mode,
+        })
+        const next = data?.bookId ? {
+          ...data,
+          chapterPercent: Number.isFinite(Number(data.chapterPercent))
+            ? Number(data.chapterPercent)
+            : progress.chapterPercent,
+          chapterTitle: data.chapterTitle || progress.chapterTitle,
+        } : data
+        this.applyProgress(next)
+        return next
+      } catch {
+        return null
+      }
     },
   },
 })
