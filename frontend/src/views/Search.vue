@@ -161,6 +161,7 @@ import BookCover from '../components/BookCover.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
+import { usePreferencesStore } from '../stores/preferences'
 import { newestBookProgress } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
@@ -169,17 +170,18 @@ const router = useRouter()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
+const preferences = usePreferencesStore()
 
 const keyword = ref('')
 const searchMode = ref(route.query.mode === 'local' ? 'local' : 'remote')
 const sources = ref([])
 const selectedIds = ref([])
-const selectedGroup = ref(typeof route.query.group === 'string' ? route.query.group : '')
-const singleSourceId = ref(Number(route.query.sourceId || 0) || null)
+const selectedGroup = ref(typeof route.query.group === 'string' ? route.query.group : preferences.search.group)
+const singleSourceId = ref(Number(route.query.sourceId || preferences.search.sourceId || 0) || null)
 const targetCategoryId = ref('')
-const searchType = ref(['all', 'group', 'single', 'custom'].includes(route.query.searchType) ? route.query.searchType : 'all')
+const searchType = ref(['all', 'group', 'single', 'custom'].includes(route.query.searchType) ? route.query.searchType : preferences.search.searchType)
 const concurrentOptions = [8, 16, 32, 60]
-const concurrentCount = ref(concurrentOptions.includes(Number(route.query.concurrent)) ? Number(route.query.concurrent) : 60)
+const concurrentCount = ref(concurrentOptions.includes(Number(route.query.concurrent)) ? Number(route.query.concurrent) : preferences.search.concurrent)
 const results = ref([])
 const searching = ref(false)
 const searched = ref(false)
@@ -254,7 +256,11 @@ onMounted(async () => {
   if (keyword.value || searchMode.value === 'local') doSearch()
 })
 
-watch(searchType, syncSelection)
+watch(searchType, () => {
+  syncSelection()
+  saveSearchPreference()
+})
+watch([selectedGroup, singleSourceId, concurrentCount], saveSearchPreference)
 watch(() => route.query.mode, (mode) => {
   const nextMode = mode === 'local' ? 'local' : 'remote'
   if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
@@ -302,6 +308,16 @@ function syncSelection() {
   } else if (searchType.value === 'single') {
     selectedIds.value = singleSourceId.value ? [singleSourceId.value] : []
   }
+}
+
+function saveSearchPreference() {
+  if (searchType.value === 'custom') return
+  preferences.setSearchConfig({
+    searchType: searchType.value,
+    group: selectedGroup.value,
+    sourceId: singleSourceId.value || '',
+    concurrent: concurrentCount.value,
+  })
 }
 
 function toggleAll() {

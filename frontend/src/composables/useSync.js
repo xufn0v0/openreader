@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { useReaderStore } from '../stores/reader'
 import { useBookshelfStore } from '../stores/bookshelf'
+import { usePreferencesStore } from '../stores/preferences'
 
 const connected = ref(false)
 let socket
@@ -12,6 +13,7 @@ const MAX_RECONNECT_DELAY = 15000
 export function useSync() {
   const reader = useReaderStore()
   const bookshelf = useBookshelfStore()
+  const preferences = usePreferencesStore()
 
   function connect() {
     const token = localStorage.getItem('openreader_token')
@@ -51,6 +53,9 @@ export function useSync() {
       }
       if (message.type === 'settings_update' && message.payload?.key === 'reader') {
         reader.loadReaderSettings().catch(() => {})
+      }
+      if (message.type === 'settings_update' && ['shelf', 'search'].includes(message.payload?.key)) {
+        preferences.loadPreference(message.payload.key).catch(() => {})
       }
     })
   }

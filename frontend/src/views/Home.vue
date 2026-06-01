@@ -107,6 +107,7 @@ import { Close, Edit, Grid, List, Menu } from '@element-plus/icons-vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
+import { usePreferencesStore } from '../stores/preferences'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
@@ -115,12 +116,13 @@ const route = useRoute()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
+const preferences = usePreferencesStore()
 
 const keyword = ref('')
 const selectedGroup = ref('')
 const showBookEditButton = ref(false)
 const refreshLoading = ref(false)
-const shelfView = ref(readStoredShelfView())
+const shelfView = computed(() => preferences.shelf.view)
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 const MINI_INTERFACE_MAX_WIDTH = 750
 
@@ -245,12 +247,7 @@ function handleBookRowClick(book) {
 }
 
 function setShelfView(view) {
-  shelfView.value = view === 'list' ? 'list' : 'grid'
-  try {
-    window.localStorage?.setItem('openreader_shelf_view', shelfView.value)
-  } catch {
-    // Private or restricted browser storage should not block the shelf UI.
-  }
+  preferences.setShelfView(view)
 }
 
 function readChapterTitle(book) {
@@ -348,14 +345,6 @@ function coverStyle(book) {
 
 function updateViewportFlags() {
   windowWidth.value = window.innerWidth
-}
-
-function readStoredShelfView() {
-  try {
-    return window.localStorage?.getItem('openreader_shelf_view') === 'list' ? 'list' : 'grid'
-  } catch {
-    return 'grid'
-  }
 }
 
 function toggleMobileNavigation() {
