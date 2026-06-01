@@ -133,6 +133,50 @@ func TestRegisterAndLogin(t *testing.T) {
 	}
 }
 
+func TestUserReaderSettingsRoundTrip(t *testing.T) {
+	router, _ := setupTestServer(t)
+	token := authHeader(t, router)
+
+	body := `{"value":{"fontSize":22,"pageMode":"mobile","mode":"scroll"},"baseUpdatedAt":""}`
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/reader", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("save settings: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var saved struct {
+		Key       string         `json:"key"`
+		Value     map[string]any `json:"value"`
+		UpdatedAt string         `json:"updatedAt"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Key != "reader" || saved.Value["pageMode"] != "mobile" || saved.Value["mode"] != "scroll" || saved.UpdatedAt == "" {
+		t.Fatalf("unexpected saved settings: %+v", saved)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/settings/reader", nil)
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("load settings: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var loaded struct {
+		Value map[string]any `json:"value"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Value["fontSize"].(float64) != 22 {
+		t.Fatalf("unexpected loaded settings: %+v", loaded.Value)
+	}
+}
+
 func TestAdminUsersIncludesGlobalSourceCount(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

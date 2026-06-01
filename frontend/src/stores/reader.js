@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import api from '../api/client'
 import { newestProgress as pickNewestProgress, progressUpdatedAt } from '../utils/bookOrder'
 
+let readerSettingsSyncTimer
+
 export const themePresets = {
   parchment: { label: '羊皮纸', bg: '#f4e9bd', text: '#24282c' },
   white:    { label: '纯白',   bg: '#ffffff', text: '#1f2933' },
@@ -31,6 +33,10 @@ export const useReaderStore = defineStore('reader', {
     paragraphSpace: 0.2,
     columnWidth: 800,
     settingsVersion: 6,
+    settingsUpdatedAt: '',
+    settingsSyncBaseUpdatedAt: '',
+    settingsSyncing: false,
+    settingsSyncError: '',
     progressByBook: {},
   }),
   persist: true,
@@ -49,74 +55,91 @@ export const useReaderStore = defineStore('reader', {
   actions: {
     setMode(mode) {
       this.mode = ['scroll', 'scroll2', 'flip', 'page'].includes(mode) ? mode : 'page'
+      this.markSettingsDirty()
     },
     setPageMode(pageMode) {
       this.pageMode = pageMode === 'mobile' ? 'mobile' : 'auto'
+      this.markSettingsDirty()
     },
     setClickMethod(method) {
       this.clickMethod = ['next', 'auto', 'none'].includes(method) ? method : 'auto'
+      this.markSettingsDirty()
     },
     setFontFamily(fontFamily) {
       this.fontFamily = ['system', 'serif', 'kai', 'mono'].includes(fontFamily) ? fontFamily : 'system'
+      this.markSettingsDirty()
     },
     setFontSize(fontSize) {
-      this.fontSize = Math.max(8, Math.min(36, Number(fontSize) || 18))
+      this.fontSize = clampNumber(fontSize, 8, 36, 18)
+      this.markSettingsDirty()
     },
     setFontWeight(fontWeight) {
-      this.fontWeight = Math.max(300, Math.min(900, Number(fontWeight) || 400))
+      this.fontWeight = clampNumber(fontWeight, 300, 900, 400)
+      this.markSettingsDirty()
     },
     setTheme(theme) {
       this.theme = theme
+      this.markSettingsDirty()
     },
     setCustomBgColor(color) {
       this.customBgColor = color
+      this.markSettingsDirty()
     },
     setCustomBgImage(image) {
       this.customBgImage = image
+      this.markSettingsDirty()
     },
     setBrightness(brightness) {
-      this.brightness = Math.max(50, Math.min(150, Number(brightness) || 100))
+      this.brightness = clampNumber(brightness, 50, 150, 100)
+      this.markSettingsDirty()
     },
     setAutoReadSpeed(speed) {
-      this.autoReadSpeed = Math.max(2, Math.min(40, Number(speed) || 12))
+      this.autoReadSpeed = clampNumber(speed, 2, 40, 12)
+      this.markSettingsDirty()
     },
     setAnimateDuration(duration) {
-      const value = Number(duration)
-      this.animateDuration = Math.max(0, Math.min(1000, Number.isFinite(value) ? value : 300))
+      this.animateDuration = clampNumber(duration, 0, 1000, 300)
+      this.markSettingsDirty()
     },
     setTTSRate(rate) {
-      this.ttsRate = Math.max(0.5, Math.min(3, Number(rate) || 1))
+      this.ttsRate = clampNumber(rate, 0.5, 3, 1)
+      this.markSettingsDirty()
     },
     setTTSPitch(pitch) {
-      this.ttsPitch = Math.max(0.5, Math.min(2, Number(pitch) || 1))
+      this.ttsPitch = clampNumber(pitch, 0.5, 2, 1)
+      this.markSettingsDirty()
     },
     setTTSVoice(uri) {
       this.ttsVoiceURI = uri || ''
+      this.markSettingsDirty()
     },
     setLineHeight(lineHeight) {
-      this.lineHeight = Math.max(1, Math.min(5, Number(lineHeight) || 1.8))
+      this.lineHeight = clampNumber(lineHeight, 1, 5, 1.8)
+      this.markSettingsDirty()
     },
     setParagraphSpace(paragraphSpace) {
-      this.paragraphSpace = Math.max(0, Math.min(3, Number(paragraphSpace) || 0))
+      this.paragraphSpace = clampNumber(paragraphSpace, 0, 3, 0)
+      this.markSettingsDirty()
     },
     setColumnWidth(columnWidth) {
-      this.columnWidth = Math.max(320, Math.min(1200, Number(columnWidth) || 800))
+      this.columnWidth = clampNumber(columnWidth, 320, 1200, 800)
+      this.markSettingsDirty()
     },
     normalizeSettings() {
       if (!['scroll', 'scroll2', 'flip', 'page'].includes(this.mode)) this.mode = 'page'
       if (!['auto', 'mobile'].includes(this.pageMode)) this.pageMode = 'auto'
       if (!['next', 'auto', 'none'].includes(this.clickMethod)) this.clickMethod = 'auto'
       if (!['system', 'serif', 'kai', 'mono'].includes(this.fontFamily)) this.fontFamily = 'system'
-      this.setFontSize(this.fontSize)
-      this.setFontWeight(this.fontWeight)
-      this.setLineHeight(this.lineHeight)
-      this.setParagraphSpace(this.paragraphSpace)
-      this.setColumnWidth(this.columnWidth)
-      this.setBrightness(this.brightness)
-      this.setAutoReadSpeed(this.autoReadSpeed)
-      this.setAnimateDuration(this.animateDuration)
-      this.setTTSRate(this.ttsRate)
-      this.setTTSPitch(this.ttsPitch)
+      this.fontSize = clampNumber(this.fontSize, 8, 36, 18)
+      this.fontWeight = clampNumber(this.fontWeight, 300, 900, 400)
+      this.lineHeight = clampNumber(this.lineHeight, 1, 5, 1.8)
+      this.paragraphSpace = clampNumber(this.paragraphSpace, 0, 3, 0)
+      this.columnWidth = clampNumber(this.columnWidth, 320, 1200, 800)
+      this.brightness = clampNumber(this.brightness, 50, 150, 100)
+      this.autoReadSpeed = clampNumber(this.autoReadSpeed, 2, 40, 12)
+      this.animateDuration = clampNumber(this.animateDuration, 0, 1000, 300)
+      this.ttsRate = clampNumber(this.ttsRate, 0.5, 3, 1)
+      this.ttsPitch = clampNumber(this.ttsPitch, 0.5, 2, 1)
       if ((this.settingsVersion || 0) < 4) {
         this.fontSize = 18
         this.fontWeight = 400
@@ -125,6 +148,76 @@ export const useReaderStore = defineStore('reader', {
         this.columnWidth = 800
       }
       this.settingsVersion = 7
+      this.settingsSyncing = false
+    },
+    markSettingsDirty() {
+      this.settingsUpdatedAt = new Date().toISOString()
+      this.settingsSyncError = ''
+      this.scheduleSettingsSync()
+    },
+    scheduleSettingsSync() {
+      if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return
+      clearTimeout(readerSettingsSyncTimer)
+      readerSettingsSyncTimer = setTimeout(() => {
+        this.saveReaderSettings().catch(() => {})
+      }, 700)
+    },
+    applyReaderSettings(payload, updatedAt = '') {
+      if (!payload || typeof payload !== 'object') return
+      const next = sanitizeReaderSettings(payload)
+      Object.assign(this, next)
+      this.normalizeSettings()
+      if (updatedAt) {
+        this.settingsSyncBaseUpdatedAt = updatedAt
+        this.settingsUpdatedAt = updatedAt
+      }
+      this.settingsSyncError = ''
+    },
+    async loadReaderSettings() {
+      if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return null
+      try {
+        const { data } = await api.get('/settings/reader')
+        const serverUpdatedAt = data?.updatedAt || ''
+        if (data?.value && typeof data.value === 'object') {
+          if (this.settingsUpdatedAt && serverUpdatedAt && this.settingsUpdatedAt > serverUpdatedAt && this.settingsSyncBaseUpdatedAt !== serverUpdatedAt) {
+            await this.saveReaderSettings()
+            return readerSettingsPayload(this)
+          }
+          this.applyReaderSettings(data.value, serverUpdatedAt)
+          return data.value
+        }
+        await this.saveReaderSettings()
+        return readerSettingsPayload(this)
+      } catch (err) {
+        this.settingsSyncError = readErrorMessage(err)
+        return null
+      }
+    },
+    async saveReaderSettings() {
+      if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return null
+      clearTimeout(readerSettingsSyncTimer)
+      this.settingsSyncing = true
+      this.settingsSyncError = ''
+      try {
+        const { data, headers } = await api.put('/settings/reader', {
+          value: readerSettingsPayload(this),
+          baseUpdatedAt: this.settingsSyncBaseUpdatedAt || '',
+        })
+        if (data?.value && headers?.['x-openreader-setting-conflict']) {
+          this.applyReaderSettings(data.value, data.updatedAt || '')
+          return data.value
+        }
+        if (data?.updatedAt) {
+          this.settingsSyncBaseUpdatedAt = data.updatedAt
+          this.settingsUpdatedAt = data.updatedAt
+        }
+        return data?.value || readerSettingsPayload(this)
+      } catch (err) {
+        this.settingsSyncError = readErrorMessage(err)
+        return null
+      } finally {
+        this.settingsSyncing = false
+      }
     },
     applyProgress(progress) {
       if (!progress?.bookId) return
@@ -300,4 +393,61 @@ function readLocalChapterProgress(bookId) {
   } catch {
     return null
   }
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value)
+  return Math.max(min, Math.min(max, Number.isFinite(number) ? number : fallback))
+}
+
+function readerSettingsPayload(state) {
+  return {
+    mode: state.mode,
+    pageMode: state.pageMode,
+    clickMethod: state.clickMethod,
+    fontFamily: state.fontFamily,
+    fontSize: state.fontSize,
+    fontWeight: state.fontWeight,
+    theme: state.theme,
+    customBgColor: state.customBgColor,
+    customBgImage: state.customBgImage,
+    brightness: state.brightness,
+    autoReadSpeed: state.autoReadSpeed,
+    animateDuration: state.animateDuration,
+    ttsRate: state.ttsRate,
+    ttsPitch: state.ttsPitch,
+    ttsVoiceURI: state.ttsVoiceURI,
+    lineHeight: state.lineHeight,
+    paragraphSpace: state.paragraphSpace,
+    columnWidth: state.columnWidth,
+    settingsVersion: 7,
+  }
+}
+
+function sanitizeReaderSettings(payload) {
+  const settings = {}
+  if (['scroll', 'scroll2', 'flip', 'page'].includes(payload.mode)) settings.mode = payload.mode
+  if (['auto', 'mobile'].includes(payload.pageMode)) settings.pageMode = payload.pageMode
+  if (['next', 'auto', 'none'].includes(payload.clickMethod)) settings.clickMethod = payload.clickMethod
+  if (['system', 'serif', 'kai', 'mono'].includes(payload.fontFamily)) settings.fontFamily = payload.fontFamily
+  if (typeof payload.theme === 'string') settings.theme = payload.theme
+  if (typeof payload.customBgColor === 'string') settings.customBgColor = payload.customBgColor
+  if (typeof payload.customBgImage === 'string') settings.customBgImage = payload.customBgImage
+  if (typeof payload.ttsVoiceURI === 'string') settings.ttsVoiceURI = payload.ttsVoiceURI
+  settings.fontSize = clampNumber(payload.fontSize, 8, 36, 18)
+  settings.fontWeight = clampNumber(payload.fontWeight, 300, 900, 400)
+  settings.brightness = clampNumber(payload.brightness, 50, 150, 100)
+  settings.autoReadSpeed = clampNumber(payload.autoReadSpeed, 2, 40, 12)
+  settings.animateDuration = clampNumber(payload.animateDuration, 0, 1000, 300)
+  settings.ttsRate = clampNumber(payload.ttsRate, 0.5, 3, 1)
+  settings.ttsPitch = clampNumber(payload.ttsPitch, 0.5, 2, 1)
+  settings.lineHeight = clampNumber(payload.lineHeight, 1, 5, 1.8)
+  settings.paragraphSpace = clampNumber(payload.paragraphSpace, 0, 3, 0.2)
+  settings.columnWidth = clampNumber(payload.columnWidth, 320, 1200, 800)
+  settings.settingsVersion = 7
+  return settings
+}
+
+function readErrorMessage(err) {
+  return err?.response?.data?.error || err?.message || '同步失败'
 }
