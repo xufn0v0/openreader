@@ -370,21 +370,39 @@ func (s *Server) restoreLegadoBackupData(data []byte, userID uint) (gin.H, error
 	for _, zipFile := range zipReader.File {
 		switch {
 		case strings.HasSuffix(zipFile.Name, "bookSource.json"):
-			sourcesCount, _ = s.restoreSourcesFromZip(zipFile)
+			n, _ := s.restoreSourcesFromZip(zipFile)
+			sourcesCount += n
 		case strings.HasSuffix(zipFile.Name, "userSettings.json"):
-			settingsCount, _ = s.restoreUserSettingsFromZip(zipFile, userID)
+			n, _ := s.restoreUserSettingsFromZip(zipFile, userID)
+			settingsCount += n
 		case strings.HasSuffix(zipFile.Name, "categories.json"):
-			categoriesCount, _ = s.restoreCategoriesFromZip(zipFile, userID)
+			n, _ := s.restoreCategoriesFromZip(zipFile, userID)
+			categoriesCount += n
+		}
+	}
+
+	for _, zipFile := range zipReader.File {
+		switch {
 		case strings.HasSuffix(zipFile.Name, "myBookShelf.json"),
 			strings.HasSuffix(zipFile.Name, "bookshelf.json"):
 			restoredBooks, restoredProgress, _ := s.restoreBookshelfFromZip(zipFile, userID)
 			booksCount += restoredBooks
 			progressCount += restoredProgress
+		}
+	}
+
+	for _, zipFile := range zipReader.File {
+		switch {
 		case strings.HasSuffix(zipFile.Name, "bookmarks.json"):
-			bookmarksCount, _ = s.restoreBookmarksFromZip(zipFile, userID)
+			n, _ := s.restoreBookmarksFromZip(zipFile, userID)
+			bookmarksCount += n
 		case strings.HasSuffix(zipFile.Name, "replaceRules.json"):
-			replaceRulesCount, _ = s.restoreReplaceRulesFromZip(zipFile, userID)
-		case strings.HasPrefix(zipFile.Name, "bookProgress/"):
+			n, _ := s.restoreReplaceRulesFromZip(zipFile, userID)
+			replaceRulesCount += n
+		case strings.HasSuffix(zipFile.Name, "readingProgress.json"):
+			n, _ := s.restoreProgressFromZip(zipFile, userID)
+			progressCount += n
+		case strings.Contains(zipFile.Name, "bookProgress/"):
 			n, _ := s.restoreProgressFromZip(zipFile, userID)
 			progressCount += n
 		}
@@ -525,6 +543,7 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 		LastChapter     string `json:"lastChapter"`
 		ChapterCount    int    `json:"chapterCount"`
 		CanUpdate       *bool  `json:"canUpdate"`
+		CategoryName    string `json:"categoryName"`
 		OriginName      string `json:"originName"`
 		DurChapter      int    `json:"durChapter"`
 		DurChapterPos   int    `json:"durChapterPos"`
@@ -563,6 +582,9 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 			ChapterCount: b.ChapterCount,
 			CanUpdate:    canUpdate,
 		}
+		if categoryID := s.findRestoredCategoryID(userID, b.CategoryName); categoryID != nil {
+			book.CategoryID = categoryID
+		}
 		query := s.db.Where("user_id = ? AND title = ?", userID, book.Title)
 		if book.URL != "" {
 			query = s.db.Where("user_id = ? AND url = ?", userID, book.URL)
@@ -575,6 +597,7 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 			existing.LastChapter = book.LastChapter
 			existing.ChapterCount = book.ChapterCount
 			existing.CanUpdate = book.CanUpdate
+			existing.CategoryID = book.CategoryID
 			if book.URL != "" {
 				existing.URL = book.URL
 			}
@@ -724,6 +747,7 @@ func (s *Server) restoreProgressFromZip(file *zip.File, userID uint) (int, error
 	type progressPayload struct {
 		Name            string `json:"name"`
 		BookName        string `json:"bookName"`
+		BookTitle       string `json:"bookTitle"`
 		Title           string `json:"title"`
 		BookURL         string `json:"bookUrl"`
 		URL             string `json:"url"`
@@ -752,6 +776,9 @@ func (s *Server) restoreProgressFromZip(file *zip.File, userID uint) (int, error
 			bookURL = strings.TrimSpace(payload.URL)
 		}
 		title := strings.TrimSpace(payload.BookName)
+		if title == "" {
+			title = strings.TrimSpace(payload.BookTitle)
+		}
 		if title == "" {
 			title = strings.TrimSpace(payload.Name)
 		}
@@ -784,6 +811,18 @@ func (s *Server) restoreProgressFromZip(file *zip.File, userID uint) (int, error
 		}
 	}
 	return count, nil
+}
+
+func (s *Server) findRestoredCategoryID(userID uint, categoryName string) *uint {
+	categoryName = strings.TrimSpace(categoryName)
+	if categoryName == "" {
+		return nil
+	}
+	var category models.Category
+	if err := s.db.Where("user_id = ? AND name = ?", userID, categoryName).First(&category).Error; err != nil {
+		return nil
+	}
+	return &category.ID
 }
 
 func (s *Server) findRestoredBook(userID uint, bookURL string, title string) (models.Book, bool) {

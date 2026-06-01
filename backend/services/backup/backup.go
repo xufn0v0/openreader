@@ -131,11 +131,26 @@ func (s *Service) addCategories(zipWriter *zip.Writer) {
 }
 
 func (s *Service) addBookshelf(zipWriter *zip.Writer) {
+	type bookExport struct {
+		models.Book
+		CategoryName string `json:"categoryName,omitempty"`
+	}
 	var books []models.Book
 	if err := s.db.Order("id asc").Find(&books).Error; err != nil {
 		return
 	}
-	data, err := json.MarshalIndent(books, "", "  ")
+	rows := make([]bookExport, 0, len(books))
+	for _, book := range books {
+		row := bookExport{Book: book}
+		if book.CategoryID != nil {
+			var category models.Category
+			if err := s.db.Select("name").First(&category, *book.CategoryID).Error; err == nil {
+				row.CategoryName = category.Name
+			}
+		}
+		rows = append(rows, row)
+	}
+	data, err := json.MarshalIndent(rows, "", "  ")
 	if err != nil {
 		return
 	}
@@ -170,11 +185,26 @@ func (s *Service) addBookmarks(zipWriter *zip.Writer) {
 }
 
 func (s *Service) addProgress(zipWriter *zip.Writer) {
+	type progressExport struct {
+		models.ReadingProgress
+		BookTitle string `json:"bookTitle"`
+		BookURL   string `json:"bookUrl"`
+	}
 	var progresses []models.ReadingProgress
 	if err := s.db.Order("user_id, book_id").Find(&progresses).Error; err != nil {
 		return
 	}
-	data, err := json.MarshalIndent(progresses, "", "  ")
+	rows := make([]progressExport, 0, len(progresses))
+	for _, progress := range progresses {
+		row := progressExport{ReadingProgress: progress}
+		var book models.Book
+		if err := s.db.Select("title", "url").First(&book, progress.BookID).Error; err == nil {
+			row.BookTitle = book.Title
+			row.BookURL = book.URL
+		}
+		rows = append(rows, row)
+	}
+	data, err := json.MarshalIndent(rows, "", "  ")
 	if err != nil {
 		return
 	}

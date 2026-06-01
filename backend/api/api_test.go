@@ -188,8 +188,12 @@ func TestBackupIncludesUserData(t *testing.T) {
 	if err := server.db.Create(&category).Error; err != nil {
 		t.Fatal(err)
 	}
-	book := models.Book{UserID: 1, Title: "备份书", URL: "https://book.example/backup"}
+	book := models.Book{UserID: 1, CategoryID: &category.ID, Title: "备份书", URL: "https://book.example/backup"}
 	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{UserID: 1, BookID: book.ID, ChapterIndex: 4, Offset: 99, ChapterTitle: "进度章"}
+	if err := server.db.Create(&progress).Error; err != nil {
 		t.Fatal(err)
 	}
 	bookmark := models.Bookmark{UserID: 1, BookID: book.ID, ChapterIndex: 2, Offset: 42, Title: "备份书签"}
@@ -225,7 +229,7 @@ func TestBackupIncludesUserData(t *testing.T) {
 		}
 		entries[file.Name] = string(data)
 	}
-	for _, name := range []string{"userSettings.json", "categories.json", "bookmarks.json", "replaceRules.json"} {
+	for _, name := range []string{"userSettings.json", "categories.json", "bookshelf.json", "bookmarks.json", "readingProgress.json", "replaceRules.json"} {
 		if entries[name] == "" {
 			t.Fatalf("%s not found in backup", name)
 		}
@@ -236,8 +240,14 @@ func TestBackupIncludesUserData(t *testing.T) {
 	if !strings.Contains(entries["categories.json"], `"name": "备份分组"`) {
 		t.Fatalf("unexpected categories backup: %s", entries["categories.json"])
 	}
+	if !strings.Contains(entries["bookshelf.json"], `"categoryName": "备份分组"`) {
+		t.Fatalf("unexpected bookshelf backup: %s", entries["bookshelf.json"])
+	}
 	if !strings.Contains(entries["bookmarks.json"], `"bookTitle": "备份书"`) || !strings.Contains(entries["bookmarks.json"], `"title": "备份书签"`) {
 		t.Fatalf("unexpected bookmarks backup: %s", entries["bookmarks.json"])
+	}
+	if !strings.Contains(entries["readingProgress.json"], `"bookTitle": "备份书"`) || !strings.Contains(entries["readingProgress.json"], `"chapterTitle": "进度章"`) {
+		t.Fatalf("unexpected reading progress backup: %s", entries["readingProgress.json"])
 	}
 	if !strings.Contains(entries["replaceRules.json"], `"pattern": "foo"`) {
 		t.Fatalf("unexpected replace rules backup: %s", entries["replaceRules.json"])
@@ -2987,18 +2997,11 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 
 	var zipBuffer bytes.Buffer
 	zipWriter := zip.NewWriter(&zipBuffer)
-	categoryFile, err := zipWriter.Create("categories.json")
+	progressFile, err := zipWriter.Create("readingProgress.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := categoryFile.Write([]byte(`[{"name":"OpenReader分组","color":"#336699","sortOrder":3}]`)); err != nil {
-		t.Fatal(err)
-	}
-	bookFile, err := zipWriter.Create("bookshelf.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bookFile.Write([]byte(`[{"title":"OpenReader备份书","author":"作者","url":"https://book.example/openreader","lastChapter":"最新章","chapterCount":12,"canUpdate":true}]`)); err != nil {
+	if _, err := progressFile.Write([]byte(`[{"bookTitle":"OpenReader备份书","bookUrl":"https://book.example/openreader","chapterIndex":5,"offset":128,"chapterPercent":0.66,"chapterTitle":"第五章"}]`)); err != nil {
 		t.Fatal(err)
 	}
 	bookmarkFile, err := zipWriter.Create("bookmarks.json")
@@ -3006,6 +3009,20 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := bookmarkFile.Write([]byte(`[{"bookTitle":"OpenReader备份书","bookUrl":"https://book.example/openreader","chapterIndex":1,"offset":42,"percent":0.4,"title":"书签标题","excerpt":"摘录"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	bookFile, err := zipWriter.Create("bookshelf.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bookFile.Write([]byte(`[{"title":"OpenReader备份书","author":"作者","url":"https://book.example/openreader","lastChapter":"最新章","chapterCount":12,"canUpdate":true,"categoryName":"OpenReader分组"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	categoryFile, err := zipWriter.Create("categories.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := categoryFile.Write([]byte(`[{"name":"OpenReader分组","color":"#336699","sortOrder":3}]`)); err != nil {
 		t.Fatal(err)
 	}
 	ruleFile, err := zipWriter.Create("replaceRules.json")
@@ -3040,7 +3057,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("restore openreader backup: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	for _, expected := range []string{`"books":1`, `"categories":1`, `"bookmarks":1`, `"replaceRules":1`} {
+	for _, expected := range []string{`"books":1`, `"categories":1`, `"bookmarks":1`, `"progress":1`, `"replaceRules":1`} {
 		if !strings.Contains(w.Body.String(), expected) {
 			t.Fatalf("expected %s in restore result, got %s", expected, w.Body.String())
 		}
@@ -3054,12 +3071,22 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if err := server.db.Where("user_id = ? AND title = ?", user.ID, "OpenReader备份书").First(&book).Error; err != nil {
 		t.Fatal(err)
 	}
-	if book.URL != "https://book.example/openreader" || book.ChapterCount != 12 {
+	if book.URL != "https://book.example/openreader" || book.ChapterCount != 12 || book.CategoryID == nil {
 		t.Fatalf("unexpected restored openreader book: %+v", book)
 	}
 	var category models.Category
 	if err := server.db.Where("user_id = ? AND name = ?", user.ID, "OpenReader分组").First(&category).Error; err != nil {
 		t.Fatal(err)
+	}
+	if book.CategoryID == nil || *book.CategoryID != category.ID {
+		t.Fatalf("expected restored book category %d, got %+v", category.ID, book.CategoryID)
+	}
+	var progress models.ReadingProgress
+	if err := server.db.Where("user_id = ? AND book_id = ?", user.ID, book.ID).First(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+	if progress.ChapterIndex != 5 || progress.Offset != 128 || progress.ChapterTitle != "第五章" {
+		t.Fatalf("unexpected restored progress: %+v", progress)
 	}
 	var bookmark models.Bookmark
 	if err := server.db.Where("user_id = ? AND book_id = ? AND title = ?", user.ID, book.ID, "书签标题").First(&bookmark).Error; err != nil {
