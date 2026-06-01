@@ -169,16 +169,16 @@ export const useReaderStore = defineStore('reader', {
       if (data?.bookId) {
         if (progressUpdatedAt(local) > progressUpdatedAt(data)) {
           this.applyProgress(local)
-          this.syncLocalProgress(local)
+          this.syncLocalProgress(local, data.updatedAt)
           return local
         }
         this.applyProgress(data)
         return data
       }
-      if (local?.bookId) this.syncLocalProgress(local)
+      if (local?.bookId) this.syncLocalProgress(local, data?.updatedAt)
       return local || data
     },
-    async syncLocalProgress(progress) {
+    async syncLocalProgress(progress, baseUpdatedAt = '') {
       if (!progress?.bookId) return null
       try {
         const { data } = await api.put('/progress', {
@@ -190,6 +190,7 @@ export const useReaderStore = defineStore('reader', {
           chapterPercent: progress.chapterPercent,
           chapterTitle: progress.chapterTitle,
           mode: progress.mode || this.mode,
+          baseUpdatedAt,
         })
         const next = data?.bookId ? {
           ...data,

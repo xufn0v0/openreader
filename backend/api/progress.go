@@ -22,6 +22,7 @@ type progressRequest struct {
 	ChapterPercent float64 `json:"chapterPercent"`
 	ChapterTitle   string  `json:"chapterTitle"`
 	Mode           string  `json:"mode"`
+	BaseUpdatedAt  string  `json:"baseUpdatedAt"`
 }
 
 func (s *Server) getProgress(c *gin.Context) {
@@ -73,7 +74,18 @@ func (s *Server) updateProgress(c *gin.Context) {
 		UpdatedAt:      time.Now(),
 	}
 
-	err := s.db.Where("user_id = ? AND book_id = ?", userID, request.BookID).
+	var existing models.ReadingProgress
+	err := s.db.Where("user_id = ? AND book_id = ?", userID, request.BookID).First(&existing).Error
+	if err == nil && isStaleProgressUpdate(existing.UpdatedAt, request.BaseUpdatedAt) {
+		c.JSON(http.StatusOK, existing)
+		return
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save progress"})
+		return
+	}
+
+	err = s.db.Where("user_id = ? AND book_id = ?", userID, request.BookID).
 		Assign(progress).
 		FirstOrCreate(&progress).Error
 	if err != nil {
@@ -87,6 +99,17 @@ func (s *Server) updateProgress(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, progress)
+}
+
+func isStaleProgressUpdate(serverUpdatedAt time.Time, baseUpdatedAt string) bool {
+	if baseUpdatedAt == "" || serverUpdatedAt.IsZero() {
+		return false
+	}
+	base, err := time.Parse(time.RFC3339Nano, baseUpdatedAt)
+	if err != nil {
+		return false
+	}
+	return serverUpdatedAt.After(base)
 }
 
 func clampProgressPercent(percent float64) float64 {

@@ -2139,7 +2139,11 @@ async function saveCurrentProgress(options = {}) {
   if (!chapter.value) return
   const force = Boolean(options.force)
   const background = Boolean(options.background)
-  const payload = currentProgressPayload()
+  const baseUpdatedAt = reader.progressByBook[bookId.value]?.updatedAt || ''
+  const payload = {
+    ...currentProgressPayload(),
+    baseUpdatedAt,
+  }
   applyLocalProgressSnapshot(payload, { force })
   const key = progressSaveKey(payload)
   if (key === lastProgressSaveKey && !force) return
