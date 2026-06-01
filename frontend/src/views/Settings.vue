@@ -209,7 +209,7 @@
             <div class="reader-setting-list">
               <label>
                 <span>页面模式（本机）</span>
-                <el-radio-group v-model="readerPageModeModel" size="small" @change="readerStore.setPageMode($event)">
+                <el-radio-group v-model="readerPageModeModel" size="small">
                   <el-radio-button value="auto">自适应</el-radio-button>
                   <el-radio-button value="mobile">手机模式</el-radio-button>
                 </el-radio-group>

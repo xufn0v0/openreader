@@ -2,7 +2,7 @@
   <div class="settings-body">
     <div class="setting-row">
       <label class="setting-label">页面模式（本机）</label>
-      <el-radio-group v-model="reader.pageMode" size="small" class="read-method-group" @change="reader.setPageMode($event)">
+      <el-radio-group v-model="pageModeModel" size="small" class="read-method-group">
         <el-radio-button value="auto">自适应</el-radio-button>
         <el-radio-button value="mobile">手机模式</el-radio-button>
       </el-radio-group>
@@ -210,6 +210,11 @@ const fontPreviewStyle = computed(() => ({
   fontWeight: props.reader.fontWeight,
   lineHeight: props.reader.lineHeight,
 }))
+
+const pageModeModel = computed({
+  get: () => props.reader.pageMode,
+  set: value => props.reader.setPageMode(value),
+})
 
 const localCustomBg = computed({
   get: () => props.customBg,

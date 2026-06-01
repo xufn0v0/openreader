@@ -125,7 +125,7 @@
       </div>
     </aside>
 
-    <div class="app-workspace" @click="closeMobileNavigation">
+    <div class="app-workspace" :style="mobileWorkspaceStyle" @click="closeMobileNavigation">
       <main class="app-content">
         <slot />
       </main>
@@ -301,6 +301,17 @@ const mobileNavigationStyle = computed(() => {
     return { ...base, transform: `translateX(${touchMoveX.value}px)` }
   }
   return base
+})
+const mobileWorkspaceStyle = computed(() => {
+  const width = mobileNavigationWidth.value
+  if (!isMobileShell.value || !touchMoveX.value) return {}
+  if (!mobileNavigationVisible.value && touchMoveX.value > 0 && touchMoveX.value <= width) {
+    return { transform: `translateX(${touchMoveX.value}px)` }
+  }
+  if (mobileNavigationVisible.value && touchMoveX.value < 0 && touchMoveX.value >= -width) {
+    return { transform: `translateX(${width + touchMoveX.value}px)` }
+  }
+  return {}
 })
 const recentBook = computed(() => {
   const rows = [...(Array.isArray(bookshelf.books) ? bookshelf.books : [])]
@@ -928,6 +939,8 @@ onBeforeUnmount(() => {
   max-width: 100vw;
   max-width: 100dvw;
   padding-left: 0;
+  transition: transform 0.3s;
+  will-change: transform;
 }
 
 .app-shell.mobile-shell .app-content {
@@ -1034,6 +1047,10 @@ onBeforeUnmount(() => {
 
 .app-shell.mobile-shell.mobile-nav-open .app-sidebar {
   transform: translateX(0);
+}
+
+.app-shell.mobile-shell.mobile-nav-open .app-workspace {
+  transform: translateX(var(--mobile-nav-width, 260px));
 }
 
 </style>

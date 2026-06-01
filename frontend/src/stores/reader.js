@@ -254,7 +254,11 @@ export const useReaderStore = defineStore('reader', {
         baseUpdatedAt: payload.baseUpdatedAt || progressServerBaseUpdatedAt(currentProgress),
       }
       this.applyProgress(optimistic)
-      const response = await api.put('/progress', { ...payload, mode: this.mode })
+      const response = await api.put('/progress', {
+        ...payload,
+        mode: this.mode,
+        baseUpdatedAt: optimistic.baseUpdatedAt,
+      })
       const { data } = response
       const merged = data?.bookId ? {
         ...data,
