@@ -196,11 +196,11 @@ const changingSource = ref(null)
 const changeMessage = ref('')
 const changeError = ref(false)
 const bookDraft = reactive({ title: '', author: '', coverUrl: '', intro: '' })
+const MINI_INTERFACE_MAX_WIDTH = 750
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(isCoarsePointer())
 
 const currentSource = computed(() => availableSources.value.find(source => Number(source.id) === Number(book.value?.sourceId)))
-const isMobileDialog = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
+const isMobileDialog = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const sourceGroups = computed(() => {
   const groups = availableSources.value.map(source => source.group).filter(Boolean)
   return [...new Set(groups)].sort()
@@ -231,13 +231,6 @@ watch(activeTab, async (tab) => {
 
 function updateWindowWidth() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = isCoarsePointer()
-}
-
-function isCoarsePointer() {
-  if (typeof window === 'undefined' || !window.matchMedia) return false
-  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
-    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 async function load() {
@@ -839,7 +832,7 @@ function readError(err, fallback) {
   color: #f56c6c;
 }
 
-@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
+@media (max-width: 750px) {
   .detail-page {
     gap: 12px;
   }

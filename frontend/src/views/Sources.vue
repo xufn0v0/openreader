@@ -240,8 +240,10 @@ import {
   testSourceSearch,
   updateSource,
 } from '../api/sources'
+import { useReaderStore } from '../stores/reader'
 
 const route = useRoute()
+const reader = useReaderStore()
 const sources = ref([])
 const keyword = ref('')
 const selectedGroup = ref('')
@@ -287,8 +289,8 @@ const debugChapterURL = ref('')
 const debugResult = ref(null)
 const testing = ref(false)
 const handledRouteAction = ref('')
+const MINI_INTERFACE_MAX_WIDTH = 750
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(isCoarsePointer())
 
 const groups = computed(() => [...new Set(sources.value.map(source => source.group || '默认分组'))].sort())
 const healthSummary = computed(() => {
@@ -318,7 +320,7 @@ const shownSources = computed(() => {
 const debugResultText = computed(() => debugResult.value ? JSON.stringify(debugResult.value, null, 2) : '')
 const debugSearchRows = computed(() => Array.isArray(debugResult.value?.results) ? debugResult.value.results : [])
 const debugChapterRows = computed(() => Array.isArray(debugResult.value?.chapters) ? debugResult.value.chapters : [])
-const isMobileDialog = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
+const isMobileDialog = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const drawerDirection = computed(() => isMobileDialog.value ? 'btt' : 'rtl')
 const editorDrawerSize = computed(() => isMobileDialog.value ? '88%' : '520px')
 
@@ -357,13 +359,6 @@ function applyRouteAction() {
 
 function handleResize() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = isCoarsePointer()
-}
-
-function isCoarsePointer() {
-  if (typeof window === 'undefined' || !window.matchMedia) return false
-  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
-    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 async function toggleSource(source, enabled) {
@@ -888,7 +883,7 @@ function readError(err, fallback) {
   align-items: center;
 }
 
-@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
+@media (max-width: 750px) {
   .sources-head,
   .debug-row,
   .source-toolbar,

@@ -804,7 +804,7 @@ function readError(err, fallback) {
   flex: 1;
 }
 
-@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
+@media (max-width: 750px) {
   .search-page {
     gap: 8px;
     padding-bottom: 14px;

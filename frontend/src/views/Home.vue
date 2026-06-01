@@ -804,7 +804,9 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .book-group-wrapper,
 .shelf-page.mobile-shelf .book-list,
 .shelf-page.mobile-shelf .empty-panel {
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
   border-radius: 0;
   border-right: 0;
   border-left: 0;
@@ -824,7 +826,12 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .title-actions {
   flex-wrap: nowrap;
   gap: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shelf-page.mobile-shelf .title-actions::-webkit-scrollbar {
+  display: none;
 }
 
 .shelf-page.mobile-shelf .title-actions button {
@@ -862,6 +869,8 @@ function readError(err, fallback) {
   min-height: 132px;
   align-items: center;
   gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 20px;
   contain: layout paint;
 }
@@ -947,7 +956,9 @@ function readError(err, fallback) {
   .book-group-wrapper,
   .book-list,
   .empty-panel {
+    width: 100%;
     max-width: 100%;
+    box-sizing: border-box;
     border-radius: 0;
     border-right: 0;
     border-left: 0;
@@ -968,7 +979,12 @@ function readError(err, fallback) {
     min-width: 0;
     flex-wrap: nowrap;
     gap: 12px;
-    overflow: hidden;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .title-actions::-webkit-scrollbar {
+    display: none;
   }
 
   .title-actions .view-switch {
@@ -998,6 +1014,8 @@ function readError(err, fallback) {
     min-height: 132px;
     align-items: center;
     gap: 18px;
+    width: 100%;
+    box-sizing: border-box;
     padding: 10px 20px;
     contain: layout paint;
   }
