@@ -77,6 +77,7 @@ func (s *Server) updateProgress(c *gin.Context) {
 	var existing models.ReadingProgress
 	err := s.db.Where("user_id = ? AND book_id = ?", userID, request.BookID).First(&existing).Error
 	if err == nil && isStaleProgressUpdate(existing.UpdatedAt, request.BaseUpdatedAt) {
+		c.Header("X-OpenReader-Progress-Conflict", "1")
 		c.JSON(http.StatusOK, existing)
 		return
 	}

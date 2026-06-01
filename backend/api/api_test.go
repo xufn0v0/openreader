@@ -382,6 +382,9 @@ func TestUpdateProgressRejectsStaleClientBase(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("update progress: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+	if w.Header().Get("X-OpenReader-Progress-Conflict") != "1" {
+		t.Fatalf("expected stale progress conflict header, got %q", w.Header().Get("X-OpenReader-Progress-Conflict"))
+	}
 
 	var returned models.ReadingProgress
 	if err := json.Unmarshal(w.Body.Bytes(), &returned); err != nil {

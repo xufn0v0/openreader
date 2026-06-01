@@ -129,6 +129,11 @@ export const useReaderStore = defineStore('reader', {
       this.progressByBook[progress.bookId] = next
       persistLocalChapterProgress(next)
     },
+    replaceProgress(progress) {
+      if (!progress?.bookId) return
+      this.progressByBook[progress.bookId] = progress
+      persistLocalChapterProgress(progress)
+    },
     async saveProgress(payload) {
       const optimistic = {
         ...payload,
@@ -136,7 +141,8 @@ export const useReaderStore = defineStore('reader', {
         updatedAt: new Date().toISOString(),
       }
       this.applyProgress(optimistic)
-      const { data } = await api.put('/progress', { ...payload, mode: this.mode })
+      const response = await api.put('/progress', { ...payload, mode: this.mode })
+      const { data } = response
       const merged = data?.bookId ? {
         ...data,
         chapterPercent: Number.isFinite(Number(data.chapterPercent))
@@ -144,7 +150,11 @@ export const useReaderStore = defineStore('reader', {
           : optimistic.chapterPercent,
         chapterTitle: data.chapterTitle || optimistic.chapterTitle,
       } : data
-      this.applyProgress(merged)
+      if (isProgressConflict(response)) {
+        this.replaceProgress(merged)
+      } else {
+        this.applyProgress(merged)
+      }
       return merged
     },
     async loadProgress(bookId, options = {}) {
@@ -181,7 +191,7 @@ export const useReaderStore = defineStore('reader', {
     async syncLocalProgress(progress, baseUpdatedAt = '') {
       if (!progress?.bookId) return null
       try {
-        const { data } = await api.put('/progress', {
+        const response = await api.put('/progress', {
           bookId: progress.bookId,
           chapterId: progress.chapterId,
           chapterIndex: progress.chapterIndex,
@@ -192,6 +202,7 @@ export const useReaderStore = defineStore('reader', {
           mode: progress.mode || this.mode,
           baseUpdatedAt,
         })
+        const { data } = response
         const next = data?.bookId ? {
           ...data,
           chapterPercent: Number.isFinite(Number(data.chapterPercent))
@@ -199,7 +210,11 @@ export const useReaderStore = defineStore('reader', {
             : progress.chapterPercent,
           chapterTitle: data.chapterTitle || progress.chapterTitle,
         } : data
-        this.applyProgress(next)
+        if (isProgressConflict(response)) {
+          this.replaceProgress(next)
+        } else {
+          this.applyProgress(next)
+        }
         return next
       } catch {
         return null
@@ -210,6 +225,10 @@ export const useReaderStore = defineStore('reader', {
 
 function newestProgress(a, b) {
   return pickNewestProgress(a, b)
+}
+
+function isProgressConflict(response) {
+  return String(response?.headers?.['x-openreader-progress-conflict'] || '') === '1'
 }
 
 function localChapterProgressKey(bookId) {
