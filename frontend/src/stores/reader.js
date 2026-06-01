@@ -33,7 +33,7 @@ export const useReaderStore = defineStore('reader', {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 6,
+    settingsVersion: 7,
     settingsUpdatedAt: '',
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,

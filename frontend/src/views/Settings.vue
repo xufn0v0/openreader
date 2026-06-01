@@ -216,7 +216,7 @@
               </label>
               <label>
                 <span>翻页方式</span>
-                <el-radio-group v-model="readerModeModel" size="small" @change="readerStore.setMode($event)">
+                <el-radio-group v-model="readerModeModel" size="small">
                   <el-radio-button value="page">上下滑动</el-radio-button>
                   <el-radio-button value="flip">左右翻页</el-radio-button>
                   <el-radio-button value="scroll">上下滚动</el-radio-button>
@@ -225,7 +225,7 @@
               </label>
               <label>
                 <span>全屏点击</span>
-                <el-radio-group v-model="readerClickMethodModel" size="small" @change="readerStore.setClickMethod($event)">
+                <el-radio-group v-model="readerClickMethodModel" size="small">
                   <el-radio-button value="next">下一页</el-radio-button>
                   <el-radio-button value="auto">自动</el-radio-button>
                   <el-radio-button value="none">不翻页</el-radio-button>
@@ -233,49 +233,49 @@
               </label>
               <label>
                 <span>字体</span>
-                <el-select v-model="readerFontFamilyModel" size="small" @change="readerStore.setFontFamily($event)">
+                <el-select v-model="readerFontFamilyModel" size="small">
                   <el-option v-for="font in fontOptions" :key="font.value" :label="font.label" :value="font.value" />
                 </el-select>
               </label>
               <label>
                 <span>亮度 {{ readerStore.brightness }}%</span>
-                <el-slider v-model="readerBrightnessModel" :min="50" :max="150" @input="readerStore.setBrightness($event)" @change="readerStore.setBrightness($event)" />
+                <el-slider v-model="readerBrightnessModel" :min="50" :max="150" />
               </label>
               <label>
                 <span>自动阅读速度 {{ readerStore.autoReadSpeed }}px</span>
-                <el-slider v-model="readerAutoReadSpeedModel" :min="2" :max="40" :step="1" @input="readerStore.setAutoReadSpeed($event)" @change="readerStore.setAutoReadSpeed($event)" />
+                <el-slider v-model="readerAutoReadSpeedModel" :min="2" :max="40" :step="1" />
               </label>
               <label>
                 <span>动画时长 {{ readerStore.animateDuration }}ms</span>
-                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" @input="readerStore.setAnimateDuration($event)" @change="readerStore.setAnimateDuration($event)" />
+                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" />
               </label>
               <label>
                 <span>字号 {{ readerStore.fontSize }}px</span>
-                <el-slider v-model="readerFontSizeModel" :min="8" :max="36" @input="readerStore.setFontSize($event)" @change="readerStore.setFontSize($event)" />
+                <el-slider v-model="readerFontSizeModel" :min="8" :max="36" />
               </label>
               <label>
                 <span>字重 {{ readerStore.fontWeight }}</span>
-                <el-slider v-model="readerFontWeightModel" :min="300" :max="900" :step="100" @input="readerStore.setFontWeight($event)" @change="readerStore.setFontWeight($event)" />
+                <el-slider v-model="readerFontWeightModel" :min="300" :max="900" :step="100" />
               </label>
               <label>
                 <span>行高 {{ readerStore.lineHeight }}</span>
-                <el-slider v-model="readerLineHeightModel" :min="1" :max="5" :step="0.2" @input="readerStore.setLineHeight($event)" @change="readerStore.setLineHeight($event)" />
+                <el-slider v-model="readerLineHeightModel" :min="1" :max="5" :step="0.2" />
               </label>
               <label>
                 <span>段落间距 {{ readerStore.paragraphSpace }}em</span>
-                <el-slider v-model="readerParagraphSpaceModel" :min="0" :max="3" :step="0.1" @input="readerStore.setParagraphSpace($event)" @change="readerStore.setParagraphSpace($event)" />
+                <el-slider v-model="readerParagraphSpaceModel" :min="0" :max="3" :step="0.1" />
               </label>
               <label>
                 <span>阅读宽度 {{ readerStore.columnWidth }}px</span>
-                <el-slider v-model="readerColumnWidthModel" :min="560" :max="1080" :step="20" @input="readerStore.setColumnWidth($event)" @change="readerStore.setColumnWidth($event)" />
+                <el-slider v-model="readerColumnWidthModel" :min="560" :max="1080" :step="20" />
               </label>
               <label>
                 <span>朗读语速 {{ readerStore.ttsRate }}</span>
-                <el-slider v-model="readerTTSRateModel" :min="0.5" :max="3" :step="0.1" @input="readerStore.setTTSRate($event)" @change="readerStore.setTTSRate($event)" />
+                <el-slider v-model="readerTTSRateModel" :min="0.5" :max="3" :step="0.1" />
               </label>
               <label>
                 <span>朗读音调 {{ readerStore.ttsPitch }}</span>
-                <el-slider v-model="readerTTSPitchModel" :min="0.5" :max="2" :step="0.1" @input="readerStore.setTTSPitch($event)" @change="readerStore.setTTSPitch($event)" />
+                <el-slider v-model="readerTTSPitchModel" :min="0.5" :max="2" :step="0.1" />
               </label>
             </div>
           </article>
@@ -303,7 +303,7 @@
             </div>
             <div v-if="readerStore.theme === 'custom'" class="custom-theme-row">
               <span>背景色</span>
-              <el-color-picker v-model="readerStore.customBgColor" @change="readerStore.setCustomBgColor($event)" />
+              <el-color-picker v-model="readerCustomBgColorModel" />
               <el-upload accept="image/*" :show-file-list="false" :auto-upload="false" @change="pickReaderBgImage">
                 <el-button size="small" :icon="Upload" :loading="readerBgUploading">背景图</el-button>
               </el-upload>
@@ -669,6 +669,10 @@ const readerTTSRateModel = computed({
 const readerTTSPitchModel = computed({
   get: () => readerStore.ttsPitch,
   set: value => readerStore.setTTSPitch(value),
+})
+const readerCustomBgColorModel = computed({
+  get: () => readerStore.customBgColor,
+  set: value => readerStore.setCustomBgColor(value),
 })
 const readerSettingsSyncText = computed(() => {
   if (readerStore.settingsSyncing) return '同步中'
