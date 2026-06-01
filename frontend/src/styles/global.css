@@ -94,6 +94,15 @@ a {
   color: #a09282;
 }
 
+.mobile-shell .app-page {
+  width: 100%;
+  padding: 18px 14px 82px;
+}
+
+.mobile-shell .app-page-title {
+  font-size: 21px;
+}
+
 @media (max-width: 750px) {
   .app-page {
     padding: 18px 14px 82px;

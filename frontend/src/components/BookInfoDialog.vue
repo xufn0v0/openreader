@@ -33,6 +33,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import BookInfoPanel from './BookInfoPanel.vue'
+import { useReaderStore } from '../stores/reader'
 
 defineProps({
   modelValue: {
@@ -95,19 +96,13 @@ defineProps({
 
 defineEmits(['update:modelValue', 'coverUpload', 'canUpdateChange'])
 
+const MINI_INTERFACE_MAX_WIDTH = 750
+const reader = useReaderStore()
 const windowWidth = ref(typeof window === 'undefined' ? 1024 : window.innerWidth)
-const coarsePointer = ref(isCoarsePointer())
-const isMobile = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
+const isMobile = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 
 function handleResize() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = isCoarsePointer()
-}
-
-function isCoarsePointer() {
-  if (typeof window === 'undefined' || !window.matchMedia) return false
-  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
-    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 onMounted(() => window.addEventListener('resize', handleResize))

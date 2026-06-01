@@ -5,7 +5,8 @@
         <button v-if="isMobileShelf" class="mobile-menu-trigger" type="button" aria-label="打开侧边栏" @click.stop="toggleMobileNavigation">
           <el-icon><Menu /></el-icon>
         </button>
-        <strong>书架 ({{ displayedBooks.length }})</strong>
+        <strong>书架 ({{ totalBookCount }})</strong>
+        <small v-if="keyword.trim()" class="shelf-filter-count">命中 {{ displayedBooks.length }}</small>
       </div>
       <div class="title-actions">
         <button type="button" @click="router.push({ name: 'discover' })">书海</button>
@@ -39,6 +40,7 @@
         @click="selectedGroup = item.id"
       >
         <span>{{ item.name }}</span>
+        <em>{{ item.count }}</em>
       </button>
     </div>
 
@@ -149,6 +151,7 @@ const groupItems = computed(() => {
 })
 
 const sortedBooks = computed(() => sortByShelfOrder(Array.isArray(bookshelf.books) ? bookshelf.books : [], reader.progressByBook))
+const totalBookCount = computed(() => Array.isArray(bookshelf.books) ? bookshelf.books.length : 0)
 
 const displayedBooks = computed(() => {
   const value = normalizeShelfSearch(keyword.value)
@@ -163,7 +166,7 @@ const displayedBooks = computed(() => {
   return filtered
 })
 
-const isMobileShelf = computed(() => windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileShelf = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const effectiveShelfView = computed(() => isMobileShelf.value ? 'list' : shelfView.value)
 
 const emptyText = computed(() => {
@@ -456,6 +459,14 @@ function readError(err, fallback) {
   white-space: nowrap;
 }
 
+.shelf-filter-count {
+  flex: 0 0 auto;
+  color: #8f97a3;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .mobile-menu-trigger {
   display: inline-grid;
   width: 30px;
@@ -581,9 +592,21 @@ function readError(err, fallback) {
   white-space: nowrap;
 }
 
+.group-chip em {
+  flex: 0 0 auto;
+  color: #8f97a3;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .group-chip.active {
   color: #1f6feb;
   background: transparent;
+}
+
+.group-chip.active em {
+  color: #1f6feb;
 }
 
 .group-chip.active::after {
@@ -781,7 +804,9 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .book-group-wrapper,
 .shelf-page.mobile-shelf .book-list,
 .shelf-page.mobile-shelf .empty-panel {
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
   border-radius: 0;
   border-right: 0;
   border-left: 0;
@@ -801,7 +826,12 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .title-actions {
   flex-wrap: nowrap;
   gap: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.shelf-page.mobile-shelf .title-actions::-webkit-scrollbar {
+  display: none;
 }
 
 .shelf-page.mobile-shelf .title-actions button {
@@ -839,6 +869,8 @@ function readError(err, fallback) {
   min-height: 132px;
   align-items: center;
   gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 10px 20px;
   contain: layout paint;
 }
@@ -924,7 +956,9 @@ function readError(err, fallback) {
   .book-group-wrapper,
   .book-list,
   .empty-panel {
+    width: 100%;
     max-width: 100%;
+    box-sizing: border-box;
     border-radius: 0;
     border-right: 0;
     border-left: 0;
@@ -945,7 +979,12 @@ function readError(err, fallback) {
     min-width: 0;
     flex-wrap: nowrap;
     gap: 12px;
-    overflow: hidden;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .title-actions::-webkit-scrollbar {
+    display: none;
   }
 
   .title-actions .view-switch {
@@ -975,6 +1014,8 @@ function readError(err, fallback) {
     min-height: 132px;
     align-items: center;
     gap: 18px;
+    width: 100%;
+    box-sizing: border-box;
     padding: 10px 20px;
     contain: layout paint;
   }

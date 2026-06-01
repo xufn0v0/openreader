@@ -20,7 +20,7 @@
       <div class="app-shell-search">
         <el-input
           v-model="quickSearch"
-          placeholder="搜索书籍"
+          :placeholder="quickSearchPlaceholder"
           clearable
           @keyup.enter="goSearch"
           @clear="clearShelfSearch"
@@ -125,7 +125,7 @@
       </div>
     </aside>
 
-    <div class="app-workspace" @click="closeMobileNavigation">
+    <div class="app-workspace" :style="mobileWorkspaceStyle" @click="closeMobileNavigation">
       <main class="app-content">
         <slot />
       </main>
@@ -183,7 +183,6 @@ const cacheStats = ref({})
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
 const MINI_INTERFACE_MAX_WIDTH = 750
-const MOBILE_NAV_EDGE = 48
 const MOBILE_NAV_TRIGGER = 72
 const FOREGROUND_REFRESH_INTERVAL = 5000
 let lastForegroundRefreshAt = 0
@@ -287,7 +286,7 @@ const cacheStatsLabel = computed(() => {
   const chapters = Number(cacheStats.value?.cachedChapters || 0)
   return `章节缓存 ${size}${chapters ? ` / ${chapters}章` : ''}`
 })
-const isMobileShell = computed(() => windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileShell = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const mobileNavigationWidth = computed(() => {
   return 260
 })
@@ -303,11 +302,23 @@ const mobileNavigationStyle = computed(() => {
   }
   return base
 })
+const mobileWorkspaceStyle = computed(() => {
+  const width = mobileNavigationWidth.value
+  if (!isMobileShell.value || !touchMoveX.value) return {}
+  if (!mobileNavigationVisible.value && touchMoveX.value > 0 && touchMoveX.value <= width) {
+    return { transform: `translateX(${touchMoveX.value}px)` }
+  }
+  if (mobileNavigationVisible.value && touchMoveX.value < 0 && touchMoveX.value >= -width) {
+    return { transform: `translateX(${width + touchMoveX.value}px)` }
+  }
+  return {}
+})
 const recentBook = computed(() => {
   const rows = [...(Array.isArray(bookshelf.books) ? bookshelf.books : [])]
   rows.sort((a, b) => compareRecentBook(a, b, reader.progressByBook))
   return rows[0] || null
 })
+const quickSearchPlaceholder = computed(() => route.name === 'home' ? '搜索书架' : '搜索书籍')
 
 function goHome() {
   router.push({ name: 'home' })
@@ -324,12 +335,16 @@ function runNavAction(item) {
     return
   }
   if (item.route) {
-    const query = item.key === 'search'
-      ? searchRouteQuery()
-      : (item.query || (item.panel ? { panel: item.panel } : {}))
+    const query = navRouteQuery(item)
     router.push({ name: item.route, query })
     if (isMobileShell.value) mobileNavigationVisible.value = false
   }
+}
+
+function navRouteQuery(item) {
+  if (item.key === 'search') return searchRouteQuery()
+  if (item.key === 'localSearch') return localSearchRouteQuery()
+  return item.query || (item.panel ? { panel: item.panel } : {})
 }
 
 function isNavActive(item) {
@@ -344,6 +359,10 @@ function isNavActive(item) {
 
 function goSearch() {
   const keyword = quickSearch.value.trim()
+  if (route.name === 'home') {
+    setShelfSearch(keyword)
+    return
+  }
   const query = searchRouteQuery(keyword)
   if (!keyword) {
     router.push({ name: 'search', query })
@@ -362,7 +381,28 @@ function searchRouteQuery(keyword = '') {
   return query
 }
 
+function localSearchRouteQuery(keyword = quickSearch.value.trim()) {
+  const query = { mode: 'local' }
+  if (keyword) query.q = keyword
+  return query
+}
+
+function setShelfSearch(keyword) {
+  const nextQuery = { ...route.query }
+  if (keyword) {
+    nextQuery.shelfQ = keyword
+  } else {
+    delete nextQuery.shelfQ
+  }
+  router.replace({ name: 'home', query: nextQuery })
+}
+
 function clearShelfSearch() {
+  if (route.name === 'home' && route.query.shelfQ !== undefined) {
+    const { shelfQ, ...query } = route.query
+    router.replace({ name: 'home', query })
+    return
+  }
   if (route.name === 'search' && route.query.q !== undefined) {
     const { q, ...query } = route.query
     router.replace({ name: 'search', query })
@@ -487,7 +527,7 @@ function handleTouchStart(event) {
     touchStart.value = null
     return
   }
-  if (!mobileNavigationVisible.value && touch.clientX > MOBILE_NAV_EDGE) {
+  if (touch.clientX <= 20 || touch.clientX >= window.innerWidth - 20) {
     touchStart.value = null
     return
   }
@@ -545,10 +585,12 @@ watch(
 )
 
 watch(
-  () => [route.name, route.query.q],
-  ([name, value]) => {
+  () => [route.name, route.query.q, route.query.shelfQ],
+  ([name, value, shelfQ]) => {
     if (name === 'search') {
       quickSearch.value = typeof value === 'string' ? value : ''
+    } else if (name === 'home') {
+      quickSearch.value = typeof shelfQ === 'string' ? shelfQ : ''
     } else if (name !== 'home') {
       quickSearch.value = ''
     }
@@ -883,8 +925,9 @@ onBeforeUnmount(() => {
   height: 100vh;
   height: 100dvh;
   overflow-y: auto;
-  padding: max(20px, env(safe-area-inset-top)) 20px 66px;
+  padding: max(20px, env(safe-area-inset-top)) 36px 66px;
   scrollbar-width: none;
+  box-shadow: 12px 0 28px rgba(36, 32, 27, 0.08);
   transform: translateX(calc(-1 * var(--mobile-nav-width, 72vw)));
   transition: transform 0.3s;
   will-change: transform;
@@ -1007,6 +1050,7 @@ onBeforeUnmount(() => {
 }
 
 .app-shell.mobile-shell.mobile-nav-open .app-workspace {
-  transform: translateX(var(--mobile-nav-width, 72vw));
+  transform: translateX(var(--mobile-nav-width, 260px));
 }
+
 </style>

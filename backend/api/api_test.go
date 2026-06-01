@@ -177,6 +177,83 @@ func TestUserReaderSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBackupIncludesUserData(t *testing.T) {
+	_, server := setupTestServer(t)
+
+	setting := models.UserSetting{UserID: 1, Key: "reader", Value: `{"fontSize":24}`}
+	if err := server.db.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	category := models.Category{UserID: 1, Name: "备份分组", SortOrder: 7}
+	if err := server.db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: 1, CategoryID: &category.ID, Title: "备份书", URL: "https://book.example/backup"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{UserID: 1, BookID: book.ID, ChapterIndex: 4, Offset: 99, ChapterTitle: "进度章"}
+	if err := server.db.Create(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+	bookmark := models.Bookmark{UserID: 1, BookID: book.ID, ChapterIndex: 2, Offset: 42, Title: "备份书签"}
+	if err := server.db.Create(&bookmark).Error; err != nil {
+		t.Fatal(err)
+	}
+	rule := models.ReplaceRule{UserID: 1, Name: "备份规则", Pattern: "foo", Replacement: "bar", Enabled: true}
+	if err := server.db.Create(&rule).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := server.backupSvc.RunNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	entries := make(map[string]string)
+	for _, file := range reader.File {
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries[file.Name] = string(data)
+	}
+	for _, name := range []string{"userSettings.json", "categories.json", "bookshelf.json", "bookmarks.json", "readingProgress.json", "replaceRules.json"} {
+		if entries[name] == "" {
+			t.Fatalf("%s not found in backup", name)
+		}
+	}
+	if !strings.Contains(entries["userSettings.json"], `"key": "reader"`) || !strings.Contains(entries["userSettings.json"], `fontSize`) {
+		t.Fatalf("unexpected user settings backup: %s", entries["userSettings.json"])
+	}
+	if !strings.Contains(entries["categories.json"], `"name": "备份分组"`) {
+		t.Fatalf("unexpected categories backup: %s", entries["categories.json"])
+	}
+	if !strings.Contains(entries["bookshelf.json"], `"categoryName": "备份分组"`) {
+		t.Fatalf("unexpected bookshelf backup: %s", entries["bookshelf.json"])
+	}
+	if !strings.Contains(entries["bookmarks.json"], `"bookTitle": "备份书"`) || !strings.Contains(entries["bookmarks.json"], `"title": "备份书签"`) {
+		t.Fatalf("unexpected bookmarks backup: %s", entries["bookmarks.json"])
+	}
+	if !strings.Contains(entries["readingProgress.json"], `"bookTitle": "备份书"`) || !strings.Contains(entries["readingProgress.json"], `"chapterTitle": "进度章"`) {
+		t.Fatalf("unexpected reading progress backup: %s", entries["readingProgress.json"])
+	}
+	if !strings.Contains(entries["replaceRules.json"], `"pattern": "foo"`) {
+		t.Fatalf("unexpected replace rules backup: %s", entries["replaceRules.json"])
+	}
+}
+
 func TestAdminUsersIncludesGlobalSourceCount(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -2836,6 +2913,13 @@ func TestRestoreWebDAVBackupImportsBookshelf(t *testing.T) {
 	if _, err := sourceFile.Write([]byte(`[{"name":"备份源","baseUrl":"https://new-source.example","charset":"gbk","enabled":false}]`)); err != nil {
 		t.Fatal(err)
 	}
+	settingFile, err := zipWriter.Create("userSettings.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := settingFile.Write([]byte(`[{"userId":99,"key":"search","value":"{\"searchType\":\"group\",\"group\":\"默认分组\",\"concurrent\":32}"}]`)); err != nil {
+		t.Fatal(err)
+	}
 	file, err := zipWriter.Create("myBookShelf.json")
 	if err != nil {
 		t.Fatal(err)
@@ -2872,6 +2956,9 @@ func TestRestoreWebDAVBackupImportsBookshelf(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"progress":1`) {
 		t.Fatalf("expected one restored progress, got %s", w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), `"settings":1`) {
+		t.Fatalf("expected one restored setting, got %s", w.Body.String())
+	}
 
 	var book models.Book
 	if err := server.db.Where("title = ?", "WebDAV恢复书").First(&book).Error; err != nil {
@@ -2890,6 +2977,130 @@ func TestRestoreWebDAVBackupImportsBookshelf(t *testing.T) {
 	}
 	if source.BaseURL != "https://new-source.example" || source.Charset != "gbk" || source.Enabled {
 		t.Fatalf("unexpected restored source update: %+v", source)
+	}
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	var setting models.UserSetting
+	if err := server.db.Where("user_id = ? AND key = ?", user.ID, "search").First(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(setting.Value, `"concurrent":32`) {
+		t.Fatalf("unexpected restored setting: %+v", setting)
+	}
+}
+
+func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var zipBuffer bytes.Buffer
+	zipWriter := zip.NewWriter(&zipBuffer)
+	progressFile, err := zipWriter.Create("readingProgress.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := progressFile.Write([]byte(`[{"bookTitle":"OpenReader备份书","bookUrl":"https://book.example/openreader","chapterIndex":5,"offset":128,"chapterPercent":0.66,"chapterTitle":"第五章"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	bookmarkFile, err := zipWriter.Create("bookmarks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bookmarkFile.Write([]byte(`[{"bookTitle":"OpenReader备份书","bookUrl":"https://book.example/openreader","chapterIndex":1,"offset":42,"percent":0.4,"title":"书签标题","excerpt":"摘录"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	bookFile, err := zipWriter.Create("bookshelf.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bookFile.Write([]byte(`[{"title":"OpenReader备份书","author":"作者","url":"https://book.example/openreader","lastChapter":"最新章","chapterCount":12,"canUpdate":true,"categoryName":"OpenReader分组"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	categoryFile, err := zipWriter.Create("categories.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := categoryFile.Write([]byte(`[{"name":"OpenReader分组","color":"#336699","sortOrder":3}]`)); err != nil {
+		t.Fatal(err)
+	}
+	ruleFile, err := zipWriter.Create("replaceRules.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ruleFile.Write([]byte(`[{"name":"规则","pattern":"foo","replacement":"bar","enabled":true}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "openreader-backup.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(zipBuffer.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/backup/restore-legado", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore openreader backup: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	for _, expected := range []string{`"books":1`, `"categories":1`, `"bookmarks":1`, `"progress":1`, `"replaceRules":1`} {
+		if !strings.Contains(w.Body.String(), expected) {
+			t.Fatalf("expected %s in restore result, got %s", expected, w.Body.String())
+		}
+	}
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	var book models.Book
+	if err := server.db.Where("user_id = ? AND title = ?", user.ID, "OpenReader备份书").First(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if book.URL != "https://book.example/openreader" || book.ChapterCount != 12 || book.CategoryID == nil {
+		t.Fatalf("unexpected restored openreader book: %+v", book)
+	}
+	var category models.Category
+	if err := server.db.Where("user_id = ? AND name = ?", user.ID, "OpenReader分组").First(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	if book.CategoryID == nil || *book.CategoryID != category.ID {
+		t.Fatalf("expected restored book category %d, got %+v", category.ID, book.CategoryID)
+	}
+	var progress models.ReadingProgress
+	if err := server.db.Where("user_id = ? AND book_id = ?", user.ID, book.ID).First(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+	if progress.ChapterIndex != 5 || progress.Offset != 128 || progress.ChapterTitle != "第五章" {
+		t.Fatalf("unexpected restored progress: %+v", progress)
+	}
+	var bookmark models.Bookmark
+	if err := server.db.Where("user_id = ? AND book_id = ? AND title = ?", user.ID, book.ID, "书签标题").First(&bookmark).Error; err != nil {
+		t.Fatal(err)
+	}
+	if bookmark.Offset != 42 || bookmark.ChapterIndex != 1 {
+		t.Fatalf("unexpected restored bookmark: %+v", bookmark)
+	}
+	var rule models.ReplaceRule
+	if err := server.db.Where("user_id = ? AND pattern = ?", user.ID, "foo").First(&rule).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rule.Replacement != "bar" || !rule.Enabled {
+		t.Fatalf("unexpected restored replace rule: %+v", rule)
 	}
 }
 

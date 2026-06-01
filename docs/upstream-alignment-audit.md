@@ -1,6 +1,6 @@
 # OpenReader 上游对齐审查
 
-上游基准：`/private/tmp/hectorqin-reader-full/web/src`。
+上游基准：`/private/tmp/hectorqin-reader/web/src`。
 
 本文件是提交前闸门。每一批重构都要回答：改动对应上游哪个组件、哪个方法、哪些差异是后端缺口或用户明确要求导致的。
 
@@ -9,7 +9,8 @@
 | 模块 | 上游基准 | 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 首页/书架 | `views/Index.vue` | 已恢复移动端侧边导航思路，正文区继续收敛为书架列表；本批已移除移动正文区搜索和行内操作按钮 | 继续对齐 |
-| 移动侧边栏 | `Index.vue` `navigation-wrapper`、`handleTouchStart/Move/End` | 已使用 260px 侧栏、右滑打开/左滑关闭；仍需持续检查真机横向溢出 | 继续验收 |
+| `miniInterface` 判定 | `plugins/helper.js` `isMiniInterface`、`plugins/vuex.js` `setMiniInterface` | 已收敛为 `<=750px` 或手动“手机模式”，不再用触摸设备/1180px 误判 | 本批完成 |
+| 移动侧边栏 | `Index.vue` `navigation-wrapper`、`handleTouchStart/Move/End` | 已使用 260px 侧栏、右滑打开/左滑关闭；书架容器和书籍行继续收敛横向宽度 | 继续验收 |
 | 阅读器工具栏 | `views/Reader.vue` `showToolBar/showReadBar` | 移动端工具栏默认隐藏，中心点击显示；不再让底部进度栏常驻 | 基本对齐 |
 | 阅读点击区 | `Reader.vue` `eventHandler`、`ReadSettings.vue` `clickMethod` | 本批补齐“下一页 / 自动 / 不翻页”；自动模式按上游区分左右滑动和上下滚动 | 本批完成 |
 | 滚动阅读手势 | `Reader.vue` `handleTouchMove`、`isSlideRead` | 本批确认上下滚动不拦截手指滑动，固定距离翻页只由点击区触发 | 本批完成 |

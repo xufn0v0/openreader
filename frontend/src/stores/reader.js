@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import api from '../api/client'
+import { currentUserScope } from '../utils/authScope'
 import { newestProgress as pickNewestProgress, progressUpdatedAt } from '../utils/bookOrder'
 
 let readerSettingsSyncTimer
@@ -59,7 +60,8 @@ export const useReaderStore = defineStore('reader', {
     },
     setPageMode(pageMode) {
       this.pageMode = pageMode === 'mobile' ? 'mobile' : 'auto'
-      this.markSettingsDirty()
+      this.settingsUpdatedAt = new Date().toISOString()
+      this.settingsSyncError = ''
     },
     setClickMethod(method) {
       this.clickMethod = ['next', 'auto', 'none'].includes(method) ? method : 'auto'
@@ -253,7 +255,11 @@ export const useReaderStore = defineStore('reader', {
         baseUpdatedAt: payload.baseUpdatedAt || progressServerBaseUpdatedAt(currentProgress),
       }
       this.applyProgress(optimistic)
-      const response = await api.put('/progress', { ...payload, mode: this.mode })
+      const response = await api.put('/progress', {
+        ...payload,
+        mode: this.mode,
+        baseUpdatedAt: optimistic.baseUpdatedAt,
+      })
       const { data } = response
       const merged = data?.bookId ? {
         ...data,
@@ -341,6 +347,10 @@ function progressServerBaseUpdatedAt(progress) {
 }
 
 function localChapterProgressKey(bookId) {
+  return `openreader_chapter_progress@${currentUserScope()}@${bookId}`
+}
+
+function legacyLocalChapterProgressKey(bookId) {
   return `openreader_chapter_progress@${bookId}`
 }
 
@@ -374,7 +384,7 @@ function persistLocalChapterProgress(progress) {
 function readLocalChapterProgress(bookId) {
   if (typeof localStorage === 'undefined' || !bookId) return null
   try {
-    const raw = localStorage.getItem(localChapterProgressKey(bookId))
+    const raw = localStorage.getItem(localChapterProgressKey(bookId)) || localStorage.getItem(legacyLocalChapterProgressKey(bookId))
     if (!raw) return null
     const data = JSON.parse(raw)
     if (!data || Number(data.bookId) !== Number(bookId)) return null
@@ -403,7 +413,6 @@ function clampNumber(value, min, max, fallback) {
 function readerSettingsPayload(state) {
   return {
     mode: state.mode,
-    pageMode: state.pageMode,
     clickMethod: state.clickMethod,
     fontFamily: state.fontFamily,
     fontSize: state.fontSize,
@@ -427,7 +436,6 @@ function readerSettingsPayload(state) {
 function sanitizeReaderSettings(payload) {
   const settings = {}
   if (['scroll', 'scroll2', 'flip', 'page'].includes(payload.mode)) settings.mode = payload.mode
-  if (['auto', 'mobile'].includes(payload.pageMode)) settings.pageMode = payload.pageMode
   if (['next', 'auto', 'none'].includes(payload.clickMethod)) settings.clickMethod = payload.clickMethod
   if (['system', 'serif', 'kai', 'mono'].includes(payload.fontFamily)) settings.fontFamily = payload.fontFamily
   if (typeof payload.theme === 'string') settings.theme = payload.theme

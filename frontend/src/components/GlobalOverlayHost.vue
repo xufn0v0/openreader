@@ -846,10 +846,10 @@ const replaceRuleDraft = ref({ name: '', pattern: '', replacement: '', enabled: 
 const replaceRuleTestText = ref('广告123\n正文内容')
 const replaceRuleTestResult = ref(null)
 const manageKeyword = ref('')
+const MINI_INTERFACE_MAX_WIDTH = 750
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
-const coarsePointer = ref(isCoarsePointer())
 
-const isMobileOverlay = computed(() => windowWidth.value <= 1180 || coarsePointer.value)
+const isMobileOverlay = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -907,13 +907,6 @@ onBeforeUnmount(() => {
 
 function updateWindowWidth() {
   windowWidth.value = window.innerWidth
-  coarsePointer.value = isCoarsePointer()
-}
-
-function isCoarsePointer() {
-  if (typeof window === 'undefined' || !window.matchMedia) return false
-  return window.matchMedia('(hover: none) and (pointer: coarse)').matches
-    || window.matchMedia('(any-pointer: coarse)').matches
 }
 
 async function loadImportCategories() {
@@ -2977,7 +2970,7 @@ function readError(err, fallback) {
   white-space: pre-wrap;
 }
 
-@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
+@media (max-width: 750px) {
   .desktop-manage-table {
     display: none;
   }

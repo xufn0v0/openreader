@@ -431,6 +431,7 @@ async function importLocalPaths(paths) {
     imported.forEach(item => {
       if (item.book) bookshelf.upsertBook(item.book)
     })
+    markImportedLocalItems(imported)
     checkedLocalPaths.value = checkedLocalPaths.value.filter(path => !paths.includes(path))
     const success = imported.filter(item => item.book).length
     const failed = imported.filter(item => item.error).length
@@ -440,6 +441,20 @@ async function importLocalPaths(paths) {
   } finally {
     importingLocal.value = false
   }
+}
+
+function markImportedLocalItems(imported) {
+  const importedByPath = new Map(
+    imported
+      .filter(item => item?.book && item?.path)
+      .map(item => [item.path, item.book]),
+  )
+  if (!importedByPath.size) return
+  localItems.value = localItems.value.map(item => {
+    const book = importedByPath.get(item.path)
+    if (!book) return item
+    return { ...item, book, importable: false }
+  })
 }
 
 function localBookTitle(item) {
@@ -804,7 +819,7 @@ function readError(err, fallback) {
   flex: 1;
 }
 
-@media (max-width: 1180px), (hover: none) and (pointer: coarse), (any-pointer: coarse) {
+@media (max-width: 750px) {
   .search-page {
     gap: 8px;
     padding-bottom: 14px;
