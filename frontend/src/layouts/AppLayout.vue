@@ -33,7 +33,7 @@
 
       <section class="app-search-setting">
         <p class="app-nav-title">搜索设置</p>
-        <el-select v-model="sidebarSearchType" size="small" class="setting-select" @change="saveSearchSetting">
+        <el-select v-model="sidebarSearchType" size="small" class="setting-select">
           <el-option label="多源搜索" value="all" />
           <el-option label="分组搜索" value="group" />
           <el-option label="单源搜索" value="single" />
@@ -44,7 +44,6 @@
           size="small"
           class="setting-select"
           placeholder="全部分组"
-          @change="saveSearchSetting"
         >
           <el-option v-for="group in sidebarSourceGroups" :key="group.value" :label="`${group.label} (${group.count})`" :value="group.value" />
         </el-select>
@@ -55,11 +54,10 @@
           class="setting-select"
           filterable
           placeholder="选择书源"
-          @change="saveSearchSetting"
         >
           <el-option v-for="source in sidebarEnabledSources" :key="source.id" :label="source.name" :value="source.id" />
         </el-select>
-        <el-select v-model="sidebarConcurrent" size="small" class="setting-select" @change="saveSearchSetting">
+        <el-select v-model="sidebarConcurrent" size="small" class="setting-select">
           <el-option v-for="count in concurrentOptions" :key="count" :label="`${count}并发线程`" :value="count" />
         </el-select>
       </section>
@@ -407,10 +405,6 @@ function clearShelfSearch() {
     const { q, ...query } = route.query
     router.replace({ name: 'search', query })
   }
-}
-
-function saveSearchSetting() {
-  preferences.savePreference('search').catch(() => {})
 }
 
 async function loadSidebarSources() {

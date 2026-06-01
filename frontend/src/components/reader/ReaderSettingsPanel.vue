@@ -10,7 +10,7 @@
 
     <div class="setting-row">
       <label class="setting-label">翻页方式</label>
-      <el-radio-group v-model="reader.mode" size="small" class="read-method-group" @change="$emit('modeChange', $event)">
+      <el-radio-group v-model="readerModeModel" size="small" class="read-method-group">
         <el-radio-button value="page">上下滑动</el-radio-button>
         <el-radio-button v-if="miniInterface" value="flip">左右滑动</el-radio-button>
         <el-radio-button value="scroll">上下滚动</el-radio-button>
@@ -20,7 +20,7 @@
 
     <div class="setting-row">
       <label class="setting-label">全屏点击</label>
-      <el-radio-group v-model="reader.clickMethod" size="small" class="read-method-group" @change="reader.setClickMethod($event)">
+      <el-radio-group v-model="clickMethodModel" size="small" class="read-method-group">
         <el-radio-button value="next">下一页</el-radio-button>
         <el-radio-button value="auto">自动</el-radio-button>
         <el-radio-button value="none">不翻页</el-radio-button>
@@ -50,7 +50,7 @@
     <template v-if="reader.theme === 'custom'">
       <div class="setting-row">
         <label class="setting-label">背景色</label>
-        <el-color-picker v-model="localCustomBg" size="small" @change="reader.setCustomBgColor($event)" />
+        <el-color-picker v-model="localCustomBg" size="small" />
       </div>
       <div class="setting-row">
         <label class="setting-label">背景图</label>
@@ -62,17 +62,17 @@
 
     <div class="setting-row">
       <label class="setting-label">亮度</label>
-      <el-slider v-model="brightnessModel" :min="50" :max="150" size="small" @input="setBrightness" @change="setBrightness" />
+      <el-slider v-model="brightnessModel" :min="50" :max="150" size="small" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">自动阅读速度 ({{ reader.autoReadSpeed }}px)</label>
-      <el-slider v-model="autoReadSpeedModel" :min="2" :max="40" :step="1" size="small" @input="setAutoReadSpeed" @change="setAutoReadSpeed" />
+      <el-slider v-model="autoReadSpeedModel" :min="2" :max="40" :step="1" size="small" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">动画时长 ({{ reader.animateDuration }}ms)</label>
-      <el-slider v-model="animateDurationModel" :min="0" :max="1000" :step="20" size="small" @input="setAnimateDuration" @change="setAnimateDuration" />
+      <el-slider v-model="animateDurationModel" :min="0" :max="1000" :step="20" size="small" />
     </div>
 
     <div class="setting-row">
@@ -99,7 +99,7 @@
       <label class="setting-label">字号 ({{ reader.fontSize }}px)</label>
       <div class="font-controls">
         <el-button size="small" :icon="Minus" circle @click="changeFontSize(-1)" />
-        <el-slider v-model="fontSizeModel" :min="8" :max="36" size="small" class="font-slider" @input="setFontSize" @change="setFontSize" />
+        <el-slider v-model="fontSizeModel" :min="8" :max="36" size="small" class="font-slider" />
         <el-button size="small" :icon="Plus" circle @click="changeFontSize(1)" />
       </div>
       <div class="font-size-presets">
@@ -118,22 +118,22 @@
 
     <div class="setting-row">
       <label class="setting-label">行高 ({{ reader.lineHeight }})</label>
-      <el-slider v-model="localLineHeight" :min="1" :max="5" :step="0.2" size="small" @input="setLineHeight" @change="setLineHeight" />
+      <el-slider v-model="localLineHeight" :min="1" :max="5" :step="0.2" size="small" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">字重 ({{ reader.fontWeight }})</label>
-      <el-slider v-model="fontWeightModel" :min="300" :max="900" :step="100" size="small" @input="setFontWeight" @change="setFontWeight" />
+      <el-slider v-model="fontWeightModel" :min="300" :max="900" :step="100" size="small" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">段落间距 ({{ reader.paragraphSpace }}em)</label>
-      <el-slider v-model="paragraphSpaceModel" :min="0" :max="3" :step="0.1" size="small" @input="setParagraphSpace" @change="setParagraphSpace" />
+      <el-slider v-model="paragraphSpaceModel" :min="0" :max="3" :step="0.1" size="small" />
     </div>
 
     <div v-if="!miniInterface" class="setting-row">
       <label class="setting-label">阅读宽度 ({{ reader.columnWidth }}px)</label>
-      <el-slider v-model="columnWidthModel" :min="560" :max="1080" :step="20" size="small" @input="setColumnWidth" @change="setColumnWidth" />
+      <el-slider v-model="columnWidthModel" :min="560" :max="1080" :step="20" size="small" />
     </div>
 
     <div class="setting-row">
@@ -143,12 +143,12 @@
 
     <div class="setting-row">
       <label class="setting-label">朗读语速 ({{ reader.ttsRate }})</label>
-      <el-slider v-model="ttsRateModel" :min="0.5" :max="3" :step="0.1" size="small" @input="setTTSRate" @change="setTTSRate" />
+      <el-slider v-model="ttsRateModel" :min="0.5" :max="3" :step="0.1" size="small" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">朗读音调 ({{ reader.ttsPitch }})</label>
-      <el-slider v-model="ttsPitchModel" :min="0.5" :max="2" :step="0.1" size="small" @input="setTTSPitch" @change="setTTSPitch" />
+      <el-slider v-model="ttsPitchModel" :min="0.5" :max="2" :step="0.1" size="small" />
     </div>
 
     <div class="setting-row">
@@ -159,7 +159,6 @@
         clearable
         :disabled="!tts.state.supported || !ttsVoices.length"
         placeholder="浏览器默认"
-        @change="setTTSVoice"
       >
         <el-option label="浏览器默认" value="" />
         <el-option
@@ -216,14 +215,30 @@ const pageModeModel = computed({
   set: value => props.reader.setPageMode(value),
 })
 
+const readerModeModel = computed({
+  get: () => props.reader.mode,
+  set: value => emit('modeChange', value),
+})
+
+const clickMethodModel = computed({
+  get: () => props.reader.clickMethod,
+  set: value => props.reader.setClickMethod(value),
+})
+
 const localCustomBg = computed({
   get: () => props.customBg,
-  set: value => emit('update:customBg', value),
+  set: value => {
+    props.reader.setCustomBgColor(value)
+    emit('update:customBg', props.reader.customBgColor)
+  },
 })
 
 const localLineHeight = computed({
   get: () => props.lineHeight,
-  set: value => emit('update:lineHeight', value),
+  set: value => {
+    props.reader.setLineHeight(value)
+    emit('update:lineHeight', props.reader.lineHeight)
+  },
 })
 
 const fontFamilyModel = computed({
@@ -289,49 +304,8 @@ function setFontSize(value) {
   props.reader.setFontSize(value)
 }
 
-function setLineHeight(value) {
-  props.reader.setLineHeight(value)
-  emit('update:lineHeight', props.reader.lineHeight)
-}
-
-function setFontWeight(value) {
-  props.reader.setFontWeight(value)
-}
-
-function setParagraphSpace(value) {
-  props.reader.setParagraphSpace(value)
-}
-
 function changeFontSize(delta) {
   props.reader.setFontSize(props.reader.fontSize + delta)
-}
-
-function setBrightness(value) {
-  props.reader.setBrightness(value)
-}
-
-function setAutoReadSpeed(value) {
-  props.reader.setAutoReadSpeed(value)
-}
-
-function setAnimateDuration(value) {
-  props.reader.setAnimateDuration(value)
-}
-
-function setColumnWidth(value) {
-  props.reader.setColumnWidth(value)
-}
-
-function setTTSRate(value) {
-  emit('ttsRateChange', value)
-}
-
-function setTTSPitch(value) {
-  emit('ttsPitchChange', value)
-}
-
-function setTTSVoice(value) {
-  emit('ttsVoiceChange', value)
 }
 </script>
 

@@ -15,6 +15,7 @@
 | 阅读点击区 | `Reader.vue` `eventHandler`、`ReadSettings.vue` `clickMethod` | 本批补齐“下一页 / 自动 / 不翻页”；自动模式按上游区分左右滑动和上下滚动 | 本批完成 |
 | 滚动阅读手势 | `Reader.vue` `handleTouchMove`、`isSlideRead` | 本批确认上下滚动不拦截手指滑动，固定距离翻页只由点击区触发 | 本批完成 |
 | 阅读方式 | `ReadSettings.vue` `readMethods`、`animateMSTime` | 当前有上下滑动、左右滑动、上下滚动；本批补齐动画时长，并将“上下滚动2”作为明确禁用的待补能力展示 | 待补齐多章节连续滚动，不做假入口 |
+| 设置写入路径 | `ReadSettings.vue` `setReadMethod/setPageMode`、`Index.vue` 搜索设置 | 本批收敛为单一 computed setter 写入；阅读器设置抽屉、设置页、首页侧边栏搜索设置不再同时通过 `v-model`、`@input`、`@change` 双写同一项 | 本批完成 |
 | 目录定位 | `PopCatalog.vue` + `Reader.vue` 当前章节定位 | 已有打开目录时定位当前章节的逻辑；需继续真机/浏览器验证 | 待复验 |
 | 书籍信息 | `components/BookInfo.vue` | 已有全局 `BookInfoDialog/Panel`；书架、搜索、阅读器仍需逐个确认全部复用 | 继续对齐 |
 | 书架管理 | `components/BookManage.vue`、`BookGroup.vue` | 已有全局弹层雏形；批量缓存/导出/分组仍受后端能力限制 | 待补齐 |
