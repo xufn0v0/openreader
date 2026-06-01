@@ -24,6 +24,18 @@ export function clearSources() {
   return api.delete('/sources')
 }
 
+export function defaultSourceStatus() {
+  return api.get('/sources/default')
+}
+
+export function saveDefaultSources() {
+  return api.post('/sources/default/save')
+}
+
+export function restoreDefaultSources() {
+  return api.post('/sources/default/restore')
+}
+
 export function batchSources(payload) {
   return api.post('/sources/batch', payload)
 }

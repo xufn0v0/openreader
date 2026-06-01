@@ -1065,6 +1065,74 @@ func TestClearSources(t *testing.T) {
 	}
 }
 
+func TestSaveAndRestoreDefaultSources(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	if err := server.db.Create(&models.BookSource{Name: "默认源一", BaseURL: "https://one.example", Enabled: true, Group: "默认"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.BookSource{Name: "默认源二", BaseURL: "https://two.example", Enabled: false}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sources/default/save", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"count":2`) {
+		t.Fatalf("save default sources: expected count, got %d: %s", w.Code, w.Body.String())
+	}
+
+	reqClear := httptest.NewRequest(http.MethodDelete, "/api/sources", nil)
+	reqClear.Header.Set("Authorization", token)
+	wClear := httptest.NewRecorder()
+	router.ServeHTTP(wClear, reqClear)
+	if wClear.Code != http.StatusOK {
+		t.Fatalf("clear sources before restore: expected 200, got %d: %s", wClear.Code, wClear.Body.String())
+	}
+	if err := server.db.Create(&models.BookSource{Name: "临时源", BaseURL: "https://temp.example", Enabled: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	reqStatus := httptest.NewRequest(http.MethodGet, "/api/sources/default", nil)
+	reqStatus.Header.Set("Authorization", token)
+	wStatus := httptest.NewRecorder()
+	router.ServeHTTP(wStatus, reqStatus)
+	if wStatus.Code != http.StatusOK || !strings.Contains(wStatus.Body.String(), `"configured":true`) {
+		t.Fatalf("default source status: expected configured, got %d: %s", wStatus.Code, wStatus.Body.String())
+	}
+
+	reqRestore := httptest.NewRequest(http.MethodPost, "/api/sources/default/restore", nil)
+	reqRestore.Header.Set("Authorization", token)
+	wRestore := httptest.NewRecorder()
+	router.ServeHTTP(wRestore, reqRestore)
+	if wRestore.Code != http.StatusOK || !strings.Contains(wRestore.Body.String(), `"imported":2`) {
+		t.Fatalf("restore default sources: expected restored sources, got %d: %s", wRestore.Code, wRestore.Body.String())
+	}
+
+	var sources []models.BookSource
+	if err := server.db.Order("name asc").Find(&sources).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Name != "默认源一" || sources[0].Group != "默认" || sources[1].Name != "默认源二" || sources[1].Enabled {
+		t.Fatalf("unexpected restored sources: %+v", sources)
+	}
+}
+
+func TestRestoreDefaultSourcesRequiresSnapshot(t *testing.T) {
+	router, _ := setupTestServer(t)
+	token := authHeader(t, router)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sources/default/restore", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("restore default sources: expected 404 without snapshot, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestImportRemoteSourceUsesRawJSON(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

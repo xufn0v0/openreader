@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -154,6 +156,86 @@ func (s *Server) clearSources(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"affected": result.RowsAffected})
+}
+
+func (s *Server) defaultSourcesStatus(c *gin.Context) {
+	sources, err := s.loadDefaultBookSources()
+	if errors.Is(err, os.ErrNotExist) {
+		c.JSON(http.StatusOK, gin.H{"configured": false, "count": 0})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"configured": false, "count": 0, "error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"configured": true, "count": len(sources)})
+}
+
+func (s *Server) saveDefaultSources(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
+	var sources []models.BookSource
+	if err := s.db.Order("name asc").Find(&sources).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list sources"})
+		return
+	}
+	if len(sources) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no sources to save as default"})
+		return
+	}
+	for i := range sources {
+		sources[i].ID = 0
+	}
+	data, err := json.MarshalIndent(sources, "", "  ")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encode default sources"})
+		return
+	}
+	path := s.defaultBookSourcesPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare default sources"})
+		return
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save default sources"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": len(sources)})
+}
+
+func (s *Server) restoreDefaultSources(c *gin.Context) {
+	if !s.requireSourceEdit(c) {
+		return
+	}
+
+	sources, err := s.loadDefaultBookSources()
+	if errors.Is(err, os.ErrNotExist) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "default sources are not configured"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "default sources are invalid"})
+		return
+	}
+	if len(sources) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "default sources are empty"})
+		return
+	}
+
+	var result gin.H
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&models.BookSource{}).Error; err != nil {
+			return err
+		}
+		result = importBookSourcesWithDB(tx, sources)
+		return nil
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to restore default sources"})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 type batchSourcesRequest struct {
@@ -307,6 +389,10 @@ func fetchRemoteBookSources(rawURL string) ([]models.BookSource, error) {
 }
 
 func (s *Server) importBookSources(sources []models.BookSource) gin.H {
+	return importBookSourcesWithDB(s.db, sources)
+}
+
+func importBookSourcesWithDB(db *gorm.DB, sources []models.BookSource) gin.H {
 	imported := 0
 	updated := 0
 	skipped := 0
@@ -329,14 +415,14 @@ func (s *Server) importBookSources(sources []models.BookSource) gin.H {
 		}
 
 		var existing models.BookSource
-		if err := s.db.Where("name = ?", source.Name).First(&existing).Error; err == nil {
+		if err := db.Where("name = ?", source.Name).First(&existing).Error; err == nil {
 			existing.BaseURL = source.BaseURL
 			existing.SearchURL = source.SearchURL
 			existing.Charset = source.Charset
 			existing.Rules = source.Rules
 			existing.Enabled = source.Enabled
 			existing.Group = source.Group
-			if err := s.db.Save(&existing).Error; err == nil {
+			if err := db.Save(&existing).Error; err == nil {
 				updated++
 				continue
 			}
@@ -344,13 +430,25 @@ func (s *Server) importBookSources(sources []models.BookSource) gin.H {
 			continue
 		}
 
-		if err := s.db.Create(&source).Error; err != nil {
+		if err := db.Create(&source).Error; err != nil {
 			skipped++
 			continue
 		}
 		imported++
 	}
 	return gin.H{"imported": imported, "updated": updated, "skipped": skipped}
+}
+
+func (s *Server) defaultBookSourcesPath() string {
+	return filepath.Join(s.cfg.DataDir, "defaultBookSources.json")
+}
+
+func (s *Server) loadDefaultBookSources() ([]models.BookSource, error) {
+	data, err := os.ReadFile(s.defaultBookSourcesPath())
+	if err != nil {
+		return nil, err
+	}
+	return decodeBookSources(data)
 }
 
 func (s *Server) requireSourceEdit(c *gin.Context) bool {
