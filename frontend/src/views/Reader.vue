@@ -2743,10 +2743,10 @@ function readError(err, fallback) {
   z-index: 4;
   display: grid;
   align-content: start;
-  grid-template-columns: 36px 36px;
-  grid-auto-flow: column;
-  grid-template-rows: repeat(5, 36px);
-  gap: 20px 10px;
+  grid-template-columns: 36px;
+  grid-auto-rows: 36px;
+  gap: 16px;
+  max-height: calc(100vh - 190px);
   overflow-y: auto;
   padding-right: 2px;
   scrollbar-width: none;
