@@ -21,11 +21,13 @@ import AppLayout from './layouts/AppLayout.vue'
 import GlobalOverlayHost from './components/GlobalOverlayHost.vue'
 import { useUserStore } from './stores/user'
 import { useReaderStore } from './stores/reader'
+import { usePreferencesStore } from './stores/preferences'
 import { useSync } from './composables/useSync'
 
 const route = useRoute()
 const userStore = useUserStore()
 const readerStore = useReaderStore()
+const preferences = usePreferencesStore()
 const { connect, disconnect } = useSync()
 
 const isLoggedIn = computed(() => !!userStore.token)
@@ -39,6 +41,7 @@ onMounted(() => {
   if (userStore.token) {
     connect()
     readerStore.loadReaderSettings().catch(() => {})
+    preferences.loadPreferences().catch(() => {})
   }
 })
 
@@ -46,6 +49,7 @@ watch(isLoggedIn, (loggedIn) => {
   if (loggedIn) {
     connect()
     readerStore.loadReaderSettings().catch(() => {})
+    preferences.loadPreferences().catch(() => {})
   } else {
     disconnect()
   }

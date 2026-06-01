@@ -98,7 +98,7 @@ func (s *Server) updateUserSetting(c *gin.Context) {
 func normalizeUserSettingKey(key string) string {
 	key = strings.TrimSpace(key)
 	switch key {
-	case "reader":
+	case "reader", "shelf", "search":
 		return key
 	default:
 		return ""

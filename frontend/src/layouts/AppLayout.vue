@@ -159,6 +159,7 @@ import { useUserStore } from '../stores/user'
 import { useOverlayStore } from '../stores/overlay'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
+import { usePreferencesStore } from '../stores/preferences'
 import { useSync } from '../composables/useSync'
 import { clearCache, getCacheStats } from '../api/cache'
 import { listSources } from '../api/sources'
@@ -171,6 +172,7 @@ const userStore = useUserStore()
 const overlay = useOverlayStore()
 const bookshelf = useBookshelfStore()
 const reader = useReaderStore()
+const preferences = usePreferencesStore()
 const quickSearch = ref('')
 const offline = ref(false)
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
@@ -253,12 +255,23 @@ const navSections = computed(() => [
 
 const userInitial = computed(() => (userStore.profile?.username || '?').slice(0, 1).toUpperCase())
 const concurrentOptions = [8, 16, 32, 60]
-const initialSidebarSearchSetting = readSidebarSearchSetting()
 const sidebarSources = ref([])
-const sidebarSearchType = ref(initialSidebarSearchSetting.searchType)
-const sidebarSearchGroup = ref(initialSidebarSearchSetting.group)
-const sidebarSourceId = ref(initialSidebarSearchSetting.sourceId)
-const sidebarConcurrent = ref(initialSidebarSearchSetting.concurrent)
+const sidebarSearchType = computed({
+  get: () => preferences.search.searchType,
+  set: value => preferences.setSearchConfig({ searchType: value }),
+})
+const sidebarSearchGroup = computed({
+  get: () => preferences.search.group,
+  set: value => preferences.setSearchConfig({ group: value }),
+})
+const sidebarSourceId = computed({
+  get: () => preferences.search.sourceId,
+  set: value => preferences.setSearchConfig({ sourceId: value }),
+})
+const sidebarConcurrent = computed({
+  get: () => preferences.search.concurrent,
+  set: value => preferences.setSearchConfig({ concurrent: value }),
+})
 const sidebarEnabledSources = computed(() => sidebarSources.value.filter(source => source.enabled))
 const sidebarSourceGroups = computed(() => {
   const groups = new Map()
@@ -357,30 +370,7 @@ function clearShelfSearch() {
 }
 
 function saveSearchSetting() {
-  try {
-    localStorage.setItem('openreader_sidebar_search', JSON.stringify({
-      searchType: sidebarSearchType.value,
-      group: sidebarSearchGroup.value,
-      sourceId: sidebarSourceId.value,
-      concurrent: sidebarConcurrent.value,
-    }))
-  } catch {
-    // Ignore restricted storage; search still works for the current session.
-  }
-}
-
-function readSidebarSearchSetting() {
-  try {
-    const data = JSON.parse(localStorage.getItem('openreader_sidebar_search') || '{}')
-    return {
-      searchType: ['all', 'group', 'single'].includes(data.searchType) ? data.searchType : 'all',
-      group: data.group || '',
-      sourceId: data.sourceId || '',
-      concurrent: concurrentOptions.includes(Number(data.concurrent)) ? Number(data.concurrent) : 60,
-    }
-  } catch {
-    return { searchType: 'all', group: '', sourceId: '', concurrent: 60 }
-  }
+  preferences.savePreference('search').catch(() => {})
 }
 
 async function loadSidebarSources() {
