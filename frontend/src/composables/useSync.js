@@ -4,6 +4,10 @@ import { useBookshelfStore } from '../stores/bookshelf'
 
 const connected = ref(false)
 let socket
+let reconnectTimer
+let reconnectDelay = 1500
+let manualDisconnect = false
+const MAX_RECONNECT_DELAY = 15000
 
 export function useSync() {
   const reader = useReaderStore()
@@ -12,19 +16,32 @@ export function useSync() {
   function connect() {
     const token = localStorage.getItem('openreader_token')
     if (!token || socket) return
+    manualDisconnect = false
+    clearReconnectTimer()
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
     socket = new WebSocket(`${protocol}://${window.location.host}/ws/sync?token=${encodeURIComponent(token)}`)
 
     socket.addEventListener('open', () => {
       connected.value = true
+      reconnectDelay = 1500
+      bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
     })
     socket.addEventListener('close', () => {
       connected.value = false
       socket = undefined
+      scheduleReconnect()
+    })
+    socket.addEventListener('error', () => {
+      socket?.close()
     })
     socket.addEventListener('message', (event) => {
-      const message = JSON.parse(event.data)
+      let message
+      try {
+        message = JSON.parse(event.data)
+      } catch {
+        return
+      }
       if (message.type === 'progress_update') {
         reader.applyProgress(message.payload)
         bookshelf.applyBookProgress(message.payload)
@@ -36,6 +53,8 @@ export function useSync() {
   }
 
   function disconnect() {
+    manualDisconnect = true
+    clearReconnectTimer()
     socket?.close()
     socket = undefined
     connected.value = false
@@ -48,4 +67,20 @@ export function useSync() {
   }
 
   return { connected, connect, disconnect, send }
+
+  function scheduleReconnect() {
+    if (manualDisconnect || reconnectTimer) return
+    if (!localStorage.getItem('openreader_token')) return
+    reconnectTimer = window.setTimeout(() => {
+      reconnectTimer = undefined
+      connect()
+      reconnectDelay = Math.min(MAX_RECONNECT_DELAY, reconnectDelay * 1.7)
+    }, reconnectDelay)
+  }
+
+  function clearReconnectTimer() {
+    if (!reconnectTimer) return
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+  }
 }
