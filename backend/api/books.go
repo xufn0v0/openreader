@@ -1362,8 +1362,64 @@ func searchContentPositions(content string, keyword string, limit int) []int {
 		}
 		offset = absolute + len(normalizedKeyword)
 	}
+	if len(positions) < limit {
+		termPosition := searchContentTermPosition(normalizedContent, contentMap, keyword)
+		if termPosition >= 0 {
+			if _, ok := seen[termPosition]; !ok {
+				positions = append(positions, termPosition)
+			}
+		}
+	}
 	sort.Ints(positions)
 	return positions
+}
+
+func searchContentTermPosition(normalizedContent string, contentMap []int, keyword string) int {
+	terms := normalizeSearchTerms(keyword)
+	if len(terms) < 2 || normalizedContent == "" {
+		return -1
+	}
+	offset := 0
+	firstNormalizedPosition := -1
+	for _, term := range terms {
+		if term == "" {
+			continue
+		}
+		position := strings.Index(normalizedContent[offset:], term)
+		if position < 0 {
+			return -1
+		}
+		absolute := offset + position
+		if firstNormalizedPosition < 0 {
+			firstNormalizedPosition = absolute
+		}
+		offset = absolute + len(term)
+	}
+	if firstNormalizedPosition < 0 || firstNormalizedPosition >= len(contentMap) {
+		return -1
+	}
+	return contentMap[firstNormalizedPosition]
+}
+
+func normalizeSearchTerms(value string) []string {
+	terms := make([]string, 0)
+	var builder strings.Builder
+	flush := func() {
+		if builder.Len() == 0 {
+			return
+		}
+		terms = append(terms, builder.String())
+		builder.Reset()
+	}
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			flush()
+			continue
+		}
+		builder.WriteString(strings.ToLower(string(r)))
+	}
+	flush()
+	return terms
 }
 
 func normalizeSearchText(value string) (string, []int) {
