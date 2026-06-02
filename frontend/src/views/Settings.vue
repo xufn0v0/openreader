@@ -215,8 +215,19 @@
                 <el-slider v-model="readerBrightnessModel" :min="50" :max="150" />
               </label>
               <label>
-                <span>自动阅读速度 {{ readerStore.autoReadSpeed }}px</span>
-                <el-slider v-model="readerAutoReadSpeedModel" :min="2" :max="40" :step="1" />
+                <span>自动阅读</span>
+                <el-radio-group v-model="readerAutoReadingMethodModel" size="small">
+                  <el-radio-button value="像素滚动">像素滚动</el-radio-button>
+                  <el-radio-button value="段落滚动">段落滚动</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label v-if="readerStore.autoReadingMethod === '像素滚动'">
+                <span>滚动像素 {{ readerStore.autoReadingPixel }}px</span>
+                <el-slider v-model="readerAutoReadingPixelModel" :min="1" :max="80" :step="1" />
+              </label>
+              <label>
+                <span>翻页速度 {{ readerStore.autoReadingLineTime }}ms</span>
+                <el-slider v-model="readerAutoReadingLineTimeModel" :min="50" :max="3000" :step="50" />
               </label>
               <label>
                 <span>动画时长 {{ readerStore.animateDuration }}ms</span>
@@ -426,9 +437,17 @@ const readerBrightnessModel = computed({
   get: () => readerStore.brightness,
   set: value => readerStore.setBrightness(value),
 })
-const readerAutoReadSpeedModel = computed({
-  get: () => readerStore.autoReadSpeed,
-  set: value => readerStore.setAutoReadSpeed(value),
+const readerAutoReadingMethodModel = computed({
+  get: () => readerStore.autoReadingMethod,
+  set: value => readerStore.setAutoReadingMethod(value),
+})
+const readerAutoReadingPixelModel = computed({
+  get: () => readerStore.autoReadingPixel,
+  set: value => readerStore.setAutoReadingPixel(value),
+})
+const readerAutoReadingLineTimeModel = computed({
+  get: () => readerStore.autoReadingLineTime,
+  set: value => readerStore.setAutoReadingLineTime(value),
 })
 const readerAnimateDurationModel = computed({
   get: () => readerStore.animateDuration,

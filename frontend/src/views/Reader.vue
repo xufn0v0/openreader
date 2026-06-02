@@ -1300,7 +1300,7 @@ function openSettingsDrawer() {
 function showClickZone() {
   showSettingsDrawer.value = false
   showMobileMoreDrawer.value = false
-  readerChromeVisible.value = false
+  mobileChromeVisible.value = false
   showClickZoneOverlay.value = true
 }
 
@@ -1824,26 +1824,85 @@ function toggleAutoReading() {
     return
   }
   autoReading.value = true
-  autoReadTimer = setInterval(() => {
-    if (autoReadAdvancing) return
-    if (isScrollRead.value && contentEl.value) {
-      const el = contentEl.value
-      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4
-      if (atBottom) {
-        advanceAutoReadPage()
-      } else {
-        el.scrollTop += reader.autoReadSpeed
-      }
-      return
-    }
-    advanceAutoReadPage()
-  }, 260)
+  runAutoReadLoop()
   toastMsg.value = '自动阅读已开始'
   setTimeout(() => { toastMsg.value = '' }, 1200)
 }
 
+function runAutoReadLoop(delay = 0) {
+  clearTimeout(autoReadTimer)
+  if (!autoReading.value) return
+  autoReadTimer = setTimeout(async () => {
+    if (!autoReading.value) return
+    if (autoReadAdvancing || isOverlayOpen.value || mobileChromeVisible.value) {
+      runAutoReadLoop(300)
+      return
+    }
+    autoReadAdvancing = true
+    try {
+      if (reader.autoReadingMethod === '段落滚动') {
+        await autoReadByParagraph()
+      } else {
+        await autoReadByPixel()
+      }
+    } finally {
+      autoReadAdvancing = false
+    }
+  }, delay)
+}
+
+async function autoReadByPixel() {
+  if (isScrollRead.value && contentEl.value) {
+    const el = contentEl.value
+    const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+    if (el.scrollTop < bottom - 4) {
+      el.scrollTop = Math.min(bottom, el.scrollTop + reader.autoReadingPixel)
+      runAutoReadLoop(reader.autoReadingLineTime)
+      return
+    }
+  }
+  const advanced = await advanceAutoReadPage()
+  if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
+}
+
+async function autoReadByParagraph() {
+  if (!isScrollRead.value || !contentEl.value || !contentBody.value) {
+    const advanced = await advanceAutoReadPage()
+    if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
+    return
+  }
+  const current = currentVisibleParagraph()
+  const next = nextParagraphAfter(current)
+  if (next) {
+    const currentRect = current?.getBoundingClientRect?.()
+    const lineHeight = Math.max(1, Number(reader.fontSize || 18) * Number(reader.lineHeight || 1.8))
+    const lineCount = currentRect?.height ? Math.max(1, Math.ceil(currentRect.height / lineHeight)) : 1
+    scrollParagraphIntoView(next)
+    progressVersion.value += 1
+    saveCurrentProgress()
+    runAutoReadLoop(reader.autoReadingLineTime * lineCount)
+    return
+  }
+  const advanced = await advanceAutoReadPage()
+  if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
+}
+
+function nextParagraphAfter(paragraph) {
+  const paragraphs = [...(contentBody.value?.querySelectorAll('p') || [])]
+  if (!paragraph) return paragraphs[0] || null
+  const index = paragraphs.indexOf(paragraph)
+  return index >= 0 ? paragraphs[index + 1] || null : paragraphs[0] || null
+}
+
+function scrollParagraphIntoView(paragraph) {
+  if (!paragraph || !contentEl.value) return
+  const viewport = contentEl.value.getBoundingClientRect()
+  const rect = paragraph.getBoundingClientRect()
+  const nextTop = contentEl.value.scrollTop + rect.top - viewport.top - 24
+  contentEl.value.scrollTo({ top: Math.max(0, nextTop), behavior: readerScrollBehavior() })
+}
+
 async function advanceAutoReadPage() {
-  autoReadAdvancing = true
   const beforeChapter = currentIndex.value
   const beforePage = page.value
   try {
@@ -1852,16 +1911,17 @@ async function advanceAutoReadPage() {
       stopAutoReading()
       toastMsg.value = '已到本书末尾'
       setTimeout(() => { toastMsg.value = '' }, 1200)
+      return false
     }
+    return true
   } finally {
-    autoReadAdvancing = false
   }
 }
 
 function stopAutoReading() {
   autoReading.value = false
   autoReadAdvancing = false
-  clearInterval(autoReadTimer)
+  clearTimeout(autoReadTimer)
   autoReadTimer = null
 }
 

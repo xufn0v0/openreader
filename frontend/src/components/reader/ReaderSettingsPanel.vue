@@ -146,8 +146,21 @@
     </div>
 
     <div class="setting-row">
-      <label class="setting-label">自动阅读速度 ({{ reader.autoReadSpeed }}px)</label>
-      <el-slider v-model="autoReadSpeedModel" :min="2" :max="40" :step="1" size="small" />
+      <label class="setting-label">自动阅读</label>
+      <el-radio-group v-model="autoReadingMethodModel" size="small" class="read-method-group">
+        <el-radio-button value="像素滚动">像素滚动</el-radio-button>
+        <el-radio-button value="段落滚动">段落滚动</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div v-if="reader.autoReadingMethod === '像素滚动'" class="setting-row">
+      <label class="setting-label">滚动像素 ({{ reader.autoReadingPixel }}px)</label>
+      <el-slider v-model="autoReadingPixelModel" :min="1" :max="80" :step="1" size="small" />
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">翻页速度 ({{ reader.autoReadingLineTime }}ms)</label>
+      <el-slider v-model="autoReadingLineTimeModel" :min="50" :max="3000" :step="50" size="small" />
     </div>
 
     <div class="setting-row">
@@ -450,9 +463,19 @@ const brightnessModel = computed({
   set: value => props.reader.setBrightness(value),
 })
 
-const autoReadSpeedModel = computed({
-  get: () => props.reader.autoReadSpeed,
-  set: value => props.reader.setAutoReadSpeed(value),
+const autoReadingMethodModel = computed({
+  get: () => props.reader.autoReadingMethod,
+  set: value => props.reader.setAutoReadingMethod(value),
+})
+
+const autoReadingPixelModel = computed({
+  get: () => props.reader.autoReadingPixel,
+  set: value => props.reader.setAutoReadingPixel(value),
+})
+
+const autoReadingLineTimeModel = computed({
+  get: () => props.reader.autoReadingLineTime,
+  set: value => props.reader.setAutoReadingLineTime(value),
 })
 
 const animateDurationModel = computed({

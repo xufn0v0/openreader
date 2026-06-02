@@ -31,6 +31,9 @@ export const useReaderStore = defineStore('reader', {
     customBgImageList: [],
     brightness: 100,
     autoReadSpeed: 12,
+    autoReadingMethod: '像素滚动',
+    autoReadingPixel: 12,
+    autoReadingLineTime: 260,
     animateDuration: 300,
     ttsRate: 1,
     ttsPitch: 1,
@@ -38,7 +41,7 @@ export const useReaderStore = defineStore('reader', {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 8,
+    settingsVersion: 9,
     settingsUpdatedAt: '',
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
@@ -229,7 +232,19 @@ export const useReaderStore = defineStore('reader', {
       this.markSettingsDirty()
     },
     setAutoReadSpeed(speed) {
-      this.autoReadSpeed = clampNumber(speed, 2, 40, 12)
+      this.setAutoReadingPixel(speed)
+    },
+    setAutoReadingMethod(method) {
+      this.autoReadingMethod = method === '段落滚动' ? '段落滚动' : '像素滚动'
+      this.markSettingsDirty()
+    },
+    setAutoReadingPixel(pixel) {
+      this.autoReadingPixel = clampNumber(pixel, 1, 80, 12)
+      this.autoReadSpeed = this.autoReadingPixel
+      this.markSettingsDirty()
+    },
+    setAutoReadingLineTime(lineTime) {
+      this.autoReadingLineTime = clampNumber(lineTime, 50, 3000, 260)
       this.markSettingsDirty()
     },
     setAnimateDuration(duration) {
@@ -287,7 +302,10 @@ export const useReaderStore = defineStore('reader', {
       this.paragraphSpace = clampNumber(this.paragraphSpace, 0, 3, 0)
       this.columnWidth = clampNumber(this.columnWidth, 320, 1200, 800)
       this.brightness = clampNumber(this.brightness, 50, 150, 100)
-      this.autoReadSpeed = clampNumber(this.autoReadSpeed, 2, 40, 12)
+      if (!['像素滚动', '段落滚动'].includes(this.autoReadingMethod)) this.autoReadingMethod = '像素滚动'
+      this.autoReadingPixel = clampNumber(this.autoReadingPixel ?? this.autoReadSpeed, 1, 80, 12)
+      this.autoReadSpeed = this.autoReadingPixel
+      this.autoReadingLineTime = clampNumber(this.autoReadingLineTime, 50, 3000, 260)
       this.animateDuration = clampNumber(this.animateDuration, 0, 1000, 300)
       if (this.pageType === 'kindle') {
         this.animateDuration = 0
@@ -301,7 +319,7 @@ export const useReaderStore = defineStore('reader', {
         this.paragraphSpace = 0.2
         this.columnWidth = 800
       }
-      this.settingsVersion = 8
+      this.settingsVersion = 9
       this.settingsSyncing = false
     },
     markSettingsDirty(options = {}) {
@@ -594,6 +612,9 @@ function readerSettingsPayload(state) {
     autoTheme: state.autoTheme === true,
     brightness: state.brightness,
     autoReadSpeed: state.autoReadSpeed,
+    autoReadingMethod: state.autoReadingMethod,
+    autoReadingPixel: state.autoReadingPixel,
+    autoReadingLineTime: state.autoReadingLineTime,
     animateDuration: state.animateDuration,
     ttsRate: state.ttsRate,
     ttsPitch: state.ttsPitch,
@@ -601,7 +622,7 @@ function readerSettingsPayload(state) {
     lineHeight: state.lineHeight,
     paragraphSpace: state.paragraphSpace,
     columnWidth: state.columnWidth,
-    settingsVersion: 8,
+    settingsVersion: 9,
   }
 }
 
@@ -625,6 +646,9 @@ function defaultReaderSettings() {
     autoTheme: false,
     brightness: 100,
     autoReadSpeed: 12,
+    autoReadingMethod: '像素滚动',
+    autoReadingPixel: 12,
+    autoReadingLineTime: 260,
     animateDuration: 300,
     ttsRate: 1,
     ttsPitch: 1,
@@ -632,7 +656,7 @@ function defaultReaderSettings() {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 8,
+    settingsVersion: 9,
     normalModeSnapshot: null,
   }
 }
@@ -661,14 +685,17 @@ function sanitizeReaderSettings(payload, options = {}) {
   settings.fontSize = clampNumber(payload.fontSize, 8, 36, 18)
   settings.fontWeight = clampNumber(payload.fontWeight, 300, 900, 400)
   settings.brightness = clampNumber(payload.brightness, 50, 150, 100)
-  settings.autoReadSpeed = clampNumber(payload.autoReadSpeed, 2, 40, 12)
+  settings.autoReadingMethod = payload.autoReadingMethod === '段落滚动' ? '段落滚动' : '像素滚动'
+  settings.autoReadingPixel = clampNumber(payload.autoReadingPixel ?? payload.autoReadSpeed, 1, 80, 12)
+  settings.autoReadSpeed = settings.autoReadingPixel
+  settings.autoReadingLineTime = clampNumber(payload.autoReadingLineTime, 50, 3000, 260)
   settings.animateDuration = clampNumber(payload.animateDuration, 0, 1000, 300)
   settings.ttsRate = clampNumber(payload.ttsRate, 0.5, 3, 1)
   settings.ttsPitch = clampNumber(payload.ttsPitch, 0.5, 2, 1)
   settings.lineHeight = clampNumber(payload.lineHeight, 1, 5, 1.8)
   settings.paragraphSpace = clampNumber(payload.paragraphSpace, 0, 3, 0.2)
   settings.columnWidth = clampNumber(payload.columnWidth, 320, 1200, 800)
-  settings.settingsVersion = 8
+  settings.settingsVersion = 9
   return settings
 }
 
@@ -720,6 +747,9 @@ function defaultCustomConfigList() {
       customConfigList: [],
       brightness: 100,
       autoReadSpeed: 12,
+      autoReadingMethod: '像素滚动',
+      autoReadingPixel: 12,
+      autoReadingLineTime: 260,
       animateDuration: 300,
       ttsRate: 1,
       ttsPitch: 1,
@@ -727,7 +757,7 @@ function defaultCustomConfigList() {
       lineHeight: 1.8,
       paragraphSpace: 0.2,
       columnWidth: 800,
-      settingsVersion: 8,
+      settingsVersion: 9,
       name: '内置白天',
       configDefaultType: '白天默认',
       builtin: true,
@@ -750,6 +780,9 @@ function defaultCustomConfigList() {
       customConfigList: [],
       brightness: 100,
       autoReadSpeed: 12,
+      autoReadingMethod: '像素滚动',
+      autoReadingPixel: 12,
+      autoReadingLineTime: 260,
       animateDuration: 300,
       ttsRate: 1,
       ttsPitch: 1,
@@ -757,7 +790,7 @@ function defaultCustomConfigList() {
       lineHeight: 1.8,
       paragraphSpace: 0.2,
       columnWidth: 800,
-      settingsVersion: 8,
+      settingsVersion: 9,
       name: '内置黑夜',
       configDefaultType: '黑夜默认',
       builtin: true,
