@@ -304,7 +304,7 @@ function toggleAll() {
   selectedIds.value = allSelected.value ? [] : enabledSources.value.map(source => source.id)
 }
 
-function switchSearchMode(mode, updateRoute = true) {
+async function switchSearchMode(mode, updateRoute = true) {
   searchMode.value = mode
   searched.value = false
   results.value = []
@@ -326,6 +326,9 @@ function switchSearchMode(mode, updateRoute = true) {
         mode: mode === 'local' ? 'local' : undefined,
       },
     })
+  }
+  if (mode === 'local') {
+    await searchLocalBooks()
   }
 }
 
