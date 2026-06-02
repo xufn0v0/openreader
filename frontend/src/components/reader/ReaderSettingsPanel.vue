@@ -15,6 +15,25 @@
     </div>
 
     <div class="setting-row">
+      <label class="setting-label">配置方案</label>
+      <div class="config-scheme-list">
+        <button
+          v-for="(config, index) in reader.customConfigList"
+          :key="config.name"
+          class="config-scheme"
+          :class="{ active: reader.customConfigName === config.name }"
+          type="button"
+          @click="selectCustomConfig(config.name)"
+        >
+          <span>{{ config.name }}</span>
+          <small v-if="config.configDefaultType">{{ config.configDefaultType }}</small>
+          <el-icon v-if="index > 1 && !config.builtin && reader.customConfigName !== config.name" @click.stop="deleteCustomConfig(config.name)"><Close /></el-icon>
+        </button>
+        <button class="config-scheme add" type="button" @click="addCustomConfig">新增方案</button>
+      </div>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">页面模式（本机）</label>
       <el-radio-group v-model="pageModeModel" size="small" class="read-method-group">
         <el-radio-button value="auto">自适应</el-radio-button>
@@ -244,6 +263,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Minus, Plus, RefreshLeft, Upload } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -290,6 +310,39 @@ const pageTypeModel = computed({
   get: () => props.reader.pageType,
   set: value => props.reader.setPageType(value),
 })
+
+function selectCustomConfig(name) {
+  if (!props.reader.setCustomConfig(name)) return
+  emit('update:customBg', props.reader.customBgColor)
+  emit('update:lineHeight', props.reader.lineHeight)
+}
+
+async function addCustomConfig() {
+  const res = await ElMessageBox.prompt('请输入方案名称', '新增配置方案', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputPattern: /\S+/,
+    inputErrorMessage: '方案名不能为空',
+  }).catch(() => null)
+  if (!res) return
+  const result = props.reader.createCustomConfig(res.value)
+  if (!result.ok) {
+    ElMessage.error(result.message || '新增方案失败')
+    return
+  }
+  ElMessage.success('已保存当前配置为新方案')
+}
+
+async function deleteCustomConfig(name) {
+  const confirmed = await ElMessageBox.confirm(`确定删除「${name}」方案吗？`, '删除配置方案', { type: 'warning' }).catch(() => false)
+  if (!confirmed) return
+  const result = props.reader.deleteCustomConfig(name)
+  if (!result.ok) {
+    ElMessage.error(result.message || '删除方案失败')
+    return
+  }
+  ElMessage.success('已删除配置方案')
+}
 
 const readerModeModel = computed({
   get: () => props.reader.mode,
@@ -439,6 +492,49 @@ function resetReaderSettings() {
 .read-method-group {
   display: flex;
   flex-wrap: wrap;
+}
+
+.config-scheme-list {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.config-scheme {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(111, 94, 54, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  color: inherit;
+  cursor: pointer;
+}
+
+.config-scheme span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-scheme small {
+  color: rgba(31, 41, 55, 0.55);
+  white-space: nowrap;
+}
+
+.config-scheme.active {
+  border-color: #ed4259;
+  color: #ed4259;
+  background: rgba(237, 66, 89, 0.08);
+}
+
+.config-scheme.add {
+  color: #ed4259;
 }
 
 .setting-row {

@@ -132,6 +132,24 @@
                   <el-radio-button value="simple">简洁</el-radio-button>
                 </el-radio-group>
               </label>
+              <label class="reader-config-schemes-row">
+                <span>配置方案</span>
+                <div class="reader-config-schemes">
+                  <button
+                    v-for="(config, index) in readerStore.customConfigList"
+                    :key="config.name"
+                    class="reader-config-scheme"
+                    :class="{ active: readerStore.customConfigName === config.name }"
+                    type="button"
+                    @click="selectReaderCustomConfig(config.name)"
+                  >
+                    <span>{{ config.name }}</span>
+                    <small v-if="config.configDefaultType">{{ config.configDefaultType }}</small>
+                    <el-icon v-if="index > 1 && !config.builtin && readerStore.customConfigName !== config.name" @click.stop="deleteReaderCustomConfig(config.name)"><Delete /></el-icon>
+                  </button>
+                  <button class="reader-config-scheme add" type="button" @click="addReaderCustomConfig">新增方案</button>
+                </div>
+              </label>
               <label>
                 <span>页面模式（本机）</span>
                 <el-radio-group v-model="readerPageModeModel" size="small">
@@ -429,6 +447,37 @@ const readerSettingsSyncText = computed(() => {
 
 const readerSettingsMiniInterface = computed(() => readerStore.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const isMobileDialog = computed(() => readerSettingsMiniInterface.value)
+
+function selectReaderCustomConfig(name) {
+  readerStore.setCustomConfig(name)
+}
+
+async function addReaderCustomConfig() {
+  const res = await ElMessageBox.prompt('请输入方案名称', '新增配置方案', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputPattern: /\S+/,
+    inputErrorMessage: '方案名不能为空',
+  }).catch(() => null)
+  if (!res) return
+  const result = readerStore.createCustomConfig(res.value)
+  if (!result.ok) {
+    ElMessage.error(result.message || '新增方案失败')
+    return
+  }
+  ElMessage.success('已保存当前配置为新方案')
+}
+
+async function deleteReaderCustomConfig(name) {
+  const confirmed = await ElMessageBox.confirm(`确定删除「${name}」方案吗？`, '删除配置方案', { type: 'warning' }).catch(() => false)
+  if (!confirmed) return
+  const result = readerStore.deleteCustomConfig(name)
+  if (!result.ok) {
+    ElMessage.error(result.message || '删除方案失败')
+    return
+  }
+  ElMessage.success('已删除配置方案')
+}
 
 onMounted(() => {
   readerStore.normalizeSettings()
@@ -818,6 +867,54 @@ function readError(err, fallback) {
 .reader-setting-list span {
   color: var(--app-text-muted);
   font-size: 13px;
+}
+
+.reader-config-schemes-row > span {
+  align-self: start;
+}
+
+.reader-config-schemes {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.reader-config-scheme {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  cursor: pointer;
+}
+
+.reader-config-scheme span {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-config-scheme small {
+  color: var(--app-text-muted);
+  white-space: nowrap;
+}
+
+.reader-config-scheme.active {
+  border-color: var(--app-primary);
+  color: var(--app-primary);
+  background: rgba(64, 158, 255, 0.08);
+}
+
+.reader-config-scheme.add {
+  color: var(--app-primary);
 }
 
 .replace-test-actions {

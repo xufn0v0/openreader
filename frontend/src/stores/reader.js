@@ -44,6 +44,8 @@ export const useReaderStore = defineStore('reader', {
     settingsSyncError: '',
     progressByBook: {},
     normalModeSnapshot: null,
+    customConfigName: '内置白天',
+    customConfigList: defaultCustomConfigList(),
   }),
   persist: true,
   getters: {
@@ -62,6 +64,37 @@ export const useReaderStore = defineStore('reader', {
     setMode(mode) {
       this.mode = ['scroll', 'scroll2', 'flip', 'page'].includes(mode) ? mode : 'page'
       this.markSettingsDirty()
+    },
+    setCustomConfig(name) {
+      const config = (Array.isArray(this.customConfigList) ? this.customConfigList : []).find(item => item?.name === name)
+      if (!config) return false
+      const next = sanitizeReaderSettings(config, { includeCustomConfigs: false })
+      Object.assign(this, next)
+      this.customConfigName = config.name
+      this.normalizeSettings()
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return true
+    },
+    createCustomConfig(name) {
+      const cleanName = String(name || '').trim()
+      if (!cleanName) return { ok: false, message: '方案名不能为空' }
+      const current = Array.isArray(this.customConfigList) ? this.customConfigList : []
+      if (current.some(item => item?.name === cleanName)) return { ok: false, message: '方案名不能重复' }
+      const config = readerConfigSnapshot(this, cleanName, '')
+      this.customConfigList = [...current, config]
+      this.customConfigName = cleanName
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return { ok: true }
+    },
+    deleteCustomConfig(name) {
+      const current = Array.isArray(this.customConfigList) ? this.customConfigList : []
+      const index = current.findIndex(item => item?.name === name)
+      if (index < 0) return { ok: false, message: '方案不存在' }
+      if (index <= 1 || current[index]?.builtin) return { ok: false, message: '内置方案不能删除' }
+      if (this.customConfigName === name) return { ok: false, message: '方案正在使用，无法删除' }
+      this.customConfigList = current.filter(item => item?.name !== name)
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return { ok: true }
     },
     setPageType(pageType) {
       const nextType = pageType === 'simple' ? 'simple' : 'normal'
@@ -204,6 +237,11 @@ export const useReaderStore = defineStore('reader', {
       if (!['简体', '繁体'].includes(this.chineseFont)) this.chineseFont = '简体'
       if (!this.customFontsMap || typeof this.customFontsMap !== 'object' || Array.isArray(this.customFontsMap)) this.customFontsMap = {}
       if (!Array.isArray(this.customBgImageList)) this.customBgImageList = []
+      if (!Array.isArray(this.customConfigList) || !this.customConfigList.length) this.customConfigList = defaultCustomConfigList()
+      this.customConfigList = sanitizeCustomConfigList(this.customConfigList)
+      if (!this.customConfigList.some(item => item.name === this.customConfigName)) {
+        this.customConfigName = this.customConfigList[0]?.name || '内置白天'
+      }
       this.fontSize = clampNumber(this.fontSize, 8, 36, 18)
       this.fontWeight = clampNumber(this.fontWeight, 300, 900, 400)
       this.lineHeight = clampNumber(this.lineHeight, 1, 5, 1.8)
@@ -227,10 +265,22 @@ export const useReaderStore = defineStore('reader', {
       this.settingsVersion = 7
       this.settingsSyncing = false
     },
-    markSettingsDirty() {
+    markSettingsDirty(options = {}) {
+      if (!options.skipCustomConfigSync) this.syncActiveCustomConfig()
       this.settingsUpdatedAt = new Date().toISOString()
       this.settingsSyncError = ''
       this.scheduleSettingsSync()
+    },
+    syncActiveCustomConfig() {
+      if (!this.customConfigName || !Array.isArray(this.customConfigList)) return
+      const index = this.customConfigList.findIndex(item => item?.name === this.customConfigName)
+      if (index < 0) return
+      const current = this.customConfigList[index]
+      const next = {
+        ...readerConfigSnapshot(this, current.name, current.configDefaultType || ''),
+        builtin: current.builtin === true,
+      }
+      this.customConfigList = this.customConfigList.map((item, itemIndex) => itemIndex === index ? next : item)
     },
     scheduleSettingsSync() {
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return
@@ -499,6 +549,8 @@ function readerSettingsPayload(state) {
     customBgColor: state.customBgColor,
     customBgImage: state.customBgImage,
     customBgImageList: Array.isArray(state.customBgImageList) ? state.customBgImageList : [],
+    customConfigName: state.customConfigName || '内置白天',
+    customConfigList: sanitizeCustomConfigList(state.customConfigList),
     brightness: state.brightness,
     autoReadSpeed: state.autoReadSpeed,
     animateDuration: state.animateDuration,
@@ -526,6 +578,8 @@ function defaultReaderSettings() {
     customBgColor: '',
     customBgImage: '',
     customBgImageList: [],
+    customConfigName: '内置白天',
+    customConfigList: defaultCustomConfigList(),
     brightness: 100,
     autoReadSpeed: 12,
     animateDuration: 300,
@@ -540,7 +594,8 @@ function defaultReaderSettings() {
   }
 }
 
-function sanitizeReaderSettings(payload) {
+function sanitizeReaderSettings(payload, options = {}) {
+  const includeCustomConfigs = options.includeCustomConfigs !== false
   const settings = {}
   if (['scroll', 'scroll2', 'flip', 'page'].includes(payload.mode)) settings.mode = payload.mode
   if (['normal', 'simple'].includes(payload.pageType)) settings.pageType = payload.pageType
@@ -552,6 +607,10 @@ function sanitizeReaderSettings(payload) {
   if (typeof payload.customBgColor === 'string') settings.customBgColor = payload.customBgColor
   if (typeof payload.customBgImage === 'string') settings.customBgImage = payload.customBgImage
   settings.customBgImageList = sanitizeStringList(payload.customBgImageList)
+  if (includeCustomConfigs) {
+    if (typeof payload.customConfigName === 'string') settings.customConfigName = payload.customConfigName
+    settings.customConfigList = sanitizeCustomConfigList(payload.customConfigList)
+  }
   if (typeof payload.ttsVoiceURI === 'string') settings.ttsVoiceURI = payload.ttsVoiceURI
   settings.fontSize = clampNumber(payload.fontSize, 8, 36, 18)
   settings.fontWeight = clampNumber(payload.fontWeight, 300, 900, 400)
@@ -578,6 +637,101 @@ function sanitizeCustomFontsMap(value) {
 function sanitizeStringList(value) {
   if (!Array.isArray(value)) return []
   return [...new Set(value.filter(item => typeof item === 'string' && item))]
+}
+
+function readerConfigSnapshot(state, name, configDefaultType) {
+  const payload = readerSettingsPayload({
+    ...state,
+    customConfigName: name,
+    customConfigList: [],
+  })
+  delete payload.customConfigName
+  delete payload.customConfigList
+  return {
+    ...payload,
+    name,
+    configDefaultType,
+  }
+}
+
+function defaultCustomConfigList() {
+  return [
+    {
+      mode: 'page',
+      pageType: 'normal',
+      clickMethod: 'auto',
+      fontFamily: 'system',
+      customFontsMap: {},
+      chineseFont: '简体',
+      fontSize: 18,
+      fontWeight: 400,
+      theme: 'parchment',
+      customBgColor: '',
+      customBgImage: '',
+      customBgImageList: [],
+      customConfigName: '内置白天',
+      customConfigList: [],
+      brightness: 100,
+      autoReadSpeed: 12,
+      animateDuration: 300,
+      ttsRate: 1,
+      ttsPitch: 1,
+      ttsVoiceURI: '',
+      lineHeight: 1.8,
+      paragraphSpace: 0.2,
+      columnWidth: 800,
+      settingsVersion: 7,
+      name: '内置白天',
+      configDefaultType: '白天默认',
+      builtin: true,
+    },
+    {
+      mode: 'page',
+      pageType: 'normal',
+      clickMethod: 'auto',
+      fontFamily: 'system',
+      customFontsMap: {},
+      chineseFont: '简体',
+      fontSize: 18,
+      fontWeight: 400,
+      theme: 'dark',
+      customBgColor: '',
+      customBgImage: '',
+      customBgImageList: [],
+      customConfigName: '内置黑夜',
+      customConfigList: [],
+      brightness: 100,
+      autoReadSpeed: 12,
+      animateDuration: 300,
+      ttsRate: 1,
+      ttsPitch: 1,
+      ttsVoiceURI: '',
+      lineHeight: 1.8,
+      paragraphSpace: 0.2,
+      columnWidth: 800,
+      settingsVersion: 7,
+      name: '内置黑夜',
+      configDefaultType: '黑夜默认',
+      builtin: true,
+    },
+  ]
+}
+
+function sanitizeCustomConfigList(value) {
+  const source = Array.isArray(value) && value.length ? value : defaultCustomConfigList()
+  return source
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const name = typeof item.name === 'string' && item.name.trim() ? item.name.trim() : ''
+      if (!name) return null
+      return {
+        ...sanitizeReaderSettings(item, { includeCustomConfigs: false }),
+        name,
+        configDefaultType: typeof item.configDefaultType === 'string' ? item.configDefaultType : '',
+        builtin: item.builtin === true || index <= 1 && ['内置白天', '内置黑夜'].includes(name),
+      }
+    })
+    .filter(Boolean)
 }
 
 function readErrorMessage(err) {
