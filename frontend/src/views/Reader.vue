@@ -201,6 +201,9 @@
       <input :value="tts.state.rate" max="3" min="0.5" step="0.1" type="range" class="tts-slider" @input="setTTSRate($event.target.value)" />
       <span class="tts-label">音调</span>
       <input :value="tts.state.pitch" max="2" min="0.5" step="0.1" type="range" class="tts-slider" @input="setTTSPitch($event.target.value)" />
+      <span class="tts-label">定时</span>
+      <input :value="ttsSleepMinutes" max="180" min="0" step="1" type="range" class="tts-slider" @input="setTTSSleepMinutes($event.target.value)" />
+      <span class="tts-label">{{ ttsSleepMinutes }}分钟</span>
     </div>
 
     <!-- Toast -->
@@ -2998,6 +3001,8 @@ useGesture(pageEl, {
 // ---- TTS ----
 const tts = useTTS()
 const ttsVoices = computed(() => tts.voices.value)
+const ttsSleepMinutes = ref(0)
+const ttsSleepEndAt = ref(0)
 const ttsProgressLabel = computed(() => {
   const total = tts.total.value || 0
   if (!tts.state.playing || total <= 0) return '段落 - / -'
@@ -3022,6 +3027,24 @@ function setTTSVoice(value) {
   tts.setVoice(reader.ttsVoiceURI)
 }
 
+function setTTSSleepMinutes(value) {
+  const minutes = Math.max(0, Math.min(180, Math.floor(Number(value) || 0)))
+  ttsSleepMinutes.value = minutes
+  ttsSleepEndAt.value = minutes > 0 ? Date.now() + minutes * 60 * 1000 : 0
+}
+
+function isTTSSleepExpired() {
+  return ttsSleepEndAt.value > 0 && Date.now() > ttsSleepEndAt.value
+}
+
+function handleTTSParagraphStart() {
+  if (!isTTSSleepExpired()) return
+  ttsContinueToken += 1
+  tts.stop()
+  toastMsg.value = '定时关闭朗读'
+  setTimeout(() => { toastMsg.value = '' }, 1400)
+}
+
 function toggleTTS() {
   if (!tts.state.supported) {
     toastMsg.value = '当前浏览器不支持朗读'
@@ -3032,11 +3055,16 @@ function toggleTTS() {
     tts.stop()
   } else {
     const token = ++ttsContinueToken
+    if (ttsSleepMinutes.value > 0 && !ttsSleepEndAt.value) setTTSSleepMinutes(ttsSleepMinutes.value)
     tts.speak(content.value, () => {
+      if (isTTSSleepExpired()) {
+        handleTTSParagraphStart()
+        return
+      }
       if (currentIndex.value < chapters.value.length - 1) {
         speakNextChapter(currentIndex.value + 1, token)
       }
-    })
+    }, handleTTSParagraphStart)
   }
 }
 function ttsStop() {
@@ -3051,10 +3079,14 @@ async function speakNextChapter(index, token) {
     await new Promise(resolve => setTimeout(resolve, 120))
     if (currentIndex.value === index && content.value.trim()) {
       tts.speak(content.value, () => {
+        if (isTTSSleepExpired()) {
+          handleTTSParagraphStart()
+          return
+        }
         if (token === ttsContinueToken && currentIndex.value < chapters.value.length - 1) {
           speakNextChapter(currentIndex.value + 1, token)
         }
-      })
+      }, handleTTSParagraphStart)
       return
     }
   }
