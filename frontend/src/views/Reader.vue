@@ -575,8 +575,7 @@ const filteredShelfBooks = computed(() => {
 })
 const sourceGroups = computed(() => {
   const sourceRows = sourceGroupOptions.value.length ? sourceGroupOptions.value : sourceCandidates.value
-  const groups = sourceRows.map(item => item.group).filter(Boolean)
-  return [...new Set(groups)].sort()
+  return buildSourceGroupOptions(sourceRows)
 })
 const currentSourceName = computed(() => {
   if (!book.value?.sourceId) return '本地书籍'
@@ -786,6 +785,19 @@ function makeParagraphs(value, heading = '') {
     items.push({ text, pos })
     return items
   }, [])
+}
+
+function buildSourceGroupOptions(rows) {
+  const counts = new Map()
+  for (const item of rows || []) {
+    if (item?.enabled === false) continue
+    const group = String(item?.group || '').trim()
+    if (!group) continue
+    counts.set(group, (counts.get(group) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([value, count]) => ({ value, label: value, count }))
 }
 
 function makeChapterBlock(index, chapterRow, text) {

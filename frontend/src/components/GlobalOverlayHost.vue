@@ -725,7 +725,7 @@ const sourceSwitchCurrentName = computed(() => {
 })
 const sourceSwitchGroups = computed(() => {
   const rows = sourceRows.value.length ? sourceRows.value : sourceSwitchCandidates.value
-  return [...new Set(rows.map(item => item.group).filter(Boolean))].sort()
+  return buildSourceGroupOptions(rows)
 })
 const bookInfoProgress = computed(() => {
   const book = overlay.bookInfoBook
@@ -2103,6 +2103,19 @@ async function renameGroup(category) {
 
 function groupBookCount(category) {
   return managedBooks.value.filter(book => String(book.categoryId || '') === String(category.id)).length
+}
+
+function buildSourceGroupOptions(rows) {
+  const counts = new Map()
+  for (const item of rows || []) {
+    if (item?.enabled === false) continue
+    const group = String(item?.group || '').trim()
+    if (!group) continue
+    counts.set(group, (counts.get(group) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([value, count]) => ({ value, label: value, count }))
 }
 
 async function toggleGroupVisibility(category, show) {

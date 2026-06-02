@@ -25,7 +25,7 @@
       class="source-group-select"
       @update:model-value="$emit('groupChange', $event || '')"
     >
-      <el-option v-for="item in groups" :key="item" :label="item" :value="item" />
+      <el-option v-for="item in normalizedGroups" :key="item.value" :label="item.label" :value="item.value" />
     </el-select>
     <el-button size="small" :loading="loading" @click="$emit('refresh')">刷新</el-button>
     <el-button v-if="hasMore" size="small" :loading="loading" @click="$emit('loadMore')">加载更多</el-button>
@@ -60,7 +60,9 @@
 </template>
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   book: {
     type: Object,
     default: null,
@@ -108,6 +110,18 @@ defineProps({
 })
 
 defineEmits(['refresh', 'loadMore', 'groupChange', 'queryChange', 'showInfo', 'change'])
+
+const normalizedGroups = computed(() => props.groups.map((item) => {
+  if (typeof item === 'string') {
+    return { value: item, label: item }
+  }
+  const value = item?.value ?? item?.name ?? ''
+  const count = Number(item?.count || 0)
+  return {
+    value,
+    label: count > 0 ? `${item?.label || value} (${count})` : (item?.label || value),
+  }
+}).filter(item => item.value))
 </script>
 
 <style scoped>
