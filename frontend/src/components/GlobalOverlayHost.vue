@@ -221,9 +221,19 @@
         </template>
       </el-dropdown>
       <span class="check-tip">已选择 {{ selectedBookIds.length }} 个</span>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchCacheBooks">批量服务器缓存10章</el-button>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchClearCache">批量清服务器缓存</el-button>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchExportBooks">批量导出</el-button>
+      <el-dropdown @command="handleBatchMoreCommand">
+        <el-button :disabled="!selectedBookIds.length" :loading="batchBusy">
+          更多批量操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="cache">批量服务器缓存10章</el-dropdown-item>
+            <el-dropdown-item command="clear-cache">批量清服务器缓存</el-dropdown-item>
+            <el-dropdown-item command="export">批量导出</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-button @click="overlay.bookManageVisible = false">取消</el-button>
     </div>
   </el-drawer>
 
@@ -1240,6 +1250,16 @@ async function batchClearCache() {
     ElMessage.error(readError(err, '清理缓存失败'))
   } finally {
     batchBusy.value = false
+  }
+}
+
+function handleBatchMoreCommand(command) {
+  if (command === 'cache') {
+    batchCacheBooks()
+  } else if (command === 'clear-cache') {
+    batchClearCache()
+  } else if (command === 'export') {
+    batchExportBooks()
   }
 }
 
