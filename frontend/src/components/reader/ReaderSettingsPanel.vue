@@ -78,6 +78,14 @@
     </div>
 
     <div class="setting-row">
+      <label class="setting-label">选择文字</label>
+      <el-radio-group v-model="selectionActionModel" size="small" class="read-method-group">
+        <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
+        <el-radio-button value="忽略">忽略</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">主题</label>
       <div class="theme-grid">
         <span
@@ -389,6 +397,11 @@ const readerModeModel = computed({
 const clickMethodModel = computed({
   get: () => props.reader.clickMethod,
   set: value => props.reader.setClickMethod(value),
+})
+
+const selectionActionModel = computed({
+  get: () => props.reader.selectionAction,
+  set: value => props.reader.setSelectionAction(value),
 })
 
 const localCustomBg = computed({

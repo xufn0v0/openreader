@@ -191,6 +191,13 @@
                 </el-radio-group>
               </label>
               <label>
+                <span>选择文字</span>
+                <el-radio-group v-model="readerSelectionActionModel" size="small">
+                  <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
+                  <el-radio-button value="忽略">忽略</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
                 <span>字体</span>
                 <el-select v-model="readerFontFamilyModel" size="small">
                   <el-option v-for="font in fontOptions" :key="font.value" :label="font.label" :value="font.value" />
@@ -402,6 +409,10 @@ const readerPageModeModel = computed({
 const readerClickMethodModel = computed({
   get: () => readerStore.clickMethod,
   set: value => readerStore.setClickMethod(value),
+})
+const readerSelectionActionModel = computed({
+  get: () => readerStore.selectionAction,
+  set: value => readerStore.setSelectionAction(value),
 })
 const readerFontFamilyModel = computed({
   get: () => readerStore.fontFamily,

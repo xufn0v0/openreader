@@ -95,6 +95,7 @@
         class="reader-content"
         :style="readerContentStyle"
         @scroll.passive="onScroll"
+        @mouseup="handleReaderSelectionEnd"
       >
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
           <p v-if="chapterLoading" class="empty-hint">正在加载章节...</p>
@@ -458,6 +459,7 @@ import {
 } from '@element-plus/icons-vue'
 import api from '../api/client'
 import { changeBookSource, listBookSourceCandidates, refreshBook, searchBookContent as searchBookContentApi } from '../api/books'
+import { createReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
 import ReaderBookmarkPanel from '../components/reader/ReaderBookmarkPanel.vue'
@@ -574,6 +576,8 @@ let handledTouchTapAt = 0
 let lastLocalProgressKey = ''
 let lastWheelPageAt = 0
 let extendingShowChapters = false
+let selectionOperateTimer = null
+let selectionOperating = false
 
 const fontOptions = readerFontOptions
 const SHOW_PREV_CHAPTER_SIZE = 1
@@ -714,6 +718,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   clearTimeout(chapterLoadingTimer)
+  clearTimeout(selectionOperateTimer)
   stopAutoReading()
   saveCurrentProgress({ force: true, background: true })
   window.removeEventListener('resize', handleResize)
@@ -2028,6 +2033,13 @@ function handleReaderTouchMove(event) {
 function handleReaderTouchEnd(event) {
   if (!isMobileReader.value) return
   const touch = event.changedTouches?.[0]
+  if (scheduleSelectedTextOperation(200)) {
+    ignoreNextContentClick = true
+    readerTouchStart = null
+    readerTouchMoved = false
+    readerTouchMove = { x: 0, y: 0 }
+    return
+  }
   const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
   const isTap = !readerTouchMoved && elapsed < 650 && Boolean(touch)
   ignoreNextContentClick = Boolean(touch)
@@ -2064,6 +2076,10 @@ function shouldHandleHorizontalSwipe() {
 
 function handleTapPoint(point) {
   if (isOverlayOpen.value || !point?.rect) return
+  if (scheduleSelectedTextOperation(0)) {
+    ignoreNextContentClick = true
+    return
+  }
   const viewportWidth = window.innerWidth || point.rect.width
   const viewportHeight = window.innerHeight || point.rect.height
   const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
@@ -2333,6 +2349,111 @@ function currentVisibleExcerpt() {
   const text = paragraph?.textContent?.replace(/\s+/g, ' ').trim()
   if (text) return text.slice(0, 140)
   return lines.value.slice(0, 2).join(' ').slice(0, 140)
+}
+
+function handleReaderSelectionEnd() {
+  scheduleSelectedTextOperation(180)
+}
+
+function scheduleSelectedTextOperation(delay = 0) {
+  if (reader.selectionAction === '忽略') return false
+  clearTimeout(selectionOperateTimer)
+  const selectedNow = selectedReaderText()
+  selectionOperateTimer = window.setTimeout(() => {
+    const text = selectedReaderText()
+    if (!text) return
+    ignoreNextContentClick = true
+    handleSelectedTextOperation(text).catch(err => {
+      if (err === 'cancel' || err === 'close') return
+      ElMessage.error(readError(err, '处理选中文字失败'))
+    })
+  }, delay)
+  return Boolean(selectedNow)
+}
+
+function selectedReaderText() {
+  if (typeof window === 'undefined' || !contentBody.value) return ''
+  const selection = window.getSelection?.()
+  const text = selection?.toString?.().replace(/\s+/g, ' ').trim()
+  if (!text || !selection.rangeCount) return ''
+  const range = selection.getRangeAt(0)
+  const container = range.commonAncestorContainer?.nodeType === window.Node?.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer?.parentElement
+  if (!container || !contentBody.value.contains(container)) return ''
+  return text.slice(0, 1000)
+}
+
+async function handleSelectedTextOperation(text) {
+  if (selectionOperating || reader.selectionAction === '忽略') return
+  selectionOperating = true
+  try {
+    const action = await ElMessageBox.confirm('请选择对选中文字执行的操作。', '选择文字', {
+      confirmButtonText: '添加过滤规则',
+      cancelButtonText: '添加书签',
+      distinguishCancelAndClose: true,
+      closeOnClickModal: false,
+      closeOnPressEscape: false,
+      type: 'info',
+    }).catch(result => result)
+    if (action === 'close') return
+    if (action === 'cancel') {
+      await createBookmarkFromSelectedText(text)
+      return
+    }
+    await createReplaceRuleFromSelectedText(text)
+  } finally {
+    clearReaderSelection()
+    selectionOperating = false
+    window.setTimeout(() => {
+      ignoreNextContentClick = false
+    }, 320)
+  }
+}
+
+async function createReplaceRuleFromSelectedText(text) {
+  const prompt = await ElMessageBox.prompt('替换为留空时表示直接过滤该文字。', '添加过滤规则', {
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+    inputValue: '',
+    inputPlaceholder: '替换为',
+  }).catch(() => null)
+  if (!prompt) return
+  const cleanText = String(text || '').trim()
+  if (!cleanText) return
+  const name = cleanText.length > 24 ? `${cleanText.slice(0, 24)}...` : cleanText
+  await createReplaceRule({
+    name,
+    pattern: cleanText,
+    replacement: String(prompt.value || ''),
+    enabled: true,
+  })
+  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
+  ElMessage.success('过滤规则已添加')
+}
+
+async function createBookmarkFromSelectedText(text) {
+  if (!chapter.value) return
+  const cleanText = String(text || '').trim()
+  const { data } = await api.post(`/books/${bookId.value}/bookmarks`, {
+    chapterId: chapter.value.id,
+    chapterIndex: currentIndex.value,
+    offset: currentOffset(),
+    percent: currentChapterPercent(),
+    title: chapter.value.title,
+    excerpt: cleanText.slice(0, 500),
+  })
+  bookmarks.value = [data, ...bookmarks.value]
+  toastMsg.value = '书签已创建'
+  setTimeout(() => { toastMsg.value = '' }, 1600)
+}
+
+function clearReaderSelection() {
+  try {
+    window.getSelection?.()?.removeAllRanges?.()
+  } catch {
+    // Selection APIs may be unavailable in embedded browsers.
+  }
 }
 
 async function saveCurrentProgress(options = {}) {

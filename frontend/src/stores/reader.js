@@ -19,6 +19,7 @@ export const useReaderStore = defineStore('reader', {
     pageType: 'normal',
     pageMode: 'auto',
     clickMethod: 'auto',
+    selectionAction: '操作弹窗',
     fontFamily: 'system',
     customFontsMap: {},
     chineseFont: '简体',
@@ -37,7 +38,7 @@ export const useReaderStore = defineStore('reader', {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 7,
+    settingsVersion: 8,
     settingsUpdatedAt: '',
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
@@ -157,6 +158,10 @@ export const useReaderStore = defineStore('reader', {
       this.clickMethod = ['next', 'auto', 'none'].includes(method) ? method : 'auto'
       this.markSettingsDirty()
     },
+    setSelectionAction(action) {
+      this.selectionAction = ['操作弹窗', '忽略'].includes(action) ? action : '操作弹窗'
+      this.markSettingsDirty()
+    },
     setFontFamily(fontFamily) {
       this.fontFamily = ['system', 'serif', 'kai', 'mono'].includes(fontFamily) ? fontFamily : 'system'
       this.markSettingsDirty()
@@ -258,6 +263,7 @@ export const useReaderStore = defineStore('reader', {
       if (!['normal', 'simple'].includes(this.pageType)) this.pageType = 'normal'
       if (!['auto', 'mobile'].includes(this.pageMode)) this.pageMode = 'auto'
       if (!['next', 'auto', 'none'].includes(this.clickMethod)) this.clickMethod = 'auto'
+      if (!['操作弹窗', '忽略'].includes(this.selectionAction)) this.selectionAction = '操作弹窗'
       if (!['system', 'serif', 'kai', 'mono'].includes(this.fontFamily)) this.fontFamily = 'system'
       if (!['简体', '繁体'].includes(this.chineseFont)) this.chineseFont = '简体'
       if (!this.customFontsMap || typeof this.customFontsMap !== 'object' || Array.isArray(this.customFontsMap)) this.customFontsMap = {}
@@ -288,7 +294,7 @@ export const useReaderStore = defineStore('reader', {
         this.paragraphSpace = 0.2
         this.columnWidth = 800
       }
-      this.settingsVersion = 7
+      this.settingsVersion = 8
       this.settingsSyncing = false
     },
     markSettingsDirty(options = {}) {
@@ -566,6 +572,7 @@ function readerSettingsPayload(state) {
     mode: state.mode,
     pageType: state.pageType,
     clickMethod: state.clickMethod,
+    selectionAction: state.selectionAction,
     fontFamily: state.fontFamily,
     customFontsMap: state.customFontsMap || {},
     chineseFont: state.chineseFont,
@@ -587,7 +594,7 @@ function readerSettingsPayload(state) {
     lineHeight: state.lineHeight,
     paragraphSpace: state.paragraphSpace,
     columnWidth: state.columnWidth,
-    settingsVersion: 7,
+    settingsVersion: 8,
   }
 }
 
@@ -596,6 +603,7 @@ function defaultReaderSettings() {
     mode: 'page',
     pageType: 'normal',
     clickMethod: 'auto',
+    selectionAction: '操作弹窗',
     fontFamily: 'system',
     customFontsMap: {},
     chineseFont: '简体',
@@ -617,7 +625,7 @@ function defaultReaderSettings() {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 7,
+    settingsVersion: 8,
     normalModeSnapshot: null,
   }
 }
@@ -628,6 +636,7 @@ function sanitizeReaderSettings(payload, options = {}) {
   if (['scroll', 'scroll2', 'flip', 'page'].includes(payload.mode)) settings.mode = payload.mode
   if (['normal', 'simple'].includes(payload.pageType)) settings.pageType = payload.pageType
   if (['next', 'auto', 'none'].includes(payload.clickMethod)) settings.clickMethod = payload.clickMethod
+  if (['操作弹窗', '忽略'].includes(payload.selectionAction)) settings.selectionAction = payload.selectionAction
   if (['system', 'serif', 'kai', 'mono'].includes(payload.fontFamily)) settings.fontFamily = payload.fontFamily
   settings.customFontsMap = sanitizeCustomFontsMap(payload.customFontsMap)
   settings.chineseFont = payload.chineseFont === '繁体' ? '繁体' : '简体'
@@ -651,7 +660,7 @@ function sanitizeReaderSettings(payload, options = {}) {
   settings.lineHeight = clampNumber(payload.lineHeight, 1, 5, 1.8)
   settings.paragraphSpace = clampNumber(payload.paragraphSpace, 0, 3, 0.2)
   settings.columnWidth = clampNumber(payload.columnWidth, 320, 1200, 800)
-  settings.settingsVersion = 7
+  settings.settingsVersion = 8
   return settings
 }
 
@@ -689,6 +698,7 @@ function defaultCustomConfigList() {
       mode: 'page',
       pageType: 'normal',
       clickMethod: 'auto',
+      selectionAction: '操作弹窗',
       fontFamily: 'system',
       customFontsMap: {},
       chineseFont: '简体',
@@ -709,7 +719,7 @@ function defaultCustomConfigList() {
       lineHeight: 1.8,
       paragraphSpace: 0.2,
       columnWidth: 800,
-      settingsVersion: 7,
+      settingsVersion: 8,
       name: '内置白天',
       configDefaultType: '白天默认',
       builtin: true,
@@ -718,6 +728,7 @@ function defaultCustomConfigList() {
       mode: 'page',
       pageType: 'normal',
       clickMethod: 'auto',
+      selectionAction: '操作弹窗',
       fontFamily: 'system',
       customFontsMap: {},
       chineseFont: '简体',
@@ -738,7 +749,7 @@ function defaultCustomConfigList() {
       lineHeight: 1.8,
       paragraphSpace: 0.2,
       columnWidth: 800,
-      settingsVersion: 7,
+      settingsVersion: 8,
       name: '内置黑夜',
       configDefaultType: '黑夜默认',
       builtin: true,
