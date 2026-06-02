@@ -70,7 +70,7 @@
       </button>
       <div class="mobile-reader-title">
         <strong>{{ book?.title || '阅读中' }}</strong>
-        <span>{{ chapter?.title || chapterLabel }}</span>
+        <span>{{ displayChapterTitle(chapter?.title) || chapterLabel }}</span>
       </div>
       <span class="mobile-reader-progress">{{ bookProgressLabel }}</span>
     </header>
@@ -467,6 +467,7 @@ import { useTTS } from '../composables/useTTS'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
+import { simplized, traditionalized } from '../utils/chinese'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
 
@@ -760,7 +761,7 @@ watch(isMobileReader, (mobile) => {
   }
 }, { immediate: true })
 
-watch(() => [reader.fontFamily, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
+watch(() => [reader.fontFamily, reader.chineseFont, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
   const offset = currentOffset()
   const restorePercent = currentChapterPercent()
   restoringPosition = true
@@ -791,9 +792,18 @@ function makeParagraphs(value, heading = '') {
     if (!text) return items
     const pos = wordCount
     wordCount += text.length + 2
-    items.push({ text, pos })
+    items.push({ text: formatChineseText(text), pos })
     return items
   }, [])
+}
+
+function formatChineseText(text) {
+  if (!text) return ''
+  return reader.chineseFont === '繁体' ? traditionalized(String(text)) : simplized(String(text))
+}
+
+function displayChapterTitle(title) {
+  return formatChineseText(title || '')
 }
 
 function buildSourceGroupOptions(rows) {
@@ -815,7 +825,7 @@ function makeChapterBlock(index, chapterRow, text) {
   return {
     index,
     id: chapterRow?.id || fallback.id,
-    title,
+    title: displayChapterTitle(title),
     content: String(text || ''),
     paragraphs: makeParagraphs(text, title),
   }

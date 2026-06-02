@@ -20,6 +20,7 @@ export const useReaderStore = defineStore('reader', {
     clickMethod: 'auto',
     fontFamily: 'system',
     customFontsMap: {},
+    chineseFont: '简体',
     fontSize: 18,
     fontWeight: 400,
     theme: 'parchment',
@@ -71,6 +72,10 @@ export const useReaderStore = defineStore('reader', {
     },
     setFontFamily(fontFamily) {
       this.fontFamily = ['system', 'serif', 'kai', 'mono'].includes(fontFamily) ? fontFamily : 'system'
+      this.markSettingsDirty()
+    },
+    setChineseFont(chineseFont) {
+      this.chineseFont = chineseFont === '繁体' ? '繁体' : '简体'
       this.markSettingsDirty()
     },
     setCustomFont(fontFamily, url) {
@@ -162,6 +167,7 @@ export const useReaderStore = defineStore('reader', {
       if (!['auto', 'mobile'].includes(this.pageMode)) this.pageMode = 'auto'
       if (!['next', 'auto', 'none'].includes(this.clickMethod)) this.clickMethod = 'auto'
       if (!['system', 'serif', 'kai', 'mono'].includes(this.fontFamily)) this.fontFamily = 'system'
+      if (!['简体', '繁体'].includes(this.chineseFont)) this.chineseFont = '简体'
       if (!this.customFontsMap || typeof this.customFontsMap !== 'object' || Array.isArray(this.customFontsMap)) this.customFontsMap = {}
       if (!Array.isArray(this.customBgImageList)) this.customBgImageList = []
       this.fontSize = clampNumber(this.fontSize, 8, 36, 18)
@@ -448,6 +454,7 @@ function readerSettingsPayload(state) {
     clickMethod: state.clickMethod,
     fontFamily: state.fontFamily,
     customFontsMap: state.customFontsMap || {},
+    chineseFont: state.chineseFont,
     fontSize: state.fontSize,
     fontWeight: state.fontWeight,
     theme: state.theme,
@@ -473,6 +480,7 @@ function sanitizeReaderSettings(payload) {
   if (['next', 'auto', 'none'].includes(payload.clickMethod)) settings.clickMethod = payload.clickMethod
   if (['system', 'serif', 'kai', 'mono'].includes(payload.fontFamily)) settings.fontFamily = payload.fontFamily
   settings.customFontsMap = sanitizeCustomFontsMap(payload.customFontsMap)
+  settings.chineseFont = payload.chineseFont === '繁体' ? '繁体' : '简体'
   if (typeof payload.theme === 'string') settings.theme = payload.theme
   if (typeof payload.customBgColor === 'string') settings.customBgColor = payload.customBgColor
   if (typeof payload.customBgImage === 'string') settings.customBgImage = payload.customBgImage

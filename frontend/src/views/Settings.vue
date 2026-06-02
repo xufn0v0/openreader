@@ -156,6 +156,13 @@
                 </el-select>
               </label>
               <label>
+                <span>简繁转换</span>
+                <el-radio-group v-model="readerChineseFontModel" size="small">
+                  <el-radio-button value="简体">简体</el-radio-button>
+                  <el-radio-button value="繁体">繁体</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
                 <span>亮度 {{ readerStore.brightness }}%</span>
                 <el-slider v-model="readerBrightnessModel" :min="50" :max="150" />
               </label>
@@ -353,6 +360,10 @@ const readerClickMethodModel = computed({
 const readerFontFamilyModel = computed({
   get: () => readerStore.fontFamily,
   set: value => readerStore.setFontFamily(value),
+})
+const readerChineseFontModel = computed({
+  get: () => readerStore.chineseFont,
+  set: value => readerStore.setChineseFont(value),
 })
 const readerBrightnessModel = computed({
   get: () => readerStore.brightness,

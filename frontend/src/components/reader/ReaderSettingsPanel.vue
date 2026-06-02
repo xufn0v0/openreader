@@ -141,6 +141,14 @@
     </div>
 
     <div class="setting-row">
+      <label class="setting-label">简繁转换</label>
+      <el-radio-group v-model="chineseFontModel" size="small" class="read-method-group">
+        <el-radio-button value="简体">简体</el-radio-button>
+        <el-radio-button value="繁体">繁体</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">字号 ({{ reader.fontSize }}px)</label>
       <div class="font-controls">
         <el-button size="small" :icon="Minus" circle @click="changeFontSize(-1)" />
@@ -292,6 +300,11 @@ const localLineHeight = computed({
 const fontFamilyModel = computed({
   get: () => props.reader.fontFamily,
   set: value => props.reader.setFontFamily(value),
+})
+
+const chineseFontModel = computed({
+  get: () => props.reader.chineseFont,
+  set: value => props.reader.setChineseFont(value),
 })
 
 const fontSizeModel = computed({
