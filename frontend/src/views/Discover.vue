@@ -3,6 +3,7 @@
     <header class="discover-head">
       <div>
         <h1 class="app-page-title">书海</h1>
+        <p class="discover-subtitle">{{ sourceCountText }}</p>
       </div>
       <el-button :icon="Refresh" :loading="loadingSources" @click="loadSources">刷新书源</el-button>
     </header>
@@ -104,6 +105,11 @@ const loadingMore = ref(false)
 const expandedSources = ref('')
 
 const activeSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value))
+const sourceCountText = computed(() => {
+  if (!sources.value.length) return '暂无可用书源'
+  if (!selectedGroup.value) return `共 ${sources.value.length} 个可用书源`
+  return `${selectedGroup.value} · ${filteredSources.value.length} / ${sources.value.length} 个可用书源`
+})
 const exploreResultGroups = computed(() => {
   const groups = new Map()
   for (const book of books.value) {
@@ -366,6 +372,12 @@ function readError(err, fallback) {
   flex-wrap: wrap;
   justify-content: flex-start;
   padding: 12px;
+}
+
+.discover-subtitle {
+  margin: 4px 0 0;
+  color: var(--app-text-muted);
+  font-size: 13px;
 }
 
 .discover-toolbar .el-select {
