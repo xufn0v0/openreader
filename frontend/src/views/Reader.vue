@@ -545,7 +545,7 @@ let ignoreNextContentClick = false
 let handledTouchTapAt = 0
 let lastLocalProgressKey = ''
 let lastWheelPageAt = 0
-let appendingShowChapter = false
+let extendingShowChapters = false
 
 const fontOptions = readerFontOptions
 const SHOW_PREV_CHAPTER_SIZE = 1
@@ -936,6 +936,25 @@ async function appendNextShowChapter() {
     ...chapterBlocks.value,
     makeChapterBlock(nextIndex, data.chapter || chapters.value[nextIndex], data.content || ''),
   ]
+}
+
+async function prependPreviousShowChapter() {
+  if (reader.mode !== 'scroll2' || !chapterBlocks.value.length || !contentEl.value) return
+  const firstIndex = chapterBlocks.value[0].index
+  const previousIndex = firstIndex - 1
+  if (previousIndex < 0) return
+  if (chapterBlocks.value.some(block => block.index === previousIndex)) return
+  const beforeHeight = contentEl.value.scrollHeight
+  const beforeTop = contentEl.value.scrollTop
+  const data = await loadChapterContent(previousIndex)
+  chapterBlocks.value = [
+    makeChapterBlock(previousIndex, data.chapter || chapters.value[previousIndex], data.content || ''),
+    ...chapterBlocks.value,
+  ]
+  await nextTick()
+  await nextFrame()
+  const heightDelta = Math.max(0, contentEl.value.scrollHeight - beforeHeight)
+  contentEl.value.scrollTop = beforeTop + heightDelta
 }
 
 async function loadChapterContent(index, options = {}) {
@@ -2066,7 +2085,7 @@ function onScroll() {
   if (!isScrollRead.value) return
   if (restoringPosition || chapterLoading.value) return
   updateCurrentChapterFromScroll()
-  maybeAppendShowChapter()
+  maybeExtendShowChapters()
   updateFlipLayout()
   progressVersion.value += 1
   applyLocalProgressSnapshot()
@@ -2157,16 +2176,20 @@ function updateCurrentChapterFromScroll() {
   content.value = block?.content || content.value
 }
 
-function maybeAppendShowChapter() {
-  if (!isContinuousScrollRead.value || appendingShowChapter || !contentEl.value) return
+function maybeExtendShowChapters() {
+  if (!isContinuousScrollRead.value || extendingShowChapters || !contentEl.value) return
   const el = contentEl.value
   const nearBottom = el.scrollTop + el.clientHeight > el.scrollHeight - el.clientHeight * 2
-  if (!nearBottom) return
-  appendingShowChapter = true
-  appendNextShowChapter()
+  const nearTop = reader.mode === 'scroll2' && el.scrollTop < el.clientHeight
+  if (!nearTop && !nearBottom) return
+  extendingShowChapters = true
+  Promise.all([
+    nearTop ? prependPreviousShowChapter() : Promise.resolve(),
+    nearBottom ? appendNextShowChapter() : Promise.resolve(),
+  ])
     .catch(() => {})
     .finally(() => {
-      appendingShowChapter = false
+      extendingShowChapters = false
     })
 }
 
