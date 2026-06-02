@@ -148,6 +148,7 @@
                     <el-icon v-if="index > 1 && !config.builtin && readerStore.customConfigName !== config.name" @click.stop="deleteReaderCustomConfig(config.name)"><Delete /></el-icon>
                   </button>
                   <button class="reader-config-scheme add" type="button" @click="addReaderCustomConfig">新增方案</button>
+                  <button class="reader-config-scheme" :class="{ active: readerStore.autoTheme }" type="button" @click="readerStore.setAutoTheme(!readerStore.autoTheme)">自动切换</button>
                 </div>
               </label>
               <label>

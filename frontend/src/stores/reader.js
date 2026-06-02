@@ -46,6 +46,7 @@ export const useReaderStore = defineStore('reader', {
     normalModeSnapshot: null,
     customConfigName: '内置白天',
     customConfigList: defaultCustomConfigList(),
+    autoTheme: false,
   }),
   persist: true,
   getters: {
@@ -95,6 +96,17 @@ export const useReaderStore = defineStore('reader', {
       this.customConfigList = current.filter(item => item?.name !== name)
       this.markSettingsDirty({ skipCustomConfigSync: true })
       return { ok: true }
+    },
+    setAutoTheme(autoTheme) {
+      this.autoTheme = Boolean(autoTheme)
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+    },
+    applyAutoTheme(isNight) {
+      if (!this.autoTheme) return false
+      const type = isNight ? '黑夜默认' : '白天默认'
+      const config = (Array.isArray(this.customConfigList) ? this.customConfigList : []).find(item => item?.configDefaultType === type)
+      if (!config) return false
+      return this.setCustomConfig(config.name)
     },
     setPageType(pageType) {
       const nextType = pageType === 'simple' ? 'simple' : 'normal'
@@ -242,6 +254,7 @@ export const useReaderStore = defineStore('reader', {
       if (!this.customConfigList.some(item => item.name === this.customConfigName)) {
         this.customConfigName = this.customConfigList[0]?.name || '内置白天'
       }
+      this.autoTheme = this.autoTheme === true
       this.fontSize = clampNumber(this.fontSize, 8, 36, 18)
       this.fontWeight = clampNumber(this.fontWeight, 300, 900, 400)
       this.lineHeight = clampNumber(this.lineHeight, 1, 5, 1.8)
@@ -551,6 +564,7 @@ function readerSettingsPayload(state) {
     customBgImageList: Array.isArray(state.customBgImageList) ? state.customBgImageList : [],
     customConfigName: state.customConfigName || '内置白天',
     customConfigList: sanitizeCustomConfigList(state.customConfigList),
+    autoTheme: state.autoTheme === true,
     brightness: state.brightness,
     autoReadSpeed: state.autoReadSpeed,
     animateDuration: state.animateDuration,
@@ -580,6 +594,7 @@ function defaultReaderSettings() {
     customBgImageList: [],
     customConfigName: '内置白天',
     customConfigList: defaultCustomConfigList(),
+    autoTheme: false,
     brightness: 100,
     autoReadSpeed: 12,
     animateDuration: 300,
@@ -610,6 +625,7 @@ function sanitizeReaderSettings(payload, options = {}) {
   if (includeCustomConfigs) {
     if (typeof payload.customConfigName === 'string') settings.customConfigName = payload.customConfigName
     settings.customConfigList = sanitizeCustomConfigList(payload.customConfigList)
+    settings.autoTheme = payload.autoTheme === true
   }
   if (typeof payload.ttsVoiceURI === 'string') settings.ttsVoiceURI = payload.ttsVoiceURI
   settings.fontSize = clampNumber(payload.fontSize, 8, 36, 18)

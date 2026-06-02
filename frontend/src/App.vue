@@ -15,7 +15,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppLayout from './layouts/AppLayout.vue'
 import GlobalOverlayHost from './components/GlobalOverlayHost.vue'
@@ -32,23 +32,35 @@ const { connect, disconnect } = useSync()
 
 const isLoggedIn = computed(() => !!userStore.token)
 const isReader = computed(() => route.name === 'reader')
+let systemThemeMedia
 
 onMounted(() => {
   readerStore.normalizeSettings()
+  setupAutoThemeListener()
   if (userStore.token && !userStore.profile) {
     userStore.loadMe().catch(() => {})
   }
   if (userStore.token) {
     connect()
-    readerStore.loadReaderSettings().catch(() => {})
+    readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})
+  }
+  applyAutoThemeFromSystem()
+})
+
+onBeforeUnmount(() => {
+  if (!systemThemeMedia) return
+  if (typeof systemThemeMedia.removeEventListener === 'function') {
+    systemThemeMedia.removeEventListener('change', applyAutoThemeFromSystem)
+  } else if (typeof systemThemeMedia.removeListener === 'function') {
+    systemThemeMedia.removeListener(applyAutoThemeFromSystem)
   }
 })
 
 watch(isLoggedIn, (loggedIn) => {
   if (loggedIn) {
     connect()
-    readerStore.loadReaderSettings().catch(() => {})
+    readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})
   } else {
     disconnect()
@@ -63,4 +75,24 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => readerStore.autoTheme,
+  () => applyAutoThemeFromSystem(),
+)
+
+function setupAutoThemeListener() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+  systemThemeMedia = window.matchMedia('(prefers-color-scheme: dark)')
+  if (typeof systemThemeMedia.addEventListener === 'function') {
+    systemThemeMedia.addEventListener('change', applyAutoThemeFromSystem)
+  } else if (typeof systemThemeMedia.addListener === 'function') {
+    systemThemeMedia.addListener(applyAutoThemeFromSystem)
+  }
+}
+
+function applyAutoThemeFromSystem() {
+  if (!readerStore.autoTheme || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+  readerStore.applyAutoTheme(window.matchMedia('(prefers-color-scheme: dark)').matches)
+}
 </script>
