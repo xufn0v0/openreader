@@ -3,6 +3,7 @@
     <header class="discover-head">
       <div>
         <h1 class="app-page-title">书海</h1>
+        <p class="discover-subtitle">{{ sourceCountText }}</p>
       </div>
       <el-button :icon="Refresh" :loading="loadingSources" @click="loadSources">刷新书源</el-button>
     </header>
@@ -55,15 +56,7 @@
 
       <section>
         <div v-loading="loadingBooks" class="discover-results">
-          <article v-for="book in books" :key="book.sourceId + book.bookUrl" class="discover-card app-panel" @click="openPreview(book)">
-            <BookCover :book="book" />
-            <div>
-              <h2>{{ book.title }}</h2>
-              <p>{{ book.author || '未知作者' }} · {{ book.sourceName }}</p>
-              <p v-if="book.latestChapter" class="latest">最新：{{ book.latestChapter }}</p>
-              <p class="intro">{{ book.intro || '无简介' }}</p>
-            </div>
-          </article>
+          <RemoteBookResultGroups v-if="books.length" :groups="exploreResultGroups" @preview="openPreview" />
           <el-empty v-if="!loadingBooks && !books.length" :description="sources.length ? '选择左侧书源入口开始探索' : '没有配置 exploreUrl 的书源'" />
         </div>
 
@@ -85,7 +78,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { createRemoteBook } from '../api/books'
 import { exploreBooks, listExploreSources } from '../api/explore'
-import BookCover from '../components/BookCover.vue'
+import RemoteBookResultGroups from '../components/RemoteBookResultGroups.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
@@ -112,6 +105,26 @@ const loadingMore = ref(false)
 const expandedSources = ref('')
 
 const activeSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value))
+const sourceCountText = computed(() => {
+  if (!sources.value.length) return '暂无可用书源'
+  if (!selectedGroup.value) return `共 ${sources.value.length} 个可用书源`
+  return `${selectedGroup.value} · ${filteredSources.value.length} / ${sources.value.length} 个可用书源`
+})
+const exploreResultGroups = computed(() => {
+  const groups = new Map()
+  for (const book of books.value) {
+    const key = book.sourceId || activeSource.value?.id || book.sourceName || 'unknown'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        sourceId: key,
+        sourceName: book.sourceName || activeSource.value?.name || '未知书源',
+        items: [],
+      })
+    }
+    groups.get(key).items.push(book)
+  }
+  return [...groups.values()]
+})
 const sourceGroups = computed(() => {
   const groups = new Map()
   for (const source of sources.value) {
@@ -359,6 +372,12 @@ function readError(err, fallback) {
   flex-wrap: wrap;
   justify-content: flex-start;
   padding: 12px;
+}
+
+.discover-subtitle {
+  margin: 4px 0 0;
+  color: var(--app-text-muted);
+  font-size: 13px;
 }
 
 .discover-toolbar .el-select {

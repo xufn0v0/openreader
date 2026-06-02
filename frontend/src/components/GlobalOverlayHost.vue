@@ -14,8 +14,10 @@
     :can-update="overlay.bookInfoBook?.canUpdate !== false"
     :update-switch-loading="updatingBookId === overlay.bookInfoBook?.id"
     :browser-cache-count="bookInfoBrowserCacheCount"
+    :show-category-action="!!overlay.bookInfoBook?.id"
     @cover-upload="uploadBookInfoCover"
     @can-update-change="toggleBookCanUpdate"
+    @category-action="setBookGroup(overlay.bookInfoBook)"
   >
     <div v-if="overlay.bookInfoOptions.actions?.length" class="overlay-actions">
       <el-button
@@ -34,7 +36,6 @@
       <el-button type="primary" @click="continueRead(overlay.bookInfoBook)">继续阅读</el-button>
       <el-button plain @click="openContentSearch(overlay.bookInfoBook)">搜正文</el-button>
       <el-button plain @click="openBookmarks(overlay.bookInfoBook)">书签</el-button>
-      <el-button plain @click="setBookGroup(overlay.bookInfoBook)">设置分组</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
       <el-button v-else plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshLocalBookInfo(overlay.bookInfoBook)">刷新本地书</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
@@ -220,9 +221,19 @@
         </template>
       </el-dropdown>
       <span class="check-tip">已选择 {{ selectedBookIds.length }} 个</span>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchCacheBooks">批量服务器缓存10章</el-button>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchClearCache">批量清服务器缓存</el-button>
-      <el-button :disabled="!selectedBookIds.length" :loading="batchBusy" @click="batchExportBooks">批量导出</el-button>
+      <el-dropdown @command="handleBatchMoreCommand">
+        <el-button :disabled="!selectedBookIds.length" :loading="batchBusy">
+          更多批量操作<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="cache">批量服务器缓存10章</el-dropdown-item>
+            <el-dropdown-item command="clear-cache">批量清服务器缓存</el-dropdown-item>
+            <el-dropdown-item command="export">批量导出</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-button @click="overlay.bookManageVisible = false">取消</el-button>
     </div>
   </el-drawer>
 
@@ -255,12 +266,32 @@
       </div>
       <div class="group-list">
         <div v-for="category in bookshelf.categories" :key="category.id" class="group-row">
-          <span>{{ category.name }}</span>
+          <span class="group-name">
+            <span>{{ category.name }}</span>
+            <small>{{ groupBookCount(category) }} 本</small>
+          </span>
+          <span class="group-visibility">
+            <el-switch
+              :model-value="category.show !== false"
+              :loading="visibilitySavingId === category.id"
+              active-text="显示"
+              inactive-text="隐藏"
+              @change="value => toggleGroupVisibility(category, value)"
+            />
+          </span>
           <span class="group-actions">
             <el-button size="small" text @click="moveGroup(category, -1)">上移</el-button>
             <el-button size="small" text @click="moveGroup(category, 1)">下移</el-button>
             <el-button size="small" text @click="renameGroup(category)">重命名</el-button>
-            <el-button size="small" text type="danger" @click="deleteGroup(category)">删除</el-button>
+            <el-button
+              v-if="groupBookCount(category) === 0"
+              size="small"
+              text
+              type="danger"
+              @click="deleteGroup(category)"
+            >
+              删除
+            </el-button>
           </span>
         </div>
       </div>
@@ -303,6 +334,8 @@
         @jump="jumpToBookmark"
         @edit="openBookmarkEditor"
         @remove="removeBookmarkItem"
+        @remove-many="removeBookmarkItems"
+        @import="importBookmarkItems"
       />
     </div>
   </el-drawer>
@@ -404,11 +437,13 @@
           <span>管理员可调整书源、书仓权限和用户限制</span>
         </div>
         <div class="file-actions">
+          <el-button size="small" type="primary" :icon="Edit" @click="openCreateUserDialog">新增</el-button>
           <el-button size="small" :icon="Refresh" :loading="usersLoading" @click="loadUsers">刷新</el-button>
           <el-button size="small" :icon="Delete" :loading="cleanupLoading" @click="cleanupInactive">清理不活跃用户</el-button>
         </div>
       </header>
-      <el-table :data="users" stripe v-loading="usersLoading" class="desktop-user-table">
+      <el-table :data="users" stripe v-loading="usersLoading" class="desktop-user-table" @selection-change="onUserSelectionChange">
+        <el-table-column type="selection" width="44" :selectable="isUserDeletable" />
         <el-table-column prop="username" label="用户名" min-width="140" />
         <el-table-column prop="role" label="角色" width="90" />
         <el-table-column prop="bookCount" label="书籍" width="80" />
@@ -421,22 +456,58 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="110" fixed="right">
+          <template #default="{ row }">
+            <el-button text @click="resetPassword(row)">重置密码</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <div v-if="users.length" v-loading="usersLoading" class="mobile-user-list">
         <article v-for="user in users" :key="user.id" class="mobile-user-card">
           <header>
-            <strong>{{ user.username }}</strong>
-            <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
+            <el-checkbox :disabled="!isUserDeletable(user)" :model-value="selectedUserIds.includes(user.id)" @change="toggleUserSelection(user.id, $event)" />
+            <div>
+              <strong>{{ user.username }}</strong>
+              <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
+            </div>
           </header>
           <div class="permission-row">
             <el-switch v-model="user.canEditSources" size="small" active-text="书源" @change="updateUserPermission(user)" />
             <el-switch v-model="user.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(user)" />
+            <el-button size="small" text @click="resetPassword(user)">重置密码</el-button>
           </div>
         </article>
       </div>
+      <footer v-if="users.length" class="user-manage-footer">
+        <span class="check-tip">已选择 {{ selectedUserIds.length }} 个</span>
+        <el-button size="small" type="danger" :disabled="!selectedUserIds.length" :loading="deletingUsers" @click="deleteSelectedUsers">批量删除</el-button>
+      </footer>
       <el-empty v-if="!usersLoading && !users.length" description="暂无用户，或当前账号无管理员权限" />
     </section>
   </el-drawer>
+
+  <el-dialog v-model="userCreateDialog" title="新增用户" width="420px" :fullscreen="isMobileOverlay">
+    <el-form label-position="top">
+      <el-form-item label="用户名"><el-input v-model="userDraft.username" autocomplete="on" /></el-form-item>
+      <el-form-item label="密码"><el-input v-model="userDraft.password" type="password" show-password autocomplete="new-password" /></el-form-item>
+      <el-form-item label="角色">
+        <el-select v-model="userDraft.role">
+          <el-option label="普通用户" value="user" />
+          <el-option label="管理员" value="admin" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="权限">
+        <div class="permission-row">
+          <el-switch v-model="userDraft.canEditSources" active-text="书源" />
+          <el-switch v-model="userDraft.canAccessStore" active-text="书仓" />
+        </div>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="userCreateDialog = false">取消</el-button>
+      <el-button type="primary" :loading="creatingUser" @click="createManagedUser">保存</el-button>
+    </template>
+  </el-dialog>
 
   <el-drawer
     v-model="overlay.replaceRulesVisible"
@@ -454,10 +525,14 @@
         </div>
         <div class="file-actions">
           <el-button size="small" type="primary" :icon="Edit" @click="openReplaceRuleEditor()">新增规则</el-button>
+          <el-button size="small" :icon="Upload" :loading="replaceRuleImporting" @click="triggerReplaceRuleImport">导入</el-button>
+          <el-button size="small" type="danger" plain :icon="Delete" :disabled="!selectedReplaceRuleIds.length" @click="deleteSelectedReplaceRules">批量删除</el-button>
           <el-button size="small" :icon="Refresh" :loading="replaceRulesLoading" @click="loadReplaceRules">刷新</el-button>
+          <input ref="replaceRuleFileInput" class="visually-hidden-file" type="file" accept=".json,application/json" @change="importReplaceRuleFile" />
         </div>
       </header>
-      <el-table :data="replaceRules" stripe v-loading="replaceRulesLoading" class="desktop-replace-table">
+      <el-table :data="replaceRules" stripe v-loading="replaceRulesLoading" class="desktop-replace-table" @selection-change="onReplaceRuleSelectionChange">
+        <el-table-column type="selection" width="44" />
         <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
         <el-table-column prop="pattern" label="匹配" min-width="180" show-overflow-tooltip />
         <el-table-column prop="replacement" label="替换为" min-width="160" show-overflow-tooltip />
@@ -476,6 +551,7 @@
       <div v-if="replaceRules.length" v-loading="replaceRulesLoading" class="mobile-rule-list">
         <article v-for="rule in replaceRules" :key="rule.id" class="mobile-rule-card">
           <header>
+            <el-checkbox :model-value="selectedReplaceRuleIds.includes(rule.id)" @change="toggleReplaceRuleSelection(rule.id, $event)" />
             <div>
               <strong>{{ rule.name || '未命名规则' }}</strong>
               <span>{{ rule.pattern }}</span>
@@ -532,8 +608,8 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, r
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Edit, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
-import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
-import { cacheBookContent, changeBookSource, checkBookUpdates, deleteBookmark, listBookSourceCandidates, listBookmarks, listChapters, refreshBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
+import { cleanupInactiveUsers, createUser, deleteUsers, listUsers, resetUserPassword, updateUser } from '../api/admin'
+import { cacheBookContent, changeBookSource, checkBookUpdates, createBookmark, deleteBookmark, listBookSourceCandidates, listBookmarks, listChapters, refreshBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
@@ -541,6 +617,7 @@ import { uploadAsset } from '../api/uploads'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
+import { useUserStore } from '../stores/user'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
@@ -558,6 +635,7 @@ const route = useRoute()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
+const userStore = useUserStore()
 
 const selectedBookIds = ref([])
 const batchBusy = ref(false)
@@ -572,6 +650,7 @@ const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
 const importingBook = ref(false)
 const newGroupName = ref('')
+const visibilitySavingId = ref(null)
 const importDraft = reactive({ title: '', author: '', categoryId: '', file: null })
 const sourceRows = ref([])
 const sourceSwitchVisible = ref(false)
@@ -606,8 +685,16 @@ const restoreLoading = ref(false)
 const users = ref([])
 const usersLoading = ref(false)
 const cleanupLoading = ref(false)
+const deletingUsers = ref(false)
+const creatingUser = ref(false)
+const userCreateDialog = ref(false)
+const selectedUserIds = ref([])
+const userDraft = reactive({ username: '', password: '', role: 'user', canEditSources: true, canAccessStore: true })
 const replaceRules = ref([])
 const replaceRulesLoading = ref(false)
+const replaceRuleImporting = ref(false)
+const selectedReplaceRuleIds = ref([])
+const replaceRuleFileInput = ref(null)
 const replaceRuleDialog = ref(false)
 const replaceRuleSaving = ref(false)
 const replaceRuleTesting = ref(false)
@@ -638,7 +725,7 @@ const sourceSwitchCurrentName = computed(() => {
 })
 const sourceSwitchGroups = computed(() => {
   const rows = sourceRows.value.length ? sourceRows.value : sourceSwitchCandidates.value
-  return [...new Set(rows.map(item => item.group).filter(Boolean))].sort()
+  return buildSourceGroupOptions(rows)
 })
 const bookInfoProgress = computed(() => {
   const book = overlay.bookInfoBook
@@ -660,6 +747,7 @@ const contentSearchStatus = computed(() => {
   if (!contentTotal.value) return `${contentResults.value.length} 条结果`
   return `已搜索 ${Math.min(scanned, contentTotal.value)} / ${contentTotal.value} 章，${contentResults.value.length} 条结果`
 })
+const currentUserId = computed(() => userStore.profile?.id || null)
 
 onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
@@ -1242,6 +1330,16 @@ async function batchClearCache() {
   }
 }
 
+function handleBatchMoreCommand(command) {
+  if (command === 'cache') {
+    batchCacheBooks()
+  } else if (command === 'clear-cache') {
+    batchClearCache()
+  } else if (command === 'export') {
+    batchExportBooks()
+  }
+}
+
 function selectedRemoteBookIds() {
   const selected = new Set(selectedBookIds.value)
   return managedBooks.value
@@ -1532,6 +1630,64 @@ async function removeBookmarkItem(bookmark) {
   }
 }
 
+async function removeBookmarkItems(rows) {
+  if (!Array.isArray(rows) || !rows.length) return
+  try {
+    await ElMessageBox.confirm(`确认要删除所选择的 ${rows.length} 条书签吗？`, '批量删除书签', { type: 'warning' })
+    await Promise.all(rows.map(item => deleteBookmark(item.id)))
+    const deleted = new Set(rows.map(item => item.id))
+    bookmarkItems.value = bookmarkItems.value.filter(item => !deleted.has(item.id))
+    ElMessage.success('书签已删除')
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '批量删除书签失败'))
+  }
+}
+
+async function importBookmarkItems(rows) {
+  const book = overlay.bookmarkBook
+  if (!book?.id) return
+  const payloads = normalizeImportedBookmarks(rows)
+  if (!payloads.length) {
+    ElMessage.error('书签文件没有可导入内容')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确认要导入文件中的 ${payloads.length} 条书签到当前书籍吗？`, '导入书签', { type: 'info' })
+    const created = []
+    for (const payload of payloads) {
+      const { data } = await createBookmark(book.id, payload)
+      if (data?.id) created.push(data)
+    }
+    bookmarkItems.value = [...created, ...bookmarkItems.value]
+    ElMessage.success(`已导入 ${created.length} 条书签`)
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '导入书签失败'))
+  }
+}
+
+function normalizeImportedBookmarks(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(row => {
+      const chapterIndex = Math.max(0, Math.floor(Number(row.chapterIndex ?? row.durChapterIndex ?? 0)))
+      return {
+        chapterIndex,
+        offset: Math.max(0, Math.floor(Number(row.offset ?? 0))),
+        percent: clampPercent(row.percent),
+        title: String(row.title || row.chapterName || row.chapterTitle || `第 ${chapterIndex + 1} 章`).trim(),
+        excerpt: String(row.excerpt || row.bookText || '').trim(),
+        note: String(row.note || row.content || '').trim(),
+      }
+    })
+    .filter(row => row.title || row.excerpt || row.note)
+}
+
+function clampPercent(value) {
+  const percent = Number(value)
+  return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0
+}
+
 function formatSize(bytes) {
   if (!bytes) return '0 B'
   if (bytes < 1024) return `${bytes} B`
@@ -1602,12 +1758,108 @@ async function restoreBackup(data) {
 async function loadUsers() {
   usersLoading.value = true
   try {
+    if (!userStore.profile) await userStore.loadMe()
     const { data } = await listUsers()
     users.value = data || []
+    selectedUserIds.value = selectedUserIds.value.filter(id => users.value.some(user => user.id === id && isUserDeletable(user)))
   } catch (err) {
     ElMessage.error(readError(err, '加载用户失败'))
   } finally {
     usersLoading.value = false
+  }
+}
+
+function isUserDeletable(user) {
+  return user.role !== 'admin' && user.id !== currentUserId.value
+}
+
+function onUserSelectionChange(rows) {
+  selectedUserIds.value = rows.filter(isUserDeletable).map(user => user.id)
+}
+
+function toggleUserSelection(id, checked) {
+  const user = users.value.find(item => item.id === id)
+  if (!user || !isUserDeletable(user)) return
+  if (checked) {
+    if (!selectedUserIds.value.includes(id)) selectedUserIds.value.push(id)
+    return
+  }
+  selectedUserIds.value = selectedUserIds.value.filter(item => item !== id)
+}
+
+function openCreateUserDialog() {
+  Object.assign(userDraft, {
+    username: '',
+    password: '',
+    role: 'user',
+    canEditSources: true,
+    canAccessStore: true,
+  })
+  userCreateDialog.value = true
+}
+
+async function createManagedUser() {
+  const username = userDraft.username.trim()
+  if (username.length < 3 || userDraft.password.length < 6) {
+    ElMessage.warning('用户名至少 3 位，密码至少 6 位')
+    return
+  }
+  creatingUser.value = true
+  try {
+    await createUser({
+      username,
+      password: userDraft.password,
+      role: userDraft.role,
+      canEditSources: userDraft.canEditSources,
+      canAccessStore: userDraft.canAccessStore,
+    })
+    ElMessage.success('新增用户成功')
+    userCreateDialog.value = false
+    await loadUsers()
+  } catch (err) {
+    ElMessage.error(readError(err, '新增用户失败'))
+  } finally {
+    creatingUser.value = false
+  }
+}
+
+async function resetPassword(row) {
+  try {
+    const res = await ElMessageBox.prompt('', `重置 ${row.username} 的密码`, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputType: 'password',
+      inputValidator(value) {
+        if (!value || value.length < 6) return '密码至少 6 位'
+        return true
+      },
+    })
+    await resetUserPassword(row.id, { password: res.value })
+    ElMessage.success('重置密码成功')
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '重置密码失败'))
+  }
+}
+
+async function deleteSelectedUsers() {
+  const ids = [...selectedUserIds.value]
+  if (!ids.length) {
+    ElMessage.warning('请选择需要删除的用户')
+    return
+  }
+  deletingUsers.value = true
+  try {
+    await ElMessageBox.confirm(`确认要删除所选择的 ${ids.length} 个用户吗？该用户空间内的书架、进度、书签和设置也会删除。`, '批量删除用户', { type: 'warning' })
+    const { data } = await deleteUsers(ids)
+    selectedUserIds.value = []
+    ElMessage.success(`删除用户成功：${data.deleted || ids.length} 个`)
+    await loadUsers()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '删除用户失败'))
+  } finally {
+    deletingUsers.value = false
   }
 }
 
@@ -1645,11 +1897,68 @@ async function loadReplaceRules() {
   try {
     const { data } = await listReplaceRules()
     replaceRules.value = data || []
+    selectedReplaceRuleIds.value = selectedReplaceRuleIds.value.filter(id => replaceRules.value.some(rule => rule.id === id))
   } catch (err) {
     ElMessage.error(readError(err, '加载替换规则失败'))
   } finally {
     replaceRulesLoading.value = false
   }
+}
+
+function onReplaceRuleSelectionChange(rows) {
+  selectedReplaceRuleIds.value = rows.map(row => row.id)
+}
+
+function toggleReplaceRuleSelection(id, checked) {
+  if (checked) {
+    if (!selectedReplaceRuleIds.value.includes(id)) selectedReplaceRuleIds.value.push(id)
+    return
+  }
+  selectedReplaceRuleIds.value = selectedReplaceRuleIds.value.filter(item => item !== id)
+}
+
+function triggerReplaceRuleImport() {
+  replaceRuleFileInput.value?.click()
+}
+
+async function importReplaceRuleFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  replaceRuleImporting.value = true
+  try {
+    const text = await file.text()
+    const parsed = JSON.parse(text)
+    const ruleList = normalizeReplaceRuleImport(parsed)
+    if (!ruleList.length) {
+      ElMessage.warning('替换规则文件中没有可导入的规则')
+      return
+    }
+    await ElMessageBox.confirm(`确认要导入文件中的 ${ruleList.length} 条替换规则吗？`, '导入替换规则', { type: 'warning' })
+    for (const rule of ruleList) {
+      await createReplaceRule(rule)
+    }
+    ElMessage.success('导入替换规则成功')
+    await loadReplaceRules()
+    notifyReplaceRulesUpdated()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '导入替换规则失败'))
+  } finally {
+    replaceRuleImporting.value = false
+  }
+}
+
+function normalizeReplaceRuleImport(input) {
+  const rows = Array.isArray(input) ? input : Array.isArray(input?.rules) ? input.rules : []
+  return rows
+    .map((rule, index) => ({
+      name: String(rule.name || rule.title || `导入规则 ${index + 1}`).trim(),
+      pattern: String(rule.pattern || rule.regex || rule.match || '').trim(),
+      replacement: String(rule.replacement ?? rule.replace ?? ''),
+      enabled: rule.enabled === false || rule.isEnabled === false ? false : true,
+    }))
+    .filter(rule => rule.pattern)
 }
 
 function openReplaceRuleEditor(rule = null) {
@@ -1730,7 +2039,29 @@ async function removeReplaceRule(rule) {
     await ElMessageBox.confirm(`确定删除替换规则“${rule.name || rule.pattern}”吗？`, '删除替换规则', { type: 'warning' })
     await deleteReplaceRule(rule.id)
     replaceRules.value = replaceRules.value.filter(item => item.id !== rule.id)
+    selectedReplaceRuleIds.value = selectedReplaceRuleIds.value.filter(id => id !== rule.id)
     ElMessage.success('替换规则已删除')
+    notifyReplaceRulesUpdated()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '删除替换规则失败'))
+  }
+}
+
+async function deleteSelectedReplaceRules() {
+  const ids = [...selectedReplaceRuleIds.value]
+  if (!ids.length) {
+    ElMessage.warning('请选择需要删除的替换规则')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确认要删除所选择的 ${ids.length} 条替换规则吗？`, '批量删除替换规则', { type: 'warning' })
+    for (const id of ids) {
+      await deleteReplaceRule(id)
+    }
+    replaceRules.value = replaceRules.value.filter(rule => !ids.includes(rule.id))
+    selectedReplaceRuleIds.value = []
+    ElMessage.success('删除替换规则成功')
     notifyReplaceRulesUpdated()
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
@@ -1770,7 +2101,41 @@ async function renameGroup(category) {
   }
 }
 
+function groupBookCount(category) {
+  return managedBooks.value.filter(book => String(book.categoryId || '') === String(category.id)).length
+}
+
+function buildSourceGroupOptions(rows) {
+  const counts = new Map()
+  for (const item of rows || []) {
+    if (item?.enabled === false) continue
+    const group = String(item?.group || '').trim()
+    if (!group) continue
+    counts.set(group, (counts.get(group) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([value, count]) => ({ value, label: value, count }))
+}
+
+async function toggleGroupVisibility(category, show) {
+  visibilitySavingId.value = category.id
+  try {
+    await bookshelf.setCategoryVisible(category.id, show)
+    ElMessage.success(show ? '分组已显示' : '分组已隐藏')
+  } catch (err) {
+    await bookshelf.loadCategories({ force: true }).catch(() => {})
+    ElMessage.error(readError(err, '修改分组显示状态失败'))
+  } finally {
+    visibilitySavingId.value = null
+  }
+}
+
 async function deleteGroup(category) {
+  if (groupBookCount(category) > 0) {
+    ElMessage.warning('分组内还有书籍，清空后才能删除')
+    return
+  }
   try {
     await ElMessageBox.confirm(`确定删除分组“${category.name}”吗？`, '删除分组', { type: 'warning' })
     await bookshelf.removeCategory(category.id)
@@ -1959,10 +2324,33 @@ function readError(err, fallback) {
 }
 
 .group-row {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   padding: 10px;
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
+}
+
+.group-name {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.group-name span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-name small {
+  color: var(--app-text-muted);
+  font-size: 12px;
+}
+
+.group-visibility {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .group-actions {
@@ -2035,6 +2423,18 @@ function readError(err, fallback) {
   gap: 8px;
 }
 
+.visually-hidden-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: -1px;
+}
+
 .backup-overlay {
   display: grid;
   gap: 12px;
@@ -2097,13 +2497,28 @@ function readError(err, fallback) {
 }
 
 .mobile-user-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-user-card header > div {
   display: grid;
+  min-width: 0;
+  flex: 1;
   gap: 2px;
 }
 
 .mobile-user-card span {
   color: var(--app-text-muted);
   font-size: 12px;
+}
+
+.user-manage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .replace-overlay {
@@ -2138,6 +2553,7 @@ function readError(err, fallback) {
 .mobile-rule-card header > div {
   display: grid;
   min-width: 0;
+  flex: 1;
   gap: 2px;
 }
 
@@ -2241,6 +2657,10 @@ function readError(err, fallback) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .group-visibility {
+    justify-content: flex-start;
   }
 
   .group-actions {

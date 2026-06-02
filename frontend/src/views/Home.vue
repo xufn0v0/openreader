@@ -17,11 +17,11 @@
         <button type="button" @click="showBookEditButton = !showBookEditButton">
           {{ showBookEditButton ? '取消' : '编辑' }}
         </button>
-        <button class="view-switch" type="button" :class="{ active: effectiveShelfView === 'grid' }" title="网格显示" @click="setShelfView('grid')">
+        <button v-if="!isMobileShelf" class="view-switch" type="button" :class="{ active: effectiveShelfView === 'grid' }" title="网格显示" @click="setShelfView('grid')">
           <el-icon><Grid /></el-icon>
           <span>网格</span>
         </button>
-        <button class="view-switch" type="button" :class="{ active: effectiveShelfView === 'list' }" title="列表显示" @click="setShelfView('list')">
+        <button v-if="!isMobileShelf" class="view-switch" type="button" :class="{ active: effectiveShelfView === 'list' }" title="列表显示" @click="setShelfView('list')">
           <el-icon><List /></el-icon>
           <span>列表</span>
         </button>
@@ -37,10 +37,10 @@
         type="button"
         role="tab"
         :aria-selected="selectedGroup === item.id"
+        :title="`${item.name} (${item.count})`"
         @click="selectedGroup = item.id"
       >
         <span>{{ item.name }}</span>
-        <em>{{ item.count }}</em>
       </button>
     </div>
 
@@ -132,22 +132,24 @@ const groupItems = computed(() => {
   const countByCategory = new Map()
   const books = Array.isArray(bookshelf.books) ? bookshelf.books : []
   const categories = Array.isArray(bookshelf.categories) ? bookshelf.categories : []
+  const localCount = books.filter(isLocalBook).length
   for (const book of books) {
     const key = book.categoryId ? String(book.categoryId) : 'none'
     countByCategory.set(key, (countByCategory.get(key) || 0) + 1)
   }
+  const noneCount = countByCategory.get('none') || 0
   return [
     { id: '', name: '全部', count: books.length, builtin: true },
-    { id: 'local', name: '本地', count: books.filter(isLocalBook).length, builtin: true },
-    { id: 'none', name: '未分组', count: countByCategory.get('none') || 0, builtin: true },
-    ...categories.map(category => ({
+    localCount ? { id: 'local', name: '本地', count: localCount, builtin: true } : null,
+    noneCount ? { id: 'none', name: '未分组', count: noneCount, builtin: true } : null,
+    ...categories.filter(category => category.show !== false && (countByCategory.get(String(category.id)) || 0) > 0).map(category => ({
       id: String(category.id),
       name: category.name,
       count: countByCategory.get(String(category.id)) || 0,
       sortOrder: category.sortOrder || 0,
       builtin: false,
     })),
-  ]
+  ].filter(Boolean)
 })
 
 const sortedBooks = computed(() => sortByShelfOrder(Array.isArray(bookshelf.books) ? bookshelf.books : [], reader.progressByBook))
@@ -206,6 +208,12 @@ watch(
   },
   { immediate: true },
 )
+
+watch(groupItems, (items) => {
+  if (selectedGroup.value && !items.some(item => item.id === selectedGroup.value)) {
+    selectedGroup.value = ''
+  }
+})
 
 async function deleteManagedBook(book) {
   try {
@@ -592,21 +600,9 @@ function readError(err, fallback) {
   white-space: nowrap;
 }
 
-.group-chip em {
-  flex: 0 0 auto;
-  color: #8f97a3;
-  font-size: 13px;
-  font-style: normal;
-  font-weight: 700;
-}
-
 .group-chip.active {
   color: #1f6feb;
   background: transparent;
-}
-
-.group-chip.active em {
-  color: #1f6feb;
 }
 
 .group-chip.active::after {
@@ -859,7 +855,7 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .book-group-wrapper {
   width: auto;
-  max-width: calc(100% - 48px);
+  max-width: none;
   margin-right: 24px;
   margin-left: 24px;
   padding: 5px 0;
@@ -1006,7 +1002,7 @@ function readError(err, fallback) {
 
   .book-group-wrapper {
     width: auto;
-    max-width: calc(100% - 48px);
+    max-width: none;
     margin-right: 24px;
     margin-left: 24px;
     padding: 5px 0;
@@ -1081,7 +1077,7 @@ function readError(err, fallback) {
   .shelf-page.mobile-shelf .book-group-wrapper,
   .book-group-wrapper {
     width: auto;
-    max-width: calc(100% - 32px);
+    max-width: none;
     margin-right: 16px;
     margin-left: 16px;
     padding: 5px 0;

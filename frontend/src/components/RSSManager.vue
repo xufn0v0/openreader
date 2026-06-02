@@ -8,6 +8,7 @@
         </div>
         <div class="rss-actions">
           <el-button size="small" type="primary" @click="openEditor()">新增</el-button>
+          <el-button size="small" @click="rssEditMode = !rssEditMode">{{ rssEditMode ? '取消' : '编辑' }}</el-button>
           <el-button size="small" :loading="sourcesLoading" @click="loadSources">刷新</el-button>
         </div>
       </header>
@@ -26,9 +27,11 @@
             <el-tag size="small" :type="source.enabled === false ? 'info' : 'success'" effect="plain">
               {{ source.enabled === false ? '停用' : '启用' }}
             </el-tag>
-            <el-button size="small" text :loading="refreshingSourceId === source.id" @click="refreshSource(source)">刷新</el-button>
-            <el-button size="small" text @click="openEditor(source)">编辑</el-button>
-            <el-button size="small" text type="danger" @click="removeSource(source)">删除</el-button>
+            <template v-if="rssEditMode">
+              <el-button size="small" text :loading="refreshingSourceId === source.id" @click="refreshSource(source)">刷新</el-button>
+              <el-button size="small" text @click="openEditor(source)">编辑</el-button>
+              <el-button size="small" text type="danger" @click="removeSource(source)">删除</el-button>
+            </template>
           </span>
         </div>
         <el-empty v-if="!sourcesLoading && !sources.length" description="暂无 RSS 源" />
@@ -131,6 +134,7 @@ const sourcesLoading = ref(false)
 const articlesLoading = ref(false)
 const articlesLoadingMore = ref(false)
 const refreshingSourceId = ref(null)
+const rssEditMode = ref(false)
 const editorVisible = ref(false)
 const savingSource = ref(false)
 const editingSourceId = ref(null)
@@ -153,6 +157,7 @@ async function loadSources() {
   try {
     const { data } = await listRSSSources()
     sources.value = data || []
+    if (!sources.value.length) rssEditMode.value = false
     if (!selectedSourceId.value && sources.value.length) selectedSourceId.value = sources.value[0].id
     if (selectedSourceId.value && !sources.value.some(source => source.id === selectedSourceId.value)) {
       selectedSourceId.value = sources.value[0]?.id || ''
@@ -273,6 +278,7 @@ async function removeSource(source) {
     await ElMessageBox.confirm(`确定删除 RSS 源“${source.title}”吗？文章缓存也会删除。`, '删除 RSS 源', { type: 'warning' })
     await deleteRSSSource(source.id)
     sources.value = sources.value.filter(item => item.id !== source.id)
+    if (!sources.value.length) rssEditMode.value = false
     if (selectedSourceId.value === source.id) selectedSourceId.value = sources.value[0]?.id || ''
     await loadArticles()
     ElMessage.success('RSS 源已删除')

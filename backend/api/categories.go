@@ -16,6 +16,12 @@ type categoryRequest struct {
 	Color string `json:"color"`
 }
 
+type categoryUpdateRequest struct {
+	Name  *string `json:"name"`
+	Color *string `json:"color"`
+	Show  *bool   `json:"show"`
+}
+
 type categoryReorderRequest struct {
 	IDs []uint `json:"ids" binding:"required"`
 }
@@ -47,6 +53,7 @@ func (s *Server) createCategory(c *gin.Context) {
 		UserID:    userID,
 		Name:      strings.TrimSpace(request.Name),
 		Color:     strings.TrimSpace(request.Color),
+		Show:      true,
 		SortOrder: maxSort + 10,
 	}
 	if category.Name == "" {
@@ -77,20 +84,28 @@ func (s *Server) updateCategory(c *gin.Context) {
 		return
 	}
 
-	var request categoryRequest
+	var request categoryUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "category name is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category payload"})
 		return
 	}
 
-	name := strings.TrimSpace(request.Name)
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "category name is required"})
-		return
+	if request.Name != nil {
+		name := strings.TrimSpace(*request.Name)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "category name is required"})
+			return
+		}
+		category.Name = name
 	}
-	category.Name = name
-	if color := strings.TrimSpace(request.Color); color != "" {
-		category.Color = color
+	if request.Color != nil {
+		category.Color = strings.TrimSpace(*request.Color)
+		if category.Color == "" {
+			category.Color = "#216869"
+		}
+	}
+	if request.Show != nil {
+		category.Show = *request.Show
 	}
 
 	if err := s.db.Save(&category).Error; err != nil {
@@ -148,14 +163,19 @@ func (s *Server) deleteCategory(c *gin.Context) {
 		return
 	}
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.Book{}).
-			Where("user_id = ? AND category_id = ?", userID, categoryID).
-			Update("category_id", nil).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&category).Error
-	}); err != nil {
+	var bookCount int64
+	if err := s.db.Model(&models.Book{}).
+		Where("user_id = ? AND category_id = ?", userID, categoryID).
+		Count(&bookCount).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check category books"})
+		return
+	}
+	if bookCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "category is not empty"})
+		return
+	}
+
+	if err := s.db.Delete(&category).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete category"})
 		return
 	}

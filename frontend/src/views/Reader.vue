@@ -235,11 +235,21 @@
 
     <!-- ===== 目录抽屉 ===== -->
     <el-drawer v-model="showTocDrawer" title="目录" :direction="drawerDirection" :size="drawerSize" @opened="locateTocCurrentChapter">
+      <div class="reader-drawer-title">
+        <span>目录({{ chapters.length }})</span>
+        <div class="reader-drawer-actions">
+          <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
+          <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
+          <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
+          <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
+        </div>
+      </div>
       <ReaderTocPanel
         ref="tocPanelRef"
         v-model="tocFilter"
         :chapters="chapters"
         :current-index="currentIndex"
+        :reverse="tocReverse"
         :locate-key="tocLocateKey"
         :browser-cached-map="browserCachedChapters"
         @jump="jumpFromToc"
@@ -254,6 +264,8 @@
         @jump="jumpToBookmark"
         @edit="openBookmarkEditor"
         @remove="removeBookmark"
+        @remove-many="removeBookmarks"
+        @import="importBookmarks"
       />
     </el-drawer>
 
@@ -411,7 +423,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDownBold,
   ArrowLeft,
@@ -501,6 +513,8 @@ const shelfListRef = ref(null)
 const tocPanelRef = ref(null)
 const tocFilter = ref('')
 const tocLocateKey = ref(0)
+const tocReverse = ref(false)
+const tocRefreshing = ref(false)
 const browserCachedChapters = ref({})
 const contentSearch = ref('')
 const bookSearchResults = ref([])
@@ -545,7 +559,7 @@ let ignoreNextContentClick = false
 let handledTouchTapAt = 0
 let lastLocalProgressKey = ''
 let lastWheelPageAt = 0
-let appendingShowChapter = false
+let extendingShowChapters = false
 
 const fontOptions = readerFontOptions
 const SHOW_PREV_CHAPTER_SIZE = 1
@@ -561,8 +575,7 @@ const filteredShelfBooks = computed(() => {
 })
 const sourceGroups = computed(() => {
   const sourceRows = sourceGroupOptions.value.length ? sourceGroupOptions.value : sourceCandidates.value
-  const groups = sourceRows.map(item => item.group).filter(Boolean)
-  return [...new Set(groups)].sort()
+  return buildSourceGroupOptions(sourceRows)
 })
 const currentSourceName = computed(() => {
   if (!book.value?.sourceId) return '本地书籍'
@@ -774,6 +787,19 @@ function makeParagraphs(value, heading = '') {
   }, [])
 }
 
+function buildSourceGroupOptions(rows) {
+  const counts = new Map()
+  for (const item of rows || []) {
+    if (item?.enabled === false) continue
+    const group = String(item?.group || '').trim()
+    if (!group) continue
+    counts.set(group, (counts.get(group) || 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([value, count]) => ({ value, label: value, count }))
+}
+
 function makeChapterBlock(index, chapterRow, text) {
   const fallback = chapters.value[index] || {}
   const title = chapterRow?.title || fallback.title || `第 ${index + 1} 章`
@@ -936,6 +962,25 @@ async function appendNextShowChapter() {
     ...chapterBlocks.value,
     makeChapterBlock(nextIndex, data.chapter || chapters.value[nextIndex], data.content || ''),
   ]
+}
+
+async function prependPreviousShowChapter() {
+  if (reader.mode !== 'scroll2' || !chapterBlocks.value.length || !contentEl.value) return
+  const firstIndex = chapterBlocks.value[0].index
+  const previousIndex = firstIndex - 1
+  if (previousIndex < 0) return
+  if (chapterBlocks.value.some(block => block.index === previousIndex)) return
+  const beforeHeight = contentEl.value.scrollHeight
+  const beforeTop = contentEl.value.scrollTop
+  const data = await loadChapterContent(previousIndex)
+  chapterBlocks.value = [
+    makeChapterBlock(previousIndex, data.chapter || chapters.value[previousIndex], data.content || ''),
+    ...chapterBlocks.value,
+  ]
+  await nextTick()
+  await nextFrame()
+  const heightDelta = Math.max(0, contentEl.value.scrollHeight - beforeHeight)
+  contentEl.value.scrollTop = beforeTop + heightDelta
 }
 
 async function loadChapterContent(index, options = {}) {
@@ -1131,6 +1176,34 @@ function openTocDrawer() {
   showTocDrawer.value = true
   window.setTimeout(locateTocCurrentChapter, 0)
   window.setTimeout(locateTocCurrentChapter, 180)
+}
+
+function toggleTocReverse() {
+  tocReverse.value = !tocReverse.value
+  locateTocCurrentChapter()
+}
+
+function scrollTocTop() {
+  tocPanelRef.value?.scrollToTop?.()
+}
+
+function scrollTocBottom() {
+  tocPanelRef.value?.scrollToBottom?.()
+}
+
+async function refreshTocDrawer() {
+  tocRefreshing.value = true
+  try {
+    if (isRemoteBook.value) {
+      await refreshReaderBookCatalog()
+    } else {
+      await loadChapters()
+    }
+    await computeBrowserCachedChapters()
+    locateTocCurrentChapter()
+  } finally {
+    tocRefreshing.value = false
+  }
 }
 
 async function computeBrowserCachedChapters() {
@@ -2066,7 +2139,7 @@ function onScroll() {
   if (!isScrollRead.value) return
   if (restoringPosition || chapterLoading.value) return
   updateCurrentChapterFromScroll()
-  maybeAppendShowChapter()
+  maybeExtendShowChapters()
   updateFlipLayout()
   progressVersion.value += 1
   applyLocalProgressSnapshot()
@@ -2157,16 +2230,20 @@ function updateCurrentChapterFromScroll() {
   content.value = block?.content || content.value
 }
 
-function maybeAppendShowChapter() {
-  if (!isContinuousScrollRead.value || appendingShowChapter || !contentEl.value) return
+function maybeExtendShowChapters() {
+  if (!isContinuousScrollRead.value || extendingShowChapters || !contentEl.value) return
   const el = contentEl.value
   const nearBottom = el.scrollTop + el.clientHeight > el.scrollHeight - el.clientHeight * 2
-  if (!nearBottom) return
-  appendingShowChapter = true
-  appendNextShowChapter()
+  const nearTop = reader.mode === 'scroll2' && el.scrollTop < el.clientHeight
+  if (!nearTop && !nearBottom) return
+  extendingShowChapters = true
+  Promise.all([
+    nearTop ? prependPreviousShowChapter() : Promise.resolve(),
+    nearBottom ? appendNextShowChapter() : Promise.resolve(),
+  ])
     .catch(() => {})
     .finally(() => {
-      appendingShowChapter = false
+      extendingShowChapters = false
     })
 }
 
@@ -2343,6 +2420,57 @@ async function removeBookmark(bookmark) {
   bookmarks.value = bookmarks.value.filter(item => item.id !== bookmark.id)
 }
 
+async function removeBookmarks(rows) {
+  if (!Array.isArray(rows) || !rows.length) return
+  try {
+    await ElMessageBox.confirm(`确认要删除所选择的 ${rows.length} 条书签吗？`, '批量删除书签', { type: 'warning' })
+    await Promise.all(rows.map(item => api.delete(`/bookmarks/${item.id}`)))
+    const deleted = new Set(rows.map(item => item.id))
+    bookmarks.value = bookmarks.value.filter(item => !deleted.has(item.id))
+    ElMessage.success('书签已删除')
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '批量删除书签失败'))
+  }
+}
+
+async function importBookmarks(rows) {
+  const payloads = normalizeImportedBookmarks(rows)
+  if (!payloads.length) {
+    ElMessage.error('书签文件没有可导入内容')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确认要导入文件中的 ${payloads.length} 条书签到当前书籍吗？`, '导入书签', { type: 'info' })
+    const created = []
+    for (const payload of payloads) {
+      const { data } = await api.post(`/books/${bookId.value}/bookmarks`, payload)
+      if (data?.id) created.push(data)
+    }
+    bookmarks.value = [...created, ...bookmarks.value]
+    ElMessage.success(`已导入 ${created.length} 条书签`)
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '导入书签失败'))
+  }
+}
+
+function normalizeImportedBookmarks(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(row => {
+      const chapterIndex = Math.max(0, Math.floor(Number(row.chapterIndex ?? row.durChapterIndex ?? 0)))
+      return {
+        chapterIndex,
+        offset: Math.max(0, Math.floor(Number(row.offset ?? 0))),
+        percent: clampPercent(row.percent),
+        title: String(row.title || row.chapterName || row.chapterTitle || `第 ${chapterIndex + 1} 章`).trim(),
+        excerpt: String(row.excerpt || row.bookText || '').trim(),
+        note: String(row.note || row.content || '').trim(),
+      }
+    })
+    .filter(row => row.title || row.excerpt || row.note)
+}
+
 function openBookmarkEditor(bookmark) {
   editingBookmark.value = bookmark
   Object.assign(bookmarkDraft, {
@@ -2396,6 +2524,11 @@ function parseRoutePercent(value) {
   if (value === undefined || value === null || value === '') return null
   const percent = Number(value)
   return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : null
+}
+
+function clampPercent(value) {
+  const percent = Number(value)
+  return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0
 }
 
 async function jumpToBookSearchResult(result) {
@@ -3091,6 +3224,7 @@ function readError(err, fallback) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
   margin: -2px 0 14px;
 }
 .reader-drawer-title span {
@@ -3109,6 +3243,12 @@ function readError(err, fallback) {
 .reader-drawer-title button:disabled {
   color: #8c8c8c;
   cursor: default;
+}
+.reader-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 14px;
 }
 .shelf-search { margin-bottom: 12px; }
 .reader-shelf-list {
