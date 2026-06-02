@@ -178,7 +178,11 @@
       <article v-for="book in filteredManagedBooks" :key="book.id" class="mobile-manage-card" :class="{ selected: selectedBookIds.includes(book.id) }">
         <header>
           <el-checkbox :model-value="selectedBookIds.includes(book.id)" @change="value => toggleManagedBook(book.id, value)" />
-          <span class="mobile-manage-cover">{{ coverInitial(book) }}</span>
+          <span
+            class="mobile-manage-cover"
+            :class="{ 'has-cover': hasBookCover(book) }"
+            :style="coverStyle(book)"
+          >{{ coverInitial(book) }}</span>
           <button type="button" @click="overlay.openBookInfo(book)">
             <strong>{{ book.title }}</strong>
             <span>{{ book.author || '未知作者' }} · {{ categoryName(book.categoryId) }}</span>
@@ -244,17 +248,22 @@
     :size="narrowDrawerSize"
   >
     <template v-if="overlay.bookGroupMode === 'set'">
-      <el-table :data="bookshelf.categories" row-key="id" class="group-set-table" @row-click="selectBookGroup">
+      <el-table :data="groupSetRows" row-key="id" class="group-set-table" @row-click="selectBookGroup">
         <el-table-column width="46">
           <template #default="{ row }">
             <span class="radio-cell" :class="{ active: String(settingCategoryId) === String(row.id) }" />
           </template>
         </el-table-column>
-        <el-table-column prop="name" label="分组名" />
+        <el-table-column label="分组名">
+          <template #default="{ row }">
+            <span class="group-set-name">
+              <span>{{ row.name }}</span>
+              <small>{{ row.description }}</small>
+            </span>
+          </template>
+        </el-table-column>
       </el-table>
-      <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
       <div class="manage-footer group-set-footer">
-        <el-button @click="settingCategoryId = ''">未分组</el-button>
         <el-button type="primary" :loading="settingCategorySaving" @click="saveBookGroupSetting">确认</el-button>
         <el-button @click="overlay.bookGroupVisible = false">取消</el-button>
       </div>
@@ -618,6 +627,7 @@ import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
+import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
@@ -735,6 +745,14 @@ const bookInfoBrowserCacheCount = computed(() => (
   overlay.bookInfoBook?.sourceId ? localCacheCount(overlay.bookInfoBook) : -1
 ))
 const sourceStatusLabel = computed(() => overlay.bookInfoBook?.sourceId ? '远程书籍' : '本地书籍')
+const groupSetRows = computed(() => [
+  { id: '', name: '未分组', description: '从当前分组移出' },
+  ...bookshelf.categories.map(category => ({
+    ...category,
+    id: String(category.id),
+    description: `${groupBookCount(category)} 本`,
+  })),
+])
 const managedBooks = computed(() => sortByShelfOrder(bookshelf.books, reader.progressByBook))
 const filteredManagedBooks = computed(() => {
   const value = manageKeyword.value.trim().toLowerCase()
@@ -926,7 +944,13 @@ function clearManagedSelection() {
 }
 
 function coverInitial(book) {
+  if (hasBookCover(book)) return ''
   return (book?.title || '?').slice(0, 1)
+}
+
+function coverStyle(book) {
+  const url = bookCoverUrl(book)
+  return url ? { backgroundImage: `url(${url})` } : {}
 }
 
 function continueRead(book) {
@@ -1221,7 +1245,7 @@ async function uploadBookInfoCover(file) {
     const { data: updatedBook } = await updateBook(book.id, {
       title: book.title,
       author: book.author || '',
-      coverUrl: uploadResult.url,
+      customCoverUrl: uploadResult.url,
       intro: book.intro || '',
       categoryId: book.categoryId || null,
       canUpdate: book.canUpdate !== false,
@@ -2272,6 +2296,12 @@ function readError(err, fallback) {
   font-weight: 800;
 }
 
+.mobile-manage-cover.has-cover {
+  background-position: center;
+  background-size: cover;
+  color: transparent;
+}
+
 .mobile-manage-card strong,
 .mobile-manage-card span,
 .mobile-manage-card p {
@@ -2366,6 +2396,24 @@ function readError(err, fallback) {
 
 .group-set-footer {
   margin-top: 12px;
+}
+
+.group-set-name {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.group-set-name span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-set-name small {
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 
 .radio-cell {

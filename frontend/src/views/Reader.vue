@@ -70,7 +70,7 @@
       </button>
       <div class="mobile-reader-title">
         <strong>{{ book?.title || '阅读中' }}</strong>
-        <span>{{ chapter?.title || chapterLabel }}</span>
+        <span>{{ displayChapterTitle(chapter?.title) || chapterLabel }}</span>
       </div>
       <span class="mobile-reader-progress">{{ bookProgressLabel }}</span>
     </header>
@@ -95,6 +95,7 @@
         class="reader-content"
         :style="readerContentStyle"
         @scroll.passive="onScroll"
+        @mouseup="handleReaderSelectionEnd"
       >
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
           <p v-if="chapterLoading" class="empty-hint">正在加载章节...</p>
@@ -107,7 +108,7 @@
             >
               <h1 data-pos="0">{{ block.title || '正文' }}</h1>
               <p v-for="(line, index) in block.paragraphs" :key="`${block.index}-${index}`" :data-pos="line.pos">{{ line.text }}</p>
-              <p v-if="block.paragraphs.length === 0" class="empty-hint">当前章节暂无缓存内容</p>
+              <p v-if="chapterLoaded && block.paragraphs.length === 0" class="empty-hint">当前章节暂无正文内容</p>
             </section>
           </template>
         </div>
@@ -118,6 +119,12 @@
         <button class="tap-zone tap-right" type="button" tabindex="-1" @click="handleTapZone('right')" />
         <button class="tap-zone tap-upper" type="button" tabindex="-1" @click="handleTapZone('upper')" />
         <button class="tap-zone tap-lower" type="button" tabindex="-1" @click="handleTapZone('lower')" />
+      </div>
+      <div v-if="showClickZoneOverlay" class="click-zone-overlay" :class="{ flip: reader.mode === 'flip' }">
+        <div class="click-zone-piece click-zone-prev"><span>{{ reader.mode === 'flip' ? '点击前一页' : '点击向上翻页' }}</span></div>
+        <div class="click-zone-piece click-zone-menu"><span>点击显示菜单</span></div>
+        <div class="click-zone-piece click-zone-next"><span>{{ reader.mode === 'flip' ? '点击后一页' : '点击向下翻页' }}</span></div>
+        <button class="click-zone-close" type="button" @click="showClickZoneOverlay = false">关闭</button>
       </div>
     </section>
 
@@ -194,6 +201,9 @@
       <input :value="tts.state.rate" max="3" min="0.5" step="0.1" type="range" class="tts-slider" @input="setTTSRate($event.target.value)" />
       <span class="tts-label">音调</span>
       <input :value="tts.state.pitch" max="2" min="0.5" step="0.1" type="range" class="tts-slider" @input="setTTSPitch($event.target.value)" />
+      <span class="tts-label">定时</span>
+      <input :value="ttsSleepMinutes" max="180" min="0" step="1" type="range" class="tts-slider" @input="setTTSSleepMinutes($event.target.value)" />
+      <span class="tts-label">{{ ttsSleepMinutes }}分钟</span>
     </div>
 
     <!-- Toast -->
@@ -398,6 +408,7 @@
         @tts-pitch-change="setTTSPitch"
         @tts-voice-change="setTTSVoice"
         @open-replace-rules="openReplaceRules"
+        @show-click-zone="showClickZone"
       />
     </el-drawer>
 
@@ -451,6 +462,7 @@ import {
 } from '@element-plus/icons-vue'
 import api from '../api/client'
 import { changeBookSource, listBookSourceCandidates, refreshBook, searchBookContent as searchBookContentApi } from '../api/books'
+import { createReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
 import ReaderBookmarkPanel from '../components/reader/ReaderBookmarkPanel.vue'
@@ -464,9 +476,11 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
 import { useTTS } from '../composables/useTTS'
+import { bookCoverUrl } from '../utils/bookCover'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
+import { simplized, traditionalized } from '../utils/chinese'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
 
@@ -484,6 +498,7 @@ const bookmarks = ref([])
 const content = ref('')
 const chapterBlocks = ref([])
 const chapterLoading = ref(true)
+const chapterLoaded = ref(false)
 const contentEl = ref(null)
 const contentBody = ref(null)
 const pageEl = ref(null)
@@ -501,6 +516,7 @@ const showMobileMoreDrawer = ref(false)
 const showCacheDrawer = ref(false)
 const showNoteDialog = ref(false)
 const showBookmarkEditor = ref(false)
+const showClickZoneOverlay = ref(false)
 const sourceCandidates = ref([])
 const sourceGroupOptions = ref([])
 const loadingSources = ref(false)
@@ -564,6 +580,8 @@ let handledTouchTapAt = 0
 let lastLocalProgressKey = ''
 let lastWheelPageAt = 0
 let extendingShowChapters = false
+let selectionOperateTimer = null
+let selectionOperating = false
 
 const fontOptions = readerFontOptions
 const SHOW_PREV_CHAPTER_SIZE = 1
@@ -704,6 +722,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   clearTimeout(chapterLoadingTimer)
+  clearTimeout(selectionOperateTimer)
   stopAutoReading()
   saveCurrentProgress({ force: true, background: true })
   window.removeEventListener('resize', handleResize)
@@ -713,8 +732,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
 })
 
-onBeforeRouteLeave(async () => {
-  await saveCurrentProgress({ force: true })
+onBeforeRouteLeave(() => {
+  saveCurrentProgress({ force: true, background: true })
 })
 
 watch(bookId, async () => {
@@ -760,7 +779,7 @@ watch(isMobileReader, (mobile) => {
   }
 }, { immediate: true })
 
-watch(() => [reader.fontFamily, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
+watch(() => [reader.fontFamily, reader.chineseFont, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
   const offset = currentOffset()
   const restorePercent = currentChapterPercent()
   restoringPosition = true
@@ -791,9 +810,18 @@ function makeParagraphs(value, heading = '') {
     if (!text) return items
     const pos = wordCount
     wordCount += text.length + 2
-    items.push({ text, pos })
+    items.push({ text: formatChineseText(text), pos })
     return items
   }, [])
+}
+
+function formatChineseText(text) {
+  if (!text) return ''
+  return reader.chineseFont === '繁体' ? traditionalized(String(text)) : simplized(String(text))
+}
+
+function displayChapterTitle(title) {
+  return formatChineseText(title || '')
 }
 
 function buildSourceGroupOptions(rows) {
@@ -815,7 +843,7 @@ function makeChapterBlock(index, chapterRow, text) {
   return {
     index,
     id: chapterRow?.id || fallback.id,
-    title,
+    title: displayChapterTitle(title),
     content: String(text || ''),
     paragraphs: makeParagraphs(text, title),
   }
@@ -831,23 +859,26 @@ function resetContentSearchState() {
 
 async function loadReaderBook() {
   clearTimeout(saveTimer)
-  const [bookRes, chRes, bmRes, saved] = await Promise.all([
+  const targetBookId = bookId.value
+  const bookmarksRequest = api.get(`/books/${targetBookId}/bookmarks`)
+    .then(({ data }) => data)
+    .catch(() => [])
+  const [bookRes, chRes, saved] = await Promise.all([
     cacheFirstRequest(
-      () => api.get(`/books/${bookId.value}`),
-      `reader@book:${bookId.value}`,
+      () => api.get(`/books/${targetBookId}`),
+      `reader@book:${targetBookId}`,
       { validate: data => Boolean(data?.id) },
     ),
     cacheFirstRequest(
-      () => api.get(`/books/${bookId.value}/chapters`),
-      `reader@chapters:${bookId.value}`,
+      () => api.get(`/books/${targetBookId}/chapters`),
+      `reader@chapters:${targetBookId}`,
       { validate: data => Array.isArray(data) },
     ),
-    api.get(`/books/${bookId.value}/bookmarks`),
-    reader.loadProgress(bookId.value),
+    reader.loadProgress(targetBookId, { preferLocal: true }),
   ])
+  if (bookId.value !== targetBookId) return
   book.value = bookRes.data
   chapters.value = chRes.data
-  bookmarks.value = bmRes.data
   sourceQuery.value = ''
   sourceCandidates.value = []
   sourceCandidatesLoadedKey.value = ''
@@ -869,6 +900,9 @@ async function loadReaderBook() {
   if (bookRes.fromCache || chRes.fromCache) {
     refreshReaderBookCaches({ book: Boolean(bookRes.fromCache), chapters: Boolean(chRes.fromCache) }).catch(() => {})
   }
+  bookmarksRequest.then(data => {
+    if (bookId.value === targetBookId) bookmarks.value = data
+  }).catch(() => {})
   await jumpToRouteLine()
 }
 
@@ -901,6 +935,7 @@ async function loadChapter(index, offset = 0, options = {}) {
   currentIndex.value = Math.max(0, Math.min(index, Math.max(chapters.value.length - 1, 0)))
   mobileChromeVisible.value = false
   restoringPosition = true
+  chapterLoaded.value = false
   clearTimeout(saveTimer)
   clearTimeout(chapterLoadingTimer)
   const cachedBeforeLoad = !options.refresh && getChapterContentFromMemory(currentIndex.value)
@@ -933,6 +968,7 @@ async function loadChapter(index, offset = 0, options = {}) {
     } else {
       lastProgressSaveKey = progressSaveKey(currentProgressPayload())
     }
+    chapterLoaded.value = true
   } finally {
     clearTimeout(chapterLoadingTimer)
     await nextFrame()
@@ -1273,6 +1309,13 @@ function openSettingsDrawer() {
   showSettingsDrawer.value = true
 }
 
+function showClickZone() {
+  showSettingsDrawer.value = false
+  showMobileMoreDrawer.value = false
+  mobileChromeVisible.value = false
+  showClickZoneOverlay.value = true
+}
+
 function openCacheDrawer() {
   if (!isRemoteBook.value) return
   computeBrowserCachedChapters()
@@ -1280,12 +1323,12 @@ function openCacheDrawer() {
 }
 
 async function goBookDetail() {
-  await saveCurrentProgress({ force: true })
+  saveCurrentProgress({ force: true, background: true })
   await router.push({ name: 'book-detail', params: { id: bookId.value } })
 }
 
 async function goShelf() {
-  await saveCurrentProgress({ force: true })
+  saveCurrentProgress({ force: true, background: true })
   bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
   await router.push({ name: 'home' })
 }
@@ -1359,13 +1402,15 @@ function shelfItemProgress(item) {
 }
 
 function shelfCoverInitial(item) {
+  if (bookCoverUrl(item)) return ''
   return (item.title || '?').slice(0, 1)
 }
 
 function shelfCoverStyle(item) {
-  if (item.coverUrl) {
+  const url = bookCoverUrl(item)
+  if (url) {
     return {
-      backgroundImage: `url(${item.coverUrl})`,
+      backgroundImage: `url(${url})`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       color: 'transparent',
@@ -1791,26 +1836,85 @@ function toggleAutoReading() {
     return
   }
   autoReading.value = true
-  autoReadTimer = setInterval(() => {
-    if (autoReadAdvancing) return
-    if (isScrollRead.value && contentEl.value) {
-      const el = contentEl.value
-      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4
-      if (atBottom) {
-        advanceAutoReadPage()
-      } else {
-        el.scrollTop += reader.autoReadSpeed
-      }
-      return
-    }
-    advanceAutoReadPage()
-  }, 260)
+  runAutoReadLoop()
   toastMsg.value = '自动阅读已开始'
   setTimeout(() => { toastMsg.value = '' }, 1200)
 }
 
+function runAutoReadLoop(delay = 0) {
+  clearTimeout(autoReadTimer)
+  if (!autoReading.value) return
+  autoReadTimer = setTimeout(async () => {
+    if (!autoReading.value) return
+    if (autoReadAdvancing || isOverlayOpen.value || mobileChromeVisible.value) {
+      runAutoReadLoop(300)
+      return
+    }
+    autoReadAdvancing = true
+    try {
+      if (reader.autoReadingMethod === '段落滚动') {
+        await autoReadByParagraph()
+      } else {
+        await autoReadByPixel()
+      }
+    } finally {
+      autoReadAdvancing = false
+    }
+  }, delay)
+}
+
+async function autoReadByPixel() {
+  if (isScrollRead.value && contentEl.value) {
+    const el = contentEl.value
+    const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+    if (el.scrollTop < bottom - 4) {
+      el.scrollTop = Math.min(bottom, el.scrollTop + reader.autoReadingPixel)
+      runAutoReadLoop(reader.autoReadingLineTime)
+      return
+    }
+  }
+  const advanced = await advanceAutoReadPage()
+  if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
+}
+
+async function autoReadByParagraph() {
+  if (!isScrollRead.value || !contentEl.value || !contentBody.value) {
+    const advanced = await advanceAutoReadPage()
+    if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
+    return
+  }
+  const current = currentVisibleParagraph()
+  const next = nextParagraphAfter(current)
+  if (next) {
+    const currentRect = current?.getBoundingClientRect?.()
+    const lineHeight = Math.max(1, Number(reader.fontSize || 18) * Number(reader.lineHeight || 1.8))
+    const lineCount = currentRect?.height ? Math.max(1, Math.ceil(currentRect.height / lineHeight)) : 1
+    scrollParagraphIntoView(next)
+    progressVersion.value += 1
+    saveCurrentProgress()
+    runAutoReadLoop(reader.autoReadingLineTime * lineCount)
+    return
+  }
+  const advanced = await advanceAutoReadPage()
+  if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
+}
+
+function nextParagraphAfter(paragraph) {
+  const paragraphs = [...(contentBody.value?.querySelectorAll('p') || [])]
+  if (!paragraph) return paragraphs[0] || null
+  const index = paragraphs.indexOf(paragraph)
+  return index >= 0 ? paragraphs[index + 1] || null : paragraphs[0] || null
+}
+
+function scrollParagraphIntoView(paragraph) {
+  if (!paragraph || !contentEl.value) return
+  const viewport = contentEl.value.getBoundingClientRect()
+  const rect = paragraph.getBoundingClientRect()
+  const nextTop = contentEl.value.scrollTop + rect.top - viewport.top - 24
+  contentEl.value.scrollTo({ top: Math.max(0, nextTop), behavior: readerScrollBehavior() })
+}
+
 async function advanceAutoReadPage() {
-  autoReadAdvancing = true
   const beforeChapter = currentIndex.value
   const beforePage = page.value
   try {
@@ -1819,16 +1923,17 @@ async function advanceAutoReadPage() {
       stopAutoReading()
       toastMsg.value = '已到本书末尾'
       setTimeout(() => { toastMsg.value = '' }, 1200)
+      return false
     }
+    return true
   } finally {
-    autoReadAdvancing = false
   }
 }
 
 function stopAutoReading() {
   autoReading.value = false
   autoReadAdvancing = false
-  clearInterval(autoReadTimer)
+  clearTimeout(autoReadTimer)
   autoReadTimer = null
 }
 
@@ -2000,6 +2105,13 @@ function handleReaderTouchMove(event) {
 function handleReaderTouchEnd(event) {
   if (!isMobileReader.value) return
   const touch = event.changedTouches?.[0]
+  if (scheduleSelectedTextOperation(200)) {
+    ignoreNextContentClick = true
+    readerTouchStart = null
+    readerTouchMoved = false
+    readerTouchMove = { x: 0, y: 0 }
+    return
+  }
   const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
   const isTap = !readerTouchMoved && elapsed < 650 && Boolean(touch)
   ignoreNextContentClick = Boolean(touch)
@@ -2036,6 +2148,10 @@ function shouldHandleHorizontalSwipe() {
 
 function handleTapPoint(point) {
   if (isOverlayOpen.value || !point?.rect) return
+  if (scheduleSelectedTextOperation(0)) {
+    ignoreNextContentClick = true
+    return
+  }
   const viewportWidth = window.innerWidth || point.rect.width
   const viewportHeight = window.innerHeight || point.rect.height
   const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
@@ -2305,6 +2421,111 @@ function currentVisibleExcerpt() {
   const text = paragraph?.textContent?.replace(/\s+/g, ' ').trim()
   if (text) return text.slice(0, 140)
   return lines.value.slice(0, 2).join(' ').slice(0, 140)
+}
+
+function handleReaderSelectionEnd() {
+  scheduleSelectedTextOperation(180)
+}
+
+function scheduleSelectedTextOperation(delay = 0) {
+  if (reader.selectionAction === '忽略') return false
+  clearTimeout(selectionOperateTimer)
+  const selectedNow = selectedReaderText()
+  selectionOperateTimer = window.setTimeout(() => {
+    const text = selectedReaderText()
+    if (!text) return
+    ignoreNextContentClick = true
+    handleSelectedTextOperation(text).catch(err => {
+      if (err === 'cancel' || err === 'close') return
+      ElMessage.error(readError(err, '处理选中文字失败'))
+    })
+  }, delay)
+  return Boolean(selectedNow)
+}
+
+function selectedReaderText() {
+  if (typeof window === 'undefined' || !contentBody.value) return ''
+  const selection = window.getSelection?.()
+  const text = selection?.toString?.().replace(/\s+/g, ' ').trim()
+  if (!text || !selection.rangeCount) return ''
+  const range = selection.getRangeAt(0)
+  const container = range.commonAncestorContainer?.nodeType === window.Node?.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer?.parentElement
+  if (!container || !contentBody.value.contains(container)) return ''
+  return text.slice(0, 1000)
+}
+
+async function handleSelectedTextOperation(text) {
+  if (selectionOperating || reader.selectionAction === '忽略') return
+  selectionOperating = true
+  try {
+    const action = await ElMessageBox.confirm('请选择对选中文字执行的操作。', '选择文字', {
+      confirmButtonText: '添加过滤规则',
+      cancelButtonText: '添加书签',
+      distinguishCancelAndClose: true,
+      closeOnClickModal: false,
+      closeOnPressEscape: false,
+      type: 'info',
+    }).catch(result => result)
+    if (action === 'close') return
+    if (action === 'cancel') {
+      await createBookmarkFromSelectedText(text)
+      return
+    }
+    await createReplaceRuleFromSelectedText(text)
+  } finally {
+    clearReaderSelection()
+    selectionOperating = false
+    window.setTimeout(() => {
+      ignoreNextContentClick = false
+    }, 320)
+  }
+}
+
+async function createReplaceRuleFromSelectedText(text) {
+  const prompt = await ElMessageBox.prompt('替换为留空时表示直接过滤该文字。', '添加过滤规则', {
+    confirmButtonText: '保存',
+    cancelButtonText: '取消',
+    inputValue: '',
+    inputPlaceholder: '替换为',
+  }).catch(() => null)
+  if (!prompt) return
+  const cleanText = String(text || '').trim()
+  if (!cleanText) return
+  const name = cleanText.length > 24 ? `${cleanText.slice(0, 24)}...` : cleanText
+  await createReplaceRule({
+    name,
+    pattern: cleanText,
+    replacement: String(prompt.value || ''),
+    enabled: true,
+  })
+  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
+  ElMessage.success('过滤规则已添加')
+}
+
+async function createBookmarkFromSelectedText(text) {
+  if (!chapter.value) return
+  const cleanText = String(text || '').trim()
+  const { data } = await api.post(`/books/${bookId.value}/bookmarks`, {
+    chapterId: chapter.value.id,
+    chapterIndex: currentIndex.value,
+    offset: currentOffset(),
+    percent: currentChapterPercent(),
+    title: chapter.value.title,
+    excerpt: cleanText.slice(0, 500),
+  })
+  bookmarks.value = [data, ...bookmarks.value]
+  toastMsg.value = '书签已创建'
+  setTimeout(() => { toastMsg.value = '' }, 1600)
+}
+
+function clearReaderSelection() {
+  try {
+    window.getSelection?.()?.removeAllRanges?.()
+  } catch {
+    // Selection APIs may be unavailable in embedded browsers.
+  }
 }
 
 async function saveCurrentProgress(options = {}) {
@@ -2789,6 +3010,8 @@ useGesture(pageEl, {
 // ---- TTS ----
 const tts = useTTS()
 const ttsVoices = computed(() => tts.voices.value)
+const ttsSleepMinutes = ref(0)
+const ttsSleepEndAt = ref(0)
 const ttsProgressLabel = computed(() => {
   const total = tts.total.value || 0
   if (!tts.state.playing || total <= 0) return '段落 - / -'
@@ -2813,6 +3036,24 @@ function setTTSVoice(value) {
   tts.setVoice(reader.ttsVoiceURI)
 }
 
+function setTTSSleepMinutes(value) {
+  const minutes = Math.max(0, Math.min(180, Math.floor(Number(value) || 0)))
+  ttsSleepMinutes.value = minutes
+  ttsSleepEndAt.value = minutes > 0 ? Date.now() + minutes * 60 * 1000 : 0
+}
+
+function isTTSSleepExpired() {
+  return ttsSleepEndAt.value > 0 && Date.now() > ttsSleepEndAt.value
+}
+
+function handleTTSParagraphStart() {
+  if (!isTTSSleepExpired()) return
+  ttsContinueToken += 1
+  tts.stop()
+  toastMsg.value = '定时关闭朗读'
+  setTimeout(() => { toastMsg.value = '' }, 1400)
+}
+
 function toggleTTS() {
   if (!tts.state.supported) {
     toastMsg.value = '当前浏览器不支持朗读'
@@ -2823,11 +3064,16 @@ function toggleTTS() {
     tts.stop()
   } else {
     const token = ++ttsContinueToken
+    if (ttsSleepMinutes.value > 0 && !ttsSleepEndAt.value) setTTSSleepMinutes(ttsSleepMinutes.value)
     tts.speak(content.value, () => {
+      if (isTTSSleepExpired()) {
+        handleTTSParagraphStart()
+        return
+      }
       if (currentIndex.value < chapters.value.length - 1) {
         speakNextChapter(currentIndex.value + 1, token)
       }
-    })
+    }, handleTTSParagraphStart)
   }
 }
 function ttsStop() {
@@ -2842,10 +3088,14 @@ async function speakNextChapter(index, token) {
     await new Promise(resolve => setTimeout(resolve, 120))
     if (currentIndex.value === index && content.value.trim()) {
       tts.speak(content.value, () => {
+        if (isTTSSleepExpired()) {
+          handleTTSParagraphStart()
+          return
+        }
         if (token === ttsContinueToken && currentIndex.value < chapters.value.length - 1) {
           speakNextChapter(currentIndex.value + 1, token)
         }
-      })
+      }, handleTTSParagraphStart)
       return
     }
   }
@@ -3075,6 +3325,52 @@ function readError(err, fallback) {
 .reader-shell.flip .tap-upper,
 .reader-shell.flip .tap-lower {
   display: none;
+}
+
+.click-zone-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: 35% 30% 35%;
+  background: rgba(20, 20, 20, 0.08);
+}
+
+.click-zone-overlay.flip {
+  grid-template-columns: 24% 52% 24%;
+  grid-template-rows: 1fr;
+}
+
+.click-zone-piece {
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(237, 66, 89, 0.55);
+  background: rgba(237, 66, 89, 0.08);
+  color: #ed4259;
+  font-size: 16px;
+  pointer-events: none;
+}
+
+.click-zone-piece span {
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.click-zone-overlay.flip .click-zone-prev { grid-column: 1; }
+.click-zone-overlay.flip .click-zone-menu { grid-column: 2; }
+.click-zone-overlay.flip .click-zone-next { grid-column: 3; }
+
+.click-zone-close {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: #ed4259;
+  color: #fff;
+  cursor: pointer;
 }
 
 @media (hover: hover) and (pointer: fine) {

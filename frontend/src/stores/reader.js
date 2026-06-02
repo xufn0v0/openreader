@@ -16,10 +16,13 @@ export const themePresets = {
 export const useReaderStore = defineStore('reader', {
   state: () => ({
     mode: 'page',
+    pageType: 'normal',
     pageMode: 'auto',
     clickMethod: 'auto',
+    selectionAction: '操作弹窗',
     fontFamily: 'system',
     customFontsMap: {},
+    chineseFont: '简体',
     fontSize: 18,
     fontWeight: 400,
     theme: 'parchment',
@@ -28,6 +31,9 @@ export const useReaderStore = defineStore('reader', {
     customBgImageList: [],
     brightness: 100,
     autoReadSpeed: 12,
+    autoReadingMethod: '像素滚动',
+    autoReadingPixel: 12,
+    autoReadingLineTime: 260,
     animateDuration: 300,
     ttsRate: 1,
     ttsPitch: 1,
@@ -35,12 +41,16 @@ export const useReaderStore = defineStore('reader', {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 7,
+    settingsVersion: 9,
     settingsUpdatedAt: '',
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
     settingsSyncError: '',
     progressByBook: {},
+    normalModeSnapshot: null,
+    customConfigName: '内置白天',
+    customConfigList: defaultCustomConfigList(),
+    autoTheme: false,
   }),
   persist: true,
   getters: {
@@ -60,17 +70,113 @@ export const useReaderStore = defineStore('reader', {
       this.mode = ['scroll', 'scroll2', 'flip', 'page'].includes(mode) ? mode : 'page'
       this.markSettingsDirty()
     },
+    setCustomConfig(name) {
+      const config = (Array.isArray(this.customConfigList) ? this.customConfigList : []).find(item => item?.name === name)
+      if (!config) return false
+      const next = sanitizeReaderSettings(config, { includeCustomConfigs: false })
+      Object.assign(this, next)
+      this.customConfigName = config.name
+      this.normalizeSettings()
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return true
+    },
+    createCustomConfig(name) {
+      const cleanName = String(name || '').trim()
+      if (!cleanName) return { ok: false, message: '方案名不能为空' }
+      const current = Array.isArray(this.customConfigList) ? this.customConfigList : []
+      if (current.some(item => item?.name === cleanName)) return { ok: false, message: '方案名不能重复' }
+      const config = readerConfigSnapshot(this, cleanName, '')
+      this.customConfigList = [...current, config]
+      this.customConfigName = cleanName
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return { ok: true }
+    },
+    deleteCustomConfig(name) {
+      const current = Array.isArray(this.customConfigList) ? this.customConfigList : []
+      const index = current.findIndex(item => item?.name === name)
+      if (index < 0) return { ok: false, message: '方案不存在' }
+      if (index <= 1 || current[index]?.builtin) return { ok: false, message: '内置方案不能删除' }
+      if (this.customConfigName === name) return { ok: false, message: '方案正在使用，无法删除' }
+      this.customConfigList = current.filter(item => item?.name !== name)
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return { ok: true }
+    },
+    setCustomConfigDefaultType(configDefaultType) {
+      if (!this.customConfigName) return { ok: false, message: '请先选择配置方案' }
+      if (!['白天默认', '黑夜默认'].includes(configDefaultType)) return { ok: false, message: '方案类型无效' }
+      const current = Array.isArray(this.customConfigList) ? this.customConfigList : []
+      if (!current.some(item => item?.name === this.customConfigName)) return { ok: false, message: '当前方案不存在' }
+      this.customConfigList = current.map(item => {
+        if (item.name === this.customConfigName) return { ...item, configDefaultType }
+        if (item.configDefaultType === configDefaultType) return { ...item, configDefaultType: '' }
+        return item
+      })
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+      return { ok: true }
+    },
+    setAutoTheme(autoTheme) {
+      this.autoTheme = Boolean(autoTheme)
+      this.markSettingsDirty({ skipCustomConfigSync: true })
+    },
+    applyAutoTheme(isNight) {
+      if (!this.autoTheme) return false
+      const type = isNight ? '黑夜默认' : '白天默认'
+      const config = (Array.isArray(this.customConfigList) ? this.customConfigList : []).find(item => item?.configDefaultType === type)
+      if (!config) return false
+      return this.setCustomConfig(config.name)
+    },
+    setPageType(pageType) {
+      const nextType = ['kindle', 'simple', 'Kindle'].includes(pageType) ? 'kindle' : 'normal'
+      if (nextType === this.pageType) return
+      if (nextType === 'kindle') {
+        this.normalModeSnapshot = {
+          pageMode: this.pageMode,
+          animateDuration: this.animateDuration,
+          mode: this.mode,
+          fontSize: this.fontSize,
+          theme: this.theme,
+          clickMethod: this.clickMethod,
+          selectionAction: this.selectionAction,
+        }
+        this.pageType = 'kindle'
+        this.animateDuration = 0
+        this.pageMode = 'mobile'
+        this.mode = 'flip'
+        this.fontSize = Math.min(this.fontSize, 20)
+        this.theme = 'white'
+        this.clickMethod = 'none'
+        this.selectionAction = '忽略'
+      } else {
+        const snapshot = this.normalModeSnapshot || {}
+        this.pageType = 'normal'
+        this.pageMode = snapshot.pageMode === 'mobile' ? 'mobile' : 'auto'
+        this.animateDuration = clampNumber(snapshot.animateDuration, 0, 1000, 300)
+        if (['scroll', 'scroll2', 'flip', 'page'].includes(snapshot.mode)) this.mode = snapshot.mode
+        if (snapshot.fontSize !== undefined) this.fontSize = clampNumber(snapshot.fontSize, 8, 36, 18)
+        if (typeof snapshot.theme === 'string') this.theme = snapshot.theme
+        if (['next', 'auto', 'none'].includes(snapshot.clickMethod)) this.clickMethod = snapshot.clickMethod
+        if (['操作弹窗', '忽略'].includes(snapshot.selectionAction)) this.selectionAction = snapshot.selectionAction
+        this.normalModeSnapshot = null
+      }
+      this.markSettingsDirty()
+    },
     setPageMode(pageMode) {
       this.pageMode = pageMode === 'mobile' ? 'mobile' : 'auto'
-      this.settingsUpdatedAt = new Date().toISOString()
-      this.settingsSyncError = ''
     },
     setClickMethod(method) {
       this.clickMethod = ['next', 'auto', 'none'].includes(method) ? method : 'auto'
       this.markSettingsDirty()
     },
+    setSelectionAction(action) {
+      this.selectionAction = ['操作弹窗', '忽略'].includes(action) ? action : '操作弹窗'
+      this.markSettingsDirty()
+    },
     setFontFamily(fontFamily) {
       this.fontFamily = ['system', 'serif', 'kai', 'mono'].includes(fontFamily) ? fontFamily : 'system'
+      this.markSettingsDirty()
+    },
+    setChineseFont(chineseFont) {
+      this.chineseFont = chineseFont === '繁体' ? '繁体' : '简体'
       this.markSettingsDirty()
     },
     setCustomFont(fontFamily, url) {
@@ -126,11 +232,23 @@ export const useReaderStore = defineStore('reader', {
       this.markSettingsDirty()
     },
     setAutoReadSpeed(speed) {
-      this.autoReadSpeed = clampNumber(speed, 2, 40, 12)
+      this.setAutoReadingPixel(speed)
+    },
+    setAutoReadingMethod(method) {
+      this.autoReadingMethod = method === '段落滚动' ? '段落滚动' : '像素滚动'
+      this.markSettingsDirty()
+    },
+    setAutoReadingPixel(pixel) {
+      this.autoReadingPixel = clampNumber(pixel, 1, 80, 12)
+      this.autoReadSpeed = this.autoReadingPixel
+      this.markSettingsDirty()
+    },
+    setAutoReadingLineTime(lineTime) {
+      this.autoReadingLineTime = clampNumber(lineTime, 50, 3000, 260)
       this.markSettingsDirty()
     },
     setAnimateDuration(duration) {
-      this.animateDuration = clampNumber(duration, 0, 1000, 300)
+      this.animateDuration = this.pageType === 'kindle' ? 0 : clampNumber(duration, 0, 1000, 300)
       this.markSettingsDirty()
     },
     setTTSRate(rate) {
@@ -157,21 +275,41 @@ export const useReaderStore = defineStore('reader', {
       this.columnWidth = clampNumber(columnWidth, 320, 1200, 800)
       this.markSettingsDirty()
     },
+    resetReaderSettings() {
+      Object.assign(this, defaultReaderSettings())
+      this.markSettingsDirty()
+    },
     normalizeSettings() {
       if (!['scroll', 'scroll2', 'flip', 'page'].includes(this.mode)) this.mode = 'page'
+      if (this.pageType === 'simple' || this.pageType === 'Kindle') this.pageType = 'kindle'
+      if (!['normal', 'kindle'].includes(this.pageType)) this.pageType = 'normal'
       if (!['auto', 'mobile'].includes(this.pageMode)) this.pageMode = 'auto'
       if (!['next', 'auto', 'none'].includes(this.clickMethod)) this.clickMethod = 'auto'
+      if (!['操作弹窗', '忽略'].includes(this.selectionAction)) this.selectionAction = '操作弹窗'
       if (!['system', 'serif', 'kai', 'mono'].includes(this.fontFamily)) this.fontFamily = 'system'
+      if (!['简体', '繁体'].includes(this.chineseFont)) this.chineseFont = '简体'
       if (!this.customFontsMap || typeof this.customFontsMap !== 'object' || Array.isArray(this.customFontsMap)) this.customFontsMap = {}
       if (!Array.isArray(this.customBgImageList)) this.customBgImageList = []
+      if (!Array.isArray(this.customConfigList) || !this.customConfigList.length) this.customConfigList = defaultCustomConfigList()
+      this.customConfigList = sanitizeCustomConfigList(this.customConfigList)
+      if (!this.customConfigList.some(item => item.name === this.customConfigName)) {
+        this.customConfigName = this.customConfigList[0]?.name || '内置白天'
+      }
+      this.autoTheme = this.autoTheme === true
       this.fontSize = clampNumber(this.fontSize, 8, 36, 18)
       this.fontWeight = clampNumber(this.fontWeight, 300, 900, 400)
       this.lineHeight = clampNumber(this.lineHeight, 1, 5, 1.8)
       this.paragraphSpace = clampNumber(this.paragraphSpace, 0, 3, 0)
       this.columnWidth = clampNumber(this.columnWidth, 320, 1200, 800)
       this.brightness = clampNumber(this.brightness, 50, 150, 100)
-      this.autoReadSpeed = clampNumber(this.autoReadSpeed, 2, 40, 12)
+      if (!['像素滚动', '段落滚动'].includes(this.autoReadingMethod)) this.autoReadingMethod = '像素滚动'
+      this.autoReadingPixel = clampNumber(this.autoReadingPixel ?? this.autoReadSpeed, 1, 80, 12)
+      this.autoReadSpeed = this.autoReadingPixel
+      this.autoReadingLineTime = clampNumber(this.autoReadingLineTime, 50, 3000, 260)
       this.animateDuration = clampNumber(this.animateDuration, 0, 1000, 300)
+      if (this.pageType === 'kindle') {
+        this.animateDuration = 0
+      }
       this.ttsRate = clampNumber(this.ttsRate, 0.5, 3, 1)
       this.ttsPitch = clampNumber(this.ttsPitch, 0.5, 2, 1)
       if ((this.settingsVersion || 0) < 4) {
@@ -181,13 +319,25 @@ export const useReaderStore = defineStore('reader', {
         this.paragraphSpace = 0.2
         this.columnWidth = 800
       }
-      this.settingsVersion = 7
+      this.settingsVersion = 9
       this.settingsSyncing = false
     },
-    markSettingsDirty() {
+    markSettingsDirty(options = {}) {
+      if (!options.skipCustomConfigSync) this.syncActiveCustomConfig()
       this.settingsUpdatedAt = new Date().toISOString()
       this.settingsSyncError = ''
       this.scheduleSettingsSync()
+    },
+    syncActiveCustomConfig() {
+      if (!this.customConfigName || !Array.isArray(this.customConfigList)) return
+      const index = this.customConfigList.findIndex(item => item?.name === this.customConfigName)
+      if (index < 0) return
+      const current = this.customConfigList[index]
+      const next = {
+        ...readerConfigSnapshot(this, current.name, current.configDefaultType || ''),
+        builtin: current.builtin === true,
+      }
+      this.customConfigList = this.customConfigList.map((item, itemIndex) => itemIndex === index ? next : item)
     },
     scheduleSettingsSync() {
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return
@@ -445,17 +595,26 @@ function clampNumber(value, min, max, fallback) {
 function readerSettingsPayload(state) {
   return {
     mode: state.mode,
+    pageType: state.pageType,
     clickMethod: state.clickMethod,
+    selectionAction: state.selectionAction,
     fontFamily: state.fontFamily,
     customFontsMap: state.customFontsMap || {},
+    chineseFont: state.chineseFont,
     fontSize: state.fontSize,
     fontWeight: state.fontWeight,
     theme: state.theme,
     customBgColor: state.customBgColor,
     customBgImage: state.customBgImage,
     customBgImageList: Array.isArray(state.customBgImageList) ? state.customBgImageList : [],
+    customConfigName: state.customConfigName || '内置白天',
+    customConfigList: sanitizeCustomConfigList(state.customConfigList),
+    autoTheme: state.autoTheme === true,
     brightness: state.brightness,
     autoReadSpeed: state.autoReadSpeed,
+    autoReadingMethod: state.autoReadingMethod,
+    autoReadingPixel: state.autoReadingPixel,
+    autoReadingLineTime: state.autoReadingLineTime,
     animateDuration: state.animateDuration,
     ttsRate: state.ttsRate,
     ttsPitch: state.ttsPitch,
@@ -463,32 +622,80 @@ function readerSettingsPayload(state) {
     lineHeight: state.lineHeight,
     paragraphSpace: state.paragraphSpace,
     columnWidth: state.columnWidth,
-    settingsVersion: 7,
+    settingsVersion: 9,
   }
 }
 
-function sanitizeReaderSettings(payload) {
+function defaultReaderSettings() {
+  return {
+    mode: 'page',
+    pageType: 'normal',
+    clickMethod: 'auto',
+    selectionAction: '操作弹窗',
+    fontFamily: 'system',
+    customFontsMap: {},
+    chineseFont: '简体',
+    fontSize: 18,
+    fontWeight: 400,
+    theme: 'parchment',
+    customBgColor: '',
+    customBgImage: '',
+    customBgImageList: [],
+    customConfigName: '内置白天',
+    customConfigList: defaultCustomConfigList(),
+    autoTheme: false,
+    brightness: 100,
+    autoReadSpeed: 12,
+    autoReadingMethod: '像素滚动',
+    autoReadingPixel: 12,
+    autoReadingLineTime: 260,
+    animateDuration: 300,
+    ttsRate: 1,
+    ttsPitch: 1,
+    ttsVoiceURI: '',
+    lineHeight: 1.8,
+    paragraphSpace: 0.2,
+    columnWidth: 800,
+    settingsVersion: 9,
+    normalModeSnapshot: null,
+  }
+}
+
+function sanitizeReaderSettings(payload, options = {}) {
+  const includeCustomConfigs = options.includeCustomConfigs !== false
   const settings = {}
   if (['scroll', 'scroll2', 'flip', 'page'].includes(payload.mode)) settings.mode = payload.mode
+  if (['normal', 'kindle'].includes(payload.pageType)) settings.pageType = payload.pageType
+  if (payload.pageType === 'simple' || payload.pageType === 'Kindle') settings.pageType = 'kindle'
   if (['next', 'auto', 'none'].includes(payload.clickMethod)) settings.clickMethod = payload.clickMethod
+  if (['操作弹窗', '忽略'].includes(payload.selectionAction)) settings.selectionAction = payload.selectionAction
   if (['system', 'serif', 'kai', 'mono'].includes(payload.fontFamily)) settings.fontFamily = payload.fontFamily
   settings.customFontsMap = sanitizeCustomFontsMap(payload.customFontsMap)
+  settings.chineseFont = payload.chineseFont === '繁体' ? '繁体' : '简体'
   if (typeof payload.theme === 'string') settings.theme = payload.theme
   if (typeof payload.customBgColor === 'string') settings.customBgColor = payload.customBgColor
   if (typeof payload.customBgImage === 'string') settings.customBgImage = payload.customBgImage
   settings.customBgImageList = sanitizeStringList(payload.customBgImageList)
+  if (includeCustomConfigs) {
+    if (typeof payload.customConfigName === 'string') settings.customConfigName = payload.customConfigName
+    settings.customConfigList = sanitizeCustomConfigList(payload.customConfigList)
+    settings.autoTheme = payload.autoTheme === true
+  }
   if (typeof payload.ttsVoiceURI === 'string') settings.ttsVoiceURI = payload.ttsVoiceURI
   settings.fontSize = clampNumber(payload.fontSize, 8, 36, 18)
   settings.fontWeight = clampNumber(payload.fontWeight, 300, 900, 400)
   settings.brightness = clampNumber(payload.brightness, 50, 150, 100)
-  settings.autoReadSpeed = clampNumber(payload.autoReadSpeed, 2, 40, 12)
+  settings.autoReadingMethod = payload.autoReadingMethod === '段落滚动' ? '段落滚动' : '像素滚动'
+  settings.autoReadingPixel = clampNumber(payload.autoReadingPixel ?? payload.autoReadSpeed, 1, 80, 12)
+  settings.autoReadSpeed = settings.autoReadingPixel
+  settings.autoReadingLineTime = clampNumber(payload.autoReadingLineTime, 50, 3000, 260)
   settings.animateDuration = clampNumber(payload.animateDuration, 0, 1000, 300)
   settings.ttsRate = clampNumber(payload.ttsRate, 0.5, 3, 1)
   settings.ttsPitch = clampNumber(payload.ttsPitch, 0.5, 2, 1)
   settings.lineHeight = clampNumber(payload.lineHeight, 1, 5, 1.8)
   settings.paragraphSpace = clampNumber(payload.paragraphSpace, 0, 3, 0.2)
   settings.columnWidth = clampNumber(payload.columnWidth, 320, 1200, 800)
-  settings.settingsVersion = 7
+  settings.settingsVersion = 9
   return settings
 }
 
@@ -503,6 +710,109 @@ function sanitizeCustomFontsMap(value) {
 function sanitizeStringList(value) {
   if (!Array.isArray(value)) return []
   return [...new Set(value.filter(item => typeof item === 'string' && item))]
+}
+
+function readerConfigSnapshot(state, name, configDefaultType) {
+  const payload = readerSettingsPayload({
+    ...state,
+    customConfigName: name,
+    customConfigList: [],
+  })
+  delete payload.customConfigName
+  delete payload.customConfigList
+  return {
+    ...payload,
+    name,
+    configDefaultType,
+  }
+}
+
+function defaultCustomConfigList() {
+  return [
+    {
+      mode: 'page',
+      pageType: 'normal',
+      clickMethod: 'auto',
+      selectionAction: '操作弹窗',
+      fontFamily: 'system',
+      customFontsMap: {},
+      chineseFont: '简体',
+      fontSize: 18,
+      fontWeight: 400,
+      theme: 'parchment',
+      customBgColor: '',
+      customBgImage: '',
+      customBgImageList: [],
+      customConfigName: '内置白天',
+      customConfigList: [],
+      brightness: 100,
+      autoReadSpeed: 12,
+      autoReadingMethod: '像素滚动',
+      autoReadingPixel: 12,
+      autoReadingLineTime: 260,
+      animateDuration: 300,
+      ttsRate: 1,
+      ttsPitch: 1,
+      ttsVoiceURI: '',
+      lineHeight: 1.8,
+      paragraphSpace: 0.2,
+      columnWidth: 800,
+      settingsVersion: 9,
+      name: '内置白天',
+      configDefaultType: '白天默认',
+      builtin: true,
+    },
+    {
+      mode: 'page',
+      pageType: 'normal',
+      clickMethod: 'auto',
+      selectionAction: '操作弹窗',
+      fontFamily: 'system',
+      customFontsMap: {},
+      chineseFont: '简体',
+      fontSize: 18,
+      fontWeight: 400,
+      theme: 'dark',
+      customBgColor: '',
+      customBgImage: '',
+      customBgImageList: [],
+      customConfigName: '内置黑夜',
+      customConfigList: [],
+      brightness: 100,
+      autoReadSpeed: 12,
+      autoReadingMethod: '像素滚动',
+      autoReadingPixel: 12,
+      autoReadingLineTime: 260,
+      animateDuration: 300,
+      ttsRate: 1,
+      ttsPitch: 1,
+      ttsVoiceURI: '',
+      lineHeight: 1.8,
+      paragraphSpace: 0.2,
+      columnWidth: 800,
+      settingsVersion: 9,
+      name: '内置黑夜',
+      configDefaultType: '黑夜默认',
+      builtin: true,
+    },
+  ]
+}
+
+function sanitizeCustomConfigList(value) {
+  const source = Array.isArray(value) && value.length ? value : defaultCustomConfigList()
+  return source
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const name = typeof item.name === 'string' && item.name.trim() ? item.name.trim() : ''
+      if (!name) return null
+      return {
+        ...sanitizeReaderSettings(item, { includeCustomConfigs: false }),
+        name,
+        configDefaultType: typeof item.configDefaultType === 'string' ? item.configDefaultType : '',
+        builtin: item.builtin === true || index <= 1 && ['内置白天', '内置黑夜'].includes(name),
+      }
+    })
+    .filter(Boolean)
 }
 
 function readErrorMessage(err) {

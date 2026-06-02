@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -130,12 +131,13 @@ func (s *Server) getBook(c *gin.Context) {
 }
 
 type bookUpdateRequest struct {
-	Title      string `json:"title"`
-	Author     string `json:"author"`
-	CoverURL   string `json:"coverUrl"`
-	Intro      string `json:"intro"`
-	CategoryID *uint  `json:"categoryId"`
-	CanUpdate  *bool  `json:"canUpdate"`
+	Title          *string `json:"title"`
+	Author         *string `json:"author"`
+	CoverURL       *string `json:"coverUrl"`
+	CustomCoverURL *string `json:"customCoverUrl"`
+	Intro          *string `json:"intro"`
+	CategoryID     *uint   `json:"categoryId"`
+	CanUpdate      *bool   `json:"canUpdate"`
 }
 
 func (s *Server) updateBook(c *gin.Context) {
@@ -149,22 +151,49 @@ func (s *Server) updateBook(c *gin.Context) {
 		return
 	}
 
-	var request bookUpdateRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	data, err := io.ReadAll(c.Request.Body)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
 		return
 	}
-	if !s.validateCategory(c, userID, request.CategoryID) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
+		return
+	}
+	var request bookUpdateRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
+		return
+	}
+	_, categoryIDSet := raw["categoryId"]
+	if categoryIDSet && !s.validateCategory(c, userID, request.CategoryID) {
 		return
 	}
 
-	if title := strings.TrimSpace(request.Title); title != "" {
+	if request.Title != nil {
+		title := strings.TrimSpace(*request.Title)
+		if title == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "book title is required"})
+			return
+		}
 		book.Title = title
 	}
-	book.Author = strings.TrimSpace(request.Author)
-	book.CoverURL = strings.TrimSpace(request.CoverURL)
-	book.Intro = strings.TrimSpace(request.Intro)
-	book.CategoryID = request.CategoryID
+	if request.Author != nil {
+		book.Author = strings.TrimSpace(*request.Author)
+	}
+	if request.CoverURL != nil {
+		book.CoverURL = strings.TrimSpace(*request.CoverURL)
+	}
+	if request.CustomCoverURL != nil {
+		book.CustomCoverURL = strings.TrimSpace(*request.CustomCoverURL)
+	}
+	if request.Intro != nil {
+		book.Intro = strings.TrimSpace(*request.Intro)
+	}
+	if categoryIDSet {
+		book.CategoryID = request.CategoryID
+	}
 	if request.CanUpdate != nil {
 		book.CanUpdate = *request.CanUpdate
 	}

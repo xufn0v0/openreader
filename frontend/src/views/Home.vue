@@ -9,12 +9,12 @@
         <small v-if="keyword.trim()" class="shelf-filter-count">命中 {{ displayedBooks.length }}</small>
       </div>
       <div class="title-actions">
-        <button type="button" @click="router.push({ name: 'discover' })">书海</button>
-        <button type="button" @click="overlay.openRSS()">RSS</button>
+        <button v-if="isNormalPage" type="button" @click="router.push({ name: 'discover' })">书海</button>
+        <button v-if="isNormalPage" type="button" @click="overlay.openRSS()">RSS</button>
         <button type="button" @click="refreshShelf">
           {{ refreshLoading ? '刷新中...' : '刷新' }}
         </button>
-        <button type="button" @click="showBookEditButton = !showBookEditButton">
+        <button v-if="isNormalPage" type="button" @click="showBookEditButton = !showBookEditButton">
           {{ showBookEditButton ? '取消' : '编辑' }}
         </button>
         <button v-if="!isMobileShelf" class="view-switch" type="button" :class="{ active: effectiveShelfView === 'grid' }" title="网格显示" @click="setShelfView('grid')">
@@ -65,7 +65,7 @@
           >
             <span
               class="list-cover"
-              :class="{ 'has-cover': Boolean(book.coverUrl) }"
+              :class="{ 'has-cover': hasBookCover(book) }"
               :style="coverStyle(book)"
               @click.stop="openDetail(book)"
             >{{ coverInitial(book) }}</span>
@@ -110,6 +110,7 @@ import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
+import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
@@ -169,6 +170,7 @@ const displayedBooks = computed(() => {
 })
 
 const isMobileShelf = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isNormalPage = computed(() => !['kindle', 'simple', 'Kindle'].includes(reader.pageType))
 const effectiveShelfView = computed(() => isMobileShelf.value ? 'list' : shelfView.value)
 
 const emptyText = computed(() => {
@@ -213,6 +215,10 @@ watch(groupItems, (items) => {
   if (selectedGroup.value && !items.some(item => item.id === selectedGroup.value)) {
     selectedGroup.value = ''
   }
+})
+
+watch(isNormalPage, (normal) => {
+  if (!normal) showBookEditButton.value = false
 })
 
 async function deleteManagedBook(book) {
@@ -344,12 +350,13 @@ function categoryName(id) {
 }
 
 function coverInitial(book) {
-  return book.coverUrl ? '' : '暂无封面'
+  return hasBookCover(book) ? '' : '暂无封面'
 }
 
 function coverStyle(book) {
-  if (book.coverUrl) {
-    return { backgroundImage: `url(${book.coverUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', color: 'transparent' }
+  const url = bookCoverUrl(book)
+  if (url) {
+    return { backgroundImage: `url(${url})`, backgroundSize: 'cover', backgroundPosition: 'center', color: 'transparent' }
   }
   return {}
 }
@@ -625,20 +632,20 @@ function readError(err, fallback) {
 
 .shelf-main.grid-view .book-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, 380px);
-  justify-content: space-around;
-  gap: 18px 28px;
-  padding: 18px 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  justify-content: stretch;
+  gap: 42px 56px;
+  padding: 22px 0;
   overflow: visible;
 }
 
 .shelf-main.grid-view .book-row {
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 20px;
-  width: 360px;
-  min-height: 160px;
+  gap: 18px;
+  width: 100%;
+  min-height: 136px;
   align-items: start;
-  padding: 24px;
+  padding: 0 10px;
   border-bottom: 0;
 }
 
@@ -655,13 +662,13 @@ function readError(err, fallback) {
 
 .shelf-main.grid-view .list-main {
   min-height: 112px;
-  justify-content: space-between;
+  justify-content: start;
   gap: 6px;
 }
 
 .shelf-main.grid-view .list-main strong {
   display: -webkit-box;
-  max-height: 44px;
+  max-height: 46px;
   padding-right: 40px;
   color: #33373d;
   font-size: 16px;
@@ -685,8 +692,8 @@ function readError(err, fallback) {
 
 .shelf-main.grid-view .book-operation {
   position: absolute;
-  top: 24px;
-  right: 24px;
+  top: 0;
+  right: 10px;
   min-height: 22px;
 }
 
@@ -863,18 +870,18 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .book-row {
   display: grid;
-  grid-template-columns: clamp(64px, 20vw, 84px) minmax(0, 1fr);
-  min-height: 132px;
+  grid-template-columns: clamp(58px, 18vw, 76px) minmax(0, 1fr);
+  min-height: 116px;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   width: 100%;
   box-sizing: border-box;
-  padding: 10px 20px;
+  padding: 10px 14px;
   contain: layout paint;
 }
 
 .shelf-page.mobile-shelf .list-cover {
-  width: clamp(64px, 20vw, 84px);
+  width: clamp(58px, 18vw, 76px);
   aspect-ratio: 3 / 4;
   height: auto;
 }
@@ -882,7 +889,7 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .book-operation {
   position: absolute;
   top: 10px;
-  right: 20px;
+  right: 14px;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -892,11 +899,10 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .list-main {
   width: auto;
-  min-height: clamp(86px, 26.6vw, 112px);
+  min-height: clamp(78px, 24vw, 102px);
   box-sizing: border-box;
   justify-content: space-between;
   gap: 4px;
-  padding-right: 48px;
   overflow: hidden;
 }
 
@@ -1010,18 +1016,18 @@ function readError(err, fallback) {
 
   .book-row {
     display: grid;
-    grid-template-columns: clamp(64px, 20vw, 84px) minmax(0, 1fr);
-    min-height: 132px;
+    grid-template-columns: clamp(58px, 18vw, 76px) minmax(0, 1fr);
+    min-height: 116px;
     align-items: center;
-    gap: 18px;
+    gap: 14px;
     width: 100%;
     box-sizing: border-box;
-    padding: 10px 20px;
+    padding: 10px 14px;
     contain: layout paint;
   }
 
   .list-cover {
-    width: clamp(64px, 20vw, 84px);
+    width: clamp(58px, 18vw, 76px);
     aspect-ratio: 3 / 4;
     height: auto;
   }
@@ -1029,7 +1035,7 @@ function readError(err, fallback) {
   .book-operation {
     position: absolute;
     top: 10px;
-    right: 20px;
+    right: 14px;
     display: flex;
     min-width: 0;
     min-height: 0;
@@ -1040,7 +1046,7 @@ function readError(err, fallback) {
   .list-main {
     width: auto;
     max-width: 100%;
-    min-height: clamp(86px, 26.6vw, 112px);
+    min-height: clamp(78px, 24vw, 102px);
     box-sizing: border-box;
     justify-content: space-between;
     padding-right: 0;
@@ -1105,20 +1111,20 @@ function readError(err, fallback) {
   .shelf-page.mobile-shelf .book-row,
   .book-row {
     display: grid;
-    grid-template-columns: 84px minmax(0, 1fr);
-    gap: 20px;
-    min-height: 132px;
+    grid-template-columns: clamp(58px, 18vw, 72px) minmax(0, 1fr);
+    gap: 12px;
+    min-height: 112px;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
-    padding: 10px 20px;
+    padding: 10px 12px;
   }
 
   .shelf-page.mobile-shelf .list-cover,
   .list-cover {
-    width: 84px;
-    height: 112px;
-    flex-basis: 84px;
+    width: clamp(58px, 18vw, 72px);
+    height: auto;
+    flex-basis: auto;
   }
 
   .shelf-page.mobile-shelf .list-main,
@@ -1128,14 +1134,14 @@ function readError(err, fallback) {
     min-height: 112px;
     box-sizing: border-box;
     gap: 4px;
-    padding-right: 48px;
+    padding-right: 0;
     overflow: hidden;
   }
 
   .shelf-page.mobile-shelf .book-operation,
   .book-operation {
     top: 10px;
-    right: 20px;
+    right: 12px;
   }
 
   .shelf-page.mobile-shelf .list-main strong,

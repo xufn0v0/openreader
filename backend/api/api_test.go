@@ -156,7 +156,7 @@ func TestUserReaderSettingsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
 		t.Fatal(err)
 	}
-	if saved.Key != "reader" || saved.Value["pageMode"] != "mobile" || saved.Value["mode"] != "scroll" || saved.UpdatedAt == "" {
+	if saved.Key != "reader" || saved.Value["pageMode"] != nil || saved.Value["mode"] != "scroll" || saved.UpdatedAt == "" {
 		t.Fatalf("unexpected saved settings: %+v", saved)
 	}
 
@@ -482,7 +482,7 @@ func TestUpdateBook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := `{"title":"新书名","author":"新作者","coverUrl":"https://example.com/cover.jpg","intro":"新简介","canUpdate":false}`
+	body := `{"title":"新书名","author":"新作者","coverUrl":"https://example.com/cover.jpg","customCoverUrl":"/uploads/covers/custom.jpg","intro":"新简介","canUpdate":false}`
 	req := httptest.NewRequest(http.MethodPut, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -499,8 +499,81 @@ func TestUpdateBook(t *testing.T) {
 	if updated.Title != "新书名" || updated.Author != "新作者" || updated.Intro != "新简介" {
 		t.Fatalf("unexpected updated book: %+v", updated)
 	}
+	if updated.CoverURL != "https://example.com/cover.jpg" || updated.CustomCoverURL != "/uploads/covers/custom.jpg" {
+		t.Fatalf("unexpected cover fields after update: %+v", updated)
+	}
 	if updated.CanUpdate {
 		t.Fatalf("expected canUpdate to be false after update: %+v", updated)
+	}
+}
+
+func TestUpdateBookPartialPayloadPreservesFields(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	category := models.Category{UserID: user.ID, Name: "分组", Show: true}
+	if err := server.db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{
+		UserID:         user.ID,
+		SourceID:       1,
+		CategoryID:     &category.ID,
+		Title:          "原书名",
+		Author:         "原作者",
+		CoverURL:       "https://example.com/source-cover.jpg",
+		CustomCoverURL: "/uploads/covers/custom.jpg",
+		Intro:          "原简介",
+		CanUpdate:      true,
+	}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10), strings.NewReader(`{"canUpdate":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("partial update book: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated models.Book
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != book.Title || updated.Author != book.Author || updated.Intro != book.Intro {
+		t.Fatalf("partial update should preserve text fields: %+v", updated)
+	}
+	if updated.CoverURL != book.CoverURL || updated.CustomCoverURL != book.CustomCoverURL {
+		t.Fatalf("partial update should preserve cover fields: %+v", updated)
+	}
+	if updated.CategoryID == nil || *updated.CategoryID != category.ID {
+		t.Fatalf("partial update should preserve category: %+v", updated.CategoryID)
+	}
+	if updated.CanUpdate {
+		t.Fatalf("expected canUpdate false after partial update: %+v", updated)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10), strings.NewReader(`{"categoryId":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("clear category: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	updated = models.Book{}
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.CategoryID != nil {
+		t.Fatalf("expected category to be cleared when categoryId is null: %+v", updated.CategoryID)
 	}
 }
 
@@ -3168,7 +3241,7 @@ func TestRestoreLegadoBackupImportsBookshelf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.Write([]byte(`[{"name":"恢复书","author":"恢复作者","bookUrl":"https://book.example/1","coverUrl":"https://book.example/cover.jpg","intro":"简介"}]`)); err != nil {
+	if _, err := file.Write([]byte(`[{"name":"恢复书","author":"恢复作者","bookUrl":"https://book.example/1","coverUrl":"https://book.example/cover.jpg","customCoverUrl":"/uploads/covers/custom-restore.jpg","intro":"简介"}]`)); err != nil {
 		t.Fatal(err)
 	}
 	progressFile, err := zipWriter.Create("bookProgress/progress.json")
@@ -3214,7 +3287,7 @@ func TestRestoreLegadoBackupImportsBookshelf(t *testing.T) {
 	if err := server.db.Where("title = ?", "恢复书").First(&book).Error; err != nil {
 		t.Fatal(err)
 	}
-	if book.Author != "恢复作者" || book.URL != "https://book.example/1" {
+	if book.Author != "恢复作者" || book.URL != "https://book.example/1" || book.CustomCoverURL != "/uploads/covers/custom-restore.jpg" {
 		t.Fatalf("unexpected restored book: %+v", book)
 	}
 	var progress models.ReadingProgress
@@ -3346,7 +3419,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bookFile.Write([]byte(`[{"title":"OpenReader备份书","author":"作者","url":"https://book.example/openreader","lastChapter":"最新章","chapterCount":12,"canUpdate":true,"categoryName":"OpenReader分组"}]`)); err != nil {
+	if _, err := bookFile.Write([]byte(`[{"title":"OpenReader备份书","author":"作者","url":"https://book.example/openreader","coverUrl":"https://book.example/openreader-cover.jpg","customCoverUrl":"/uploads/covers/openreader-custom.jpg","lastChapter":"最新章","chapterCount":12,"canUpdate":true,"categoryName":"OpenReader分组"}]`)); err != nil {
 		t.Fatal(err)
 	}
 	categoryFile, err := zipWriter.Create("categories.json")
@@ -3402,7 +3475,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if err := server.db.Where("user_id = ? AND title = ?", user.ID, "OpenReader备份书").First(&book).Error; err != nil {
 		t.Fatal(err)
 	}
-	if book.URL != "https://book.example/openreader" || book.ChapterCount != 12 || book.CategoryID == nil {
+	if book.URL != "https://book.example/openreader" || book.ChapterCount != 12 || book.CategoryID == nil || book.CustomCoverURL != "/uploads/covers/openreader-custom.jpg" {
 		t.Fatalf("unexpected restored openreader book: %+v", book)
 	}
 	var category models.Category
@@ -3595,6 +3668,36 @@ func TestUploadAssetStoresPublicFile(t *testing.T) {
 	name := strings.TrimPrefix(resp.URL, "/uploads/covers/")
 	if _, err := os.Stat(filepath.Join(server.cfg.DataDir, "uploads", "covers", name)); err != nil {
 		t.Fatalf("uploaded file missing: %v", err)
+	}
+}
+
+func TestUploadCoverRejectsUnsupportedImageFormat(t *testing.T) {
+	router, _ := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("type", "cover"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", "cover.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("webp-data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unsupported file type") {
+		t.Fatalf("upload cover webp: expected unsupported file type, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

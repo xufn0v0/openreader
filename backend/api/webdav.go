@@ -539,6 +539,7 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 		URL             string `json:"url"`
 		BookURL         string `json:"bookUrl"`
 		CoverURL        string `json:"coverUrl"`
+		CustomCoverURL  string `json:"customCoverUrl"`
 		Intro           string `json:"intro"`
 		LastChapter     string `json:"lastChapter"`
 		ChapterCount    int    `json:"chapterCount"`
@@ -572,15 +573,16 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 			canUpdate = *b.CanUpdate
 		}
 		book := models.Book{
-			UserID:       userID,
-			Title:        title,
-			Author:       strings.TrimSpace(b.Author),
-			URL:          bookURL,
-			CoverURL:     strings.TrimSpace(b.CoverURL),
-			Intro:        strings.TrimSpace(b.Intro),
-			LastChapter:  strings.TrimSpace(b.LastChapter),
-			ChapterCount: b.ChapterCount,
-			CanUpdate:    canUpdate,
+			UserID:         userID,
+			Title:          title,
+			Author:         strings.TrimSpace(b.Author),
+			URL:            bookURL,
+			CoverURL:       strings.TrimSpace(b.CoverURL),
+			CustomCoverURL: strings.TrimSpace(b.CustomCoverURL),
+			Intro:          strings.TrimSpace(b.Intro),
+			LastChapter:    strings.TrimSpace(b.LastChapter),
+			ChapterCount:   b.ChapterCount,
+			CanUpdate:      canUpdate,
 		}
 		if categoryID := s.findRestoredCategoryID(userID, b.CategoryName); categoryID != nil {
 			book.CategoryID = categoryID
@@ -593,6 +595,7 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 		if query.First(&existing).Error == nil {
 			existing.Author = book.Author
 			existing.CoverURL = book.CoverURL
+			existing.CustomCoverURL = book.CustomCoverURL
 			existing.Intro = book.Intro
 			existing.LastChapter = book.LastChapter
 			existing.ChapterCount = book.ChapterCount

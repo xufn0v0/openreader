@@ -1,5 +1,55 @@
 <template>
   <div class="settings-body">
+    <div class="settings-title-row">
+      <strong>设置</strong>
+      <button type="button" @click="resetReaderSettings">重置为默认配置</button>
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">特殊模式</label>
+      <el-radio-group v-model="pageTypeModel" size="small" class="read-method-group">
+        <el-radio-button value="normal">正常</el-radio-button>
+        <el-radio-button value="kindle">Kindle</el-radio-button>
+      </el-radio-group>
+      <small class="setting-help">Kindle 模式会关闭动画、切到手机模式并忽略文字选择。</small>
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">配置方案</label>
+      <div class="config-scheme-list">
+        <button
+          v-for="(config, index) in reader.customConfigList"
+          :key="config.name"
+          class="config-scheme"
+          :class="{ active: reader.customConfigName === config.name }"
+          type="button"
+          @click="selectCustomConfig(config.name)"
+        >
+          <span>{{ config.name }}</span>
+          <small v-if="config.configDefaultType">{{ config.configDefaultType }}</small>
+          <el-icon v-if="index > 1 && !config.builtin && reader.customConfigName !== config.name" @click.stop="deleteCustomConfig(config.name)"><Close /></el-icon>
+        </button>
+        <button class="config-scheme add" type="button" @click="addCustomConfig">新增方案</button>
+        <button class="config-scheme" :class="{ active: reader.autoTheme }" type="button" @click="reader.setAutoTheme(!reader.autoTheme)">自动切换</button>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">方案类型</label>
+      <div class="config-scheme-list">
+        <button
+          v-for="type in configDefaultTypes"
+          :key="type"
+          class="config-scheme"
+          :class="{ active: currentCustomConfig?.configDefaultType === type }"
+          type="button"
+          @click="setConfigDefaultType(type)"
+        >
+          {{ type }}
+        </button>
+      </div>
+    </div>
+
     <div class="setting-row">
       <label class="setting-label">页面模式（本机）</label>
       <el-radio-group v-model="pageModeModel" size="small" class="read-method-group">
@@ -24,6 +74,14 @@
         <el-radio-button value="next">下一页</el-radio-button>
         <el-radio-button value="auto">自动</el-radio-button>
         <el-radio-button value="none">不翻页</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">选择文字</label>
+      <el-radio-group v-model="selectionActionModel" size="small" class="read-method-group">
+        <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
+        <el-radio-button value="忽略">忽略</el-radio-button>
       </el-radio-group>
     </div>
 
@@ -88,13 +146,27 @@
     </div>
 
     <div class="setting-row">
-      <label class="setting-label">自动阅读速度 ({{ reader.autoReadSpeed }}px)</label>
-      <el-slider v-model="autoReadSpeedModel" :min="2" :max="40" :step="1" size="small" />
+      <label class="setting-label">自动阅读</label>
+      <el-radio-group v-model="autoReadingMethodModel" size="small" class="read-method-group">
+        <el-radio-button value="像素滚动">像素滚动</el-radio-button>
+        <el-radio-button value="段落滚动">段落滚动</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div v-if="reader.autoReadingMethod === '像素滚动'" class="setting-row">
+      <label class="setting-label">滚动像素 ({{ reader.autoReadingPixel }}px)</label>
+      <el-slider v-model="autoReadingPixelModel" :min="1" :max="80" :step="1" size="small" />
+    </div>
+
+    <div class="setting-row">
+      <label class="setting-label">翻页速度 ({{ reader.autoReadingLineTime }}ms)</label>
+      <el-slider v-model="autoReadingLineTimeModel" :min="50" :max="3000" :step="50" size="small" />
     </div>
 
     <div class="setting-row">
       <label class="setting-label">动画时长 ({{ reader.animateDuration }}ms)</label>
-      <el-slider v-model="animateDurationModel" :min="0" :max="1000" :step="20" size="small" />
+      <el-slider v-model="animateDurationModel" :min="0" :max="1000" :step="20" size="small" :disabled="reader.pageType === 'kindle'" />
+      <small v-if="reader.pageType === 'kindle'" class="setting-help">Kindle 模式会关闭翻页动画。</small>
     </div>
 
     <div class="setting-row">
@@ -141,6 +213,14 @@
     </div>
 
     <div class="setting-row">
+      <label class="setting-label">简繁转换</label>
+      <el-radio-group v-model="chineseFontModel" size="small" class="read-method-group">
+        <el-radio-button value="简体">简体</el-radio-button>
+        <el-radio-button value="繁体">繁体</el-radio-button>
+      </el-radio-group>
+    </div>
+
+    <div class="setting-row">
       <label class="setting-label">字号 ({{ reader.fontSize }}px)</label>
       <div class="font-controls">
         <el-button size="small" :icon="Minus" circle @click="changeFontSize(-1)" />
@@ -183,7 +263,10 @@
 
     <div class="setting-row">
       <label class="setting-label">替换规则</label>
-      <el-button size="small" plain @click="$emit('openReplaceRules')">管理全局替换规则</el-button>
+      <div class="operation-actions">
+        <el-button size="small" plain @click="$emit('showClickZone')">显示翻页区域</el-button>
+        <el-button size="small" plain @click="$emit('openReplaceRules')">管理全局替换规则</el-button>
+      </div>
     </div>
 
     <div class="setting-row">
@@ -221,6 +304,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Minus, Plus, RefreshLeft, Upload } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -247,9 +331,11 @@ const emit = defineEmits([
   'ttsPitchChange',
   'ttsVoiceChange',
   'openReplaceRules',
+  'showClickZone',
 ])
 
 const fontSizePresets = [14, 16, 18, 20, 22, 24, 28, 32]
+const configDefaultTypes = ['白天默认', '黑夜默认']
 
 const fontPreviewStyle = computed(() => ({
   fontFamily: props.fontOptions.find(font => font.value === props.reader.fontFamily)?.stack,
@@ -258,10 +344,63 @@ const fontPreviewStyle = computed(() => ({
   lineHeight: props.reader.lineHeight,
 }))
 
+const currentCustomConfig = computed(() => {
+  return (Array.isArray(props.reader.customConfigList) ? props.reader.customConfigList : []).find(config => config.name === props.reader.customConfigName) || null
+})
+
 const pageModeModel = computed({
   get: () => props.reader.pageMode,
   set: value => props.reader.setPageMode(value),
 })
+
+const pageTypeModel = computed({
+  get: () => props.reader.pageType,
+  set: value => props.reader.setPageType(value),
+})
+
+function selectCustomConfig(name) {
+  if (!props.reader.setCustomConfig(name)) return
+  emit('update:customBg', props.reader.customBgColor)
+  emit('update:lineHeight', props.reader.lineHeight)
+}
+
+async function addCustomConfig() {
+  const res = await ElMessageBox.prompt('请输入方案名称', '新增配置方案', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    inputPattern: /\S+/,
+    inputErrorMessage: '方案名不能为空',
+  }).catch(() => null)
+  if (!res) return
+  const result = props.reader.createCustomConfig(res.value)
+  if (!result.ok) {
+    ElMessage.error(result.message || '新增方案失败')
+    return
+  }
+  ElMessage.success('已保存当前配置为新方案')
+}
+
+async function deleteCustomConfig(name) {
+  const confirmed = await ElMessageBox.confirm(`确定删除「${name}」方案吗？`, '删除配置方案', { type: 'warning' }).catch(() => false)
+  if (!confirmed) return
+  const result = props.reader.deleteCustomConfig(name)
+  if (!result.ok) {
+    ElMessage.error(result.message || '删除方案失败')
+    return
+  }
+  ElMessage.success('已删除配置方案')
+}
+
+async function setConfigDefaultType(type) {
+  const confirmed = await ElMessageBox.confirm(`确认把「${props.reader.customConfigName}」设为${type}吗？`, '设置方案类型', { type: 'warning' }).catch(() => false)
+  if (!confirmed) return
+  const result = props.reader.setCustomConfigDefaultType(type)
+  if (!result.ok) {
+    ElMessage.error(result.message || '设置方案类型失败')
+    return
+  }
+  ElMessage.success(`已设为${type}`)
+}
 
 const readerModeModel = computed({
   get: () => props.reader.mode,
@@ -271,6 +410,11 @@ const readerModeModel = computed({
 const clickMethodModel = computed({
   get: () => props.reader.clickMethod,
   set: value => props.reader.setClickMethod(value),
+})
+
+const selectionActionModel = computed({
+  get: () => props.reader.selectionAction,
+  set: value => props.reader.setSelectionAction(value),
 })
 
 const localCustomBg = computed({
@@ -294,6 +438,11 @@ const fontFamilyModel = computed({
   set: value => props.reader.setFontFamily(value),
 })
 
+const chineseFontModel = computed({
+  get: () => props.reader.chineseFont,
+  set: value => props.reader.setChineseFont(value),
+})
+
 const fontSizeModel = computed({
   get: () => props.reader.fontSize,
   set: value => props.reader.setFontSize(value),
@@ -314,9 +463,19 @@ const brightnessModel = computed({
   set: value => props.reader.setBrightness(value),
 })
 
-const autoReadSpeedModel = computed({
-  get: () => props.reader.autoReadSpeed,
-  set: value => props.reader.setAutoReadSpeed(value),
+const autoReadingMethodModel = computed({
+  get: () => props.reader.autoReadingMethod,
+  set: value => props.reader.setAutoReadingMethod(value),
+})
+
+const autoReadingPixelModel = computed({
+  get: () => props.reader.autoReadingPixel,
+  set: value => props.reader.setAutoReadingPixel(value),
+})
+
+const autoReadingLineTimeModel = computed({
+  get: () => props.reader.autoReadingLineTime,
+  set: value => props.reader.setAutoReadingLineTime(value),
 })
 
 const animateDurationModel = computed({
@@ -364,6 +523,12 @@ function hasCustomFont(value) {
   return Boolean(props.reader.customFontsMap?.[value])
 }
 
+function resetReaderSettings() {
+  props.reader.resetReaderSettings()
+  emit('update:customBg', props.reader.customBgColor)
+  emit('update:lineHeight', props.reader.lineHeight)
+}
+
 </script>
 
 <style scoped>
@@ -373,9 +538,83 @@ function hasCustomFont(value) {
   min-width: 0;
 }
 
+.settings-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-title-row strong {
+  color: #ed4259;
+  border-bottom: 1px solid #ed4259;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.settings-title-row button {
+  padding: 0;
+  color: #ed4259;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
 .read-method-group {
   display: flex;
   flex-wrap: wrap;
+}
+
+.config-scheme-list {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.config-scheme {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(111, 94, 54, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  color: inherit;
+  cursor: pointer;
+}
+
+.config-scheme span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-scheme small {
+  color: rgba(31, 41, 55, 0.55);
+  white-space: nowrap;
+}
+
+.config-scheme.active {
+  border-color: #ed4259;
+  color: #ed4259;
+  background: rgba(237, 66, 89, 0.08);
+}
+
+.config-scheme.add {
+  color: #ed4259;
+}
+
+.operation-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .setting-row {
