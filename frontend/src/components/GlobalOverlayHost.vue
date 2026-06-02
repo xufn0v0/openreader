@@ -178,7 +178,11 @@
       <article v-for="book in filteredManagedBooks" :key="book.id" class="mobile-manage-card" :class="{ selected: selectedBookIds.includes(book.id) }">
         <header>
           <el-checkbox :model-value="selectedBookIds.includes(book.id)" @change="value => toggleManagedBook(book.id, value)" />
-          <span class="mobile-manage-cover">{{ coverInitial(book) }}</span>
+          <span
+            class="mobile-manage-cover"
+            :class="{ 'has-cover': hasBookCover(book) }"
+            :style="coverStyle(book)"
+          >{{ coverInitial(book) }}</span>
           <button type="button" @click="overlay.openBookInfo(book)">
             <strong>{{ book.title }}</strong>
             <span>{{ book.author || '未知作者' }} · {{ categoryName(book.categoryId) }}</span>
@@ -618,6 +622,7 @@ import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
+import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
@@ -926,7 +931,13 @@ function clearManagedSelection() {
 }
 
 function coverInitial(book) {
+  if (hasBookCover(book)) return ''
   return (book?.title || '?').slice(0, 1)
+}
+
+function coverStyle(book) {
+  const url = bookCoverUrl(book)
+  return url ? { backgroundImage: `url(${url})` } : {}
 }
 
 function continueRead(book) {
@@ -2270,6 +2281,12 @@ function readError(err, fallback) {
   border-radius: 4px;
   font-size: 16px;
   font-weight: 800;
+}
+
+.mobile-manage-cover.has-cover {
+  background-position: center;
+  background-size: cover;
+  color: transparent;
 }
 
 .mobile-manage-card strong,
