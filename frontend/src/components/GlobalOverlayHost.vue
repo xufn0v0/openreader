@@ -417,11 +417,13 @@
           <span>管理员可调整书源、书仓权限和用户限制</span>
         </div>
         <div class="file-actions">
+          <el-button size="small" type="primary" :icon="Edit" @click="openCreateUserDialog">新增</el-button>
           <el-button size="small" :icon="Refresh" :loading="usersLoading" @click="loadUsers">刷新</el-button>
           <el-button size="small" :icon="Delete" :loading="cleanupLoading" @click="cleanupInactive">清理不活跃用户</el-button>
         </div>
       </header>
-      <el-table :data="users" stripe v-loading="usersLoading" class="desktop-user-table">
+      <el-table :data="users" stripe v-loading="usersLoading" class="desktop-user-table" @selection-change="onUserSelectionChange">
+        <el-table-column type="selection" width="44" :selectable="isUserDeletable" />
         <el-table-column prop="username" label="用户名" min-width="140" />
         <el-table-column prop="role" label="角色" width="90" />
         <el-table-column prop="bookCount" label="书籍" width="80" />
@@ -434,22 +436,58 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="110" fixed="right">
+          <template #default="{ row }">
+            <el-button text @click="resetPassword(row)">重置密码</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <div v-if="users.length" v-loading="usersLoading" class="mobile-user-list">
         <article v-for="user in users" :key="user.id" class="mobile-user-card">
           <header>
-            <strong>{{ user.username }}</strong>
-            <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
+            <el-checkbox :disabled="!isUserDeletable(user)" :model-value="selectedUserIds.includes(user.id)" @change="toggleUserSelection(user.id, $event)" />
+            <div>
+              <strong>{{ user.username }}</strong>
+              <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
+            </div>
           </header>
           <div class="permission-row">
             <el-switch v-model="user.canEditSources" size="small" active-text="书源" @change="updateUserPermission(user)" />
             <el-switch v-model="user.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(user)" />
+            <el-button size="small" text @click="resetPassword(user)">重置密码</el-button>
           </div>
         </article>
       </div>
+      <footer v-if="users.length" class="user-manage-footer">
+        <span class="check-tip">已选择 {{ selectedUserIds.length }} 个</span>
+        <el-button size="small" type="danger" :disabled="!selectedUserIds.length" :loading="deletingUsers" @click="deleteSelectedUsers">批量删除</el-button>
+      </footer>
       <el-empty v-if="!usersLoading && !users.length" description="暂无用户，或当前账号无管理员权限" />
     </section>
   </el-drawer>
+
+  <el-dialog v-model="userCreateDialog" title="新增用户" width="420px" :fullscreen="isMobileOverlay">
+    <el-form label-position="top">
+      <el-form-item label="用户名"><el-input v-model="userDraft.username" autocomplete="on" /></el-form-item>
+      <el-form-item label="密码"><el-input v-model="userDraft.password" type="password" show-password autocomplete="new-password" /></el-form-item>
+      <el-form-item label="角色">
+        <el-select v-model="userDraft.role">
+          <el-option label="普通用户" value="user" />
+          <el-option label="管理员" value="admin" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="权限">
+        <div class="permission-row">
+          <el-switch v-model="userDraft.canEditSources" active-text="书源" />
+          <el-switch v-model="userDraft.canAccessStore" active-text="书仓" />
+        </div>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="userCreateDialog = false">取消</el-button>
+      <el-button type="primary" :loading="creatingUser" @click="createManagedUser">保存</el-button>
+    </template>
+  </el-dialog>
 
   <el-drawer
     v-model="overlay.replaceRulesVisible"
@@ -550,7 +588,7 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, r
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Edit, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
-import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
+import { cleanupInactiveUsers, createUser, deleteUsers, listUsers, resetUserPassword, updateUser } from '../api/admin'
 import { cacheBookContent, changeBookSource, checkBookUpdates, createBookmark, deleteBookmark, listBookSourceCandidates, listBookmarks, listChapters, refreshBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
@@ -559,6 +597,7 @@ import { uploadAsset } from '../api/uploads'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
+import { useUserStore } from '../stores/user'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
@@ -576,6 +615,7 @@ const route = useRoute()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
+const userStore = useUserStore()
 
 const selectedBookIds = ref([])
 const batchBusy = ref(false)
@@ -624,6 +664,11 @@ const restoreLoading = ref(false)
 const users = ref([])
 const usersLoading = ref(false)
 const cleanupLoading = ref(false)
+const deletingUsers = ref(false)
+const creatingUser = ref(false)
+const userCreateDialog = ref(false)
+const selectedUserIds = ref([])
+const userDraft = reactive({ username: '', password: '', role: 'user', canEditSources: true, canAccessStore: true })
 const replaceRules = ref([])
 const replaceRulesLoading = ref(false)
 const replaceRuleImporting = ref(false)
@@ -681,6 +726,7 @@ const contentSearchStatus = computed(() => {
   if (!contentTotal.value) return `${contentResults.value.length} 条结果`
   return `已搜索 ${Math.min(scanned, contentTotal.value)} / ${contentTotal.value} 章，${contentResults.value.length} 条结果`
 })
+const currentUserId = computed(() => userStore.profile?.id || null)
 
 onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
@@ -1691,12 +1737,108 @@ async function restoreBackup(data) {
 async function loadUsers() {
   usersLoading.value = true
   try {
+    if (!userStore.profile) await userStore.loadMe()
     const { data } = await listUsers()
     users.value = data || []
+    selectedUserIds.value = selectedUserIds.value.filter(id => users.value.some(user => user.id === id && isUserDeletable(user)))
   } catch (err) {
     ElMessage.error(readError(err, '加载用户失败'))
   } finally {
     usersLoading.value = false
+  }
+}
+
+function isUserDeletable(user) {
+  return user.role !== 'admin' && user.id !== currentUserId.value
+}
+
+function onUserSelectionChange(rows) {
+  selectedUserIds.value = rows.filter(isUserDeletable).map(user => user.id)
+}
+
+function toggleUserSelection(id, checked) {
+  const user = users.value.find(item => item.id === id)
+  if (!user || !isUserDeletable(user)) return
+  if (checked) {
+    if (!selectedUserIds.value.includes(id)) selectedUserIds.value.push(id)
+    return
+  }
+  selectedUserIds.value = selectedUserIds.value.filter(item => item !== id)
+}
+
+function openCreateUserDialog() {
+  Object.assign(userDraft, {
+    username: '',
+    password: '',
+    role: 'user',
+    canEditSources: true,
+    canAccessStore: true,
+  })
+  userCreateDialog.value = true
+}
+
+async function createManagedUser() {
+  const username = userDraft.username.trim()
+  if (username.length < 3 || userDraft.password.length < 6) {
+    ElMessage.warning('用户名至少 3 位，密码至少 6 位')
+    return
+  }
+  creatingUser.value = true
+  try {
+    await createUser({
+      username,
+      password: userDraft.password,
+      role: userDraft.role,
+      canEditSources: userDraft.canEditSources,
+      canAccessStore: userDraft.canAccessStore,
+    })
+    ElMessage.success('新增用户成功')
+    userCreateDialog.value = false
+    await loadUsers()
+  } catch (err) {
+    ElMessage.error(readError(err, '新增用户失败'))
+  } finally {
+    creatingUser.value = false
+  }
+}
+
+async function resetPassword(row) {
+  try {
+    const res = await ElMessageBox.prompt('', `重置 ${row.username} 的密码`, {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputType: 'password',
+      inputValidator(value) {
+        if (!value || value.length < 6) return '密码至少 6 位'
+        return true
+      },
+    })
+    await resetUserPassword(row.id, { password: res.value })
+    ElMessage.success('重置密码成功')
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '重置密码失败'))
+  }
+}
+
+async function deleteSelectedUsers() {
+  const ids = [...selectedUserIds.value]
+  if (!ids.length) {
+    ElMessage.warning('请选择需要删除的用户')
+    return
+  }
+  deletingUsers.value = true
+  try {
+    await ElMessageBox.confirm(`确认要删除所选择的 ${ids.length} 个用户吗？该用户空间内的书架、进度、书签和设置也会删除。`, '批量删除用户', { type: 'warning' })
+    const { data } = await deleteUsers(ids)
+    selectedUserIds.value = []
+    ElMessage.success(`删除用户成功：${data.deleted || ids.length} 个`)
+    await loadUsers()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '删除用户失败'))
+  } finally {
+    deletingUsers.value = false
   }
 }
 
@@ -2277,13 +2419,28 @@ function readError(err, fallback) {
 }
 
 .mobile-user-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-user-card header > div {
   display: grid;
+  min-width: 0;
+  flex: 1;
   gap: 2px;
 }
 
 .mobile-user-card span {
   color: var(--app-text-muted);
   font-size: 12px;
+}
+
+.user-manage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .replace-overlay {

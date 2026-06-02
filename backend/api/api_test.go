@@ -292,6 +292,139 @@ func TestAdminUsersIncludesGlobalSourceCount(t *testing.T) {
 	}
 }
 
+func TestAdminUserManagementActions(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var admin models.User
+	if err := server.db.Where("username = ?", "testuser").First(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&admin).Update("role", "admin").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(`{"username":"managed","password":"secret123","canEditSources":false,"canAccessStore":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create managed user: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var managed models.User
+	if err := json.Unmarshal(w.Body.Bytes(), &managed); err != nil {
+		t.Fatal(err)
+	}
+	if managed.Username != "managed" || managed.CanEditSources {
+		t.Fatalf("unexpected managed user response: %+v", managed)
+	}
+
+	resetReq := httptest.NewRequest(http.MethodPut, "/api/admin/users/"+strconv.FormatUint(uint64(managed.ID), 10)+"/password", strings.NewReader(`{"password":"changed123"}`))
+	resetReq.Header.Set("Content-Type", "application/json")
+	resetReq.Header.Set("Authorization", token)
+	resetW := httptest.NewRecorder()
+	router.ServeHTTP(resetW, resetReq)
+	if resetW.Code != http.StatusOK {
+		t.Fatalf("reset password: expected 200, got %d: %s", resetW.Code, resetW.Body.String())
+	}
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"managed","password":"changed123"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginW := httptest.NewRecorder()
+	router.ServeHTTP(loginW, loginReq)
+	if loginW.Code != http.StatusOK {
+		t.Fatalf("login with reset password: expected 200, got %d: %s", loginW.Code, loginW.Body.String())
+	}
+
+	category := models.Category{UserID: managed.ID, Name: "待删分组"}
+	if err := server.db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: managed.ID, CategoryID: &category.ID, Title: "待删书"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: book.ID, Index: 0, Title: "第一章"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.ReadingProgress{UserID: managed.ID, BookID: book.ID, ChapterIndex: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Bookmark{UserID: managed.ID, BookID: book.ID, Title: "书签"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.ReplaceRule{UserID: managed.ID, Name: "规则", Pattern: "foo", Enabled: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	rss := models.RSSSource{UserID: managed.ID, Title: "RSS", URL: "https://example.com/rss", Enabled: true}
+	if err := server.db.Create(&rss).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.RSSArticle{UserID: managed.ID, SourceID: rss.ID, Title: "文章"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.UserSetting{UserID: managed.ID, Key: "reader", Value: `{}`}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodPost, "/api/admin/users/batch-delete", strings.NewReader(fmt.Sprintf(`{"ids":[%d]}`, managed.ID)))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("Authorization", token)
+	deleteW := httptest.NewRecorder()
+	router.ServeHTTP(deleteW, deleteReq)
+	if deleteW.Code != http.StatusOK {
+		t.Fatalf("delete users: expected 200, got %d: %s", deleteW.Code, deleteW.Body.String())
+	}
+
+	for name, query := range map[string]func() int64{
+		"users": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.User{}).Where("id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"books": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.Book{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"chapters": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.Chapter{}).Where("book_id = ?", book.ID).Count(&count).Error
+			return count
+		},
+		"progress": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.ReadingProgress{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"bookmarks": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.Bookmark{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"replace rules": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.ReplaceRule{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"rss": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.RSSSource{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"user settings": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.UserSetting{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+	} {
+		if count := query(); count != 0 {
+			t.Fatalf("%s were not deleted, count=%d", name, count)
+		}
+	}
+}
+
 func TestBookCRUD(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
