@@ -237,43 +237,10 @@
             <el-icon><Edit /></el-icon>
             <h2>全局替换规则</h2>
           </div>
+          <p class="panel-text">替换规则管理使用全局弹层，和阅读器、侧边栏入口保持同一套导入、批量删除、启停、测试逻辑。</p>
           <div class="panel-actions">
-            <el-button type="primary" :icon="Edit" @click="openReplaceRuleEditor()">新增规则</el-button>
-            <el-button :icon="Refresh" :loading="replaceRulesLoading" @click="loadReplaceRules">刷新</el-button>
+            <el-button type="primary" :icon="Edit" @click="overlay.openReplaceRules()">打开替换规则管理</el-button>
           </div>
-          <el-table :data="replaceRules" stripe v-loading="replaceRulesLoading" class="desktop-replace-table">
-            <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
-            <el-table-column prop="pattern" label="匹配" min-width="180" show-overflow-tooltip />
-            <el-table-column prop="replacement" label="替换为" min-width="160" show-overflow-tooltip />
-            <el-table-column label="启用" width="90">
-              <template #default="{ row }">
-                <el-switch v-model="row.enabled" size="small" @change="toggleReplaceRule(row)" />
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="140" fixed="right">
-              <template #default="{ row }">
-                <el-button text @click="openReplaceRuleEditor(row)">编辑</el-button>
-                <el-button text type="danger" @click="removeReplaceRule(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-if="replaceRules.length" v-loading="replaceRulesLoading" class="mobile-rule-list">
-            <article v-for="rule in replaceRules" :key="rule.id" class="mobile-rule-card app-panel">
-              <header>
-                <div>
-                  <strong>{{ rule.name || '未命名规则' }}</strong>
-                  <span>{{ rule.pattern }}</span>
-                </div>
-                <el-switch v-model="rule.enabled" size="small" @change="toggleReplaceRule(rule)" />
-              </header>
-              <p>替换为：{{ rule.replacement || '空' }}</p>
-              <footer>
-                <el-button size="small" text @click="openReplaceRuleEditor(rule)">编辑</el-button>
-                <el-button size="small" text type="danger" @click="removeReplaceRule(rule)">删除</el-button>
-              </footer>
-            </article>
-          </div>
-          <el-empty v-if="!replaceRulesLoading && !replaceRules.length" description="暂无全局替换规则" />
         </section>
       </el-tab-pane>
 
@@ -287,65 +254,14 @@
             <el-icon><UserFilled /></el-icon>
             <h2>用户空间</h2>
           </div>
+          <p class="panel-text">用户管理使用全局弹层，和首页侧边栏入口保持同一套新增、重置密码、权限调整和批量删除逻辑。</p>
           <div class="panel-actions">
-            <el-button :icon="Refresh" :loading="usersLoading" @click="loadUsers">加载用户</el-button>
-            <el-button :icon="Delete" :loading="cleanupLoading" @click="cleanupInactive">清理不活跃用户</el-button>
-          </div>
-          <el-table :data="users" stripe class="desktop-user-table">
-            <el-table-column prop="username" label="用户名" min-width="140" />
-            <el-table-column prop="role" label="角色" width="90" />
-            <el-table-column prop="bookCount" label="书籍" width="80" />
-            <el-table-column prop="sourceCount" label="全局书源" width="100" />
-            <el-table-column label="权限" min-width="260">
-              <template #default="{ row }">
-                <div class="permission-row">
-                  <el-switch v-model="row.canEditSources" size="small" active-text="书源" @change="updateUserPermission(row)" />
-                  <el-switch v-model="row.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(row)" />
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div v-if="users.length" v-loading="usersLoading" class="mobile-user-list">
-            <article v-for="user in users" :key="user.id" class="mobile-user-card app-panel">
-              <header>
-                <div>
-                  <strong>{{ user.username }}</strong>
-                  <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
-                </div>
-              </header>
-              <div class="mobile-permission-row">
-                <el-switch v-model="user.canEditSources" size="small" active-text="书源" @change="updateUserPermission(user)" />
-                <el-switch v-model="user.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(user)" />
-              </div>
-            </article>
+            <el-button type="primary" :icon="UserFilled" @click="overlay.openUserManage()">打开用户管理</el-button>
           </div>
           <el-alert type="warning" :closable="false" show-icon title="只有管理员账号能访问用户管理接口；普通账号加载失败是预期行为。" />
         </section>
       </el-tab-pane>
     </el-tabs>
-
-    <el-dialog v-model="replaceRuleDialog" :title="editingReplaceRuleId ? '编辑替换规则' : '新增替换规则'" width="520px" :fullscreen="isMobileDialog">
-      <el-form label-position="top">
-        <el-form-item label="名称"><el-input v-model="replaceRuleDraft.name" /></el-form-item>
-        <el-form-item label="匹配正则或文本"><el-input v-model="replaceRuleDraft.pattern" /></el-form-item>
-        <el-form-item label="替换为"><el-input v-model="replaceRuleDraft.replacement" /></el-form-item>
-        <el-form-item><el-switch v-model="replaceRuleDraft.enabled" active-text="启用" inactive-text="停用" /></el-form-item>
-        <el-form-item label="测试文本">
-          <el-input v-model="replaceRuleTestText" type="textarea" :rows="3" />
-        </el-form-item>
-        <div class="replace-test-actions">
-          <el-button size="small" :loading="replaceRuleTesting" @click="runReplaceRuleTest">测试规则</el-button>
-          <span v-if="replaceRuleTestResult" :class="replaceRuleTestResult.changed ? 'msg-success' : 'msg-muted'">
-            {{ replaceRuleTestResult.changed ? '已发生替换' : '未匹配' }}
-          </span>
-        </div>
-        <pre v-if="replaceRuleTestResult" class="replace-test-output">{{ replaceRuleTestResult.output }}</pre>
-      </el-form>
-      <template #footer>
-        <el-button @click="replaceRuleDialog = false">取消</el-button>
-        <el-button type="primary" :loading="replaceRuleSaving" @click="saveReplaceRule">保存</el-button>
-      </template>
-    </el-dialog>
 
   </section>
 </template>
@@ -357,7 +273,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Connection,
   Delete,
-  Document,
   Edit,
   Files,
   Link,
@@ -371,13 +286,12 @@ import {
   Moon,
 } from '@element-plus/icons-vue'
 import api from '../api/client'
-import { cleanupInactiveUsers, listUsers, updateUser } from '../api/admin'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
 import { clearCache, getCacheStats } from '../api/cache'
-import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { uploadAsset } from '../api/uploads'
 import { useSync } from '../composables/useSync'
 import { useReaderStore, themePresets } from '../stores/reader'
+import { useOverlayStore } from '../stores/overlay'
 import { readerFontOptions } from '../utils/readerFonts'
 import { useUserStore } from '../stores/user'
 import RSSManager from '../components/RSSManager.vue'
@@ -387,6 +301,7 @@ const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 const readerStore = useReaderStore()
+const overlay = useOverlayStore()
 const { connected: syncConnected } = useSync()
 
 const settingPanels = new Set(['account', 'backup', 'cache', 'webdav', 'reader', 'replace', 'rss', 'admin'])
@@ -396,21 +311,9 @@ const backupLoading = ref(false)
 const backupListLoading = ref(false)
 const restoreLoading = ref(false)
 const backups = ref([])
-const users = ref([])
-const usersLoading = ref(false)
-const cleanupLoading = ref(false)
 const cacheStats = ref({})
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
-const replaceRules = ref([])
-const replaceRulesLoading = ref(false)
-const replaceRuleDialog = ref(false)
-const replaceRuleSaving = ref(false)
-const replaceRuleTesting = ref(false)
-const editingReplaceRuleId = ref(null)
-const replaceRuleDraft = ref({ name: '', pattern: '', replacement: '', enabled: true })
-const replaceRuleTestText = ref('广告123\n正文内容')
-const replaceRuleTestResult = ref(null)
 const readerBgUploading = ref(false)
 const healthInfo = ref(null)
 const MINI_INTERFACE_MAX_WIDTH = 750
@@ -495,8 +398,6 @@ onMounted(() => {
   loadBackups()
   loadCacheStats()
   loadHealthInfo().catch(() => {})
-  loadReplaceRules()
-  if (userStore.profile?.role === 'admin') loadUsers()
 })
 
 onBeforeUnmount(() => window.removeEventListener('resize', updateWindowWidth))
@@ -618,30 +519,6 @@ async function clearSystemCache() {
   }
 }
 
-async function loadReplaceRules() {
-  replaceRulesLoading.value = true
-  try {
-    const { data } = await listReplaceRules()
-    replaceRules.value = data || []
-  } catch (err) {
-    ElMessage.error(readError(err, '加载替换规则失败'))
-  } finally {
-    replaceRulesLoading.value = false
-  }
-}
-
-function openReplaceRuleEditor(rule = null) {
-  editingReplaceRuleId.value = rule?.id || null
-  replaceRuleDraft.value = {
-    name: rule?.name || '',
-    pattern: rule?.pattern || '',
-    replacement: rule?.replacement || '',
-    enabled: rule?.enabled ?? true,
-  }
-  replaceRuleTestResult.value = null
-  replaceRuleDialog.value = true
-}
-
 async function pickReaderBgImage(data) {
   const file = data.raw || data.file
   if (!file) return
@@ -654,113 +531,6 @@ async function pickReaderBgImage(data) {
     ElMessage.error(readError(err, '上传背景图失败'))
   } finally {
     readerBgUploading.value = false
-  }
-}
-
-async function saveReplaceRule() {
-  if (!replaceRuleDraft.value.pattern.trim()) {
-    ElMessage.warning('匹配规则不能为空')
-    return
-  }
-  replaceRuleSaving.value = true
-  try {
-    const payload = { ...replaceRuleDraft.value, pattern: replaceRuleDraft.value.pattern.trim() }
-    if (editingReplaceRuleId.value) {
-      await updateReplaceRule(editingReplaceRuleId.value, payload)
-      ElMessage.success('替换规则已更新')
-    } else {
-      await createReplaceRule(payload)
-      ElMessage.success('替换规则已创建')
-    }
-    replaceRuleDialog.value = false
-    await loadReplaceRules()
-  } catch (err) {
-    ElMessage.error(readError(err, '保存替换规则失败'))
-  } finally {
-    replaceRuleSaving.value = false
-  }
-}
-
-async function toggleReplaceRule(rule) {
-  try {
-    await updateReplaceRule(rule.id, rule)
-    ElMessage.success('替换规则已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新替换规则失败'))
-    await loadReplaceRules()
-  }
-}
-
-async function runReplaceRuleTest() {
-  if (!replaceRuleDraft.value.pattern.trim() || !replaceRuleTestText.value) {
-    ElMessage.warning('请输入匹配规则和测试文本')
-    return
-  }
-  replaceRuleTesting.value = true
-  try {
-    const { data } = await testReplaceRule({
-      pattern: replaceRuleDraft.value.pattern,
-      replacement: replaceRuleDraft.value.replacement,
-      text: replaceRuleTestText.value,
-    })
-    replaceRuleTestResult.value = data
-  } catch (err) {
-    ElMessage.error(readError(err, '测试替换规则失败'))
-  } finally {
-    replaceRuleTesting.value = false
-  }
-}
-
-async function removeReplaceRule(rule) {
-  try {
-    await ElMessageBox.confirm(`确定删除替换规则“${rule.name}”吗？`, '删除替换规则', { type: 'warning' })
-    await deleteReplaceRule(rule.id)
-    replaceRules.value = replaceRules.value.filter(item => item.id !== rule.id)
-    ElMessage.success('替换规则已删除')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '删除替换规则失败'))
-  }
-}
-
-async function loadUsers() {
-  usersLoading.value = true
-  try {
-    const { data } = await listUsers()
-    users.value = data
-  } catch (err) {
-    ElMessage.error(readError(err, '加载用户失败'))
-  } finally {
-    usersLoading.value = false
-  }
-}
-
-async function updateUserPermission(row) {
-  try {
-    await updateUser(row.id, {
-      canEditSources: row.canEditSources,
-      canAccessStore: row.canAccessStore,
-      bookLimit: row.bookLimit,
-      sourceLimit: row.sourceLimit,
-    })
-    ElMessage.success('用户权限已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新用户失败'))
-    await loadUsers()
-  }
-}
-
-async function cleanupInactive() {
-  cleanupLoading.value = true
-  try {
-    await ElMessageBox.confirm('确定清理不活跃用户吗？', '提示', { type: 'warning' })
-    await cleanupInactiveUsers()
-    ElMessage.success('清理完成')
-    await loadUsers()
-  } catch {
-    // canceled or failed with message above from interceptor
-  } finally {
-    cleanupLoading.value = false
   }
 }
 
