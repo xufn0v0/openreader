@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useReaderStore } from '../stores/reader'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { usePreferencesStore } from '../stores/preferences'
+import { useUserStore } from '../stores/user'
 
 const connected = ref(false)
 let socket
@@ -21,6 +22,7 @@ export function useSync() {
   const reader = useReaderStore()
   const bookshelf = useBookshelfStore()
   const preferences = usePreferencesStore()
+  const userStore = useUserStore()
 
   function connect() {
     const token = localStorage.getItem('openreader_token')
@@ -102,6 +104,9 @@ export function useSync() {
       }
       if (message.type === 'bookmarks_update') {
         scheduleBookmarksUpdate(message.payload)
+      }
+      if (message.type === 'users_update') {
+        handleUsersUpdate(message.payload)
       }
     })
   }
@@ -227,5 +232,15 @@ export function useSync() {
     window.clearTimeout(bookmarksUpdateTimer)
     bookmarksUpdateTimer = undefined
     bookmarksUpdatePending = { bookIds: new Set(), payload: null }
+  }
+
+  function handleUsersUpdate(detail = {}) {
+    const userIds = Array.isArray(detail?.userIds) ? detail.userIds.map(Number).filter(Boolean) : []
+    const currentId = Number(userStore.profile?.id || 0)
+    dispatchWindowEvent('openreader:users-updated', detail)
+    if (!currentId || (userIds.length && !userIds.includes(currentId))) return
+    userStore.loadMe().catch(() => {
+      if (['delete', 'cleanup'].includes(detail?.kind)) userStore.logout()
+    })
   }
 }

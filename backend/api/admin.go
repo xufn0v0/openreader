@@ -156,6 +156,7 @@ func (s *Server) createUser(c *gin.Context) {
 			return
 		}
 	}
+	s.broadcastUsersUpdate("create", []uint{user.ID})
 	c.JSON(http.StatusCreated, user)
 }
 
@@ -205,6 +206,7 @@ func (s *Server) updateUser(c *gin.Context) {
 		internalError(c, "failed to update user")
 		return
 	}
+	s.broadcastUsersUpdate("update", []uint{user.ID})
 	c.JSON(http.StatusOK, user)
 }
 
@@ -247,6 +249,7 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 		notFound(c, "user not found")
 		return
 	}
+	s.broadcastUsersUpdate("password", []uint{id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -339,6 +342,7 @@ func (s *Server) deleteUsers(c *gin.Context) {
 		internalError(c, "failed to delete users")
 		return
 	}
+	s.broadcastUsersUpdate("delete", ids)
 	c.JSON(http.StatusOK, gin.H{"deleted": len(ids)})
 }
 
@@ -353,5 +357,21 @@ func (s *Server) cleanupInactiveUsers(c *gin.Context) {
 		internalError(c, "cleanup failed")
 		return
 	}
+	if result.RowsAffected > 0 {
+		s.broadcastUsersUpdate("cleanup", nil)
+	}
 	c.JSON(http.StatusOK, gin.H{"deleted": result.RowsAffected})
+}
+
+func (s *Server) broadcastUsersUpdate(kind string, userIDs []uint) {
+	if s.hub == nil {
+		return
+	}
+	_ = s.hub.BroadcastAll(nil, gin.H{
+		"type": "users_update",
+		"payload": gin.H{
+			"kind":    kind,
+			"userIds": userIDs,
+		},
+	})
 }
