@@ -75,6 +75,7 @@ func (s *Server) createSource(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create source"})
 		return
 	}
+	s.broadcastSourcesUpdate("create")
 	c.JSON(http.StatusCreated, source)
 }
 
@@ -120,6 +121,7 @@ func (s *Server) updateSource(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update source"})
 		return
 	}
+	s.broadcastSourcesUpdate("update")
 	c.JSON(http.StatusOK, source)
 }
 
@@ -142,6 +144,7 @@ func (s *Server) deleteSource(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "source not found"})
 		return
 	}
+	s.broadcastSourcesUpdate("delete")
 	c.Status(http.StatusNoContent)
 }
 
@@ -155,6 +158,7 @@ func (s *Server) clearSources(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear sources"})
 		return
 	}
+	s.broadcastSourcesUpdate("clear")
 	c.JSON(http.StatusOK, gin.H{"affected": result.RowsAffected})
 }
 
@@ -202,6 +206,7 @@ func (s *Server) saveDefaultSources(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save default sources"})
 		return
 	}
+	s.broadcastSourcesUpdate("save-default")
 	c.JSON(http.StatusOK, gin.H{"count": len(sources)})
 }
 
@@ -235,6 +240,7 @@ func (s *Server) restoreDefaultSources(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to restore default sources"})
 		return
 	}
+	s.broadcastSourcesUpdate("restore-default")
 	c.JSON(http.StatusOK, result)
 }
 
@@ -282,6 +288,7 @@ func (s *Server) batchSources(c *gin.Context) {
 		return
 	}
 
+	s.broadcastSourcesUpdate("batch-" + req.Action)
 	c.JSON(http.StatusOK, gin.H{"affected": result.RowsAffected})
 }
 
@@ -316,6 +323,7 @@ func (s *Server) importSources(c *gin.Context) {
 	}
 
 	result := s.importBookSources(sources)
+	s.broadcastSourcesUpdate("import")
 	c.JSON(http.StatusOK, result)
 }
 
@@ -353,7 +361,18 @@ func (s *Server) importRemoteSource(c *gin.Context) {
 	}
 
 	result := s.importBookSources(sources)
+	s.broadcastSourcesUpdate("remote-import")
 	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) broadcastSourcesUpdate(kind string) {
+	if s.hub == nil {
+		return
+	}
+	_ = s.hub.BroadcastAll(nil, gin.H{
+		"type":    "sources_update",
+		"payload": gin.H{"kind": kind},
+	})
 }
 
 func (s *Server) previewRemoteSource(c *gin.Context) {

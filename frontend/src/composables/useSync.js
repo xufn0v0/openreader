@@ -86,6 +86,9 @@ export function useSync() {
       if (message.type === 'settings_update' && ['shelf', 'search'].includes(message.payload?.key)) {
         preferences.loadPreference(message.payload.key).catch(() => {})
       }
+      if (message.type === 'sources_update') {
+        dispatchWindowEvent('openreader:sources-update', message.payload)
+      }
     })
   }
 
@@ -144,5 +147,10 @@ export function useSync() {
     window.clearTimeout(bookshelfRefreshTimer)
     bookshelfRefreshTimer = undefined
     bookshelfRefreshPending = { books: false, categories: false }
+  }
+
+  function dispatchWindowEvent(name, detail) {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent(name, { detail }))
   }
 }

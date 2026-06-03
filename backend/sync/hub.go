@@ -81,6 +81,29 @@ func (h *Hub) Broadcast(userID uint, except *Client, event any) error {
 	return nil
 }
 
+func (h *Hub) BroadcastAll(except *Client, event any) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, userClients := range h.clients {
+		for client := range userClients {
+			if client == except {
+				continue
+			}
+			select {
+			case client.Send <- payload:
+			default:
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Client) ReadPump() {
 	defer func() {
 		c.hub.RemoveClient(c)
