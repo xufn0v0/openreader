@@ -7,6 +7,12 @@ const connected = ref(false)
 let socket
 let reconnectTimer
 let bookshelfRefreshTimer
+let replaceRulesUpdateTimer
+let rssUpdateTimer
+let bookmarksUpdateTimer
+let bookshelfRefreshPending = { books: false, categories: false }
+let rssUpdatePending = { sources: false, articles: false, payload: null }
+let bookmarksUpdatePending = { bookIds: new Set(), payload: null }
 let reconnectDelay = 1500
 let manualDisconnect = false
 const MAX_RECONNECT_DELAY = 15000
@@ -28,7 +34,10 @@ export function useSync() {
     socket.addEventListener('open', () => {
       connected.value = true
       reconnectDelay = 1500
-      bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
+      Promise.all([
+        bookshelf.loadCategories({ force: true }),
+        bookshelf.loadBooks({ force: true, all: true }),
+      ]).catch(() => {})
     })
     socket.addEventListener('close', () => {
       connected.value = false
@@ -53,11 +62,24 @@ export function useSync() {
         if (message.payload?.id) {
           bookshelf.upsertBook(message.payload)
         } else {
-          scheduleBookshelfRefresh()
+          scheduleBookshelfRefresh({ books: true, categories: true })
         }
       }
       if (message.type === 'bookshelf_delete') {
         bookshelf.removeBookLocal(message.payload?.id)
+      }
+      if (message.type === 'category_update') {
+        bookshelf.upsertCategory(message.payload)
+      }
+      if (message.type === 'category_delete') {
+        bookshelf.removeCategoryLocal(message.payload?.id)
+      }
+      if (message.type === 'categories_update') {
+        if (Array.isArray(message.payload)) {
+          bookshelf.replaceCategories(message.payload)
+        } else {
+          scheduleBookshelfRefresh({ books: false, categories: true })
+        }
       }
       if (message.type === 'settings_update' && message.payload?.key === 'reader') {
         reader.loadReaderSettings().catch(() => {})
@@ -69,6 +91,18 @@ export function useSync() {
       if (message.type === 'settings_update' && ['shelf', 'search'].includes(message.payload?.key)) {
         preferences.loadPreference(message.payload.key).catch(() => {})
       }
+      if (message.type === 'sources_update') {
+        dispatchWindowEvent('openreader:sources-update', message.payload)
+      }
+      if (message.type === 'replace_rules_update') {
+        scheduleReplaceRulesUpdate(message.payload)
+      }
+      if (message.type === 'rss_update') {
+        scheduleRSSUpdate(message.payload)
+      }
+      if (message.type === 'bookmarks_update') {
+        scheduleBookmarksUpdate(message.payload)
+      }
     })
   }
 
@@ -76,6 +110,9 @@ export function useSync() {
     manualDisconnect = true
     clearReconnectTimer()
     clearBookshelfRefreshTimer()
+    clearReplaceRulesUpdateTimer()
+    clearRSSUpdateTimer()
+    clearBookmarksUpdateTimer()
     socket?.close()
     socket = undefined
     connected.value = false
@@ -105,11 +142,20 @@ export function useSync() {
     reconnectTimer = undefined
   }
 
-  function scheduleBookshelfRefresh() {
+  function scheduleBookshelfRefresh(options = {}) {
+    const refreshBooks = options.books !== false
+    const refreshCategories = options.categories !== false
+    bookshelfRefreshPending.books = bookshelfRefreshPending.books || refreshBooks
+    bookshelfRefreshPending.categories = bookshelfRefreshPending.categories || refreshCategories
     if (bookshelfRefreshTimer) return
     bookshelfRefreshTimer = window.setTimeout(() => {
       bookshelfRefreshTimer = undefined
-      bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
+      const pending = bookshelfRefreshPending
+      bookshelfRefreshPending = { books: false, categories: false }
+      const jobs = []
+      if (pending.categories) jobs.push(bookshelf.loadCategories({ force: true }))
+      if (pending.books) jobs.push(bookshelf.loadBooks({ force: true, all: true }))
+      Promise.all(jobs).catch(() => {})
     }, 500)
   }
 
@@ -117,5 +163,69 @@ export function useSync() {
     if (!bookshelfRefreshTimer) return
     window.clearTimeout(bookshelfRefreshTimer)
     bookshelfRefreshTimer = undefined
+    bookshelfRefreshPending = { books: false, categories: false }
+  }
+
+  function dispatchWindowEvent(name, detail) {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new CustomEvent(name, { detail }))
+  }
+
+  function scheduleReplaceRulesUpdate(detail) {
+    clearReplaceRulesUpdateTimer()
+    replaceRulesUpdateTimer = window.setTimeout(() => {
+      replaceRulesUpdateTimer = undefined
+      dispatchWindowEvent('openreader:replace-rules-updated', detail)
+    }, 500)
+  }
+
+  function clearReplaceRulesUpdateTimer() {
+    if (!replaceRulesUpdateTimer) return
+    window.clearTimeout(replaceRulesUpdateTimer)
+    replaceRulesUpdateTimer = undefined
+  }
+
+  function scheduleRSSUpdate(detail = {}) {
+    const kind = detail?.kind || ''
+    rssUpdatePending.sources = rssUpdatePending.sources || kind.startsWith('source-')
+    rssUpdatePending.articles = rssUpdatePending.articles || kind.startsWith('article-') || kind === 'source-refresh' || kind === 'source-delete'
+    rssUpdatePending.payload = detail
+    if (rssUpdateTimer) return
+    rssUpdateTimer = window.setTimeout(() => {
+      rssUpdateTimer = undefined
+      const pending = rssUpdatePending
+      rssUpdatePending = { sources: false, articles: false, payload: null }
+      dispatchWindowEvent('openreader:rss-updated', pending)
+    }, 500)
+  }
+
+  function clearRSSUpdateTimer() {
+    if (!rssUpdateTimer) return
+    window.clearTimeout(rssUpdateTimer)
+    rssUpdateTimer = undefined
+    rssUpdatePending = { sources: false, articles: false, payload: null }
+  }
+
+  function scheduleBookmarksUpdate(detail = {}) {
+    const bookId = Number(detail?.bookId || 0)
+    if (bookId) bookmarksUpdatePending.bookIds.add(bookId)
+    bookmarksUpdatePending.payload = detail
+    if (bookmarksUpdateTimer) return
+    bookmarksUpdateTimer = window.setTimeout(() => {
+      bookmarksUpdateTimer = undefined
+      const pending = {
+        bookIds: [...bookmarksUpdatePending.bookIds],
+        payload: bookmarksUpdatePending.payload,
+      }
+      bookmarksUpdatePending = { bookIds: new Set(), payload: null }
+      dispatchWindowEvent('openreader:bookmarks-updated', pending)
+    }, 500)
+  }
+
+  function clearBookmarksUpdateTimer() {
+    if (!bookmarksUpdateTimer) return
+    window.clearTimeout(bookmarksUpdateTimer)
+    bookmarksUpdateTimer = undefined
+    bookmarksUpdatePending = { bookIds: new Set(), payload: null }
   }
 }

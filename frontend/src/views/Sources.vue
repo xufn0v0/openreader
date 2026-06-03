@@ -324,6 +324,7 @@ const testing = ref(false)
 const handledRouteAction = ref('')
 const MINI_INTERFACE_MAX_WIDTH = 750
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+let sourceReloadTimer
 
 const sourceGroupOptions = computed(() => buildSourceGroupOptions(sources.value))
 const healthSummary = computed(() => {
@@ -359,12 +360,15 @@ const editorDrawerSize = computed(() => isMobileDialog.value ? '88%' : '520px')
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
+  window.addEventListener('openreader:sources-update', handleSourcesUpdate)
   await Promise.all([loadSources(), loadDefaultSourceStatus()])
   applyRouteAction()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('openreader:sources-update', handleSourcesUpdate)
+  clearSourceReloadTimer()
 })
 
 watch(
@@ -392,6 +396,31 @@ async function loadDefaultSourceStatus() {
     defaultSource.configured = false
     defaultSource.count = 0
   }
+}
+
+function handleSourcesUpdate(event) {
+  scheduleSourcesReload(event?.detail)
+}
+
+function scheduleSourcesReload(detail = {}) {
+  clearSourceReloadTimer()
+  sourceReloadTimer = window.setTimeout(async () => {
+    sourceReloadTimer = undefined
+    try {
+      await loadSources()
+      if (['save-default', 'restore-default'].includes(detail?.kind)) {
+        await loadDefaultSourceStatus()
+      }
+    } catch {
+      // Keep the current list visible; the next explicit refresh or sync event can recover.
+    }
+  }, 350)
+}
+
+function clearSourceReloadTimer() {
+  if (!sourceReloadTimer) return
+  window.clearTimeout(sourceReloadTimer)
+  sourceReloadTimer = undefined
 }
 
 function applyRouteAction() {

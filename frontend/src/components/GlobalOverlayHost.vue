@@ -715,6 +715,8 @@ const replaceRuleTestResult = ref(null)
 const manageKeyword = ref('')
 const MINI_INTERFACE_MAX_WIDTH = 750
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+let replaceRulesRefreshTimer
+let bookmarkRefreshTimer
 
 const isMobileOverlay = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -769,10 +771,16 @@ const currentUserId = computed(() => userStore.profile?.id || null)
 
 onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
+  window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
+  window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateWindowWidth)
+  window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
+  window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
+  clearReplaceRulesRefreshTimer()
+  clearBookmarkRefreshTimer()
 })
 
 function updateWindowWidth() {
@@ -1599,6 +1607,27 @@ async function loadBookmarkItems() {
   }
 }
 
+function handleBookmarksUpdated(event) {
+  if (!overlay.bookmarkVisible || !overlay.bookmarkBook?.id) return
+  const bookIds = event?.detail?.bookIds || []
+  if (bookIds.length && !bookIds.some(id => String(id) === String(overlay.bookmarkBook.id))) return
+  scheduleBookmarkRefresh()
+}
+
+function scheduleBookmarkRefresh() {
+  clearBookmarkRefreshTimer()
+  bookmarkRefreshTimer = window.setTimeout(async () => {
+    bookmarkRefreshTimer = undefined
+    await loadBookmarkItems()
+  }, 250)
+}
+
+function clearBookmarkRefreshTimer() {
+  if (!bookmarkRefreshTimer) return
+  window.clearTimeout(bookmarkRefreshTimer)
+  bookmarkRefreshTimer = undefined
+}
+
 function jumpToBookmark(bookmark) {
   const book = overlay.bookmarkBook
   if (!book?.id) return
@@ -1929,6 +1958,25 @@ async function loadReplaceRules() {
   }
 }
 
+function handleReplaceRulesUpdated(event) {
+  if (event?.detail?.local || !overlay.replaceRulesVisible) return
+  scheduleReplaceRulesRefresh()
+}
+
+function scheduleReplaceRulesRefresh() {
+  clearReplaceRulesRefreshTimer()
+  replaceRulesRefreshTimer = window.setTimeout(async () => {
+    replaceRulesRefreshTimer = undefined
+    await loadReplaceRules()
+  }, 250)
+}
+
+function clearReplaceRulesRefreshTimer() {
+  if (!replaceRulesRefreshTimer) return
+  window.clearTimeout(replaceRulesRefreshTimer)
+  replaceRulesRefreshTimer = undefined
+}
+
 function onReplaceRuleSelectionChange(rows) {
   selectedReplaceRuleIds.value = rows.map(row => row.id)
 }
@@ -2094,7 +2142,7 @@ async function deleteSelectedReplaceRules() {
 }
 
 function notifyReplaceRulesUpdated() {
-  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
+  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated', { detail: { local: true } }))
 }
 
 async function createCategory() {
