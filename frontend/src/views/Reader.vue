@@ -44,7 +44,7 @@
       <button class="round-tool" type="button" title="添加笔记" @click="openNoteDialog">
         <el-icon :size="18"><EditPen /></el-icon>
       </button>
-      <button class="round-tool" type="button" :disabled="!isRemoteBook" :title="isRemoteBook ? '缓存章节' : '本地书无需服务器缓存'" @click="openCacheDrawer">
+      <button class="round-tool" type="button" :disabled="!isRemoteBook" :title="isRemoteBook ? '缓存章节' : '本地书无需章节缓存'" @click="openCacheDrawer">
         <el-icon :size="18"><Download /></el-icon>
       </button>
       <button class="round-tool" type="button" title="重新载入章节" @click="reloadChapter">
@@ -376,9 +376,9 @@
     <el-drawer v-model="showCacheDrawer" title="缓存章节" :direction="drawerDirection" :size="drawerSize">
       <div class="reader-cache-panel">
         <div class="reader-cache-actions">
-          <button type="button" :disabled="isCachingContent" @click="cacheFollowingChapters(20)">后面20章</button>
           <button type="button" :disabled="isCachingContent" @click="cacheFollowingChapters(50)">后面50章</button>
           <button type="button" :disabled="isCachingContent" @click="cacheFollowingChapters(100)">后面100章</button>
+          <button type="button" :disabled="isCachingContent" @click="cacheFollowingChapters(true)">后面全部</button>
         </div>
         <div v-if="isCachingContent" class="reader-cache-status">
           <span>{{ cachingContentTip }}</span>
