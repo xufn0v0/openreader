@@ -15,7 +15,7 @@
     </div>
     <div class="book-info-main">
       <div class="book-info-title">
-        <h2>{{ book?.title || '未命名书籍' }}</h2>
+        <h2>{{ bookTitle }}</h2>
         <el-tag v-if="statusLabel" size="small" effect="plain" :type="statusType">{{ statusLabel }}</el-tag>
       </div>
       <div v-if="bookKindTags.length" class="book-kind-tags">
@@ -28,7 +28,7 @@
         </div>
         <div>
           <span>来源：</span>
-          <strong>{{ sourceName || (book?.sourceId ? '远程书籍' : '本地') }}</strong>
+          <strong>{{ displaySourceName }}</strong>
         </div>
         <div>
           <span>最新：</span>
@@ -143,12 +143,24 @@ const props = defineProps({
 const emit = defineEmits(['cover-upload', 'can-update-change', 'category-action'])
 const coverInput = ref(null)
 
-const chapterCount = computed(() => Array.isArray(props.chapters) ? props.chapters.length : (props.chapters || props.book?.chapterCount || 0))
-const latestChapterLabel = computed(() => props.book?.lastChapter || props.book?.latestChapter || props.book?.latestChapterTitle || '-')
+const bookTitle = computed(() => props.book?.title || props.book?.name || props.book?.bookName || '未命名书籍')
+const chapterCount = computed(() => {
+  if (Array.isArray(props.chapters)) return props.chapters.length
+  return props.chapters || props.book?.chapterCount || props.book?.totalChapterNum || props.book?.chapterNum || 0
+})
+const latestChapterLabel = computed(() => props.book?.lastChapter || props.book?.latestChapter || props.book?.latestChapterTitle || props.book?.durChapterTitle || '-')
+const displaySourceName = computed(() => {
+  if (props.sourceName) return props.sourceName
+  if (props.book?.sourceName) return props.book.sourceName
+  if (props.book?.originName) return props.book.originName
+  if (props.book?.origin === 'loc_book' || props.book?.origin === 'local') return '本地'
+  if (props.book?.origin) return props.book.origin
+  return props.book?.sourceId ? '远程书籍' : '本地'
+})
 const progressLabel = computed(() => `${Math.round(Math.max(0, Math.min(1, props.progress || 0)) * 100)}%`)
 const canUpdateValue = computed(() => props.book?.canUpdate !== false && props.canUpdate !== false)
 const bookKindTags = computed(() => {
-  const raw = props.book?.kind ?? props.book?.category ?? props.book?.categoryName ?? props.book?.genre ?? props.book?.tags
+  const raw = props.book?.kind ?? props.book?.category ?? props.book?.categoryName ?? props.book?.genre ?? props.book?.tags ?? props.book?.type
   return normalizeKindTags(raw)
 })
 const introParagraphs = computed(() => {

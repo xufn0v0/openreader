@@ -631,6 +631,15 @@ import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
+import {
+  sourceCandidateAuthor,
+  sourceCandidateBookUrl,
+  sourceCandidateCover,
+  sourceCandidateIntro,
+  sourceCandidateKey,
+  sourceCandidateSourceId,
+  sourceCandidateTitle,
+} from '../utils/sourceCandidate'
 import BookInfoDialog from './BookInfoDialog.vue'
 import RSSManager from './RSSManager.vue'
 import WebDAVBrowser from './WebDAVBrowser.vue'
@@ -718,6 +727,7 @@ const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth
 let replaceRulesRefreshTimer
 let bookmarkRefreshTimer
 let usersRefreshTimer
+let sourceRowsRefreshTimer
 
 const isMobileOverlay = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -775,6 +785,7 @@ onMounted(() => {
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   window.addEventListener('openreader:users-updated', handleUsersUpdated)
+  window.addEventListener('openreader:sources-update', handleSourcesUpdated)
 })
 
 onBeforeUnmount(() => {
@@ -782,9 +793,11 @@ onBeforeUnmount(() => {
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   window.removeEventListener('openreader:users-updated', handleUsersUpdated)
+  window.removeEventListener('openreader:sources-update', handleSourcesUpdated)
   clearReplaceRulesRefreshTimer()
   clearBookmarkRefreshTimer()
   clearUsersRefreshTimer()
+  clearSourceRowsRefreshTimer()
 })
 
 function updateWindowWidth() {
@@ -933,6 +946,35 @@ function progressLabel(book) {
 async function loadSourceRows() {
   const { data } = await listSources()
   sourceRows.value = data || []
+}
+
+function handleSourcesUpdated() {
+  if (!shouldRefreshOverlaySources()) return
+  scheduleSourceRowsRefresh()
+}
+
+function shouldRefreshOverlaySources() {
+  return sourceSwitchVisible.value ||
+    (overlay.bookInfoVisible && Number(overlay.bookInfoBook?.sourceId || 0) > 0) ||
+    sourceRows.value.length > 0
+}
+
+function scheduleSourceRowsRefresh() {
+  clearSourceRowsRefreshTimer()
+  sourceRowsRefreshTimer = window.setTimeout(async () => {
+    sourceRowsRefreshTimer = undefined
+    try {
+      await loadSourceRows()
+    } catch {
+      // Keep existing source names/groups; the next source action can recover.
+    }
+  }, 350)
+}
+
+function clearSourceRowsRefreshTimer() {
+  if (!sourceRowsRefreshTimer) return
+  window.clearTimeout(sourceRowsRefreshTimer)
+  sourceRowsRefreshTimer = undefined
 }
 
 function onManageSelectionChange(rows) {
@@ -1131,9 +1173,9 @@ function changeGlobalSourceQuery(value) {
 }
 
 function mergeSourceCandidates(existing, incoming) {
-  const seen = new Set(existing.map(item => `${item.sourceId}-${item.bookUrl}`))
+  const seen = new Set(existing.map(item => sourceCandidateKey(item)))
   return existing.concat(incoming.filter(item => {
-    const key = `${item.sourceId}-${item.bookUrl}`
+    const key = sourceCandidateKey(item)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -1143,15 +1185,16 @@ function mergeSourceCandidates(existing, incoming) {
 async function changeGlobalBookSource(source) {
   const book = sourceSwitchBook.value
   if (!book?.id || source.current) return
-  sourceSwitchChanging.value = source.sourceId
+  const nextSourceId = sourceCandidateSourceId(source)
+  sourceSwitchChanging.value = nextSourceId
   try {
     const { data } = await changeBookSource(book.id, {
-      sourceId: source.sourceId,
-      bookUrl: source.bookUrl,
-      title: source.title,
-      author: source.author,
-      coverUrl: source.coverUrl,
-      intro: source.intro,
+      sourceId: nextSourceId,
+      bookUrl: sourceCandidateBookUrl(source),
+      title: sourceCandidateTitle(source, book.title),
+      author: sourceCandidateAuthor(source),
+      coverUrl: sourceCandidateCover(source),
+      intro: sourceCandidateIntro(source),
     })
     bookshelf.upsertBook(data)
     sourceSwitchBook.value = data

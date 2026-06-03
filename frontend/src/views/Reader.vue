@@ -483,6 +483,15 @@ import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
+import {
+  sourceCandidateAuthor,
+  sourceCandidateBookUrl,
+  sourceCandidateCover,
+  sourceCandidateIntro,
+  sourceCandidateKey,
+  sourceCandidateSourceId,
+  sourceCandidateTitle,
+} from '../utils/sourceCandidate'
 
 const route = useRoute()
 const router = useRouter()
@@ -1667,9 +1676,9 @@ function changeSourceQuery(value) {
 }
 
 function mergeSourceCandidates(existing, incoming) {
-  const seen = new Set(existing.map(item => `${item.sourceId}-${item.bookUrl}`))
+  const seen = new Set(existing.map(item => sourceCandidateKey(item)))
   return existing.concat(incoming.filter(item => {
-    const key = `${item.sourceId}-${item.bookUrl}`
+    const key = sourceCandidateKey(item)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -1678,15 +1687,16 @@ function mergeSourceCandidates(existing, incoming) {
 
 async function changeSource(source) {
   if (!book.value || source.current) return
-  changingSource.value = source.sourceId
+  const nextSourceId = sourceCandidateSourceId(source)
+  changingSource.value = nextSourceId
   try {
     const { data } = await changeBookSource(bookId.value, {
-      sourceId: source.sourceId,
-      bookUrl: source.bookUrl,
-      title: source.title,
-      author: source.author,
-      coverUrl: source.coverUrl,
-      intro: source.intro,
+      sourceId: nextSourceId,
+      bookUrl: sourceCandidateBookUrl(source),
+      title: sourceCandidateTitle(source, book.value?.title),
+      author: sourceCandidateAuthor(source),
+      coverUrl: sourceCandidateCover(source),
+      intro: sourceCandidateIntro(source),
     })
     book.value = data
     bookshelf.upsertBook(data)

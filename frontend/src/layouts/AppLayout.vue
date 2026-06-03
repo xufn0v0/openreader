@@ -12,7 +12,10 @@
       <div class="app-brand" @click="goHome">
         <div class="app-brand-mark">阅</div>
         <div>
-          <div class="app-brand-title">阅读</div>
+          <div class="app-brand-title-row">
+            <div class="app-brand-title">阅读</div>
+            <button class="app-version-text" type="button" @click.stop="refreshHealthInfo(true)">{{ appVersionLabel }}</button>
+          </div>
           <div class="app-brand-subtitle">清风不识字，何故乱翻书</div>
         </div>
       </div>
@@ -178,6 +181,7 @@ import { usePreferencesStore } from '../stores/preferences'
 import { useSync } from '../composables/useSync'
 import { clearCache, getCacheStats } from '../api/cache'
 import { listSources } from '../api/sources'
+import api from '../api/client'
 import { compareRecentBook, newestBookProgress } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
@@ -195,6 +199,7 @@ const mobileNavigationVisible = ref(false)
 const touchStart = ref(null)
 const touchMoveX = ref(0)
 const cacheStats = ref({})
+const healthInfo = ref(null)
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
 const MINI_INTERFACE_MAX_WIDTH = 750
@@ -302,6 +307,12 @@ const cacheStatsLabel = computed(() => {
   return `章节缓存 ${size}${chapters ? ` / ${chapters}章` : ''}`
 })
 const isNightTheme = computed(() => reader.theme === 'dark' || reader.theme === 'black')
+const appVersionLabel = computed(() => {
+  const version = String(healthInfo.value?.version || '').trim()
+  const commit = shortCommit(healthInfo.value?.commit)
+  if (version && !['dev', 'unknown'].includes(version)) return version
+  return commit || 'dev'
+})
 const isMobileShell = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const mobileNavigationWidth = computed(() => {
   return 260
@@ -435,6 +446,25 @@ async function loadCacheStats() {
   } finally {
     cacheLoading.value = false
   }
+}
+
+async function refreshHealthInfo(showMessage = false) {
+  try {
+    const { data } = await api.get('/health')
+    healthInfo.value = data || {}
+    if (showMessage) {
+      const commit = shortCommit(data?.commit) || '-'
+      const buildText = data?.buildDate && data.buildDate !== 'unknown' ? `构建 ${data.buildDate}` : '开发构建'
+      ElMessage.success(`${buildText} · ${commit}`)
+    }
+  } catch (err) {
+    if (showMessage) ElMessage.error(readError(err, '读取版本信息失败'))
+  }
+}
+
+function shortCommit(value) {
+  if (!value || value === 'unknown') return ''
+  return String(value).slice(0, 12)
 }
 
 async function clearSystemCache() {
@@ -621,6 +651,7 @@ onMounted(() => {
   }
   if (userStore.token) loadSidebarSources()
   if (userStore.token) loadCacheStats()
+  refreshHealthInfo(false)
 })
 
 onBeforeUnmount(() => {
@@ -685,6 +716,10 @@ onBeforeUnmount(() => {
   color: #bbb;
 }
 
+:global(html.dark-reader) .app-version-text {
+  color: #7f766c;
+}
+
 :global(html.dark-reader) .app-brand-subtitle,
 :global(html.dark-reader) .app-nav-title {
   color: #7f766c;
@@ -721,6 +756,13 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.app-brand-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 12px;
+}
+
 .app-brand-mark {
   display: inline-grid;
   width: 0;
@@ -740,6 +782,24 @@ onBeforeUnmount(() => {
   font-weight: 800;
   line-height: 1.2;
   word-break: keep-all;
+}
+
+.app-version-text {
+  min-width: 0;
+  padding: 0;
+  color: #b5b5b5;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.app-version-text:hover {
+  color: #8f8f8f;
 }
 
 .app-brand-subtitle {

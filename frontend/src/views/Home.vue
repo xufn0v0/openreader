@@ -861,8 +861,8 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .book-group-wrapper {
-  width: auto;
-  max-width: none;
+  width: calc(100% - 48px);
+  max-width: calc(100% - 48px);
   margin-right: 24px;
   margin-left: 24px;
   padding: 5px 0;
@@ -1007,8 +1007,8 @@ function readError(err, fallback) {
   }
 
   .book-group-wrapper {
-    width: auto;
-    max-width: none;
+    width: calc(100% - 48px);
+    max-width: calc(100% - 48px);
     margin-right: 24px;
     margin-left: 24px;
     padding: 5px 0;
@@ -1082,8 +1082,8 @@ function readError(err, fallback) {
 @media (max-width: 520px) {
   .shelf-page.mobile-shelf .book-group-wrapper,
   .book-group-wrapper {
-    width: auto;
-    max-width: none;
+    width: calc(100% - 32px);
+    max-width: calc(100% - 32px);
     margin-right: 16px;
     margin-left: 16px;
     padding: 5px 0;

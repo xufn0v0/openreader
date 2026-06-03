@@ -15,11 +15,11 @@
           <BookCover :book="item" />
           <div class="result-main">
             <div class="result-title">
-              <h3>{{ item.title }}</h3>
+              <h3>{{ bookTitle(item) }}</h3>
               <el-tag size="small" effect="plain">{{ item.sourceName || group.sourceName }}</el-tag>
             </div>
             <p>{{ item.author || '未知作者' }}</p>
-            <p v-if="item.latestChapter" class="latest-chapter">{{ item.latestChapter }}</p>
+            <p v-if="latestChapter(item)" class="latest-chapter">{{ latestChapter(item) }}</p>
             <p class="result-intro">{{ item.intro || '暂无简介' }}</p>
           </div>
           <div class="result-actions" @click.stop>
@@ -39,6 +39,14 @@ defineProps({
 })
 
 defineEmits(['preview'])
+
+function bookTitle(item) {
+  return item?.title || item?.name || item?.bookName || '未命名书籍'
+}
+
+function latestChapter(item) {
+  return item?.latestChapter || item?.latestChapterTitle || item?.lastChapter || ''
+}
 </script>
 
 <style scoped>
