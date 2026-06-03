@@ -8,7 +8,9 @@ let socket
 let reconnectTimer
 let bookshelfRefreshTimer
 let replaceRulesUpdateTimer
+let rssUpdateTimer
 let bookshelfRefreshPending = { books: false, categories: false }
+let rssUpdatePending = { sources: false, articles: false, payload: null }
 let reconnectDelay = 1500
 let manualDisconnect = false
 const MAX_RECONNECT_DELAY = 15000
@@ -93,6 +95,9 @@ export function useSync() {
       if (message.type === 'replace_rules_update') {
         scheduleReplaceRulesUpdate(message.payload)
       }
+      if (message.type === 'rss_update') {
+        scheduleRSSUpdate(message.payload)
+      }
     })
   }
 
@@ -101,6 +106,7 @@ export function useSync() {
     clearReconnectTimer()
     clearBookshelfRefreshTimer()
     clearReplaceRulesUpdateTimer()
+    clearRSSUpdateTimer()
     socket?.close()
     socket = undefined
     connected.value = false
@@ -171,5 +177,26 @@ export function useSync() {
     if (!replaceRulesUpdateTimer) return
     window.clearTimeout(replaceRulesUpdateTimer)
     replaceRulesUpdateTimer = undefined
+  }
+
+  function scheduleRSSUpdate(detail = {}) {
+    const kind = detail?.kind || ''
+    rssUpdatePending.sources = rssUpdatePending.sources || kind.startsWith('source-')
+    rssUpdatePending.articles = rssUpdatePending.articles || kind.startsWith('article-') || kind === 'source-refresh' || kind === 'source-delete'
+    rssUpdatePending.payload = detail
+    if (rssUpdateTimer) return
+    rssUpdateTimer = window.setTimeout(() => {
+      rssUpdateTimer = undefined
+      const pending = rssUpdatePending
+      rssUpdatePending = { sources: false, articles: false, payload: null }
+      dispatchWindowEvent('openreader:rss-updated', pending)
+    }, 500)
+  }
+
+  function clearRSSUpdateTimer() {
+    if (!rssUpdateTimer) return
+    window.clearTimeout(rssUpdateTimer)
+    rssUpdateTimer = undefined
+    rssUpdatePending = { sources: false, articles: false, payload: null }
   }
 }

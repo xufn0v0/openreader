@@ -114,7 +114,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRSSSource, deleteRSSSource, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
 
@@ -144,12 +144,19 @@ const selectedArticle = ref(null)
 const articleFilter = ref('all')
 const articlePage = ref(1)
 const hasMoreArticles = ref(false)
+let rssReloadTimer
 
 const articleCountText = computed(() => `${articles.value.length} 篇${hasMoreArticles.value ? '+' : ''}`)
 
 onMounted(async () => {
+  window.addEventListener('openreader:rss-updated', handleRSSUpdated)
   await loadSources()
   await loadArticles()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('openreader:rss-updated', handleRSSUpdated)
+  clearRSSReloadTimer()
 })
 
 async function loadSources() {
@@ -167,6 +174,34 @@ async function loadSources() {
   } finally {
     sourcesLoading.value = false
   }
+}
+
+function handleRSSUpdated(event) {
+  const detail = event?.detail || {}
+  const article = detail.payload?.article
+  if (article?.id && selectedArticle.value?.id === article.id) {
+    selectedArticle.value = { ...selectedArticle.value, ...article }
+  }
+  scheduleRSSReload(detail)
+}
+
+function scheduleRSSReload(detail = {}) {
+  clearRSSReloadTimer()
+  rssReloadTimer = window.setTimeout(async () => {
+    rssReloadTimer = undefined
+    try {
+      if (detail.sources) await loadSources()
+      if (detail.articles) await loadArticles()
+    } catch {
+      // Keep the visible RSS state; the next manual refresh or sync event can recover.
+    }
+  }, 250)
+}
+
+function clearRSSReloadTimer() {
+  if (!rssReloadTimer) return
+  window.clearTimeout(rssReloadTimer)
+  rssReloadTimer = undefined
 }
 
 async function selectSource(sourceId) {

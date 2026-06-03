@@ -57,6 +57,7 @@ func (s *Server) createRSSSource(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create RSS source"})
 		return
 	}
+	s.broadcastRSSUpdate(userID, "source-create", gin.H{"sourceId": source.ID})
 	c.JSON(http.StatusCreated, source)
 }
 
@@ -92,6 +93,7 @@ func (s *Server) updateRSSSource(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update RSS source"})
 		return
 	}
+	s.broadcastRSSUpdate(userID, "source-update", gin.H{"sourceId": source.ID})
 	c.JSON(http.StatusOK, source)
 }
 
@@ -114,6 +116,7 @@ func (s *Server) deleteRSSSource(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "RSS source not found"})
 		return
 	}
+	s.broadcastRSSUpdate(userID, "source-delete", gin.H{"sourceId": sourceID})
 	c.Status(http.StatusNoContent)
 }
 
@@ -151,6 +154,11 @@ func (s *Server) refreshRSSSource(c *gin.Context) {
 			imported++
 		}
 	}
+	s.broadcastRSSUpdate(userID, "source-refresh", gin.H{
+		"sourceId": source.ID,
+		"imported": imported,
+		"total":    len(articles),
+	})
 	c.JSON(http.StatusOK, gin.H{"imported": imported, "total": len(articles)})
 }
 
@@ -234,7 +242,25 @@ func (s *Server) updateRSSArticleState(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update RSS article"})
 		return
 	}
+	s.broadcastRSSUpdate(userID, "article-update", gin.H{
+		"sourceId": article.SourceID,
+		"article":  article,
+	})
 	c.JSON(http.StatusOK, article)
+}
+
+func (s *Server) broadcastRSSUpdate(userID uint, kind string, payload gin.H) {
+	if s.hub == nil {
+		return
+	}
+	if payload == nil {
+		payload = gin.H{}
+	}
+	payload["kind"] = kind
+	_ = s.hub.Broadcast(userID, nil, gin.H{
+		"type":    "rss_update",
+		"payload": payload,
+	})
 }
 
 type parsedRSS struct {
