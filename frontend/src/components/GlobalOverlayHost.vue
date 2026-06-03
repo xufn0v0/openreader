@@ -717,6 +717,7 @@ const MINI_INTERFACE_MAX_WIDTH = 750
 const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 let replaceRulesRefreshTimer
 let bookmarkRefreshTimer
+let usersRefreshTimer
 
 const isMobileOverlay = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -773,14 +774,17 @@ onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
+  window.addEventListener('openreader:users-updated', handleUsersUpdated)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateWindowWidth)
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
+  window.removeEventListener('openreader:users-updated', handleUsersUpdated)
   clearReplaceRulesRefreshTimer()
   clearBookmarkRefreshTimer()
+  clearUsersRefreshTimer()
 })
 
 function updateWindowWidth() {
@@ -1820,6 +1824,25 @@ async function loadUsers() {
   } finally {
     usersLoading.value = false
   }
+}
+
+function handleUsersUpdated() {
+  if (!overlay.userManageVisible) return
+  scheduleUsersRefresh()
+}
+
+function scheduleUsersRefresh() {
+  clearUsersRefreshTimer()
+  usersRefreshTimer = window.setTimeout(async () => {
+    usersRefreshTimer = undefined
+    await loadUsers()
+  }, 250)
+}
+
+function clearUsersRefreshTimer() {
+  if (!usersRefreshTimer) return
+  window.clearTimeout(usersRefreshTimer)
+  usersRefreshTimer = undefined
 }
 
 function isUserDeletable(user) {
