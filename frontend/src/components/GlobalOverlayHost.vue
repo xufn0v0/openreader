@@ -631,6 +631,15 @@ import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
+import {
+  sourceCandidateAuthor,
+  sourceCandidateBookUrl,
+  sourceCandidateCover,
+  sourceCandidateIntro,
+  sourceCandidateKey,
+  sourceCandidateSourceId,
+  sourceCandidateTitle,
+} from '../utils/sourceCandidate'
 import BookInfoDialog from './BookInfoDialog.vue'
 import RSSManager from './RSSManager.vue'
 import WebDAVBrowser from './WebDAVBrowser.vue'
@@ -1164,9 +1173,9 @@ function changeGlobalSourceQuery(value) {
 }
 
 function mergeSourceCandidates(existing, incoming) {
-  const seen = new Set(existing.map(item => `${item.sourceId}-${item.bookUrl}`))
+  const seen = new Set(existing.map(item => sourceCandidateKey(item)))
   return existing.concat(incoming.filter(item => {
-    const key = `${item.sourceId}-${item.bookUrl}`
+    const key = sourceCandidateKey(item)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -1176,15 +1185,16 @@ function mergeSourceCandidates(existing, incoming) {
 async function changeGlobalBookSource(source) {
   const book = sourceSwitchBook.value
   if (!book?.id || source.current) return
-  sourceSwitchChanging.value = source.sourceId
+  const nextSourceId = sourceCandidateSourceId(source)
+  sourceSwitchChanging.value = nextSourceId
   try {
     const { data } = await changeBookSource(book.id, {
-      sourceId: source.sourceId,
-      bookUrl: source.bookUrl,
-      title: source.title,
-      author: source.author,
-      coverUrl: source.coverUrl,
-      intro: source.intro,
+      sourceId: nextSourceId,
+      bookUrl: sourceCandidateBookUrl(source),
+      title: sourceCandidateTitle(source, book.title),
+      author: sourceCandidateAuthor(source),
+      coverUrl: sourceCandidateCover(source),
+      intro: sourceCandidateIntro(source),
     })
     bookshelf.upsertBook(data)
     sourceSwitchBook.value = data

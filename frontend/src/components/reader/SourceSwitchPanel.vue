@@ -37,23 +37,24 @@
   <section v-if="book" class="current-source-card">
     <div>
       <strong>{{ currentSourceName || '当前来源' }}</strong>
-      <span>{{ book.title }}<template v-if="book.author"> · {{ book.author }}</template></span>
+      <span>{{ bookTitle(book) }}<template v-if="book.author"> · {{ book.author }}</template></span>
     </div>
     <el-tag size="small" effect="plain" type="success">当前</el-tag>
   </section>
   <div class="source-switch-list">
     <button
       v-for="source in sources"
-      :key="`${source.sourceId}-${source.bookUrl}`"
+      :key="sourceKey(source)"
       class="source-switch-card"
       :class="{ active: source.current }"
       type="button"
-      :disabled="source.current || changingSource === source.sourceId"
+      :disabled="source.current || changingSource === sourceId(source)"
       @click="$emit('change', source)"
     >
-      <strong>{{ source.title || book?.title }}</strong>
-      <span>{{ source.sourceName }} · {{ source.author || '未知作者' }}</span>
-      <small>{{ source.current ? '当前来源' : (changingSource === source.sourceId ? '切换中...' : '点击切换') }}</small>
+      <strong>{{ sourceTitle(source) }}</strong>
+      <span>{{ sourceName(source) }} · {{ sourceAuthor(source) || '未知作者' }}</span>
+      <span v-if="latestChapter(source)" class="source-latest">{{ latestChapter(source) }}</span>
+      <small>{{ source.current ? '当前来源' : (changingSource === sourceId(source) ? '切换中...' : '点击切换') }}</small>
     </button>
     <el-empty v-if="!loading && !sources.length" description="没有找到可用来源" />
   </div>
@@ -61,6 +62,13 @@
 
 <script setup>
 import { computed } from 'vue'
+import {
+  sourceCandidateAuthor,
+  sourceCandidateKey,
+  sourceCandidateSourceName,
+  sourceCandidateSourceId,
+  sourceCandidateTitle,
+} from '../../utils/sourceCandidate'
 
 const props = defineProps({
   book: {
@@ -122,6 +130,34 @@ const normalizedGroups = computed(() => props.groups.map((item) => {
     label: count > 0 ? `${item?.label || value} (${count})` : (item?.label || value),
   }
 }).filter(item => item.value))
+
+function bookTitle(book) {
+  return book?.title || book?.name || book?.bookName || '未命名书籍'
+}
+
+function sourceTitle(source) {
+  return sourceCandidateTitle(source, bookTitle(props.book))
+}
+
+function sourceAuthor(source) {
+  return sourceCandidateAuthor(source)
+}
+
+function sourceName(source) {
+  return sourceCandidateSourceName(source)
+}
+
+function sourceKey(source) {
+  return sourceCandidateKey(source)
+}
+
+function sourceId(source) {
+  return sourceCandidateSourceId(source)
+}
+
+function latestChapter(source) {
+  return source?.latestChapter || source?.latestChapterTitle || source?.lastChapter || ''
+}
 </script>
 
 <style scoped>
@@ -217,6 +253,10 @@ const normalizedGroups = computed(() => props.groups.map((item) => {
 .source-switch-card small {
   color: #7b715e;
   font-size: 12px;
+}
+
+.source-switch-card .source-latest {
+  color: #0f5451;
 }
 
 .source-switch-card strong,
