@@ -6,6 +6,7 @@ import { usePreferencesStore } from '../stores/preferences'
 const connected = ref(false)
 let socket
 let reconnectTimer
+let bookshelfRefreshTimer
 let reconnectDelay = 1500
 let manualDisconnect = false
 const MAX_RECONNECT_DELAY = 15000
@@ -49,7 +50,14 @@ export function useSync() {
         bookshelf.applyBookProgress(progress, { replace: true })
       }
       if (message.type === 'bookshelf_update') {
-        bookshelf.loadBooks({ force: true, all: true })
+        if (message.payload?.id) {
+          bookshelf.upsertBook(message.payload)
+        } else {
+          scheduleBookshelfRefresh()
+        }
+      }
+      if (message.type === 'bookshelf_delete') {
+        bookshelf.removeBookLocal(message.payload?.id)
       }
       if (message.type === 'settings_update' && message.payload?.key === 'reader') {
         reader.loadReaderSettings().catch(() => {})
@@ -67,6 +75,7 @@ export function useSync() {
   function disconnect() {
     manualDisconnect = true
     clearReconnectTimer()
+    clearBookshelfRefreshTimer()
     socket?.close()
     socket = undefined
     connected.value = false
@@ -94,5 +103,19 @@ export function useSync() {
     if (!reconnectTimer) return
     window.clearTimeout(reconnectTimer)
     reconnectTimer = undefined
+  }
+
+  function scheduleBookshelfRefresh() {
+    if (bookshelfRefreshTimer) return
+    bookshelfRefreshTimer = window.setTimeout(() => {
+      bookshelfRefreshTimer = undefined
+      bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
+    }, 500)
+  }
+
+  function clearBookshelfRefreshTimer() {
+    if (!bookshelfRefreshTimer) return
+    window.clearTimeout(bookshelfRefreshTimer)
+    bookshelfRefreshTimer = undefined
   }
 }

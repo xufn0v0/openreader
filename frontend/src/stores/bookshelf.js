@@ -156,6 +156,10 @@ export const useBookshelfStore = defineStore('bookshelf', {
       this.books = this.books.filter(book => book.id !== bookId)
       this.invalidateBooks()
     },
+    removeBookLocal(bookId) {
+      this.books = this.books.filter(book => Number(book.id) !== Number(bookId))
+      this.invalidateBooks()
+    },
     upsertBook(book) {
       if (!book?.id) return
       const index = this.books.findIndex(item => item.id === book.id)
