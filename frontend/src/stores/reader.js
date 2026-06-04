@@ -414,8 +414,8 @@ export const useReaderStore = defineStore('reader', {
     applyServerProgress(progress) {
       if (!progress?.bookId) return null
       const local = newestProgress(this.progressByBook[progress.bookId], readLocalChapterProgress(progress.bookId))
-      if (local?.pendingSync && progressUpdatedAt(local) > progressUpdatedAt(progress)) {
-        this.syncLocalProgress(local, local.baseUpdatedAt || progress.updatedAt || '').catch(() => {})
+      if (local?.bookId && progressUpdatedAt(local) > progressUpdatedAt(progress)) {
+        if (local.pendingSync) this.syncLocalProgress(local, local.baseUpdatedAt || progress.updatedAt || '').catch(() => {})
         return local
       }
       this.replaceProgress(progress)
@@ -442,14 +442,11 @@ export const useReaderStore = defineStore('reader', {
         mode: this.mode,
         baseUpdatedAt: optimistic.baseUpdatedAt,
       })
-      const { data } = response
-      const merged = data?.bookId ? {
-        ...data,
-        chapterPercent: Number.isFinite(Number(data.chapterPercent))
-          ? Number(data.chapterPercent)
-          : optimistic.chapterPercent,
-        chapterTitle: data.chapterTitle || optimistic.chapterTitle,
-      } : data
+      const merged = mergeProgressResponse(response.data, optimistic)
+      if (isProgressConflict(response) && shouldRetryProgressConflict(optimistic, merged)) {
+        const retried = await this.syncLocalProgress(optimistic, merged?.updatedAt || optimistic.baseUpdatedAt || '', { force: true })
+        if (retried?.bookId) return retried
+      }
       this.replaceProgress(merged)
       return merged
     },
@@ -481,7 +478,7 @@ export const useReaderStore = defineStore('reader', {
       if (local?.bookId && local.pendingSync) this.syncLocalProgress(local, local.baseUpdatedAt || data?.updatedAt)
       return local || data
     },
-    async syncLocalProgress(progress, baseUpdatedAt = '') {
+    async syncLocalProgress(progress, baseUpdatedAt = '', options = {}) {
       if (!progress?.bookId) return null
       try {
         const response = await api.put('/progress', {
@@ -495,14 +492,10 @@ export const useReaderStore = defineStore('reader', {
           mode: progress.mode || this.mode,
           baseUpdatedAt: baseUpdatedAt || progress.baseUpdatedAt || '',
         })
-        const { data } = response
-        const next = data?.bookId ? {
-          ...data,
-          chapterPercent: Number.isFinite(Number(data.chapterPercent))
-            ? Number(data.chapterPercent)
-            : progress.chapterPercent,
-          chapterTitle: data.chapterTitle || progress.chapterTitle,
-        } : data
+        const next = mergeProgressResponse(response.data, progress)
+        if (isProgressConflict(response) && shouldRetryProgressConflict(progress, next) && !options.force) {
+          return await this.syncLocalProgress(progress, next?.updatedAt || progress.baseUpdatedAt || '', { force: true })
+        }
         this.replaceProgress(next)
         return next
       } catch {
@@ -520,6 +513,42 @@ function clearLocalProgressFlags(progress) {
   if (!progress) return progress
   const { pendingSync, baseUpdatedAt, ...rest } = progress
   return rest
+}
+
+function mergeProgressResponse(data, fallback) {
+  if (!data?.bookId) return data
+  return {
+    ...data,
+    chapterPercent: Number.isFinite(Number(data.chapterPercent))
+      ? Number(data.chapterPercent)
+      : fallback?.chapterPercent,
+    chapterTitle: data.chapterTitle || fallback?.chapterTitle,
+  }
+}
+
+function isProgressConflict(response) {
+  return String(response?.headers?.['x-openreader-progress-conflict'] || '') === '1'
+}
+
+function shouldRetryProgressConflict(local, server) {
+  if (!local?.bookId || !server?.bookId) return false
+  if (Number(local.bookId) !== Number(server.bookId)) return false
+  if (progressUpdatedAt(local) <= progressUpdatedAt(server)) return false
+  return progressSaveFingerprint(local) !== progressSaveFingerprint(server)
+}
+
+function progressSaveFingerprint(progress) {
+  if (!progress) return ''
+  return [
+    Number(progress.bookId || 0),
+    Number(progress.chapterId || 0),
+    Number(progress.chapterIndex || 0),
+    Number(progress.offset || 0),
+    Math.round(Number(progress.percent || 0) * 100000),
+    Math.round(Number(progress.chapterPercent || 0) * 100000),
+    progress.chapterTitle || '',
+    progress.mode || '',
+  ].join(':')
 }
 
 function progressServerBaseUpdatedAt(progress) {
