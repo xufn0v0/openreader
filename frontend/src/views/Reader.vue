@@ -2049,7 +2049,16 @@ async function nextPage() {
 }
 
 function scrollStep() {
-  return Math.max(240, Math.floor(readableViewportSize().height * 0.9))
+  const viewportHeight = contentEl.value?.clientHeight || window.innerHeight || readableViewportSize().height
+  return Math.max(1, Math.floor(viewportHeight - scrollOffset()))
+}
+
+function scrollOffset() {
+  const fontSize = Number(reader.fontSize || 18)
+  return (
+    fontSize * Number(reader.lineHeight || 1.8) * 2 +
+    fontSize * Number(reader.paragraphSpace || 0) * 2
+  )
 }
 
 function readerScrollBehavior() {
@@ -2370,7 +2379,7 @@ function updateFlipLayout() {
     return
   }
   if (reader.mode === 'page') {
-    pageHeight.value = viewport.height
+    pageHeight.value = scrollStep()
     const scrollBottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 1)
     pageCount.value = Math.max(1, Math.ceil(contentEl.value.scrollHeight / pageHeight.value))
     page.value = Math.max(0, Math.min(pageCount.value - 1, Math.round((contentEl.value.scrollTop / scrollBottom) * Math.max(pageCount.value - 1, 0))))
