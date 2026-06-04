@@ -45,56 +45,58 @@
     </div>
 
     <main class="shelf-main" :class="`${effectiveShelfView}-view`">
-      <div v-if="bookshelf.loading" class="book-list app-panel">
-        <article v-for="i in 8" :key="i" class="book-row skeleton-row">
-          <el-skeleton :rows="2" animated />
-        </article>
-      </div>
-
-      <template v-else-if="displayedBooks.length">
-        <div class="book-list app-panel">
-          <article
-            v-for="book in displayedBooks"
-            :key="book.id"
-            class="book-row"
-            :class="{ editing: showBookEditButton }"
-            role="button"
-            tabindex="0"
-            @click="handleBookRowClick(book)"
-            @keyup.enter="handleBookRowClick(book)"
-          >
-            <span
-              class="list-cover"
-              :class="{ 'has-cover': hasBookCover(book) }"
-              :style="coverStyle(book)"
-              @click.stop="openDetail(book)"
-            >{{ coverInitial(book) }}</span>
-            <span class="list-main">
-              <span class="book-operation">
-                <button v-if="showBookEditButton" class="operation-icon danger" type="button" title="删除" @click.stop="deleteManagedBook(book)">
-                  <el-icon><Close /></el-icon>
-                </button>
-                <button v-if="showBookEditButton" class="operation-icon" type="button" title="编辑" @click.stop="goEditBook(book)">
-                  <el-icon><Edit /></el-icon>
-                </button>
-                <el-badge
-                  v-if="!showBookEditButton && unreadCount(book) > 0"
-                  class="unread-num-badge"
-                  :max="99"
-                  :value="unreadCount(book)"
-                />
-              </span>
-              <strong>{{ book.title }}</strong>
-              <small>{{ bookAuthorLine(book) }}</small>
-              <small v-if="readChapterTitle(book)">已读：{{ readChapterTitle(book) }}</small>
-              <small v-if="latestChapterTitle(book)">{{ latestChapterLabel(book) }}：{{ latestChapterTitle(book) }}</small>
-            </span>
+      <div class="books-wrapper">
+        <div v-if="bookshelf.loading" class="book-list app-panel">
+          <article v-for="i in 8" :key="i" class="book-row skeleton-row">
+            <el-skeleton :rows="2" animated />
           </article>
         </div>
-      </template>
 
-      <div v-else class="empty-panel app-panel">
-        <el-empty :description="emptyText" />
+        <template v-else-if="displayedBooks.length">
+          <div class="book-list app-panel">
+            <article
+              v-for="book in displayedBooks"
+              :key="book.id"
+              class="book-row"
+              :class="{ editing: showBookEditButton }"
+              role="button"
+              tabindex="0"
+              @click="handleBookRowClick(book)"
+              @keyup.enter="handleBookRowClick(book)"
+            >
+              <span
+                class="list-cover"
+                :class="{ 'has-cover': hasBookCover(book) }"
+                :style="coverStyle(book)"
+                @click.stop="openDetail(book)"
+              >{{ coverInitial(book) }}</span>
+              <span class="list-main">
+                <span class="book-operation">
+                  <button v-if="showBookEditButton" class="operation-icon danger" type="button" title="删除" @click.stop="deleteManagedBook(book)">
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button v-if="showBookEditButton" class="operation-icon" type="button" title="编辑" @click.stop="goEditBook(book)">
+                    <el-icon><Edit /></el-icon>
+                  </button>
+                  <el-badge
+                    v-if="!showBookEditButton && unreadCount(book) > 0"
+                    class="unread-num-badge"
+                    :max="99"
+                    :value="unreadCount(book)"
+                  />
+                </span>
+                <strong>{{ book.title }}</strong>
+                <small>{{ bookAuthorLine(book) }}</small>
+                <small v-if="readChapterTitle(book)">已读：{{ readChapterTitle(book) }}</small>
+                <small v-if="latestChapterTitle(book)">{{ latestChapterLabel(book) }}：{{ latestChapterTitle(book) }}</small>
+              </span>
+            </article>
+          </div>
+        </template>
+
+        <div v-else class="empty-panel app-panel">
+          <el-empty :description="emptyText" />
+        </div>
       </div>
     </main>
 
@@ -630,6 +632,12 @@ function readError(err, fallback) {
   box-shadow: none;
 }
 
+.books-wrapper {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .shelf-main.grid-view .book-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
@@ -802,6 +810,13 @@ function readError(err, fallback) {
   overflow-x: hidden;
 }
 
+.shelf-page.mobile-shelf .books-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 .shelf-page.mobile-shelf .shelf-title,
 .shelf-page.mobile-shelf .recent-strip,
 .shelf-page.mobile-shelf .book-group-wrapper,
@@ -817,16 +832,23 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .shelf-title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: space-between;
   min-width: 0;
   padding: 8px 10px;
   overflow: hidden;
 }
 
+.shelf-page.mobile-shelf .shelf-title-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .shelf-page.mobile-shelf .title-actions {
+  max-width: min(58vw, 220px);
+  flex: 0 1 auto;
   flex-wrap: nowrap;
   gap: 12px;
   overflow-x: auto;
@@ -946,6 +968,13 @@ function readError(err, fallback) {
     overflow-x: hidden;
   }
 
+  .books-wrapper {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
   .shelf-main.grid-view .book-list {
     display: block;
     padding: 0;
@@ -970,16 +999,23 @@ function readError(err, fallback) {
   }
 
   .shelf-title {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    display: flex;
     gap: 8px;
     align-items: center;
+    justify-content: space-between;
     min-width: 0;
     padding: 8px 10px;
     overflow: hidden;
   }
 
+  .shelf-title-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   .title-actions {
+    max-width: min(58vw, 220px);
+    flex: 0 1 auto;
     min-width: 0;
     flex-wrap: nowrap;
     gap: 12px;
