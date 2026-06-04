@@ -217,7 +217,7 @@
           {{ shelfLoading ? '刷新中...' : '刷新' }}
         </button>
       </div>
-      <el-input v-model="shelfKeyword" placeholder="搜索书名或作者..." clearable size="small" class="shelf-search" />
+      <el-input v-model="shelfKeyword" placeholder="搜索书名、作者或文件名..." clearable size="small" class="shelf-search" />
       <div ref="shelfListRef" v-loading="shelfLoading" class="reader-shelf-list">
         <button
           v-for="item in filteredShelfBooks"
@@ -481,6 +481,7 @@ import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
+import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
 import {
@@ -599,13 +600,20 @@ const SHOW_PREV_CHAPTER_SIZE = 1
 const SHOW_NEXT_CHAPTER_SIZE = 2
 
 const filteredShelfBooks = computed(() => {
-  const value = shelfKeyword.value.trim().toLowerCase()
+  const value = normalizeLocalBookSearch(shelfKeyword.value)
   const books = Array.isArray(bookshelf.books) ? bookshelf.books : []
   const values = value
-    ? books.filter(item => `${item.title || ''} ${item.author || ''}`.toLowerCase().includes(value))
+    ? books.filter(item => readerShelfSearchText(item).includes(value))
     : books
   return sortByShelfOrder(values, reader.progressByBook)
 })
+
+function readerShelfSearchText(item) {
+  return localBookSearchText(item, [
+    shelfChapterTitle(item),
+    shelfProgressLabel(item),
+  ])
+}
 const sourceGroups = computed(() => {
   const sourceRows = sourceGroupOptions.value.length ? sourceGroupOptions.value : sourceCandidates.value
   return buildSourceGroupOptions(sourceRows)
