@@ -620,10 +620,7 @@ const chapterParagraphs = computed(() => {
 })
 const lines = computed(() => chapterParagraphs.value.map(item => item.text))
 const chapterTextLength = computed(() => {
-  const paragraphs = chapterParagraphs.value
-  if (!paragraphs.length) return 0
-  const last = paragraphs[paragraphs.length - 1]
-  return last.pos + last.text.length
+  return chapterBlockTextLength({ paragraphs: chapterParagraphs.value })
 })
 const isVerticalPagedRead = computed(() => reader.mode === 'page')
 const isScrollRead = computed(() => reader.mode === 'scroll' || reader.mode === 'scroll2')
@@ -862,6 +859,13 @@ function makeChapterBlock(index, chapterRow, text) {
     content: String(text || ''),
     paragraphs: makeParagraphs(text, title),
   }
+}
+
+function chapterBlockTextLength(block) {
+  const paragraphs = Array.isArray(block?.paragraphs) ? block.paragraphs : []
+  if (!paragraphs.length) return 0
+  const last = paragraphs[paragraphs.length - 1]
+  return Number(last.pos || 0) + String(last.text || '').length
 }
 
 function resetContentSearchState() {
@@ -2367,6 +2371,8 @@ function currentChapterPercent() {
   if (reader.mode === 'flip') {
     return pageCount.value <= 1 ? 0 : page.value / (pageCount.value - 1)
   }
+  const snapshot = visibleChapterProgressSnapshot()
+  if (snapshot) return snapshot.chapterPercent
   const el = contentEl.value
   if (!el) return 0
   const textLength = Math.max(chapterTextLength.value, 1)
@@ -2382,10 +2388,14 @@ function currentOffset() {
   if (reader.mode === 'flip') {
     return Math.max(0, Math.floor(page.value || 0))
   }
+  const snapshot = visibleChapterProgressSnapshot()
+  if (snapshot) return snapshot.offset
   return currentChapterPosition()
 }
 
 function currentChapterPosition() {
+  const snapshot = visibleChapterProgressSnapshot()
+  if (snapshot) return snapshot.offset
   const el = contentEl.value
   if (!el) return 0
   const activeChapter = activeChapterElement()
@@ -2407,6 +2417,39 @@ function currentChapterPosition() {
   const scrollPercent = Math.max(0, Math.min(1, Number(el.scrollTop || 0) / bottom))
   if (scrollPercent > 0) return Math.round(scrollPercent * textLength)
   return 0
+}
+
+function visibleChapterProgressSnapshot() {
+  if (!contentEl.value || !contentBody.value) return null
+  const paragraph = currentVisibleParagraph()
+  if (!paragraph) return null
+  const chapterEl = paragraph.closest?.('.chapter-content')
+  const chapterIndex = Number(chapterEl?.dataset?.index)
+  if (!Number.isInteger(chapterIndex)) return null
+  const block = displayedChapterBlocks.value.find(item => item.index === chapterIndex)
+    || chapterBlocks.value.find(item => item.index === chapterIndex)
+    || (chapterIndex === currentIndex.value ? makeChapterBlock(currentIndex.value, chapter.value, content.value) : null)
+  const paragraphPos = Number(paragraph.dataset?.pos)
+  const offset = Number.isFinite(paragraphPos)
+    ? visibleParagraphOffset(paragraph, paragraphPos)
+    : 0
+  const textLength = Math.max(chapterBlockTextLength(block), 1)
+  return {
+    chapterIndex,
+    chapter: chapters.value[chapterIndex] || (block?.id ? { id: block.id, title: block.title, index: chapterIndex } : null),
+    offset,
+    chapterPercent: Math.max(0, Math.min(1, offset / textLength)),
+  }
+}
+
+function visibleParagraphOffset(paragraph, paragraphPos) {
+  const viewport = contentEl.value?.getBoundingClientRect()
+  if (!viewport) return Math.max(0, Math.round(paragraphPos))
+  const rect = paragraph.getBoundingClientRect()
+  const anchorY = viewport.top + Math.min(viewport.height * 0.32, 180)
+  const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (anchorY - rect.top) / rect.height)) : 0
+  const extra = Math.round((paragraph.textContent?.length || 0) * ratio)
+  return Math.max(0, Math.round(paragraphPos + extra))
 }
 
 function currentVisibleParagraph() {
@@ -2436,12 +2479,12 @@ function activeChapterElement() {
 
 function updateCurrentChapterFromScroll() {
   if (!isContinuousScrollRead.value) return
-  const chapterEl = activeChapterElement()
-  const nextIndex = Number(chapterEl?.dataset?.index)
+  const snapshot = visibleChapterProgressSnapshot()
+  const nextIndex = Number(snapshot?.chapterIndex)
   if (!Number.isInteger(nextIndex) || nextIndex === currentIndex.value) return
   const block = chapterBlocks.value.find(item => item.index === nextIndex)
   currentIndex.value = nextIndex
-  chapter.value = chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
+  chapter.value = snapshot?.chapter || chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
   content.value = block?.content || content.value
 }
 
@@ -2644,14 +2687,19 @@ async function flushProgressQueue(force = false) {
 }
 
 function currentProgressPayload() {
+  const snapshot = visibleChapterProgressSnapshot()
+  const progressChapter = snapshot?.chapter || chapter.value
+  const progressChapterIndex = Number.isInteger(snapshot?.chapterIndex) ? snapshot.chapterIndex : currentIndex.value
+  const progressChapterPercent = snapshot ? snapshot.chapterPercent : currentChapterPercent()
+  const progressTotal = Math.max(chapters.value.length, 1)
   return {
     bookId: bookId.value,
-    chapterId: chapter.value?.id,
-    chapterIndex: currentIndex.value,
-    offset: currentOffset(),
-    percent: bookProgress.value,
-    chapterPercent: currentChapterPercent(),
-    chapterTitle: chapter.value?.title || '',
+    chapterId: progressChapter?.id,
+    chapterIndex: progressChapterIndex,
+    offset: snapshot ? snapshot.offset : currentOffset(),
+    percent: Math.min(1, Math.max(0, (progressChapterIndex + progressChapterPercent) / progressTotal)),
+    chapterPercent: progressChapterPercent,
+    chapterTitle: progressChapter?.title || '',
   }
 }
 
