@@ -373,6 +373,9 @@ function readError(err, fallback) {
 
 .shelf-page {
   background: #fff;
+  min-height: 100vh;
+  padding: 48px;
+  box-sizing: border-box;
 }
 
 .shelf-title {
@@ -627,20 +630,20 @@ function readError(err, fallback) {
 
 .shelf-main.grid-view .book-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
-  justify-content: stretch;
-  gap: 42px 56px;
-  padding: 22px 0;
+  grid-template-columns: repeat(auto-fill, 380px);
+  justify-content: space-around;
+  gap: 10px;
+  padding: 18px 0;
   overflow: visible;
 }
 
 .shelf-main.grid-view .book-row {
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 18px;
-  width: 100%;
-  min-height: 136px;
+  gap: 20px;
+  width: 360px;
+  min-height: 160px;
   align-items: start;
-  padding: 0 10px;
+  padding: 24px;
   border-bottom: 0;
 }
 
@@ -820,11 +823,11 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .shelf-title {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 20px 24px 0;
   overflow: hidden;
 }
 
@@ -833,12 +836,16 @@ function readError(err, fallback) {
   min-width: 0;
 }
 
+.shelf-page.mobile-shelf .shelf-title strong {
+  font-size: clamp(24px, 6vw, 30px);
+}
+
 .shelf-page.mobile-shelf .title-actions {
-  max-width: min(58vw, 220px);
-  flex: 0 1 auto;
+  max-width: none;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
-  gap: 12px;
-  overflow-x: auto;
+  gap: 14px;
+  overflow: visible;
   scrollbar-width: none;
 }
 
@@ -848,6 +855,9 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .title-actions button {
   flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 28px;
+  white-space: nowrap;
 }
 
 .shelf-page.mobile-shelf .title-actions .view-switch {
@@ -881,7 +891,7 @@ function readError(err, fallback) {
   display: grid;
   grid-template-columns: 84px minmax(0, 1fr);
   min-height: 132px;
-  align-items: center;
+  align-items: start;
   gap: 20px;
   width: 100%;
   box-sizing: border-box;
@@ -909,8 +919,8 @@ function readError(err, fallback) {
   width: auto;
   min-height: 112px;
   box-sizing: border-box;
-  justify-content: space-between;
-  gap: 4px;
+  justify-content: start;
+  gap: 6px;
   overflow: hidden;
 }
 
@@ -986,11 +996,11 @@ function readError(err, fallback) {
 
   .shelf-title {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     align-items: center;
     justify-content: space-between;
     min-width: 0;
-    padding: 8px 10px;
+    padding: 20px 24px 0;
     overflow: hidden;
   }
 
@@ -999,13 +1009,17 @@ function readError(err, fallback) {
     min-width: 0;
   }
 
+  .shelf-title strong {
+    font-size: clamp(24px, 6vw, 30px);
+  }
+
   .title-actions {
-    max-width: min(58vw, 220px);
-    flex: 0 1 auto;
+    max-width: none;
+    flex: 0 0 auto;
     min-width: 0;
     flex-wrap: nowrap;
-    gap: 12px;
-    overflow-x: auto;
+    gap: 14px;
+    overflow: visible;
     scrollbar-width: none;
   }
 
@@ -1020,7 +1034,8 @@ function readError(err, fallback) {
   .title-actions button {
     flex: 0 0 auto;
     min-width: 0;
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 28px;
     white-space: nowrap;
   }
 
@@ -1040,7 +1055,7 @@ function readError(err, fallback) {
     display: grid;
     grid-template-columns: 84px minmax(0, 1fr);
     min-height: 132px;
-    align-items: center;
+    align-items: start;
     gap: 20px;
     width: 100%;
     box-sizing: border-box;
@@ -1069,7 +1084,8 @@ function readError(err, fallback) {
     max-width: 100%;
     min-height: 112px;
     box-sizing: border-box;
-    justify-content: space-between;
+    justify-content: start;
+    gap: 6px;
     padding-right: 0;
     overflow: hidden;
   }
@@ -1121,12 +1137,22 @@ function readError(err, fallback) {
 
   .shelf-page.mobile-shelf .shelf-title,
   .shelf-title {
-    padding: 8px;
+    padding: 20px 16px 0;
   }
 
   .shelf-page.mobile-shelf .shelf-title strong,
   .shelf-title strong {
-    font-size: 15px;
+    font-size: clamp(22px, 7vw, 28px);
+  }
+
+  .shelf-page.mobile-shelf .title-actions,
+  .title-actions {
+    gap: 10px;
+  }
+
+  .shelf-page.mobile-shelf .title-actions button,
+  .title-actions button {
+    font-size: 13px;
   }
 
   .shelf-page.mobile-shelf .book-row,
