@@ -143,7 +143,16 @@ import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
 import { newestBookProgress } from '../utils/bookOrder'
+import { isLocalBook, localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
+import {
+  remoteBookCreatePayload,
+  remoteBookKey,
+  remoteBookSourceId,
+  remoteBookSourceName,
+  remoteBookTitle,
+  remoteBookUrl,
+} from '../utils/remoteBookResult'
 
 const route = useRoute()
 const router = useRouter()
@@ -176,11 +185,11 @@ const allSelected = computed(() => enabledSources.value.length > 0 && selectedId
 const groupedResults = computed(() => {
   const groups = new Map()
   for (const item of results.value) {
-    const key = item.sourceId || item.sourceName || 'unknown'
+    const key = remoteBookSourceId(item) || remoteBookSourceName(item) || 'unknown'
     if (!groups.has(key)) {
       groups.set(key, {
         sourceId: key,
-        sourceName: item.sourceName || '未知书源',
+        sourceName: remoteBookSourceName(item),
         items: [],
       })
     }
@@ -199,7 +208,7 @@ const sourceGroups = computed(() => {
 })
 
 const localImportableCount = computed(() => localItems.value.filter(item => item.importable).length)
-const localShelfBooks = computed(() => (bookshelf.books || []).filter(isLocalShelfBook))
+const localShelfBooks = computed(() => (bookshelf.books || []).filter(isLocalBook))
 const shownLocalResults = computed(() => {
   if (!searched.value || searchMode.value !== 'local') return []
   const value = normalizeLocalSearch(keyword.value)
@@ -241,6 +250,9 @@ watch(searchType, () => {
   saveSearchPreference()
 })
 watch([selectedGroup, singleSourceId, concurrentCount], saveSearchPreference)
+watch(localRecursiveScan, () => {
+  if (searchMode.value === 'local') searchLocalBooks()
+})
 watch(() => route.query.mode, (mode) => {
   const nextMode = mode === 'local' ? 'local' : 'remote'
   if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
@@ -474,27 +486,10 @@ function localResultKey(item) {
 }
 
 function localShelfSearchText(book) {
-  return normalizeLocalSearch([
-    book.title,
-    book.author,
-    book.lastChapter,
-    book.latestChapter,
-    book.latestChapterTitle,
-    book.originalFile,
-    book.libraryPath,
-    book.tocFile,
-    book.sourceFile,
-    book.url,
+  return localBookSearchText(book, [
     localBookSubline({ book }),
     localBookMeta({ book }),
-  ].filter(Boolean).join(' '))
-}
-
-function isLocalShelfBook(book) {
-  if (!book) return false
-  if (Number(book.sourceId || 0) === 0) return true
-  if (String(book.url || '').startsWith('local://')) return true
-  return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
+  ])
 }
 
 function localFileSearchText(item) {
@@ -507,9 +502,7 @@ function localFileSearchText(item) {
 }
 
 function normalizeLocalSearch(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[\s·•._\-—–:：，,。.!！?？()[\]【】《》"'“”‘’/\\]+/g, '')
+  return normalizeLocalBookSearch(value)
 }
 
 function fileExtension(value) {
@@ -546,28 +539,20 @@ function formatSize(bytes) {
 }
 
 async function addRemoteBook(item, shouldRead) {
-  addingBook.value = item.bookUrl
+  const key = remoteBookKey(item)
+  addingBook.value = key
   try {
-    const payload = {
-      title: item.title,
-      author: item.author,
-      coverUrl: item.coverUrl,
-      intro: item.intro,
-      bookUrl: item.bookUrl,
-      sourceId: item.sourceId,
-      sourceName: item.sourceName,
-      categoryId: targetCategoryId.value ? Number(targetCategoryId.value) : null,
-    }
+    const payload = remoteBookCreatePayload(item, targetCategoryId.value)
     const { data } = await createRemoteBook(payload)
     bookshelf.upsertBook(data)
-    ElMessage.success(`已加入书架：《${item.title}》`)
+    ElMessage.success(`已加入书架：《${remoteBookTitle(item)}》`)
     if (shouldRead) {
       overlay.closeBookInfo()
       router.push({ name: 'reader', params: { id: data.id } })
       return
     }
     overlay.openBookInfo(data, {
-      sourceName: item.sourceName,
+      sourceName: remoteBookSourceName(item),
       statusLabel: '已加入书架',
       statusType: 'success',
       progress: 0,
@@ -586,26 +571,26 @@ async function addRemoteBook(item, shouldRead) {
 function openPreview(item) {
   const existing = findExistingBook(item)
   overlay.openBookInfo(item, {
-    sourceName: item.sourceName,
+    sourceName: remoteBookSourceName(item),
     statusLabel: existing ? '已在书架' : '搜索结果',
     statusType: existing ? 'warning' : 'success',
     progress: readerProgressForBook(existing)?.percent || 0,
     actions: existing
       ? [
-          { label: '查看详情', plain: true, handler: () => openExistingInfo(existing, item.sourceName) },
+          { label: '查看详情', plain: true, handler: () => openExistingInfo(existing, remoteBookSourceName(item)) },
           { label: '继续阅读', type: 'primary', handler: () => openExistingReader(existing) },
         ]
       : [
-          { label: '加入书架', plain: true, loading: addingBook.value === item.bookUrl, handler: () => addRemoteBook(item, false) },
-          { label: '加入并阅读', type: 'primary', loading: addingBook.value === item.bookUrl, handler: () => addRemoteBook(item, true) },
+          { label: '加入书架', plain: true, loading: addingBook.value === remoteBookKey(item), handler: () => addRemoteBook(item, false) },
+          { label: '加入并阅读', type: 'primary', loading: addingBook.value === remoteBookKey(item), handler: () => addRemoteBook(item, true) },
         ],
   })
 }
 
 function findExistingBook(item) {
   return bookshelf.books.find(book => (
-    Number(book.sourceId || 0) === Number(item.sourceId || 0)
-    && String(book.url || book.bookUrl || '') === String(item.bookUrl || '')
+    Number(book.sourceId || 0) === Number(remoteBookSourceId(item) || 0)
+    && String(book.url || book.bookUrl || '') === String(remoteBookUrl(item) || '')
   )) || null
 }
 

@@ -25,7 +25,10 @@ export const useReaderStore = defineStore('reader', {
     chineseFont: '简体',
     fontSize: 18,
     fontWeight: 400,
+    fontColor: '',
     theme: 'parchment',
+    customBodyColor: '',
+    customPopupColor: '',
     customBgColor: '',
     customBgImage: '',
     customBgImageList: [],
@@ -41,7 +44,7 @@ export const useReaderStore = defineStore('reader', {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 9,
+    settingsVersion: 11,
     settingsUpdatedAt: '',
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
@@ -59,7 +62,7 @@ export const useReaderStore = defineStore('reader', {
         return {
           label: '自定义',
           bg: state.customBgColor || '#f4e9bd',
-          text: '#24282c',
+          text: state.fontColor || '#24282c',
         }
       }
       return themePresets[state.theme] || themePresets.parchment
@@ -135,6 +138,9 @@ export const useReaderStore = defineStore('reader', {
           mode: this.mode,
           fontSize: this.fontSize,
           theme: this.theme,
+          customBodyColor: this.customBodyColor,
+          customPopupColor: this.customPopupColor,
+          fontColor: this.fontColor,
           clickMethod: this.clickMethod,
           selectionAction: this.selectionAction,
         }
@@ -144,6 +150,7 @@ export const useReaderStore = defineStore('reader', {
         this.mode = 'flip'
         this.fontSize = Math.min(this.fontSize, 20)
         this.theme = 'white'
+        this.fontColor = ''
         this.clickMethod = 'none'
         this.selectionAction = '忽略'
       } else {
@@ -154,6 +161,9 @@ export const useReaderStore = defineStore('reader', {
         if (['scroll', 'scroll2', 'flip', 'page'].includes(snapshot.mode)) this.mode = snapshot.mode
         if (snapshot.fontSize !== undefined) this.fontSize = clampNumber(snapshot.fontSize, 8, 36, 18)
         if (typeof snapshot.theme === 'string') this.theme = snapshot.theme
+        if (typeof snapshot.customBodyColor === 'string') this.customBodyColor = snapshot.customBodyColor
+        if (typeof snapshot.customPopupColor === 'string') this.customPopupColor = snapshot.customPopupColor
+        if (typeof snapshot.fontColor === 'string') this.fontColor = snapshot.fontColor
         if (['next', 'auto', 'none'].includes(snapshot.clickMethod)) this.clickMethod = snapshot.clickMethod
         if (['操作弹窗', '忽略'].includes(snapshot.selectionAction)) this.selectionAction = snapshot.selectionAction
         this.normalModeSnapshot = null
@@ -202,8 +212,20 @@ export const useReaderStore = defineStore('reader', {
       this.fontWeight = clampNumber(fontWeight, 300, 900, 400)
       this.markSettingsDirty()
     },
+    setFontColor(fontColor) {
+      this.fontColor = typeof fontColor === 'string' ? fontColor : ''
+      this.markSettingsDirty()
+    },
     setTheme(theme) {
       this.theme = theme
+      this.markSettingsDirty()
+    },
+    setCustomBodyColor(color) {
+      this.customBodyColor = typeof color === 'string' ? color : ''
+      this.markSettingsDirty()
+    },
+    setCustomPopupColor(color) {
+      this.customPopupColor = typeof color === 'string' ? color : ''
       this.markSettingsDirty()
     },
     setCustomBgColor(color) {
@@ -298,6 +320,9 @@ export const useReaderStore = defineStore('reader', {
       this.autoTheme = this.autoTheme === true
       this.fontSize = clampNumber(this.fontSize, 8, 36, 18)
       this.fontWeight = clampNumber(this.fontWeight, 300, 900, 400)
+      if (typeof this.fontColor !== 'string') this.fontColor = ''
+      if (typeof this.customBodyColor !== 'string') this.customBodyColor = ''
+      if (typeof this.customPopupColor !== 'string') this.customPopupColor = ''
       this.lineHeight = clampNumber(this.lineHeight, 1, 5, 1.8)
       this.paragraphSpace = clampNumber(this.paragraphSpace, 0, 3, 0)
       this.columnWidth = clampNumber(this.columnWidth, 320, 1200, 800)
@@ -319,7 +344,7 @@ export const useReaderStore = defineStore('reader', {
         this.paragraphSpace = 0.2
         this.columnWidth = 800
       }
-      this.settingsVersion = 9
+      this.settingsVersion = 11
       this.settingsSyncing = false
     },
     markSettingsDirty(options = {}) {
@@ -414,8 +439,8 @@ export const useReaderStore = defineStore('reader', {
     applyServerProgress(progress) {
       if (!progress?.bookId) return null
       const local = newestProgress(this.progressByBook[progress.bookId], readLocalChapterProgress(progress.bookId))
-      if (local?.pendingSync && progressUpdatedAt(local) > progressUpdatedAt(progress)) {
-        this.syncLocalProgress(local, local.baseUpdatedAt || progress.updatedAt || '').catch(() => {})
+      if (local?.bookId && progressUpdatedAt(local) > progressUpdatedAt(progress)) {
+        if (local.pendingSync) this.syncLocalProgress(local, local.baseUpdatedAt || progress.updatedAt || '').catch(() => {})
         return local
       }
       this.replaceProgress(progress)
@@ -442,14 +467,11 @@ export const useReaderStore = defineStore('reader', {
         mode: this.mode,
         baseUpdatedAt: optimistic.baseUpdatedAt,
       })
-      const { data } = response
-      const merged = data?.bookId ? {
-        ...data,
-        chapterPercent: Number.isFinite(Number(data.chapterPercent))
-          ? Number(data.chapterPercent)
-          : optimistic.chapterPercent,
-        chapterTitle: data.chapterTitle || optimistic.chapterTitle,
-      } : data
+      const merged = mergeProgressResponse(response.data, optimistic)
+      if (isProgressConflict(response) && shouldRetryProgressConflict(optimistic, merged)) {
+        const retried = await this.syncLocalProgress(optimistic, merged?.updatedAt || optimistic.baseUpdatedAt || '', { force: true })
+        if (retried?.bookId) return retried
+      }
       this.replaceProgress(merged)
       return merged
     },
@@ -481,7 +503,7 @@ export const useReaderStore = defineStore('reader', {
       if (local?.bookId && local.pendingSync) this.syncLocalProgress(local, local.baseUpdatedAt || data?.updatedAt)
       return local || data
     },
-    async syncLocalProgress(progress, baseUpdatedAt = '') {
+    async syncLocalProgress(progress, baseUpdatedAt = '', options = {}) {
       if (!progress?.bookId) return null
       try {
         const response = await api.put('/progress', {
@@ -495,14 +517,10 @@ export const useReaderStore = defineStore('reader', {
           mode: progress.mode || this.mode,
           baseUpdatedAt: baseUpdatedAt || progress.baseUpdatedAt || '',
         })
-        const { data } = response
-        const next = data?.bookId ? {
-          ...data,
-          chapterPercent: Number.isFinite(Number(data.chapterPercent))
-            ? Number(data.chapterPercent)
-            : progress.chapterPercent,
-          chapterTitle: data.chapterTitle || progress.chapterTitle,
-        } : data
+        const next = mergeProgressResponse(response.data, progress)
+        if (isProgressConflict(response) && shouldRetryProgressConflict(progress, next) && !options.force) {
+          return await this.syncLocalProgress(progress, next?.updatedAt || progress.baseUpdatedAt || '', { force: true })
+        }
         this.replaceProgress(next)
         return next
       } catch {
@@ -520,6 +538,42 @@ function clearLocalProgressFlags(progress) {
   if (!progress) return progress
   const { pendingSync, baseUpdatedAt, ...rest } = progress
   return rest
+}
+
+function mergeProgressResponse(data, fallback) {
+  if (!data?.bookId) return data
+  return {
+    ...data,
+    chapterPercent: Number.isFinite(Number(data.chapterPercent))
+      ? Number(data.chapterPercent)
+      : fallback?.chapterPercent,
+    chapterTitle: data.chapterTitle || fallback?.chapterTitle,
+  }
+}
+
+function isProgressConflict(response) {
+  return String(response?.headers?.['x-openreader-progress-conflict'] || '') === '1'
+}
+
+function shouldRetryProgressConflict(local, server) {
+  if (!local?.bookId || !server?.bookId) return false
+  if (Number(local.bookId) !== Number(server.bookId)) return false
+  if (progressUpdatedAt(local) <= progressUpdatedAt(server)) return false
+  return progressSaveFingerprint(local) !== progressSaveFingerprint(server)
+}
+
+function progressSaveFingerprint(progress) {
+  if (!progress) return ''
+  return [
+    Number(progress.bookId || 0),
+    Number(progress.chapterId || 0),
+    Number(progress.chapterIndex || 0),
+    Number(progress.offset || 0),
+    Math.round(Number(progress.percent || 0) * 100000),
+    Math.round(Number(progress.chapterPercent || 0) * 100000),
+    progress.chapterTitle || '',
+    progress.mode || '',
+  ].join(':')
 }
 
 function progressServerBaseUpdatedAt(progress) {
@@ -603,7 +657,10 @@ function readerSettingsPayload(state) {
     chineseFont: state.chineseFont,
     fontSize: state.fontSize,
     fontWeight: state.fontWeight,
+    fontColor: state.fontColor || '',
     theme: state.theme,
+    customBodyColor: state.customBodyColor || '',
+    customPopupColor: state.customPopupColor || '',
     customBgColor: state.customBgColor,
     customBgImage: state.customBgImage,
     customBgImageList: Array.isArray(state.customBgImageList) ? state.customBgImageList : [],
@@ -622,7 +679,7 @@ function readerSettingsPayload(state) {
     lineHeight: state.lineHeight,
     paragraphSpace: state.paragraphSpace,
     columnWidth: state.columnWidth,
-    settingsVersion: 9,
+    settingsVersion: 11,
   }
 }
 
@@ -637,7 +694,10 @@ function defaultReaderSettings() {
     chineseFont: '简体',
     fontSize: 18,
     fontWeight: 400,
+    fontColor: '',
     theme: 'parchment',
+    customBodyColor: '',
+    customPopupColor: '',
     customBgColor: '',
     customBgImage: '',
     customBgImageList: [],
@@ -656,7 +716,7 @@ function defaultReaderSettings() {
     lineHeight: 1.8,
     paragraphSpace: 0.2,
     columnWidth: 800,
-    settingsVersion: 9,
+    settingsVersion: 11,
     normalModeSnapshot: null,
   }
 }
@@ -673,6 +733,8 @@ function sanitizeReaderSettings(payload, options = {}) {
   settings.customFontsMap = sanitizeCustomFontsMap(payload.customFontsMap)
   settings.chineseFont = payload.chineseFont === '繁体' ? '繁体' : '简体'
   if (typeof payload.theme === 'string') settings.theme = payload.theme
+  settings.customBodyColor = typeof payload.customBodyColor === 'string' ? payload.customBodyColor : ''
+  settings.customPopupColor = typeof payload.customPopupColor === 'string' ? payload.customPopupColor : ''
   if (typeof payload.customBgColor === 'string') settings.customBgColor = payload.customBgColor
   if (typeof payload.customBgImage === 'string') settings.customBgImage = payload.customBgImage
   settings.customBgImageList = sanitizeStringList(payload.customBgImageList)
@@ -684,6 +746,7 @@ function sanitizeReaderSettings(payload, options = {}) {
   if (typeof payload.ttsVoiceURI === 'string') settings.ttsVoiceURI = payload.ttsVoiceURI
   settings.fontSize = clampNumber(payload.fontSize, 8, 36, 18)
   settings.fontWeight = clampNumber(payload.fontWeight, 300, 900, 400)
+  settings.fontColor = typeof payload.fontColor === 'string' ? payload.fontColor : ''
   settings.brightness = clampNumber(payload.brightness, 50, 150, 100)
   settings.autoReadingMethod = payload.autoReadingMethod === '段落滚动' ? '段落滚动' : '像素滚动'
   settings.autoReadingPixel = clampNumber(payload.autoReadingPixel ?? payload.autoReadSpeed, 1, 80, 12)
@@ -695,7 +758,7 @@ function sanitizeReaderSettings(payload, options = {}) {
   settings.lineHeight = clampNumber(payload.lineHeight, 1, 5, 1.8)
   settings.paragraphSpace = clampNumber(payload.paragraphSpace, 0, 3, 0.2)
   settings.columnWidth = clampNumber(payload.columnWidth, 320, 1200, 800)
-  settings.settingsVersion = 9
+  settings.settingsVersion = 11
   return settings
 }
 
@@ -739,7 +802,10 @@ function defaultCustomConfigList() {
       chineseFont: '简体',
       fontSize: 18,
       fontWeight: 400,
+      fontColor: '',
       theme: 'parchment',
+      customBodyColor: '',
+      customPopupColor: '',
       customBgColor: '',
       customBgImage: '',
       customBgImageList: [],
@@ -757,7 +823,7 @@ function defaultCustomConfigList() {
       lineHeight: 1.8,
       paragraphSpace: 0.2,
       columnWidth: 800,
-      settingsVersion: 9,
+      settingsVersion: 11,
       name: '内置白天',
       configDefaultType: '白天默认',
       builtin: true,
@@ -772,7 +838,10 @@ function defaultCustomConfigList() {
       chineseFont: '简体',
       fontSize: 18,
       fontWeight: 400,
+      fontColor: '',
       theme: 'dark',
+      customBodyColor: '',
+      customPopupColor: '',
       customBgColor: '',
       customBgImage: '',
       customBgImageList: [],
@@ -790,7 +859,7 @@ function defaultCustomConfigList() {
       lineHeight: 1.8,
       paragraphSpace: 0.2,
       columnWidth: 800,
-      settingsVersion: 9,
+      settingsVersion: 11,
       name: '内置黑夜',
       configDefaultType: '黑夜默认',
       builtin: true,

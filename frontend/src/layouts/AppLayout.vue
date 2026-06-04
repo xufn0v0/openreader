@@ -1056,11 +1056,11 @@ onBeforeUnmount(() => {
 }
 
 .app-shell.mobile-shell .app-workspace {
-  width: 100vw;
-  width: 100dvw;
-  max-width: 100vw;
-  max-width: 100dvw;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding-left: 0;
+  overflow-x: hidden;
 }
 
 .app-shell.mobile-shell .app-content {

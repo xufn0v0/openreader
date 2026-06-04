@@ -45,56 +45,58 @@
     </div>
 
     <main class="shelf-main" :class="`${effectiveShelfView}-view`">
-      <div v-if="bookshelf.loading" class="book-list app-panel">
-        <article v-for="i in 8" :key="i" class="book-row skeleton-row">
-          <el-skeleton :rows="2" animated />
-        </article>
-      </div>
-
-      <template v-else-if="displayedBooks.length">
-        <div class="book-list app-panel">
-          <article
-            v-for="book in displayedBooks"
-            :key="book.id"
-            class="book-row"
-            :class="{ editing: showBookEditButton }"
-            role="button"
-            tabindex="0"
-            @click="handleBookRowClick(book)"
-            @keyup.enter="handleBookRowClick(book)"
-          >
-            <span
-              class="list-cover"
-              :class="{ 'has-cover': hasBookCover(book) }"
-              :style="coverStyle(book)"
-              @click.stop="openDetail(book)"
-            >{{ coverInitial(book) }}</span>
-            <span class="list-main">
-              <span class="book-operation">
-                <button v-if="showBookEditButton" class="operation-icon danger" type="button" title="删除" @click.stop="deleteManagedBook(book)">
-                  <el-icon><Close /></el-icon>
-                </button>
-                <button v-if="showBookEditButton" class="operation-icon" type="button" title="编辑" @click.stop="goEditBook(book)">
-                  <el-icon><Edit /></el-icon>
-                </button>
-                <el-badge
-                  v-if="!showBookEditButton && unreadCount(book) > 0"
-                  class="unread-num-badge"
-                  :max="99"
-                  :value="unreadCount(book)"
-                />
-              </span>
-              <strong>{{ book.title }}</strong>
-              <small>{{ bookAuthorLine(book) }}</small>
-              <small v-if="readChapterTitle(book)">已读：{{ readChapterTitle(book) }}</small>
-              <small v-if="latestChapterTitle(book)">{{ latestChapterLabel(book) }}：{{ latestChapterTitle(book) }}</small>
-            </span>
+      <div class="books-wrapper">
+        <div v-if="bookshelf.loading" class="book-list app-panel">
+          <article v-for="i in 8" :key="i" class="book-row skeleton-row">
+            <el-skeleton :rows="2" animated />
           </article>
         </div>
-      </template>
 
-      <div v-else class="empty-panel app-panel">
-        <el-empty :description="emptyText" />
+        <template v-else-if="displayedBooks.length">
+          <div class="book-list app-panel">
+            <article
+              v-for="book in displayedBooks"
+              :key="book.id"
+              class="book-row"
+              :class="{ editing: showBookEditButton }"
+              role="button"
+              tabindex="0"
+              @click="handleBookRowClick(book)"
+              @keyup.enter="handleBookRowClick(book)"
+            >
+              <span
+                class="list-cover"
+                :class="{ 'has-cover': hasBookCover(book) }"
+                :style="coverStyle(book)"
+                @click.stop="openDetail(book)"
+              >{{ coverInitial(book) }}</span>
+              <span class="list-main">
+                <span class="book-operation">
+                  <button v-if="showBookEditButton" class="operation-icon danger" type="button" title="删除" @click.stop="deleteManagedBook(book)">
+                    <el-icon><Close /></el-icon>
+                  </button>
+                  <button v-if="showBookEditButton" class="operation-icon" type="button" title="编辑" @click.stop="goEditBook(book)">
+                    <el-icon><Edit /></el-icon>
+                  </button>
+                  <el-badge
+                    v-if="!showBookEditButton && unreadCount(book) > 0"
+                    class="unread-num-badge"
+                    :max="99"
+                    :value="unreadCount(book)"
+                  />
+                </span>
+                <strong>{{ book.title }}</strong>
+                <small>{{ bookAuthorLine(book) }}</small>
+                <small v-if="readChapterTitle(book)">已读：{{ readChapterTitle(book) }}</small>
+                <small v-if="latestChapterTitle(book)">{{ latestChapterLabel(book) }}：{{ latestChapterTitle(book) }}</small>
+              </span>
+            </article>
+          </div>
+        </template>
+
+        <div v-else class="empty-panel app-panel">
+          <el-empty :description="emptyText" />
+        </div>
       </div>
     </main>
 
@@ -112,6 +114,7 @@ import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
 import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
+import { isLocalBook, localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
 const router = useRouter()
@@ -297,29 +300,15 @@ function latestChapterTitle(book) {
 }
 
 function shelfSearchText(book) {
-  return normalizeShelfSearch([
-    book.title,
-    book.author,
+  return localBookSearchText(book, [
     readChapterTitle(book),
     latestChapterTitle(book),
-    book.originalFile,
-    book.libraryPath,
-    book.url,
     categoryName(book.categoryId),
-  ].filter(Boolean).join(' '))
-}
-
-function isLocalBook(book) {
-  if (!book) return false
-  if (Number(book.sourceId || 0) === 0) return true
-  if (String(book.url || '').startsWith('local://')) return true
-  return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
+  ])
 }
 
 function normalizeShelfSearch(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[\s·•._\-—–:：，,。.!！?？()[\]【】《》"'“”‘’/\\]+/g, '')
+  return normalizeLocalBookSearch(value)
 }
 
 function latestChapterLabel(book) {
@@ -384,6 +373,9 @@ function readError(err, fallback) {
 
 .shelf-page {
   background: #fff;
+  min-height: 100vh;
+  padding: 48px;
+  box-sizing: border-box;
 }
 
 .shelf-title {
@@ -630,22 +622,28 @@ function readError(err, fallback) {
   box-shadow: none;
 }
 
+.books-wrapper {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .shelf-main.grid-view .book-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
-  justify-content: stretch;
-  gap: 42px 56px;
-  padding: 22px 0;
+  grid-template-columns: repeat(auto-fill, 380px);
+  justify-content: space-around;
+  gap: 10px;
+  padding: 18px 0;
   overflow: visible;
 }
 
 .shelf-main.grid-view .book-row {
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 18px;
-  width: 100%;
-  min-height: 136px;
+  gap: 20px;
+  width: 360px;
+  min-height: 160px;
   align-items: start;
-  padding: 0 10px;
+  padding: 24px;
   border-bottom: 0;
 }
 
@@ -802,6 +800,13 @@ function readError(err, fallback) {
   overflow-x: hidden;
 }
 
+.shelf-page.mobile-shelf .books-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 .shelf-page.mobile-shelf .shelf-title,
 .shelf-page.mobile-shelf .recent-strip,
 .shelf-page.mobile-shelf .book-group-wrapper,
@@ -817,19 +822,30 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .shelf-title {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-  gap: 8px;
+  display: flex;
+  gap: 10px;
   align-items: center;
+  justify-content: space-between;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 20px 24px 0;
   overflow: hidden;
 }
 
+.shelf-page.mobile-shelf .shelf-title-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.shelf-page.mobile-shelf .shelf-title strong {
+  font-size: clamp(24px, 6vw, 30px);
+}
+
 .shelf-page.mobile-shelf .title-actions {
+  max-width: none;
+  flex: 0 0 auto;
   flex-wrap: nowrap;
-  gap: 12px;
-  overflow-x: auto;
+  gap: 14px;
+  overflow: visible;
   scrollbar-width: none;
 }
 
@@ -839,6 +855,9 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .title-actions button {
   flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 28px;
+  white-space: nowrap;
 }
 
 .shelf-page.mobile-shelf .title-actions .view-switch {
@@ -870,20 +889,19 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .book-row {
   display: grid;
-  grid-template-columns: clamp(58px, 18vw, 76px) minmax(0, 1fr);
-  min-height: 116px;
-  align-items: center;
-  gap: 14px;
+  grid-template-columns: 84px minmax(0, 1fr);
+  min-height: 132px;
+  align-items: start;
+  gap: 20px;
   width: 100%;
   box-sizing: border-box;
-  padding: 10px 14px;
+  padding: 10px 20px;
   contain: layout paint;
 }
 
 .shelf-page.mobile-shelf .list-cover {
-  width: clamp(58px, 18vw, 76px);
-  aspect-ratio: 3 / 4;
-  height: auto;
+  width: 84px;
+  height: 112px;
 }
 
 .shelf-page.mobile-shelf .book-operation {
@@ -899,10 +917,10 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .list-main {
   width: auto;
-  min-height: clamp(78px, 24vw, 102px);
+  min-height: 112px;
   box-sizing: border-box;
-  justify-content: space-between;
-  gap: 4px;
+  justify-content: start;
+  gap: 6px;
   overflow: hidden;
 }
 
@@ -946,6 +964,13 @@ function readError(err, fallback) {
     overflow-x: hidden;
   }
 
+  .books-wrapper {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
   .shelf-main.grid-view .book-list {
     display: block;
     padding: 0;
@@ -970,20 +995,31 @@ function readError(err, fallback) {
   }
 
   .shelf-title {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-    gap: 8px;
+    display: flex;
+    gap: 10px;
     align-items: center;
+    justify-content: space-between;
     min-width: 0;
-    padding: 8px 10px;
+    padding: 20px 24px 0;
     overflow: hidden;
   }
 
+  .shelf-title-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .shelf-title strong {
+    font-size: clamp(24px, 6vw, 30px);
+  }
+
   .title-actions {
+    max-width: none;
+    flex: 0 0 auto;
     min-width: 0;
     flex-wrap: nowrap;
-    gap: 12px;
-    overflow-x: auto;
+    gap: 14px;
+    overflow: visible;
     scrollbar-width: none;
   }
 
@@ -998,7 +1034,8 @@ function readError(err, fallback) {
   .title-actions button {
     flex: 0 0 auto;
     min-width: 0;
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 28px;
     white-space: nowrap;
   }
 
@@ -1016,20 +1053,19 @@ function readError(err, fallback) {
 
   .book-row {
     display: grid;
-    grid-template-columns: clamp(58px, 18vw, 76px) minmax(0, 1fr);
-    min-height: 116px;
-    align-items: center;
-    gap: 14px;
+    grid-template-columns: 84px minmax(0, 1fr);
+    min-height: 132px;
+    align-items: start;
+    gap: 20px;
     width: 100%;
     box-sizing: border-box;
-    padding: 10px 14px;
+    padding: 10px 20px;
     contain: layout paint;
   }
 
   .list-cover {
-    width: clamp(58px, 18vw, 76px);
-    aspect-ratio: 3 / 4;
-    height: auto;
+    width: 84px;
+    height: 112px;
   }
 
   .book-operation {
@@ -1046,9 +1082,10 @@ function readError(err, fallback) {
   .list-main {
     width: auto;
     max-width: 100%;
-    min-height: clamp(78px, 24vw, 102px);
+    min-height: 112px;
     box-sizing: border-box;
-    justify-content: space-between;
+    justify-content: start;
+    gap: 6px;
     padding-right: 0;
     overflow: hidden;
   }
@@ -1100,30 +1137,40 @@ function readError(err, fallback) {
 
   .shelf-page.mobile-shelf .shelf-title,
   .shelf-title {
-    padding: 8px;
+    padding: 20px 16px 0;
   }
 
   .shelf-page.mobile-shelf .shelf-title strong,
   .shelf-title strong {
-    font-size: 15px;
+    font-size: clamp(22px, 7vw, 28px);
+  }
+
+  .shelf-page.mobile-shelf .title-actions,
+  .title-actions {
+    gap: 10px;
+  }
+
+  .shelf-page.mobile-shelf .title-actions button,
+  .title-actions button {
+    font-size: 13px;
   }
 
   .shelf-page.mobile-shelf .book-row,
   .book-row {
     display: grid;
-    grid-template-columns: clamp(58px, 18vw, 72px) minmax(0, 1fr);
-    gap: 12px;
-    min-height: 112px;
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 14px;
+    min-height: 132px;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
-    padding: 10px 12px;
+    padding: 10px 20px;
   }
 
   .shelf-page.mobile-shelf .list-cover,
   .list-cover {
-    width: clamp(58px, 18vw, 72px);
-    height: auto;
+    width: 84px;
+    height: 112px;
     flex-basis: auto;
   }
 

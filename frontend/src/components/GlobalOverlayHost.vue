@@ -111,7 +111,7 @@
     class="global-manage-drawer"
   >
     <div class="manage-head">
-      <el-input v-model="manageKeyword" placeholder="搜索书名或作者" clearable size="small" />
+      <el-input v-model="manageKeyword" placeholder="搜索书名、作者或文件名" clearable size="small" />
       <div class="manage-head-actions">
         <el-button size="small" text @click="selectAllManagedBooks">全选</el-button>
         <el-button size="small" text @click="clearManagedSelection">清空</el-button>
@@ -630,6 +630,7 @@ import { useUserStore } from '../stores/user'
 import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
+import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import {
   sourceCandidateAuthor,
@@ -768,10 +769,17 @@ const groupSetRows = computed(() => [
 ])
 const managedBooks = computed(() => sortByShelfOrder(bookshelf.books, reader.progressByBook))
 const filteredManagedBooks = computed(() => {
-  const value = manageKeyword.value.trim().toLowerCase()
+  const value = normalizeLocalBookSearch(manageKeyword.value)
   if (!value) return managedBooks.value
-  return managedBooks.value.filter(book => `${book.title || ''} ${book.author || ''}`.toLowerCase().includes(value))
+  return managedBooks.value.filter(book => manageBookSearchText(book).includes(value))
 })
+
+function manageBookSearchText(book) {
+  return localBookSearchText(book, [
+    progressLabel(book),
+    categoryName(book.categoryId),
+  ])
+}
 const contentSearchStatus = computed(() => {
   if (!contentSearched.value) return ''
   const scanned = contentLastIndex.value >= 0 ? contentLastIndex.value + 1 : 0

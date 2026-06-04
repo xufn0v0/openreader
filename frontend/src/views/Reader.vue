@@ -217,7 +217,7 @@
           {{ shelfLoading ? '刷新中...' : '刷新' }}
         </button>
       </div>
-      <el-input v-model="shelfKeyword" placeholder="搜索书名或作者..." clearable size="small" class="shelf-search" />
+      <el-input v-model="shelfKeyword" placeholder="搜索书名、作者或文件名..." clearable size="small" class="shelf-search" />
       <div ref="shelfListRef" v-loading="shelfLoading" class="reader-shelf-list">
         <button
           v-for="item in filteredShelfBooks"
@@ -481,6 +481,7 @@ import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
+import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
 import {
@@ -569,6 +570,7 @@ const pageWidth = ref(600)
 const windowWidth = ref(window.innerWidth)
 const mobileReaderMaxWidth = 750
 const SAVE_PROGRESS_MIN_INTERVAL = 1200
+const MOBILE_TAP_MOVE_TOLERANCE = 14
 
 let saveTimer
 let chapterLoadingTimer
@@ -598,13 +600,20 @@ const SHOW_PREV_CHAPTER_SIZE = 1
 const SHOW_NEXT_CHAPTER_SIZE = 2
 
 const filteredShelfBooks = computed(() => {
-  const value = shelfKeyword.value.trim().toLowerCase()
+  const value = normalizeLocalBookSearch(shelfKeyword.value)
   const books = Array.isArray(bookshelf.books) ? bookshelf.books : []
   const values = value
-    ? books.filter(item => `${item.title || ''} ${item.author || ''}`.toLowerCase().includes(value))
+    ? books.filter(item => readerShelfSearchText(item).includes(value))
     : books
   return sortByShelfOrder(values, reader.progressByBook)
 })
+
+function readerShelfSearchText(item) {
+  return localBookSearchText(item, [
+    shelfChapterTitle(item),
+    shelfProgressLabel(item),
+  ])
+}
 const sourceGroups = computed(() => {
   const sourceRows = sourceGroupOptions.value.length ? sourceGroupOptions.value : sourceCandidates.value
   return buildSourceGroupOptions(sourceRows)
@@ -620,12 +629,11 @@ const chapterParagraphs = computed(() => {
 })
 const lines = computed(() => chapterParagraphs.value.map(item => item.text))
 const chapterTextLength = computed(() => {
-  const paragraphs = chapterParagraphs.value
-  if (!paragraphs.length) return 0
-  const last = paragraphs[paragraphs.length - 1]
-  return last.pos + last.text.length
+  return chapterBlockTextLength({ paragraphs: chapterParagraphs.value })
 })
-const isScrollRead = computed(() => reader.mode === 'page' || reader.mode === 'scroll' || reader.mode === 'scroll2')
+const isVerticalPagedRead = computed(() => reader.mode === 'page')
+const isScrollRead = computed(() => reader.mode === 'scroll' || reader.mode === 'scroll2')
+const isVerticalRead = computed(() => isVerticalPagedRead.value || isScrollRead.value)
 const isContinuousScrollRead = computed(() => reader.mode === 'scroll' || reader.mode === 'scroll2')
 const displayedChapterBlocks = computed(() => {
   if (isContinuousScrollRead.value && chapterBlocks.value.length) return chapterBlocks.value
@@ -640,8 +648,10 @@ const readerStyle = computed(() => ({
   '--reader-font-family': fontStack.value,
   '--reader-font-size': `${reader.fontSize}px`,
   '--reader-heading-size': `${Math.round(reader.fontSize * 1.36)}px`,
+  '--reader-body-bg': reader.customBodyColor || '#d9c27f',
+  '--reader-popup-bg': reader.customPopupColor || 'rgba(255, 252, 239, 0.94)',
   '--reader-bg': reader.currentTheme.bg,
-  '--reader-text': reader.currentTheme.text,
+  '--reader-text': reader.fontColor || reader.currentTheme.text,
   '--reader-font-weight': reader.fontWeight,
   '--reader-brightness': `${reader.brightness}%`,
   '--reader-line-height': reader.lineHeight,
@@ -724,6 +734,7 @@ onMounted(async () => {
   window.addEventListener('wheel', handleReaderWheel, { passive: false })
   window.addEventListener('pagehide', handleReaderPageHide)
   document.addEventListener('visibilitychange', handleReaderVisibilityChange)
+  window.addEventListener('openreader:progress-updated', handleProgressUpdated)
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   customBg.value = reader.customBgColor
@@ -740,6 +751,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('wheel', handleReaderWheel)
   window.removeEventListener('pagehide', handleReaderPageHide)
   document.removeEventListener('visibilitychange', handleReaderVisibilityChange)
+  window.removeEventListener('openreader:progress-updated', handleProgressUpdated)
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   clearBookmarkReloadTimer()
@@ -860,6 +872,13 @@ function makeChapterBlock(index, chapterRow, text) {
     content: String(text || ''),
     paragraphs: makeParagraphs(text, title),
   }
+}
+
+function chapterBlockTextLength(block) {
+  const paragraphs = Array.isArray(block?.paragraphs) ? block.paragraphs : []
+  if (!paragraphs.length) return 0
+  const last = paragraphs[paragraphs.length - 1]
+  return Number(last.pos || 0) + String(last.text || '').length
 }
 
 function resetContentSearchState() {
@@ -1171,18 +1190,24 @@ function restoreScroll2ChapterPosition(chapterOffset, restorePercent = null) {
     el.scrollTop = Math.max(0, activeChapter.offsetTop + Math.round(Math.max(0, Math.min(1, restorePercent)) * room))
     return
   }
+  if (chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) return
   el.scrollTop = Math.max(0, activeChapter.offsetTop)
 }
 
 function restoreByChapterPosition(position) {
   if (!contentBody.value || !Number.isFinite(position) || position <= 0) return false
   const activeChapter = contentBody.value.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`) || contentBody.value
-  const nodes = [...activeChapter.querySelectorAll('h1[data-pos], p[data-pos]')]
-  if (!nodes.length) return false
-  const target = [...nodes].reverse().find(node => Number(node.dataset.pos) <= position) || nodes[0]
+  const target = paragraphByChapterPosition(activeChapter, position)
   if (!target) return false
   jumpToParagraph(target, { save: false, flash: false })
   return true
+}
+
+function paragraphByChapterPosition(chapterEl, position) {
+  if (!chapterEl || !Number.isFinite(position) || position <= 0) return null
+  const nodes = [...chapterEl.querySelectorAll('h1[data-pos], p[data-pos]')]
+  if (!nodes.length) return null
+  return [...nodes].reverse().find(node => Number(node.dataset.pos) <= position) || nodes[0]
 }
 
 function nextFrame() {
@@ -1279,6 +1304,16 @@ function jumpToLoadedChapter(index, offset = 0) {
       top: Math.max(0, chapterEl.offsetTop + chapterEl.offsetHeight - contentEl.value.clientHeight),
       behavior: readerScrollBehavior(),
     })
+  } else if (offset > 0) {
+    const target = paragraphByChapterPosition(chapterEl, offset)
+    if (target) {
+      jumpToParagraph(target, { save: false, flash: false })
+    } else {
+      contentEl.value.scrollTo({
+        top: Math.max(0, chapterEl.offsetTop),
+        behavior: readerScrollBehavior(),
+      })
+    }
   } else {
     contentEl.value.scrollTo({
       top: Math.max(0, chapterEl.offsetTop),
@@ -1297,6 +1332,7 @@ async function jumpFromToc(index) {
 }
 
 function locateTocCurrentChapter() {
+  updateCurrentChapterFromScroll()
   tocFilter.value = ''
   tocLocateKey.value += 1
   nextTick(() => tocPanelRef.value?.locateCurrentChapter?.())
@@ -1908,7 +1944,7 @@ function runAutoReadLoop(delay = 0) {
 }
 
 async function autoReadByPixel() {
-  if (isScrollRead.value && contentEl.value) {
+  if (isVerticalRead.value && contentEl.value) {
     const el = contentEl.value
     const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
     if (el.scrollTop < bottom - 4) {
@@ -1922,7 +1958,7 @@ async function autoReadByPixel() {
 }
 
 async function autoReadByParagraph() {
-  if (!isScrollRead.value || !contentEl.value || !contentBody.value) {
+  if (!isVerticalRead.value || !contentEl.value || !contentBody.value) {
     const advanced = await advanceAutoReadPage()
     if (advanced) runAutoReadLoop(reader.autoReadingLineTime)
     return
@@ -1992,7 +2028,7 @@ async function previousPage() {
     saveCurrentProgress()
     return
   }
-  if (isScrollRead.value && contentEl.value) {
+  if (isVerticalRead.value && contentEl.value) {
     const el = contentEl.value
     if (el.scrollTop > 8) {
       el.scrollBy({ top: -scrollStep(), behavior: readerScrollBehavior() })
@@ -2010,7 +2046,7 @@ async function nextPage() {
     saveCurrentProgress()
     return
   }
-  if (isScrollRead.value && contentEl.value) {
+  if (isVerticalRead.value && contentEl.value) {
     const el = contentEl.value
     const bottom = el.scrollHeight - el.clientHeight
     if (el.scrollTop < bottom - 8) {
@@ -2023,7 +2059,16 @@ async function nextPage() {
 }
 
 function scrollStep() {
-  return Math.max(240, Math.floor(readableViewportSize().height * 0.9))
+  const viewportHeight = contentEl.value?.clientHeight || window.innerHeight || readableViewportSize().height
+  return Math.max(1, Math.floor(viewportHeight - scrollOffset()))
+}
+
+function scrollOffset() {
+  const fontSize = Number(reader.fontSize || 18)
+  return (
+    fontSize * Number(reader.lineHeight || 1.8) * 2 +
+    fontSize * Number(reader.paragraphSpace || 0) * 2
+  )
 }
 
 function readerScrollBehavior() {
@@ -2104,7 +2149,7 @@ function handleTapZone(zone) {
 }
 
 function handleReaderContentClick(event) {
-  if (!isMobileReader.value || isOverlayOpen.value || !pageEl.value) return
+  if (isOverlayOpen.value || !pageEl.value) return
   if (Date.now() - handledTouchTapAt < 450) return
   if (ignoreNextContentClick) {
     ignoreNextContentClick = false
@@ -2114,13 +2159,18 @@ function handleReaderContentClick(event) {
   const target = event.target
   if (target?.closest?.('button, a, input, textarea, select, [role="button"]')) return
   const rect = pageEl.value.getBoundingClientRect()
-  handleTapPoint({
+  const point = {
     rect,
     relX: event.clientX - rect.left,
     relY: event.clientY - rect.top,
     clientX: event.clientX,
     clientY: event.clientY,
-  })
+  }
+  if (isMobileReader.value) {
+    handleTapPoint(point)
+  } else {
+    handleDesktopTapPoint(point)
+  }
 }
 
 function handleReaderTouchStart(event) {
@@ -2137,7 +2187,7 @@ function handleReaderTouchMove(event) {
   const moveX = touch.clientX - readerTouchStart.x
   const moveY = touch.clientY - readerTouchStart.y
   readerTouchMove = { x: moveX, y: moveY }
-  if (Math.abs(moveX) > 6 || Math.abs(moveY) > 6) {
+  if (Math.hypot(moveX, moveY) > MOBILE_TAP_MOVE_TOLERANCE) {
     readerTouchMoved = true
   }
   if (reader.mode === 'flip' && Math.abs(moveX) > 12 && Math.abs(moveX) > Math.abs(moveY) + 8) {
@@ -2157,7 +2207,8 @@ function handleReaderTouchEnd(event) {
     return
   }
   const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
-  const isTap = !readerTouchMoved && elapsed < 650 && Boolean(touch)
+  const moveDistance = Math.hypot(Number(readerTouchMove.x || 0), Number(readerTouchMove.y || 0))
+  const isTap = moveDistance <= MOBILE_TAP_MOVE_TOLERANCE && elapsed < 650 && Boolean(touch)
   ignoreNextContentClick = Boolean(touch)
   if (isTap) handledTouchTapAt = Date.now()
   setTimeout(() => {
@@ -2239,6 +2290,34 @@ function handleTapPoint(point) {
   else previousPage()
 }
 
+function handleDesktopTapPoint(point) {
+  if (isOverlayOpen.value || !point?.rect) return
+  if (scheduleSelectedTextOperation(0)) {
+    ignoreNextContentClick = true
+    return
+  }
+  const viewportWidth = window.innerWidth || point.rect.width
+  const viewportHeight = window.innerHeight || point.rect.height
+  const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
+  const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
+  const midX = viewportWidth / 2
+  const midY = viewportHeight / 2
+  const inCenter = Math.abs(pointX - midX) <= viewportWidth * 0.2
+    && Math.abs(pointY - midY) <= viewportHeight * 0.2
+  if (inCenter || reader.clickMethod === 'none') return
+  if (reader.clickMethod === 'next') {
+    nextPage()
+    return
+  }
+  if (reader.mode === 'flip') {
+    if (pointX > midX) nextPage()
+    else previousPage()
+    return
+  }
+  if (pointY > midY) nextPage()
+  else previousPage()
+}
+
 function handleReaderWheel(event) {
   if (event._openReaderWheelHandled) return
   event._openReaderWheelHandled = true
@@ -2310,7 +2389,7 @@ function updateFlipLayout() {
     return
   }
   if (reader.mode === 'page') {
-    pageHeight.value = viewport.height
+    pageHeight.value = scrollStep()
     const scrollBottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 1)
     pageCount.value = Math.max(1, Math.ceil(contentEl.value.scrollHeight / pageHeight.value))
     page.value = Math.max(0, Math.min(pageCount.value - 1, Math.round((contentEl.value.scrollTop / scrollBottom) * Math.max(pageCount.value - 1, 0))))
@@ -2348,8 +2427,45 @@ function handleReaderVisibilityChange() {
   if (document.hidden) saveCurrentProgress({ force: true, background: true })
 }
 
+async function handleProgressUpdated(event) {
+  const progress = event?.detail?.progress
+  if (!progress?.bookId || Number(progress.bookId) !== Number(bookId.value)) return
+  if (!chapter.value || restoringPosition || savingProgress || pendingProgressPayload) return
+  const localKey = progressSaveKey(currentProgressPayload())
+  const remoteKey = progressSaveKey({
+    bookId: progress.bookId,
+    chapterId: progress.chapterId,
+    chapterIndex: progress.chapterIndex,
+    offset: progress.offset,
+    percent: progress.percent,
+    chapterPercent: progress.chapterPercent,
+  })
+  if (!remoteKey || remoteKey === localKey) return
+  const targetIndex = Math.max(0, Math.min(Number(progress.chapterIndex || 0), Math.max(chapters.value.length - 1, 0)))
+  const targetOffset = Math.max(0, Math.floor(Number(progress.offset || 0)))
+  const restorePercent = Number.isFinite(Number(progress.chapterPercent))
+    ? Math.max(0, Math.min(1, Number(progress.chapterPercent)))
+    : null
+  clearTimeout(saveTimer)
+  try {
+    await router.replace({
+      name: 'reader',
+      params: { id: bookId.value },
+      query: {
+        chapter: targetIndex,
+        ...(targetOffset ? { offset: targetOffset } : {}),
+        ...(restorePercent !== null ? { percent: Number(restorePercent.toFixed(6)) } : {}),
+      },
+    })
+    await loadChapter(targetIndex, targetOffset, { restorePercent, saveAfterLoad: false })
+    lastProgressSaveKey = progressSaveKey(currentProgressPayload())
+  } catch {
+    // If the chapter cannot be applied immediately, the stored progress will be used on the next open.
+  }
+}
+
 function onScroll() {
-  if (!isScrollRead.value) return
+  if (!isVerticalRead.value) return
   if (restoringPosition || chapterLoading.value) return
   updateCurrentChapterFromScroll()
   maybeExtendShowChapters()
@@ -2365,6 +2481,8 @@ function currentChapterPercent() {
   if (reader.mode === 'flip') {
     return pageCount.value <= 1 ? 0 : page.value / (pageCount.value - 1)
   }
+  const snapshot = visibleChapterProgressSnapshot()
+  if (snapshot) return snapshot.chapterPercent
   const el = contentEl.value
   if (!el) return 0
   const textLength = Math.max(chapterTextLength.value, 1)
@@ -2380,10 +2498,14 @@ function currentOffset() {
   if (reader.mode === 'flip') {
     return Math.max(0, Math.floor(page.value || 0))
   }
+  const snapshot = visibleChapterProgressSnapshot()
+  if (snapshot) return snapshot.offset
   return currentChapterPosition()
 }
 
 function currentChapterPosition() {
+  const snapshot = visibleChapterProgressSnapshot()
+  if (snapshot) return snapshot.offset
   const el = contentEl.value
   if (!el) return 0
   const activeChapter = activeChapterElement()
@@ -2405,6 +2527,39 @@ function currentChapterPosition() {
   const scrollPercent = Math.max(0, Math.min(1, Number(el.scrollTop || 0) / bottom))
   if (scrollPercent > 0) return Math.round(scrollPercent * textLength)
   return 0
+}
+
+function visibleChapterProgressSnapshot() {
+  if (!contentEl.value || !contentBody.value) return null
+  const paragraph = currentVisibleParagraph()
+  if (!paragraph) return null
+  const chapterEl = paragraph.closest?.('.chapter-content')
+  const chapterIndex = Number(chapterEl?.dataset?.index)
+  if (!Number.isInteger(chapterIndex)) return null
+  const block = displayedChapterBlocks.value.find(item => item.index === chapterIndex)
+    || chapterBlocks.value.find(item => item.index === chapterIndex)
+    || (chapterIndex === currentIndex.value ? makeChapterBlock(currentIndex.value, chapter.value, content.value) : null)
+  const paragraphPos = Number(paragraph.dataset?.pos)
+  const offset = Number.isFinite(paragraphPos)
+    ? visibleParagraphOffset(paragraph, paragraphPos)
+    : 0
+  const textLength = Math.max(chapterBlockTextLength(block), 1)
+  return {
+    chapterIndex,
+    chapter: chapters.value[chapterIndex] || (block?.id ? { id: block.id, title: block.title, index: chapterIndex } : null),
+    offset,
+    chapterPercent: Math.max(0, Math.min(1, offset / textLength)),
+  }
+}
+
+function visibleParagraphOffset(paragraph, paragraphPos) {
+  const viewport = contentEl.value?.getBoundingClientRect()
+  if (!viewport) return Math.max(0, Math.round(paragraphPos))
+  const rect = paragraph.getBoundingClientRect()
+  const anchorY = viewport.top + Math.min(viewport.height * 0.32, 180)
+  const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (anchorY - rect.top) / rect.height)) : 0
+  const extra = Math.round((paragraph.textContent?.length || 0) * ratio)
+  return Math.max(0, Math.round(paragraphPos + extra))
 }
 
 function currentVisibleParagraph() {
@@ -2434,12 +2589,12 @@ function activeChapterElement() {
 
 function updateCurrentChapterFromScroll() {
   if (!isContinuousScrollRead.value) return
-  const chapterEl = activeChapterElement()
-  const nextIndex = Number(chapterEl?.dataset?.index)
+  const snapshot = visibleChapterProgressSnapshot()
+  const nextIndex = Number(snapshot?.chapterIndex)
   if (!Number.isInteger(nextIndex) || nextIndex === currentIndex.value) return
   const block = chapterBlocks.value.find(item => item.index === nextIndex)
   currentIndex.value = nextIndex
-  chapter.value = chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
+  chapter.value = snapshot?.chapter || chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
   content.value = block?.content || content.value
 }
 
@@ -2642,14 +2797,19 @@ async function flushProgressQueue(force = false) {
 }
 
 function currentProgressPayload() {
+  const snapshot = visibleChapterProgressSnapshot()
+  const progressChapter = snapshot?.chapter || chapter.value
+  const progressChapterIndex = Number.isInteger(snapshot?.chapterIndex) ? snapshot.chapterIndex : currentIndex.value
+  const progressChapterPercent = snapshot ? snapshot.chapterPercent : currentChapterPercent()
+  const progressTotal = Math.max(chapters.value.length, 1)
   return {
     bookId: bookId.value,
-    chapterId: chapter.value?.id,
-    chapterIndex: currentIndex.value,
-    offset: currentOffset(),
-    percent: bookProgress.value,
-    chapterPercent: currentChapterPercent(),
-    chapterTitle: chapter.value?.title || '',
+    chapterId: progressChapter?.id,
+    chapterIndex: progressChapterIndex,
+    offset: snapshot ? snapshot.offset : currentOffset(),
+    percent: Math.min(1, Math.max(0, (progressChapterIndex + progressChapterPercent) / progressTotal)),
+    chapterPercent: progressChapterPercent,
+    chapterTitle: progressChapter?.title || '',
   }
 }
 
@@ -3175,7 +3335,7 @@ function readError(err, fallback) {
   background:
     linear-gradient(90deg, rgba(124, 99, 43, 0.16), transparent 18%, transparent 82%, rgba(124, 99, 43, 0.16)),
     repeating-linear-gradient(0deg, rgba(105, 83, 35, 0.035) 0 1px, transparent 1px 6px),
-    #d9c27f;
+    var(--reader-body-bg);
 }
 
 /* ---- 左侧工具栏 ---- */
@@ -3188,7 +3348,7 @@ function readError(err, fallback) {
   width: 58px;
   display: grid;
   align-content: start;
-  background: rgba(255, 250, 226, 0.5);
+  background: color-mix(in srgb, var(--reader-popup-bg) 64%, transparent);
   border-left: 1px solid rgba(148, 132, 87, 0.26);
   border-right: 1px solid rgba(148, 132, 87, 0.38);
   backdrop-filter: blur(2px);
@@ -3203,7 +3363,7 @@ function readError(err, fallback) {
   gap: 2px;
   padding: 7px 0 5px;
   color: rgba(36, 33, 27, 0.62);
-  background: rgba(255, 253, 240, 0.46);
+  background: color-mix(in srgb, var(--reader-popup-bg) 58%, transparent);
   border: 0;
   border-bottom: 1px solid rgba(148, 132, 87, 0.35);
   cursor: pointer;
@@ -3217,7 +3377,7 @@ function readError(err, fallback) {
 
 .rail-item:hover {
   color: #1e1f22;
-  background: rgba(255, 253, 240, 0.78);
+  background: color-mix(in srgb, var(--reader-popup-bg) 82%, transparent);
 }
 
 .rail-item:disabled {
@@ -3258,7 +3418,7 @@ function readError(err, fallback) {
   height: 36px;
   place-items: center;
   color: #121212;
-  background: rgba(255, 249, 226, 0.9);
+  background: var(--reader-popup-bg);
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 999px;
   box-shadow: 0 4px 10px rgba(80, 62, 28, 0.08);
@@ -3268,7 +3428,7 @@ function readError(err, fallback) {
 .round-tool:hover,
 .round-tool.active {
   color: #0f5451;
-  background: #fff9df;
+  background: var(--reader-popup-bg);
   box-shadow: 0 12px 26px rgba(80, 62, 28, 0.14);
 }
 
@@ -3516,7 +3676,7 @@ function readError(err, fallback) {
   z-index: 4;
   display: grid;
   width: 42px;
-  background: rgba(255, 250, 226, 0.72);
+  background: color-mix(in srgb, var(--reader-popup-bg) 82%, transparent);
   border: 1px solid rgba(148, 132, 87, 0.38);
   border-bottom: 0;
 }
@@ -3527,7 +3687,7 @@ function readError(err, fallback) {
   height: 43px;
   place-items: center;
   color: #121212;
-  background: rgba(255, 253, 240, 0.44);
+  background: color-mix(in srgb, var(--reader-popup-bg) 62%, transparent);
   border: 0;
   border-bottom: 1px solid rgba(148, 132, 87, 0.32);
   font-size: 16px;
@@ -3546,7 +3706,7 @@ function readError(err, fallback) {
   gap: 7px;
   padding: 9px 0;
   color: #121212;
-  background: rgba(255, 253, 240, 0.5);
+  background: color-mix(in srgb, var(--reader-popup-bg) 70%, transparent);
   border-bottom: 1px solid rgba(148, 132, 87, 0.32);
   font-size: 12px;
 }
@@ -3579,7 +3739,7 @@ function readError(err, fallback) {
 }
 
 .page-step:hover {
-  background: rgba(255, 253, 240, 0.82);
+  background: var(--reader-popup-bg);
 }
 
 .reader-mobile-bottom {
@@ -3620,6 +3780,21 @@ function readError(err, fallback) {
   gap: 14px;
   margin: -2px 0 14px;
 }
+
+.reader-shell :deep(.el-drawer) {
+  color: var(--reader-text);
+  background: var(--reader-popup-bg);
+}
+
+.reader-shell :deep(.el-drawer__header) {
+  color: var(--reader-text);
+  margin-bottom: 14px;
+}
+
+.reader-shell :deep(.el-drawer__body) {
+  background: var(--reader-popup-bg);
+}
+
 .reader-drawer-title span {
   color: #ed4259;
   border-bottom: 1px solid #ed4259;
@@ -3730,7 +3905,7 @@ function readError(err, fallback) {
 .reader-cache-status button {
   min-height: 42px;
   color: #2a2925;
-  background: #fffaf0;
+  background: var(--reader-popup-bg);
   border: 1px solid #e7dabb;
   border-radius: 6px;
   cursor: pointer;
@@ -3746,7 +3921,7 @@ function readError(err, fallback) {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  background: rgba(255, 250, 240, 0.78);
+  background: color-mix(in srgb, var(--reader-popup-bg) 88%, transparent);
   border: 1px solid #eadfca;
   border-radius: 6px;
 }
@@ -3810,7 +3985,7 @@ function readError(err, fallback) {
     gap: 8px;
     min-height: 58px;
     padding: max(8px, env(safe-area-inset-top)) 12px 8px;
-    background: rgba(255, 252, 239, 0.94);
+    background: color-mix(in srgb, var(--reader-popup-bg) 96%, transparent);
     border-bottom: 1px solid rgba(148, 132, 87, 0.28);
     box-shadow: 0 8px 24px rgba(73, 57, 27, 0.08);
   }
@@ -3850,7 +4025,7 @@ function readError(err, fallback) {
     min-height: calc(76px + env(safe-area-inset-bottom));
     box-sizing: border-box;
     padding: 8px 10px max(10px, env(safe-area-inset-bottom));
-    background: rgba(255, 252, 239, 0.92);
+    background: color-mix(in srgb, var(--reader-popup-bg) 94%, transparent);
     border-top: 1px solid rgba(148, 132, 87, 0.35);
     border-radius: 10px 10px 0 0;
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
@@ -3863,7 +4038,7 @@ function readError(err, fallback) {
     gap: 8px;
     min-height: 54px;
     padding: 7px;
-    background: rgba(255, 252, 239, 0.94);
+    background: color-mix(in srgb, var(--reader-popup-bg) 96%, transparent);
     border: 1px solid rgba(148, 132, 87, 0.28);
     border-radius: 8px;
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
@@ -3876,7 +4051,7 @@ function readError(err, fallback) {
     min-width: 0;
     min-height: 38px;
     color: #24201b;
-    background: #fffaf0;
+    background: var(--reader-popup-bg);
     border: 1px solid rgba(148, 132, 87, 0.3);
     border-radius: 6px;
     font-size: 13px;
@@ -3945,7 +4120,7 @@ function readError(err, fallback) {
     align-content: center;
     gap: 7px;
     color: #232323;
-    background: #fffaf0;
+    background: var(--reader-popup-bg);
     border: 1px solid #eee4c9;
     border-radius: 8px;
     font-size: 13px;
@@ -3953,7 +4128,7 @@ function readError(err, fallback) {
   .mobile-more-item.active {
     color: #0f5451;
     border-color: #0f5451;
-    background: #fff7dc;
+    background: color-mix(in srgb, var(--reader-popup-bg) 90%, #fff1bc);
   }
   .mobile-more-item:disabled {
     cursor: not-allowed;
