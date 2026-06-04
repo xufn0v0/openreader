@@ -569,6 +569,7 @@ const pageWidth = ref(600)
 const windowWidth = ref(window.innerWidth)
 const mobileReaderMaxWidth = 750
 const SAVE_PROGRESS_MIN_INTERVAL = 1200
+const MOBILE_TAP_MOVE_TOLERANCE = 14
 
 let saveTimer
 let chapterLoadingTimer
@@ -2143,7 +2144,7 @@ function handleReaderTouchMove(event) {
   const moveX = touch.clientX - readerTouchStart.x
   const moveY = touch.clientY - readerTouchStart.y
   readerTouchMove = { x: moveX, y: moveY }
-  if (Math.abs(moveX) > 6 || Math.abs(moveY) > 6) {
+  if (Math.hypot(moveX, moveY) > MOBILE_TAP_MOVE_TOLERANCE) {
     readerTouchMoved = true
   }
   if (reader.mode === 'flip' && Math.abs(moveX) > 12 && Math.abs(moveX) > Math.abs(moveY) + 8) {
@@ -2163,7 +2164,8 @@ function handleReaderTouchEnd(event) {
     return
   }
   const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
-  const isTap = !readerTouchMoved && elapsed < 650 && Boolean(touch)
+  const moveDistance = Math.hypot(Number(readerTouchMove.x || 0), Number(readerTouchMove.y || 0))
+  const isTap = moveDistance <= MOBILE_TAP_MOVE_TOLERANCE && elapsed < 650 && Boolean(touch)
   ignoreNextContentClick = Boolean(touch)
   if (isTap) handledTouchTapAt = Date.now()
   setTimeout(() => {
