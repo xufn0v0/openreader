@@ -114,6 +114,7 @@ import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
 import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
+import { isLocalBook, localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 
 const router = useRouter()
@@ -299,29 +300,15 @@ function latestChapterTitle(book) {
 }
 
 function shelfSearchText(book) {
-  return normalizeShelfSearch([
-    book.title,
-    book.author,
+  return localBookSearchText(book, [
     readChapterTitle(book),
     latestChapterTitle(book),
-    book.originalFile,
-    book.libraryPath,
-    book.url,
     categoryName(book.categoryId),
-  ].filter(Boolean).join(' '))
-}
-
-function isLocalBook(book) {
-  if (!book) return false
-  if (Number(book.sourceId || 0) === 0) return true
-  if (String(book.url || '').startsWith('local://')) return true
-  return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
+  ])
 }
 
 function normalizeShelfSearch(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[\s·•._\-—–:：，,。.!！?？()[\]【】《》"'“”‘’/\\]+/g, '')
+  return normalizeLocalBookSearch(value)
 }
 
 function latestChapterLabel(book) {

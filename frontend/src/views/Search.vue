@@ -143,6 +143,7 @@ import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
 import { newestBookProgress } from '../utils/bookOrder'
+import { isLocalBook, localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import {
   remoteBookCreatePayload,
@@ -207,7 +208,7 @@ const sourceGroups = computed(() => {
 })
 
 const localImportableCount = computed(() => localItems.value.filter(item => item.importable).length)
-const localShelfBooks = computed(() => (bookshelf.books || []).filter(isLocalShelfBook))
+const localShelfBooks = computed(() => (bookshelf.books || []).filter(isLocalBook))
 const shownLocalResults = computed(() => {
   if (!searched.value || searchMode.value !== 'local') return []
   const value = normalizeLocalSearch(keyword.value)
@@ -249,6 +250,9 @@ watch(searchType, () => {
   saveSearchPreference()
 })
 watch([selectedGroup, singleSourceId, concurrentCount], saveSearchPreference)
+watch(localRecursiveScan, () => {
+  if (searchMode.value === 'local') searchLocalBooks()
+})
 watch(() => route.query.mode, (mode) => {
   const nextMode = mode === 'local' ? 'local' : 'remote'
   if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
@@ -482,27 +486,10 @@ function localResultKey(item) {
 }
 
 function localShelfSearchText(book) {
-  return normalizeLocalSearch([
-    book.title,
-    book.author,
-    book.lastChapter,
-    book.latestChapter,
-    book.latestChapterTitle,
-    book.originalFile,
-    book.libraryPath,
-    book.tocFile,
-    book.sourceFile,
-    book.url,
+  return localBookSearchText(book, [
     localBookSubline({ book }),
     localBookMeta({ book }),
-  ].filter(Boolean).join(' '))
-}
-
-function isLocalShelfBook(book) {
-  if (!book) return false
-  if (Number(book.sourceId || 0) === 0) return true
-  if (String(book.url || '').startsWith('local://')) return true
-  return Boolean(book.originalFile || book.libraryPath || book.tocFile || book.sourceFile)
+  ])
 }
 
 function localFileSearchText(item) {
@@ -515,9 +502,7 @@ function localFileSearchText(item) {
 }
 
 function normalizeLocalSearch(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[\s·•._\-—–:：，,。.!！?？()[\]【】《》"'“”‘’/\\]+/g, '')
+  return normalizeLocalBookSearch(value)
 }
 
 function fileExtension(value) {
