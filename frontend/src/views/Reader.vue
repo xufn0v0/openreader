@@ -3716,12 +3716,12 @@ function readError(err, fallback) {
 }
 
 .desktop-progress-slider {
-  width: 124px;
-  height: 18px;
-  margin: 52px -42px;
+  width: 18px;
+  height: 124px;
+  margin: 0;
   accent-color: #2f6f6d;
   cursor: pointer;
-  transform: rotate(90deg);
+  writing-mode: vertical-lr;
 }
 
 .page-step {
