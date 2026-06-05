@@ -155,6 +155,20 @@
 
     <footer class="reader-mobile-bottom">
       <div class="reader-mobile-progress-panel">
+        <label class="mobile-progress-slider-row" title="拖动定位当前章节进度">
+          <input
+            class="mobile-progress-slider"
+            type="range"
+            min="0"
+            max="1000"
+            step="1"
+            :value="desktopChapterSliderValue"
+            :aria-label="`当前章节进度 ${desktopChapterProgressLabel}`"
+            @input="handleDesktopProgressInput"
+            @change="handleDesktopProgressChange"
+          />
+          <span>{{ desktopChapterProgressLabel }}</span>
+        </label>
         <button class="mobile-chapter-step" type="button" :disabled="currentIndex <= 0" @click="goChapter(currentIndex - 1)">
           上一章
         </button>
@@ -3989,8 +4003,8 @@ function readError(err, fallback) {
     touch-action: pan-y pinch-zoom;
   }
   .reader-shell.mobile-chrome-visible .reader-content {
-    padding-bottom: calc(220px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(220px + env(safe-area-inset-bottom));
+    padding-bottom: calc(250px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(250px + env(safe-area-inset-bottom));
   }
   .reader-content h1 { font-size: var(--reader-heading-size); margin-bottom: 28px; }
   .reader-left-rail,
@@ -4063,12 +4077,28 @@ function readError(err, fallback) {
     grid-template-columns: minmax(62px, 76px) minmax(0, 1fr) minmax(62px, 76px);
     align-items: center;
     gap: 8px;
-    min-height: 54px;
+    min-height: 84px;
     padding: 7px;
     background: color-mix(in srgb, var(--reader-popup-bg) 96%, transparent);
     border: 1px solid rgba(148, 132, 87, 0.28);
     border-radius: 8px;
     box-shadow: 0 -8px 24px rgba(73, 57, 27, 0.08);
+  }
+  .mobile-progress-slider-row {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 0 3px;
+    color: #8d8270;
+    font-size: 12px;
+  }
+  .mobile-progress-slider {
+    width: 100%;
+    min-width: 0;
+    accent-color: #409eff;
   }
   .reader-shell.mobile-chrome-visible .reader-mobile-top,
   .reader-shell.mobile-chrome-visible .reader-mobile-bottom {
