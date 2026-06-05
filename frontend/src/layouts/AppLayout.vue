@@ -99,7 +99,6 @@
             type="button"
             @click="runNavAction(item)"
           >
-            <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ item.label }}</span>
           </button>
         </section>
@@ -134,22 +133,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Box,
-  Compass,
-  Connection,
-  Delete,
-  Edit,
-  Files,
   FolderOpened,
-  Link as LinkIcon,
   Moon,
-  Notebook,
-  Operation,
-  Refresh,
   Search,
-  Setting,
   Sunny,
-  Upload,
 } from '@element-plus/icons-vue'
 import { useUserStore } from '../stores/user'
 import { useOverlayStore } from '../stores/overlay'
@@ -190,59 +177,59 @@ const navSections = computed(() => [
   {
     title: '后端设定',
     items: [
-      { key: 'backendStatus', label: syncConnected.value ? '同步在线' : '同步未连接', icon: Connection, action: refreshShelfData },
+      { key: 'backendStatus', label: syncConnected.value ? '同步在线' : '同步未连接', action: refreshShelfData },
     ],
   },
   {
     title: '书源设置',
     items: [
-      { key: 'sources', label: '书源管理', icon: Connection, route: 'sources' },
-      { key: 'discover', label: '探索书源', icon: Compass, route: 'discover' },
-      { key: 'importSources', label: '导入书源', icon: Upload, route: 'sources', query: { action: 'import' } },
-      { key: 'remoteSources', label: '远程书源', icon: LinkIcon, route: 'sources', query: { panel: 'remote' } },
-      { key: 'sourceHealth', label: '失效书源', icon: Operation, route: 'sources', query: { action: 'health' } },
-      { key: 'sourceDebug', label: '调试书源', icon: Edit, route: 'sources', query: { action: 'debug' } },
+      { key: 'sources', label: '书源管理', route: 'sources' },
+      { key: 'discover', label: '探索书源', route: 'discover' },
+      { key: 'importSources', label: '导入书源', route: 'sources', query: { action: 'import' } },
+      { key: 'remoteSources', label: '远程书源', route: 'sources', query: { panel: 'remote' } },
+      { key: 'sourceHealth', label: '失效书源', route: 'sources', query: { action: 'health' } },
+      { key: 'sourceDebug', label: '调试书源', route: 'sources', query: { action: 'debug' } },
     ],
   },
   {
     title: '书架设置',
     items: [
-      { key: 'home', label: '书架', icon: Notebook, route: 'home' },
-      { key: 'bookManage', label: '书籍管理', icon: Files, action: () => overlay.openBookManage() },
-      { key: 'bookGroup', label: '分组管理', icon: Box, action: () => overlay.openBookGroup('manage') },
-      { key: 'importBook', label: '导入书籍', icon: Upload, action: () => overlay.openImportBook() },
-      { key: 'localStore', label: '浏览书仓', icon: FolderOpened, action: () => overlay.openLocalStore() },
-      { key: 'refreshShelf', label: '刷新书架', icon: Refresh, action: refreshShelfData },
+      { key: 'home', label: '书架', route: 'home' },
+      { key: 'bookManage', label: '书籍管理', action: () => overlay.openBookManage() },
+      { key: 'bookGroup', label: '分组管理', action: () => overlay.openBookGroup('manage') },
+      { key: 'importBook', label: '导入书籍', action: () => overlay.openImportBook() },
+      { key: 'localStore', label: '浏览书仓', action: () => overlay.openLocalStore() },
+      { key: 'refreshShelf', label: '刷新书架', action: refreshShelfData },
     ],
   },
   {
     title: '用户空间',
     items: [
-      { key: 'account', label: userStore.profile?.username || '默认', icon: Setting, route: 'settings', panel: 'account' },
-      { key: 'backupConfig', label: '备份用户配置', icon: Upload, action: () => overlay.openBackup() },
-      { key: 'syncConfig', label: '同步用户配置', icon: Refresh, action: syncUserConfig },
-      { key: 'userManage', label: '加载用户空间', icon: Operation, action: () => overlay.openUserManage() },
+      { key: 'account', label: userStore.profile?.username || '默认', route: 'settings', panel: 'account' },
+      { key: 'backupConfig', label: '备份用户配置', action: () => overlay.openBackup() },
+      { key: 'syncConfig', label: '同步用户配置', action: syncUserConfig },
+      { key: 'userManage', label: '加载用户空间', action: () => overlay.openUserManage() },
     ],
   },
   {
     title: 'WebDAV',
     items: [
-      { key: 'webdav', label: '文件管理', icon: Upload, action: () => overlay.openWebDAV() },
-      { key: 'backup', label: '保存备份', icon: Refresh, action: () => overlay.openBackup() },
+      { key: 'webdav', label: '文件管理', action: () => overlay.openWebDAV() },
+      { key: 'backup', label: '保存备份', action: () => overlay.openBackup() },
     ],
   },
   {
     title: cacheSectionTitle.value,
     items: [
-      { key: 'cacheStats', label: '刷新缓存统计', icon: Files, action: loadCacheStats },
-      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearChapterCacheLabel.value, icon: Delete, action: clearSystemCache },
+      { key: 'cacheStats', label: '刷新缓存统计', action: loadCacheStats },
+      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearChapterCacheLabel.value, action: clearSystemCache },
     ],
   },
   {
     title: '其它',
     items: [
-      { key: 'rss', label: 'RSS', icon: Connection, action: () => overlay.openRSS() },
-      { key: 'replaceRules', label: '替换规则', icon: Edit, action: () => overlay.openReplaceRules() },
+      { key: 'rss', label: 'RSS', action: () => overlay.openRSS() },
+      { key: 'replaceRules', label: '替换规则', action: () => overlay.openReplaceRules() },
     ],
   },
 ])
@@ -940,7 +927,7 @@ onBeforeUnmount(() => {
 .app-nav-section {
   display: grid;
   grid-template-columns: repeat(2, minmax(78px, 1fr));
-  gap: 10px 12px;
+  gap: 12px 14px;
 }
 
 .app-nav-title {
@@ -957,13 +944,12 @@ onBeforeUnmount(() => {
 
 .app-nav-item {
   display: flex;
-  width: 100%;
+  width: fit-content;
   max-width: 100%;
-  min-height: 34px;
+  min-height: 32px;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 7px 8px;
+  padding: 7px 12px;
   color: #9aa1aa;
   background: #fafafa;
   border: 1px solid #e6e9ef;
@@ -986,7 +972,7 @@ onBeforeUnmount(() => {
 .app-nav-item span {
   min-width: 0;
   overflow: visible;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.3;
   overflow-wrap: anywhere;
   text-overflow: clip;
