@@ -1,6 +1,6 @@
 <template>
   <section class="app-page shelf-page" :class="{ 'mobile-shelf': isMobileShelf }">
-    <div class="shelf-title app-panel">
+    <div class="shelf-title">
       <div class="shelf-title-main">
         <button v-if="isMobileShelf" class="mobile-menu-trigger" type="button" aria-label="打开侧边栏" @click.stop="toggleMobileNavigation">
           <el-icon><Menu /></el-icon>
@@ -28,7 +28,7 @@
       </div>
     </div>
 
-    <div class="book-group-wrapper app-panel" role="tablist" aria-label="书架分组">
+    <div class="book-group-wrapper" role="tablist" aria-label="书架分组">
       <button
         v-for="item in groupItems"
         :key="item.id"
@@ -46,14 +46,14 @@
 
     <main class="shelf-main" :class="`${effectiveShelfView}-view`">
       <div class="books-wrapper">
-        <div v-if="bookshelf.loading" class="book-list app-panel">
+        <div v-if="bookshelf.loading" class="book-list">
           <article v-for="i in 8" :key="i" class="book-row skeleton-row">
             <el-skeleton :rows="2" animated />
           </article>
         </div>
 
         <template v-else-if="displayedBooks.length">
-          <div class="book-list app-panel">
+          <div class="book-list">
             <article
               v-for="book in displayedBooks"
               :key="book.id"
@@ -94,7 +94,7 @@
           </div>
         </template>
 
-        <div v-else class="empty-panel app-panel">
+        <div v-else class="empty-panel">
           <el-empty :description="emptyText" />
         </div>
       </div>
@@ -365,91 +365,50 @@ function readError(err, fallback) {
 
 <style scoped>
 .shelf-page,
-.shelf-main {
-  display: grid;
+.shelf-main,
+.books-wrapper {
   min-width: 0;
-  gap: 16px;
+  max-width: 100%;
 }
 
 .shelf-page {
-  background: #fff;
-  min-height: 100vh;
-  padding: 42px 48px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   box-sizing: border-box;
+  height: 100vh;
+  max-height: 100vh;
+  gap: 0;
+  padding: 48px 48px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.shelf-main {
+  display: grid;
+  min-height: 0;
+  gap: 0;
+  overflow: hidden;
 }
 
 .shelf-title {
   display: flex;
+  z-index: 2;
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-}
-
-.shelf-title {
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  padding: 18px 0 12px;
-  border-radius: 0;
+  gap: 16px;
+  padding: 4px 0 12px;
   background: #fff;
   border: 0;
+  border-radius: 0;
   box-shadow: none;
-}
-
-.recent-strip {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  color: var(--app-text);
-  cursor: pointer;
-  text-align: left;
-}
-
-.recent-strip span {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.recent-strip small,
-.recent-strip em {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--app-text-muted);
-  font-size: 12px;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-strip strong {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-strip b {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  flex: 0 0 48px;
-  color: var(--app-primary-strong);
-  background: var(--app-primary-soft);
-  border-radius: 50%;
-  font-size: 14px;
 }
 
 .shelf-title strong {
   color: #26394a;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 800;
+  line-height: 1.25;
 }
 
 .shelf-title-main {
@@ -492,14 +451,15 @@ function readError(err, fallback) {
   min-width: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 16px;
 }
 
 .title-actions button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0 2px;
+  min-width: 0;
+  padding: 0;
   color: #26394a;
   background: transparent;
   border: 0;
@@ -535,22 +495,6 @@ function readError(err, fallback) {
 .list-cover.has-cover {
   border-color: transparent;
   writing-mode: initial;
-}
-
-.list-main small {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--app-text-muted);
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.list-main strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .book-group-wrapper {
@@ -616,34 +560,39 @@ function readError(err, fallback) {
 
 .book-list {
   min-width: 0;
-  overflow: hidden;
   background: #fff;
   border: 0;
   box-shadow: none;
 }
 
 .books-wrapper {
-  min-width: 0;
-  max-width: 100%;
+  min-height: 0;
   overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.books-wrapper::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .shelf-main.grid-view .book-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 380px));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 360px));
   justify-content: space-around;
-  gap: 10px 16px;
-  padding: 18px 0 28px;
+  gap: 18px 16px;
+  padding: 22px 0 28px;
   overflow: visible;
 }
 
 .shelf-main.grid-view .book-row {
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 20px;
+  gap: 18px;
   width: min(360px, 100%);
-  min-height: 160px;
+  min-height: 142px;
   align-items: start;
-  padding: 24px;
+  padding: 12px 8px;
   border-bottom: 0;
 }
 
@@ -691,8 +640,8 @@ function readError(err, fallback) {
 
 .shelf-main.grid-view .book-operation {
   position: absolute;
-  top: 0;
-  right: 10px;
+  top: 4px;
+  right: 0;
   min-height: 22px;
 }
 
@@ -705,14 +654,14 @@ function readError(err, fallback) {
 .book-row {
   position: relative;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   width: 100%;
-  padding: 12px;
+  box-sizing: border-box;
+  padding: 14px 0;
   color: var(--app-text);
   background: transparent;
   border: 0;
@@ -732,8 +681,8 @@ function readError(err, fallback) {
 }
 
 .list-cover {
-  width: 52px;
-  height: 68px;
+  width: 74px;
+  height: 98px;
   border-radius: 5px;
   cursor: zoom-in;
 }
@@ -742,7 +691,31 @@ function readError(err, fallback) {
   display: grid;
   min-width: 0;
   box-sizing: border-box;
-  gap: 5px;
+  align-content: start;
+  gap: 6px;
+  padding-right: 44px;
+}
+
+.list-main strong,
+.list-main small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-main strong {
+  color: #33373d;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.list-main small {
+  color: var(--app-text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 .book-operation {
@@ -786,35 +759,27 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf {
-  gap: 8px;
+  gap: 0;
+  height: auto;
+  max-height: none;
+  min-height: 100vh;
   width: 100%;
   max-width: 100%;
   min-width: 0;
   padding: 0 0 18px;
   overflow-x: hidden;
+  overflow-y: visible;
 }
 
-.shelf-page.mobile-shelf .shelf-main {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: hidden;
-}
-
-.shelf-page.mobile-shelf .books-wrapper {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: hidden;
-}
-
+.shelf-page.mobile-shelf .shelf-main,
+.shelf-page.mobile-shelf .books-wrapper,
 .shelf-page.mobile-shelf .shelf-title,
-.shelf-page.mobile-shelf .recent-strip,
 .shelf-page.mobile-shelf .book-group-wrapper,
 .shelf-page.mobile-shelf .book-list,
 .shelf-page.mobile-shelf .empty-panel {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   border-radius: 0;
   border-right: 0;
@@ -824,13 +789,12 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .shelf-title {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  min-width: 0;
-  padding: 18px 16px 0;
-  overflow: visible;
+  padding: 22px 16px 10px;
+  overflow: hidden;
 }
 
 .shelf-page.mobile-shelf .shelf-title-main {
@@ -839,16 +803,19 @@ function readError(err, fallback) {
 }
 
 .shelf-page.mobile-shelf .shelf-title strong {
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .shelf-page.mobile-shelf .title-actions {
-  max-width: none;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 12px;
-  overflow: visible;
+  max-width: 58%;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
 }
 
@@ -867,44 +834,42 @@ function readError(err, fallback) {
   display: none;
 }
 
-.shelf-page.mobile-shelf .recent-strip {
-  display: none;
-}
-
-.shelf-page.mobile-shelf .recent-strip strong {
-  font-size: 13px;
-}
-
-.shelf-page.mobile-shelf .recent-strip b {
-  width: 38px;
-  height: 38px;
-  flex-basis: 38px;
-  font-size: 12px;
-}
-
 .shelf-page.mobile-shelf .book-group-wrapper {
-  width: 100%;
-  max-width: 100%;
   margin-right: 0;
   margin-left: 0;
-  padding: 5px 0;
+  padding: 0;
+}
+
+.shelf-page.mobile-shelf .group-chip {
+  height: 54px;
+  flex: 1 0 25%;
+  padding: 0 10px;
+  font-size: 16px;
+}
+
+.shelf-page.mobile-shelf .shelf-main.grid-view .book-list {
+  display: block;
+  padding: 0;
 }
 
 .shelf-page.mobile-shelf .book-row {
   display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  min-height: 142px;
+  grid-template-columns: clamp(76px, 24vw, 92px) minmax(0, 1fr);
+  min-height: clamp(120px, 36vw, 142px);
   align-items: start;
-  gap: 18px;
+  gap: clamp(12px, 4vw, 18px);
   width: 100%;
   box-sizing: border-box;
   padding: 14px 16px;
+  border-bottom: 0;
   contain: inline-size paint;
 }
 
 .shelf-page.mobile-shelf .list-cover {
-  width: 92px;
-  height: 122px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 4;
+  border-radius: 0;
 }
 
 .shelf-page.mobile-shelf .book-operation {
@@ -920,11 +885,12 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .list-main {
   width: auto;
-  min-height: 122px;
+  min-height: clamp(102px, 32vw, 122px);
   box-sizing: border-box;
   align-content: space-between;
   justify-content: stretch;
   gap: 6px;
+  padding-right: 0;
   overflow: hidden;
 }
 
@@ -944,6 +910,7 @@ function readError(err, fallback) {
   font-size: 13px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  white-space: normal;
   word-break: break-word;
 }
 
@@ -953,18 +920,23 @@ function readError(err, fallback) {
 
 @media (max-width: 750px) {
   .shelf-page {
-    gap: 8px;
+    gap: 0;
+    height: auto;
+    max-height: none;
+    min-height: 100vh;
     width: 100%;
     max-width: 100%;
     min-width: 0;
     padding: 0 0 18px;
     overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .shelf-main {
     width: 100%;
     max-width: 100%;
     min-width: 0;
+    overflow: visible;
     overflow-x: hidden;
   }
 
@@ -973,6 +945,7 @@ function readError(err, fallback) {
     max-width: 100%;
     min-width: 0;
     overflow-x: hidden;
+    overflow-y: visible;
   }
 
   .shelf-main.grid-view .book-list {
@@ -982,143 +955,6 @@ function readError(err, fallback) {
 
   .shelf-main.grid-view .book-row {
     width: 100%;
-  }
-
-  .shelf-title,
-  .recent-strip,
-  .book-group-wrapper,
-  .book-list,
-  .empty-panel {
-    width: 100%;
-    max-width: 100%;
-    box-sizing: border-box;
-    border-radius: 0;
-    border-right: 0;
-    border-left: 0;
-    box-shadow: none;
-  }
-
-  .shelf-title {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    justify-content: space-between;
-    min-width: 0;
-    padding: 18px 16px 0;
-    overflow: visible;
-  }
-
-  .shelf-title-main {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  .shelf-title strong {
-    font-size: 28px;
-    line-height: 1.2;
-  }
-
-  .title-actions {
-    max-width: none;
-    flex: 0 0 auto;
-    min-width: 0;
-    flex-wrap: wrap;
-    gap: 14px;
-    overflow: visible;
-    scrollbar-width: none;
-  }
-
-  .title-actions::-webkit-scrollbar {
-    display: none;
-  }
-
-  .title-actions .view-switch {
-    display: none;
-  }
-
-  .title-actions button {
-    flex: 0 0 auto;
-    min-width: 0;
-    font-size: 14px;
-    line-height: 28px;
-    white-space: nowrap;
-  }
-
-  .recent-strip {
-    display: none;
-  }
-
-  .book-group-wrapper {
-    width: 100%;
-    max-width: 100%;
-    margin-right: 0;
-    margin-left: 0;
-    padding: 5px 0;
-  }
-
-  .book-row {
-    display: grid;
-    grid-template-columns: 92px minmax(0, 1fr);
-    min-height: 142px;
-    align-items: start;
-    gap: 18px;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 14px 16px;
-    contain: inline-size paint;
-  }
-
-  .list-cover {
-    width: 92px;
-    height: 122px;
-  }
-
-  .book-operation {
-    position: absolute;
-    top: 10px;
-    right: 14px;
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-    justify-content: flex-end;
-    overflow: hidden;
-  }
-
-  .list-main {
-    width: auto;
-    max-width: 100%;
-    min-height: 122px;
-    box-sizing: border-box;
-    align-content: space-between;
-    justify-content: stretch;
-    gap: 6px;
-    padding-right: 0;
-    overflow: hidden;
-  }
-
-  .list-main strong {
-    display: -webkit-box;
-    max-height: 45px;
-    padding-right: 48px;
-    font-size: 16px;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
-    white-space: normal;
-    word-break: break-word;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  .book-row.editing .list-main strong {
-    padding-right: 58px;
-  }
-
-  .list-main small {
-    font-size: 13px;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
-    word-break: break-word;
   }
 
 }

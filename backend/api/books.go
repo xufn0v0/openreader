@@ -518,7 +518,20 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read local source file"})
 		return
 	}
-	parsed, err := parseLocalBookChapters(filepath.Ext(sourcePath), data)
+	var request struct {
+		TOCRule *string `json:"tocRule"`
+	}
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid local refresh payload"})
+			return
+		}
+	}
+	tocRule := strings.TrimSpace(book.TOCRule)
+	if request.TOCRule != nil {
+		tocRule = strings.TrimSpace(*request.TOCRule)
+	}
+	parsed, err := parseLocalBookChapters(filepath.Ext(sourcePath), data, tocRule)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to parse local book: %v", err)})
 		return
@@ -593,6 +606,7 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 			book.LastChapter = fmt.Sprintf("第 %d 章", len(parsed))
 		}
 		book.ChapterCount = len(parsed)
+		book.TOCRule = tocRule
 		if err := tx.Save(&book).Error; err != nil {
 			return err
 		}
@@ -1600,7 +1614,7 @@ func (s *Server) rebuildLocalChapterText(book models.Book, chapter *models.Chapt
 	if err != nil {
 		return ""
 	}
-	chapters, err := parseLocalBookChapters(filepath.Ext(sourcePath), data)
+	chapters, err := parseLocalBookChapters(filepath.Ext(sourcePath), data, book.TOCRule)
 	if err != nil || chapter.Index < 0 || chapter.Index >= len(chapters) {
 		return ""
 	}
@@ -1628,10 +1642,10 @@ func (s *Server) rebuildLocalChapterText(book models.Book, chapter *models.Chapt
 	return content
 }
 
-func parseLocalBookChapters(ext string, data []byte) ([]engine.TXTChapter, error) {
+func parseLocalBookChapters(ext string, data []byte, tocRule string) ([]engine.TXTChapter, error) {
 	switch strings.ToLower(strings.TrimSpace(ext)) {
 	case ".txt", ".text", ".md":
-		return engine.ParseTXT(data)
+		return engine.ParseTXTWithRule(data, tocRule)
 	case ".epub":
 		book, err := engine.ParseEPUB(data)
 		return book.Chapters, err

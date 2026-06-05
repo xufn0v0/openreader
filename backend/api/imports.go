@@ -10,9 +10,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"openreader/backend/engine"
 	"openreader/backend/middleware"
 	"openreader/backend/services/localbook"
 )
+
+func (s *Server) listTXTTocRules(c *gin.Context) {
+	c.JSON(http.StatusOK, engine.DefaultTXTTocRules())
+}
 
 func (s *Server) importTXT(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
@@ -61,6 +66,7 @@ func (s *Server) importTXT(c *gin.Context) {
 		Title:      c.PostForm("title"),
 		Author:     c.PostForm("author"),
 		CategoryID: categoryID,
+		TOCRule:    c.PostForm("tocRule"),
 	})
 	if err != nil {
 		if errors.Is(err, localbook.ErrUnsupportedFormat) ||

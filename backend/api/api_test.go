@@ -100,6 +100,29 @@ func TestHealthIncludesBuildInfo(t *testing.T) {
 	}
 }
 
+func TestListTXTTocRules(t *testing.T) {
+	router, _ := setupTestServer(t)
+	auth := authHeader(t, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/txt-toc-rules", nil)
+	req.Header.Set("Authorization", auth)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("txt toc rules: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var rules []engine.TXTTocRule
+	if err := json.Unmarshal(w.Body.Bytes(), &rules); err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) == 0 {
+		t.Fatal("expected default txt toc rules")
+	}
+	if rules[0].Name == "" || rules[0].Rule == "" {
+		t.Fatalf("unexpected first rule: %+v", rules[0])
+	}
+}
+
 func TestRegisterAndLogin(t *testing.T) {
 	router, _ := setupTestServer(t)
 
@@ -3082,6 +3105,25 @@ func TestRefreshLocalBookReparsesArchivedSource(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "新正文") || chapter.CachePath == "" {
 		t.Fatalf("expected refreshed chapter content and cache, chapter=%+v body=%s", chapter, w.Body.String())
+	}
+
+	next = "== 第一节 ==\n第一节正文\n== 第二节 ==\n第二节正文"
+	if err := os.WriteFile(sourcePath, []byte(next), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh-local", strings.NewReader(`{"tocRule":"^== .+ ==$"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh local book with toc rule: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := server.db.First(&refreshed, book.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.TOCRule != "^== .+ ==$" || refreshed.ChapterCount != 2 || refreshed.LastChapter != "== 第二节 ==" {
+		t.Fatalf("unexpected refreshed book with toc rule: %+v", refreshed)
 	}
 }
 

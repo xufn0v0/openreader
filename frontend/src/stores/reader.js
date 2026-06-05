@@ -446,6 +446,10 @@ export const useReaderStore = defineStore('reader', {
       this.replaceProgress(progress)
       return progress
     },
+    cachedProgress(bookId) {
+      if (!bookId) return null
+      return newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
+    },
     replaceProgress(progress) {
       if (!progress?.bookId) return
       const next = clearLocalProgressFlags(progress)
@@ -477,7 +481,7 @@ export const useReaderStore = defineStore('reader', {
     },
     async loadProgress(bookId, options = {}) {
       const local = newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
-      if (options.preferLocal && local?.bookId) {
+      if (options.preferLocal && local?.bookId && local.pendingSync) {
         api.get(`/progress/${bookId}`)
           .then(({ data }) => {
             if (data?.bookId) this.applyServerProgress(data)

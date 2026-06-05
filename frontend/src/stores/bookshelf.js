@@ -263,12 +263,13 @@ export const useBookshelfStore = defineStore('bookshelf', {
       this.invalidateCategories()
       return data
     },
-    async importTXT({ file, title, author, categoryId }) {
+    async importTXT({ file, title, author, categoryId, tocRule }) {
       const form = new FormData()
       form.append('file', file)
       if (title) form.append('title', title)
       if (author) form.append('author', author)
       if (categoryId) form.append('categoryId', categoryId)
+      if (tocRule) form.append('tocRule', tocRule)
 
       const { data } = await api.post('/imports/books', form, {
         headers: { 'Content-Type': 'multipart/form-data' },

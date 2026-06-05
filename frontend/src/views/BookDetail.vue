@@ -30,6 +30,7 @@
               <el-button @click="openBookEditor">编辑</el-button>
               <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
               <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
+              <el-button v-if="isTextLocalBook" :loading="refreshingBook" @click="changeLocalTocRule">修改目录规则</el-button>
               <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
               <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存到浏览器</el-button>
               <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
@@ -58,6 +59,7 @@
                 :current-index="detailCurrentIndex"
                 :reverse="tocReverse"
                 :show-meta="true"
+                searchable
                 :locate-key="tocLocateKey"
                 :browser-cached-map="browserCachedChapters"
                 @jump="goChapter"
@@ -218,6 +220,11 @@ const sourceGroups = computed(() => {
   return [...new Set(groups)].sort()
 })
 const bookProgress = computed(() => newestBookProgress(book.value, reader.progressByBook))
+const isTextLocalBook = computed(() => {
+  if (Number(book.value?.sourceId || 0) > 0) return false
+  const name = String(book.value?.originalFile || book.value?.libraryPath || book.value?.title || '').toLowerCase()
+  return /\.(txt|text|md)$/.test(name)
+})
 const detailCurrentIndex = computed(() => {
   const progress = bookProgress.value
   const index = Number(progress?.chapterIndex || 0)
@@ -465,6 +472,31 @@ async function refreshCurrentLocalBook() {
     ElMessage.success(`本地书已刷新，共 ${data?.chapterCount || book.value?.chapterCount || chapters.value.length} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '刷新本地书失败'))
+  } finally {
+    refreshingBook.value = false
+  }
+}
+
+async function changeLocalTocRule() {
+  if (!book.value) return
+  const currentRule = book.value.tocRule || ''
+  const result = await ElMessageBox.prompt('填写 TXT 目录行正则，留空则使用默认目录规则。', '修改目录规则', {
+    confirmButtonText: '刷新目录',
+    cancelButtonText: '取消',
+    inputType: 'textarea',
+    inputValue: currentRule,
+    inputPlaceholder: '^第.+章.*$',
+  }).catch(() => null)
+  if (!result) return
+  refreshingBook.value = true
+  try {
+    const { data } = await refreshLocalBook(book.value.id, { tocRule: result.value || '' })
+    book.value = data?.book || data
+    if (book.value?.id) bookshelf.upsertBook(book.value)
+    await reloadChapters()
+    ElMessage.success(`目录规则已更新，共 ${data?.chapterCount || book.value?.chapterCount || chapters.value.length} 章`)
+  } catch (err) {
+    ElMessage.error(readError(err, '更新目录规则失败'))
   } finally {
     refreshingBook.value = false
   }

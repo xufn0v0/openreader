@@ -33,6 +33,7 @@ type ImportRequest struct {
 	Title      string
 	Author     string
 	CategoryID *uint
+	TOCRule    string
 }
 
 func NewImporter(cfg config.Config, db *gorm.DB) Importer {
@@ -40,7 +41,7 @@ func NewImporter(cfg config.Config, db *gorm.DB) Importer {
 }
 
 func (importer Importer) Import(request ImportRequest) (models.Book, error) {
-	parsedBook, err := parseUploadedBook(request.Extension, request.Data)
+	parsedBook, err := parseUploadedBook(request.Extension, request.Data, request.TOCRule)
 	if err != nil {
 		if errors.Is(err, ErrUnsupportedFormat) {
 			return models.Book{}, err
@@ -82,6 +83,7 @@ func (importer Importer) Import(request ImportRequest) (models.Book, error) {
 			LibraryPath:  archive.Directory,
 			OriginalFile: archive.OriginalFile,
 			TOCFile:      archive.TOCFile,
+			TOCRule:      strings.TrimSpace(request.TOCRule),
 			SourceFile:   archive.SourceFile,
 			LastChapter:  chapters[len(chapters)-1].Title,
 			ChapterCount: len(chapters),
@@ -160,13 +162,13 @@ func (importer Importer) Import(request ImportRequest) (models.Book, error) {
 	return book, nil
 }
 
-func parseUploadedBook(ext string, data []byte) (engine.ParsedBook, error) {
+func parseUploadedBook(ext string, data []byte, tocRule string) (engine.ParsedBook, error) {
 	ext = strings.ToLower(strings.TrimSpace(ext))
 	switch ext {
 	case ".epub":
 		return engine.ParseEPUB(data)
 	case ".txt", ".text", ".md":
-		chapters, err := engine.ParseTXT(data)
+		chapters, err := engine.ParseTXTWithRule(data, tocRule)
 		if err != nil {
 			return engine.ParsedBook{}, err
 		}

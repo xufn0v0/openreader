@@ -2,8 +2,8 @@ import { newestProgress } from './bookOrder'
 
 export function readerRouteQueryFromBook(book, progressOverride = null, totalChaptersOverride = null) {
   const progress = newestProgress(book?.progress || null, progressOverride || null)
-  if (!progress) return {}
-  const query = {}
+  const query = { resume: '1' }
+  if (!progress) return query
   const chapterIndex = Number(progress.chapterIndex)
   if (Number.isFinite(chapterIndex)) query.chapter = Math.max(0, Math.floor(chapterIndex))
   const offset = Number(progress.offset)
