@@ -129,7 +129,7 @@
                 <span>特殊模式</span>
                 <el-radio-group v-model="readerPageTypeModel" size="small">
                   <el-radio-button value="normal">正常</el-radio-button>
-                  <el-radio-button value="kindle">Kindle</el-radio-button>
+                  <el-radio-button value="kindle">简洁</el-radio-button>
                 </el-radio-group>
               </label>
               <label class="reader-config-schemes-row">
@@ -167,37 +167,6 @@
                 </div>
               </label>
               <label>
-                <span>页面模式（本机）</span>
-                <el-radio-group v-model="readerPageModeModel" size="small">
-                  <el-radio-button value="auto">自适应</el-radio-button>
-                  <el-radio-button value="mobile">手机模式</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
-                <span>翻页方式</span>
-                <el-radio-group v-model="readerModeModel" size="small">
-                  <el-radio-button value="page">上下滑动</el-radio-button>
-                  <el-radio-button v-if="readerSettingsMiniInterface" value="flip">左右滑动</el-radio-button>
-                  <el-radio-button value="scroll">上下滚动</el-radio-button>
-                  <el-radio-button value="scroll2">上下滚动2</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
-                <span>全屏点击</span>
-                <el-radio-group v-model="readerClickMethodModel" size="small">
-                  <el-radio-button value="next">下一页</el-radio-button>
-                  <el-radio-button value="auto">自动</el-radio-button>
-                  <el-radio-button value="none">不翻页</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
-                <span>选择文字</span>
-                <el-radio-group v-model="readerSelectionActionModel" size="small">
-                  <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
-                  <el-radio-button value="忽略">忽略</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
                 <span>字体</span>
                 <el-select v-model="readerFontFamilyModel" size="small">
                   <el-option v-for="font in fontOptions" :key="font.value" :label="font.label" :value="font.value" />
@@ -213,25 +182,6 @@
               <label>
                 <span>亮度 {{ readerStore.brightness }}%</span>
                 <el-slider v-model="readerBrightnessModel" :min="50" :max="150" />
-              </label>
-              <label>
-                <span>自动阅读</span>
-                <el-radio-group v-model="readerAutoReadingMethodModel" size="small">
-                  <el-radio-button value="像素滚动">像素滚动</el-radio-button>
-                  <el-radio-button value="段落滚动">段落滚动</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label v-if="readerStore.autoReadingMethod === '像素滚动'">
-                <span>滚动像素 {{ readerStore.autoReadingPixel }}px</span>
-                <el-slider v-model="readerAutoReadingPixelModel" :min="1" :max="80" :step="1" />
-              </label>
-              <label>
-                <span>翻页速度 {{ readerStore.autoReadingLineTime }}ms</span>
-                <el-slider v-model="readerAutoReadingLineTimeModel" :min="50" :max="3000" :step="50" />
-              </label>
-              <label>
-                <span>动画时长 {{ readerStore.animateDuration }}ms</span>
-                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" :disabled="readerStore.pageType === 'kindle'" />
               </label>
               <label>
                 <span>字号 {{ readerStore.fontSize }}px</span>
@@ -252,6 +202,56 @@
               <label>
                 <span>阅读宽度 {{ readerStore.columnWidth }}px</span>
                 <el-slider v-model="readerColumnWidthModel" :min="560" :max="1080" :step="20" />
+              </label>
+              <label>
+                <span>页面模式（本机）</span>
+                <el-radio-group v-model="readerPageModeModel" size="small">
+                  <el-radio-button value="auto">自适应</el-radio-button>
+                  <el-radio-button value="mobile">手机模式</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
+                <span>翻页方式</span>
+                <el-radio-group v-model="readerModeModel" size="small">
+                  <el-radio-button value="page">上下滑动</el-radio-button>
+                  <el-radio-button v-if="readerSettingsMiniInterface" value="flip">左右滑动</el-radio-button>
+                  <el-radio-button value="scroll">上下滚动</el-radio-button>
+                  <el-radio-button value="scroll2">上下滚动2</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
+                <span>动画时长 {{ readerStore.animateDuration }}ms</span>
+                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" :disabled="readerStore.pageType === 'kindle'" />
+              </label>
+              <label>
+                <span>自动阅读</span>
+                <el-radio-group v-model="readerAutoReadingMethodModel" size="small">
+                  <el-radio-button value="像素滚动">像素滚动</el-radio-button>
+                  <el-radio-button value="段落滚动">段落滚动</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label v-if="readerStore.autoReadingMethod === '像素滚动'">
+                <span>滚动像素 {{ readerStore.autoReadingPixel }}px</span>
+                <el-slider v-model="readerAutoReadingPixelModel" :min="1" :max="80" :step="1" />
+              </label>
+              <label>
+                <span>翻页速度 {{ readerStore.autoReadingLineTime }}ms</span>
+                <el-slider v-model="readerAutoReadingLineTimeModel" :min="50" :max="3000" :step="50" />
+              </label>
+              <label>
+                <span>全屏点击</span>
+                <el-radio-group v-model="readerClickMethodModel" size="small">
+                  <el-radio-button value="next">下一页</el-radio-button>
+                  <el-radio-button value="auto">自动</el-radio-button>
+                  <el-radio-button value="none">不翻页</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
+                <span>选择文字</span>
+                <el-radio-group v-model="readerSelectionActionModel" size="small">
+                  <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
+                  <el-radio-button value="忽略">忽略</el-radio-button>
+                </el-radio-group>
               </label>
               <label>
                 <span>朗读语速 {{ readerStore.ttsRate }}</span>
@@ -286,8 +286,20 @@
               </button>
             </div>
             <div v-if="readerStore.theme === 'custom'" class="custom-theme-row">
-              <span>背景色</span>
-              <el-color-picker v-model="readerCustomBgColorModel" />
+              <label class="custom-theme-field">
+                <span>页面背景颜色</span>
+                <el-color-picker v-model="readerCustomBodyColorModel" />
+                <el-button v-if="readerStore.customBodyColor" size="small" text type="danger" @click="readerStore.setCustomBodyColor('')">恢复默认</el-button>
+              </label>
+              <label class="custom-theme-field">
+                <span>浮窗背景颜色</span>
+                <el-color-picker v-model="readerCustomPopupColorModel" />
+                <el-button v-if="readerStore.customPopupColor" size="small" text type="danger" @click="readerStore.setCustomPopupColor('')">恢复默认</el-button>
+              </label>
+              <label class="custom-theme-field">
+                <span>阅读背景颜色</span>
+                <el-color-picker v-model="readerCustomBgColorModel" />
+              </label>
               <el-upload accept="image/*" :show-file-list="false" :auto-upload="false" @change="pickReaderBgImage">
                 <el-button size="small" :icon="Upload" :loading="readerBgUploading">背景图</el-button>
               </el-upload>
@@ -481,9 +493,17 @@ const readerTTSPitchModel = computed({
   get: () => readerStore.ttsPitch,
   set: value => readerStore.setTTSPitch(value),
 })
+const readerCustomBodyColorModel = computed({
+  get: () => readerStore.customBodyColor,
+  set: value => readerStore.setCustomBodyColor(value || ''),
+})
+const readerCustomPopupColorModel = computed({
+  get: () => readerStore.customPopupColor,
+  set: value => readerStore.setCustomPopupColor(value || ''),
+})
 const readerCustomBgColorModel = computed({
   get: () => readerStore.customBgColor,
-  set: value => readerStore.setCustomBgColor(value),
+  set: value => readerStore.setCustomBgColor(value || ''),
 })
 const readerSettingsSyncText = computed(() => {
   if (readerStore.settingsSyncing) return '同步中'
@@ -1048,6 +1068,18 @@ function readError(err, fallback) {
   gap: 12px;
   color: var(--app-text-muted);
   font-size: 13px;
+}
+
+.custom-theme-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.custom-theme-field > span {
+  color: var(--app-text-muted);
+  white-space: nowrap;
 }
 
 .settings-bg-list {
