@@ -27,15 +27,15 @@
           >
             <div class="hero-actions">
               <el-button type="primary" @click="startRead">开始阅读</el-button>
-	              <el-button @click="openBookEditor">编辑</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
-	              <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
-	              <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存后续100章</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="clearingLocalCache" @click="clearCurrentBookLocalCache">清浏览器缓存</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="clearingCache" @click="clearCurrentBookCache">清服务器缓存</el-button>
-	              <el-button type="danger" plain @click="deleteCurrentBook">删除</el-button>
+              <el-button @click="openBookEditor">编辑</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
+              <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
+              <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存到浏览器</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="clearingLocalCache" @click="clearCurrentBookLocalCache">清浏览器缓存</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="clearingCache" @click="clearCurrentBookCache">清服务器缓存</el-button>
+              <el-button type="danger" plain @click="deleteCurrentBook">删除</el-button>
               <el-select v-model="categoryDraft" placeholder="设置分组" clearable size="default" class="category-select" @change="changeCategory">
                 <el-option label="未分组" value="" />
                 <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
