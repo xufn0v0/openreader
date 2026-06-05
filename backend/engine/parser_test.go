@@ -59,6 +59,51 @@ func TestParseTXTSkipsShortFrontMatterBeforeFirstChapter(t *testing.T) {
 	}
 }
 
+func TestParseTXTDetectsUpstreamDefaultTitleRules(t *testing.T) {
+	input := []byte("1、初见\n第一节正文。\n2、再会\n第二节正文。")
+
+	chapters, err := ParseTXT(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d: %+v", len(chapters), chapters)
+	}
+	if chapters[0].Title != "1、初见" || chapters[1].Title != "2、再会" {
+		t.Fatalf("unexpected detected chapters: %+v", chapters)
+	}
+}
+
+func TestParseTXTDetectsEnglishChapterDefaultRule(t *testing.T) {
+	input := []byte("Chapter 1 Begin\nFirst body.\nChapter 2 Finale\nSecond body.")
+
+	chapters, err := ParseTXT(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d: %+v", len(chapters), chapters)
+	}
+	if chapters[0].Title != "Chapter 1 Begin" || chapters[1].Title != "Chapter 2 Finale" {
+		t.Fatalf("unexpected detected chapters: %+v", chapters)
+	}
+}
+
+func TestParseTXTWithRuleAcceptsUpstreamLookbehindPrefix(t *testing.T) {
+	input := []byte("正文前说明\n第一章 起始\n第一章正文。\n第二章 转折\n第二章正文。")
+
+	chapters, err := ParseTXTWithRule(input, `(?<=[　\s])第?\s{0,4}[\d〇零一二两三四五六七八九十百千万]+?\s{0,4}章.{0,30}$`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("expected 2 chapters, got %d: %+v", len(chapters), chapters)
+	}
+	if chapters[0].Title != "第一章 起始" || chapters[1].Title != "第二章 转折" {
+		t.Fatalf("unexpected chapters: %+v", chapters)
+	}
+}
+
 func TestParseEPUBUsesSpineOrder(t *testing.T) {
 	var buffer bytes.Buffer
 	zipWriter := zip.NewWriter(&buffer)

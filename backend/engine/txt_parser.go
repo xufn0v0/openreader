@@ -11,6 +11,20 @@ import (
 
 var ChapterTitlePattern = regexp.MustCompile(`^(?:第[零一二三四五六七八九十百千万两〇○0-9０-９]+[章回节卷集部]|序章|楔子|引子|前言|尾声|后记|番外(?:篇)?|第[零一二三四五六七八九十百千万两〇○0-9０-９]+卷|[上中下]卷).{0,64}$`)
 
+var defaultTXTTitlePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^.{1,20}[(（][\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]{1,8}[)）][ 　\t]{0,4}$`),
+	regexp.MustCompile(`^[ \t　]{0,4}(?:(?:内容|文章)?简介|文案|前言|序章|序言|卷首语|扉页|楔子|正文(?:完|结)?|终章|后记|尾声|番外|[卷章][\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]{1,8})[ 　]{0,4}.{0,30}$`),
+	regexp.MustCompile(`^[\s　]{0,4}(?:[☆★✦✧].{1,30}|(?:内容|文章)?简介|文案|前言|序章|楔子|正文|终章|后记|尾声|番外)[ 　]{0,4}$`),
+	regexp.MustCompile(`^[\s　]*[【〔〖「『〈［\[](?:第|[Cc]hapter)[\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]{1,10}[章节].{0,20}$`),
+	regexp.MustCompile(`^[ 　\t]{0,4}(?:[Cc]hapter|[Ss]ection|[Pp]art|ＰＡＲＴ|[Nn][oO]\.|[Ee]pisode|(?:内容|文章)?简介|文案|前言|序章|楔子|正文|终章|后记|尾声|番外)\s{0,4}\d{1,4}.{0,30}$`),
+	regexp.MustCompile(`^[ 　\t]{0,4}正文[ 　]{1,4}.{0,20}$`),
+	regexp.MustCompile(`^[ 　\t]{0,4}(?:序章|序言|卷首语|扉页|楔子|正文|终章|后记|尾声|番外|[〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]{1,8})[ 、_—\-].{1,30}$`),
+	regexp.MustCompile(`^[ 　\t]{0,4}\d{1,5}[：:,.， 、_—\-].{1,30}$`),
+	regexp.MustCompile(`^[ 　\t]{0,4}(?:序章|序言|卷首语|扉页|楔子|正文|终章|后记|尾声|番外|第?\s{0,4}[\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\s{0,4}(?:章|节|卷|集|部|篇)).{0,30}$`),
+	regexp.MustCompile(`^(?:序章|序言|卷首语|扉页|楔子|正文|终章|后记|尾声|番外|第?\s{0,4}[\d〇零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+?\s{0,4}(?:章|节|卷|集|部|篇)).{0,30}$`),
+	ChapterTitlePattern,
+}
+
 type TXTChapter struct {
 	Index   int    `json:"index"`
 	Title   string `json:"title"`
@@ -25,7 +39,7 @@ func ParseTXT(data []byte) ([]TXTChapter, error) {
 		return nil, err
 	}
 
-	return parseTXTText(text, nil), nil
+	return parseTXTText(text, detectTXTTitlePattern(text)), nil
 }
 
 func ParseTXTWithRule(data []byte, rule string) ([]TXTChapter, error) {
@@ -35,9 +49,9 @@ func ParseTXTWithRule(data []byte, rule string) ([]TXTChapter, error) {
 	}
 	rule = strings.TrimSpace(rule)
 	if rule == "" {
-		return parseTXTText(text, nil), nil
+		return parseTXTText(text, detectTXTTitlePattern(text)), nil
 	}
-	pattern, err := regexp.Compile(rule)
+	pattern, err := compileTXTTitlePattern(rule)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +98,53 @@ func parseTXTText(text string, titlePattern *regexp.Regexp) []TXTChapter {
 	}
 
 	return chapters
+}
+
+func detectTXTTitlePattern(text string) *regexp.Regexp {
+	bestPattern := ChapterTitlePattern
+	bestCount := countTXTTitleMatches(text, bestPattern)
+	for _, pattern := range defaultTXTTitlePatterns {
+		count := countTXTTitleMatches(text, pattern)
+		if count >= bestCount && count > 1 {
+			bestCount = count
+			bestPattern = pattern
+		}
+	}
+	return bestPattern
+}
+
+func countTXTTitleMatches(text string, pattern *regexp.Regexp) int {
+	count := 0
+	for lineStart := 0; lineStart < len(text); {
+		lineEnd := nextLineEnd(text, lineStart)
+		lineText := strings.TrimRight(text[lineStart:lineEnd], "\r\n")
+		if isChapterTitleWithRule(lineText, pattern) {
+			count++
+		}
+		lineStart = lineEnd
+	}
+	return count
+}
+
+func compileTXTTitlePattern(rule string) (*regexp.Regexp, error) {
+	rule = normalizeTXTTitleRule(rule)
+	return regexp.Compile(rule)
+}
+
+func normalizeTXTTitleRule(rule string) string {
+	rule = strings.TrimSpace(rule)
+	rule = strings.TrimPrefix(rule, "(?m)")
+	rule = strings.TrimPrefix(rule, "(?M)")
+	replacements := []string{
+		`(?<=[　\s])`,
+		`(?<=[\s　])`,
+		`(?<=[\s　]{0,4})`,
+		`(?<=[ \t　]{0,4})`,
+	}
+	for _, old := range replacements {
+		rule = strings.ReplaceAll(rule, old, "^")
+	}
+	return rule
 }
 
 func nextLineEnd(text string, start int) int {
