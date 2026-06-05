@@ -250,8 +250,10 @@ const navSections = computed(() => [
   {
     title: '用户空间',
     items: [
-      { key: 'userManage', label: '用户管理', icon: Operation, action: () => overlay.openUserManage() },
-      { key: 'settings', label: '设置', icon: Setting, route: 'settings', panel: 'account' },
+      { key: 'account', label: userStore.profile?.username || '默认', icon: Setting, route: 'settings', panel: 'account' },
+      { key: 'backupConfig', label: '备份用户配置', icon: Upload, action: () => overlay.openBackup() },
+      { key: 'syncConfig', label: '同步用户配置', icon: Refresh, action: syncUserConfig },
+      { key: 'userManage', label: '加载用户空间', icon: Operation, action: () => overlay.openUserManage() },
     ],
   },
   {
@@ -262,10 +264,10 @@ const navSections = computed(() => [
     ],
   },
   {
-    title: '本地缓存',
+    title: cacheSectionTitle.value,
     items: [
-      { key: 'cacheStats', label: cacheStatsLabel.value, icon: Files, action: loadCacheStats },
-      { key: 'clearCache', label: cacheClearing.value ? '清理中' : '清空章节缓存', icon: Delete, action: clearSystemCache },
+      { key: 'cacheStats', label: '刷新缓存统计', icon: Files, action: loadCacheStats },
+      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearChapterCacheLabel.value, icon: Delete, action: clearSystemCache },
     ],
   },
   {
@@ -310,6 +312,14 @@ const cacheStatsLabel = computed(() => {
   const size = formatSize(cacheStats.value?.size || 0)
   const chapters = Number(cacheStats.value?.cachedChapters || 0)
   return `章节缓存 ${size}${chapters ? ` / ${chapters}章` : ''}`
+})
+const cacheSectionTitle = computed(() => {
+  const size = Number(cacheStats.value?.size || 0)
+  return size ? `本地缓存 ${formatSize(size)}` : '本地缓存'
+})
+const clearChapterCacheLabel = computed(() => {
+  const size = Number(cacheStats.value?.size || 0)
+  return size ? `清空章节缓存 ${formatSize(size)}` : '清空章节缓存'
 })
 const isNightTheme = computed(() => reader.theme === 'dark' || reader.theme === 'black')
 const appVersionLabel = computed(() => {
@@ -457,6 +467,22 @@ async function loadCacheStats() {
     cacheStats.value = {}
   } finally {
     cacheLoading.value = false
+  }
+}
+
+async function syncUserConfig() {
+  try {
+    await Promise.all([
+      userStore.loadMe(),
+      preferences.loadPreferences(),
+      reader.loadReaderSettings(),
+      bookshelf.loadCategories({ force: true }),
+      bookshelf.loadBooks({ force: true, all: true }),
+      loadCacheStats(),
+    ])
+    ElMessage.success('用户配置已同步')
+  } catch (err) {
+    ElMessage.error(readError(err, '同步用户配置失败'))
   }
 }
 
