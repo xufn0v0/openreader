@@ -58,6 +58,7 @@
                 :current-index="detailCurrentIndex"
                 :reverse="tocReverse"
                 :show-meta="true"
+                searchable
                 :locate-key="tocLocateKey"
                 :browser-cached-map="browserCachedChapters"
                 @jump="goChapter"

@@ -1,5 +1,5 @@
 <template>
-  <el-input v-model="keyword" placeholder="搜索章节..." clearable size="small" class="toc-search" />
+  <el-input v-if="searchable" v-model="keyword" placeholder="搜索章节..." clearable size="small" class="toc-search" />
   <div ref="tocListRef" class="toc-list">
     <button
       v-for="item in filteredChapters"
@@ -16,7 +16,7 @@
       </span>
       <el-tag v-if="!showMeta && isCached(item)" size="small" type="success" effect="plain">{{ browserCachedMap[item.index] ? '本地' : '已缓存' }}</el-tag>
     </button>
-    <el-empty v-if="keyword && !filteredChapters.length" description="没有匹配章节" />
+    <el-empty v-if="searchable && keyword && !filteredChapters.length" description="没有匹配章节" />
   </div>
 </template>
 
@@ -35,6 +35,10 @@ const props = defineProps({
   modelValue: {
     type: String,
     default: '',
+  },
+  searchable: {
+    type: Boolean,
+    default: false,
   },
   reverse: {
     type: Boolean,
@@ -62,7 +66,7 @@ const keyword = computed({
 })
 
 const filteredChapters = computed(() => {
-  const value = keyword.value.trim().toLowerCase()
+  const value = props.searchable ? keyword.value.trim().toLowerCase() : ''
   const list = value
     ? props.chapters.filter(chapter => String(chapter.title || '').toLowerCase().includes(value))
     : props.chapters

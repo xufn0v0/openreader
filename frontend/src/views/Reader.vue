@@ -166,7 +166,7 @@
           下一章
         </button>
       </div>
-      <button class="mobile-tool-button" type="button" @click="openMobileTool(openTocSearch)">
+      <button class="mobile-tool-button" type="button" @click="openMobileTool(openTocDrawer)">
         <el-icon :size="20"><List /></el-icon>
         <span>目录</span>
       </button>
@@ -250,7 +250,6 @@
       </div>
       <ReaderTocPanel
         ref="tocPanelRef"
-        v-model="tocFilter"
         :chapters="chapters"
         :current-index="currentIndex"
         :reverse="tocReverse"
@@ -534,7 +533,6 @@ const sourceStats = ref(null)
 const shelfLoading = ref(false)
 const shelfListRef = ref(null)
 const tocPanelRef = ref(null)
-const tocFilter = ref('')
 const tocLocateKey = ref(0)
 const tocReverse = ref(false)
 const tocRefreshing = ref(false)
@@ -1314,14 +1312,12 @@ async function jumpFromToc(index) {
 
 function locateTocCurrentChapter() {
   updateCurrentChapterFromScroll()
-  tocFilter.value = ''
   tocLocateKey.value += 1
   nextTick(() => tocPanelRef.value?.locateCurrentChapter?.())
 }
 
 function openTocDrawer() {
   mobileChromeVisible.value = false
-  tocFilter.value = ''
   computeBrowserCachedChapters()
   showTocDrawer.value = true
   window.setTimeout(locateTocCurrentChapter, 0)
@@ -1401,10 +1397,11 @@ async function openShelfPanel() {
   showShelfDrawer.value = true
   if (bookshelf.books.length) {
     window.setTimeout(locateReaderShelfCurrentBook, 0)
+    return
   }
   shelfLoading.value = true
   try {
-    await bookshelf.loadBooks({ force: true, all: true })
+    await bookshelf.loadBooks({ all: true })
     locateReaderShelfCurrentBook()
   } catch (err) {
     ElMessage.error(readError(err, '加载书架失败'))
@@ -1711,14 +1708,6 @@ async function changeSource(source) {
   } finally {
     changingSource.value = null
   }
-}
-
-function openTocSearch() {
-  openTocDrawer()
-  nextTick(() => {
-    const input = document.querySelector('.toc-search input')
-    input?.focus()
-  })
 }
 
 function openContentSearch() {
