@@ -878,7 +878,9 @@ async function loadReaderBook() {
   clearTimeout(saveTimer)
   const targetBookId = bookId.value
   const bookmarksRequest = loadBookmarks(targetBookId).catch(() => [])
-  const [bookRes, chRes, saved] = await Promise.all([
+  const progressRequest = reader.loadProgress(targetBookId, { preferLocal: true }).catch(() => null)
+  const cachedProgress = reader.cachedProgress(targetBookId)
+  const [bookRes, chRes] = await Promise.all([
     cacheFirstRequest(
       () => api.get(`/books/${targetBookId}`),
       `reader@book:${targetBookId}`,
@@ -889,8 +891,9 @@ async function loadReaderBook() {
       `reader@chapters:${targetBookId}`,
       { validate: data => Array.isArray(data) },
     ),
-    reader.loadProgress(targetBookId, { preferLocal: true }),
   ])
+  if (bookId.value !== targetBookId) return
+  const saved = cachedProgress?.bookId ? cachedProgress : await progressRequest
   if (bookId.value !== targetBookId) return
   book.value = bookRes.data
   chapters.value = chRes.data
@@ -900,18 +903,32 @@ async function loadReaderBook() {
   sourceOffset.value = 0
   if (saved?.bookId) bookshelf.applyBookProgress(saved)
   const resumeFromProgress = route.query.resume === '1'
-  if ((resumeFromProgress || route.query.chapter === undefined) && saved?.chapterIndex !== undefined) {
+  const hasExplicitChapter = route.query.chapter !== undefined
+  const shouldUseSavedPosition = resumeFromProgress || !hasExplicitChapter
+  if (shouldUseSavedPosition && saved?.chapterIndex !== undefined) {
     currentIndex.value = saved.chapterIndex
   } else {
     currentIndex.value = Number(route.query.chapter || 0)
   }
   const hasRouteOffset = !resumeFromProgress && route.query.offset !== undefined
-  const initialOffset = hasRouteOffset ? Number(route.query.offset || 0) : Number(saved?.offset || 0)
+  const initialOffset = hasRouteOffset
+    ? Number(route.query.offset || 0)
+    : (shouldUseSavedPosition ? Number(saved?.offset || 0) : 0)
   const routePercent = resumeFromProgress ? null : parseRoutePercent(route.query.percent)
-  const savedPercent = savedBookChapterPercent(saved, chapters.value.length)
+  const savedPercent = shouldUseSavedPosition ? savedBookChapterPercent(saved, chapters.value.length) : null
   await loadChapter(currentIndex.value, initialOffset, {
     restorePercent: routePercent ?? (hasRouteOffset ? null : savedPercent),
     saveAfterLoad: false,
+  })
+  const initialProgressKey = progressSaveKey(currentProgressPayload())
+  progressRequest.then(serverSaved => {
+    reconcileInitialServerProgress(serverSaved, {
+      baseline: saved,
+      baselineKey: initialProgressKey,
+      resumeFromProgress,
+      hasRouteOffset,
+      routePercent,
+    }).catch(() => {})
   })
   if (bookRes.fromCache || chRes.fromCache) {
     refreshReaderBookCaches({ book: Boolean(bookRes.fromCache), chapters: Boolean(chRes.fromCache) }).catch(() => {})
@@ -920,6 +937,34 @@ async function loadReaderBook() {
     if (bookId.value === targetBookId) bookmarks.value = data
   }).catch(() => {})
   await jumpToRouteLine()
+}
+
+async function reconcileInitialServerProgress(serverSaved, options = {}) {
+  if (!serverSaved?.bookId || Number(serverSaved.bookId) !== Number(bookId.value)) return
+  const canFollowServer = options.resumeFromProgress || route.query.chapter === undefined
+  if (!canFollowServer || options.hasRouteOffset || options.routePercent !== null) return
+  if (options.baseline?.bookId && progressUpdatedAtMs(serverSaved) <= progressUpdatedAtMs(options.baseline)) return
+  if (progressSaveKey(currentProgressPayload()) !== options.baselineKey) return
+  const targetIndex = Math.max(0, Math.min(Number(serverSaved.chapterIndex || 0), Math.max(chapters.value.length - 1, 0)))
+  const targetOffset = Math.max(0, Math.floor(Number(serverSaved.offset || 0)))
+  const restorePercent = Number.isFinite(Number(serverSaved.chapterPercent))
+    ? Math.max(0, Math.min(1, Number(serverSaved.chapterPercent)))
+    : savedBookChapterPercent(serverSaved, chapters.value.length)
+  await router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query: {
+      resume: '1',
+      chapter: targetIndex,
+      ...(targetOffset ? { offset: targetOffset } : {}),
+      ...(restorePercent !== null ? { percent: Number(restorePercent.toFixed(6)) } : {}),
+    },
+  })
+  await loadChapter(targetIndex, targetOffset, {
+    restorePercent,
+    saveAfterLoad: false,
+  })
+  lastProgressSaveKey = progressSaveKey(currentProgressPayload())
 }
 
 async function loadBookmarks(targetBookId = bookId.value) {
@@ -2853,6 +2898,11 @@ function progressSaveKey(payload) {
     Math.round(Number(payload.chapterPercent || 0) * 10000),
     reader.mode,
   ].join(':')
+}
+
+function progressUpdatedAtMs(progress) {
+  const time = Date.parse(progress?.updatedAt || '')
+  return Number.isFinite(time) ? time : 0
 }
 
 async function createBookmark() {

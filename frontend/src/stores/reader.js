@@ -446,6 +446,10 @@ export const useReaderStore = defineStore('reader', {
       this.replaceProgress(progress)
       return progress
     },
+    cachedProgress(bookId) {
+      if (!bookId) return null
+      return newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
+    },
     replaceProgress(progress) {
       if (!progress?.bookId) return
       const next = clearLocalProgressFlags(progress)
