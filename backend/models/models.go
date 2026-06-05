@@ -157,6 +157,7 @@ type Book struct {
 	LibraryPath    string    `json:"libraryPath" gorm:"size:600"`
 	OriginalFile   string    `json:"originalFile" gorm:"size:600"`
 	TOCFile        string    `json:"tocFile" gorm:"size:600"`
+	TOCRule        string    `json:"tocRule" gorm:"type:text"`
 	SourceFile     string    `json:"sourceFile" gorm:"size:600"`
 	LastChapter    string    `json:"lastChapter" gorm:"size:240"`
 	ChapterCount   int       `json:"chapterCount"`

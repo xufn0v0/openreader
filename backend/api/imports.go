@@ -61,6 +61,7 @@ func (s *Server) importTXT(c *gin.Context) {
 		Title:      c.PostForm("title"),
 		Author:     c.PostForm("author"),
 		CategoryID: categoryID,
+		TOCRule:    c.PostForm("tocRule"),
 	})
 	if err != nil {
 		if errors.Is(err, localbook.ErrUnsupportedFormat) ||

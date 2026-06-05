@@ -245,6 +245,7 @@
           <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
           <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
           <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
+          <button v-if="isTextLocalBook" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
           <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
         </div>
       </div>
@@ -454,7 +455,7 @@ import {
   View,
 } from '@element-plus/icons-vue'
 import api from '../api/client'
-import { changeBookSource, listBookSourceCandidates, refreshBook, searchBookContent as searchBookContentApi } from '../api/books'
+import { changeBookSource, listBookSourceCandidates, refreshBook, refreshLocalBook, searchBookContent as searchBookContentApi } from '../api/books'
 import { createReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
@@ -602,6 +603,11 @@ const currentSourceName = computed(() => {
   return sourceGroupOptions.value.find(source => Number(source.id) === Number(book.value.sourceId))?.name || '当前来源'
 })
 const isRemoteBook = computed(() => Number(book.value?.sourceId || 0) > 0)
+const isTextLocalBook = computed(() => {
+  if (isRemoteBook.value) return false
+  const name = String(book.value?.originalFile || book.value?.libraryPath || book.value?.title || '').toLowerCase()
+  return /\.(txt|text|md)$/.test(name)
+})
 
 const chapterParagraphs = computed(() => {
   return makeParagraphs(content.value, chapter.value?.title)
@@ -1347,6 +1353,39 @@ async function refreshTocDrawer() {
     }
     await computeBrowserCachedChapters()
     locateTocCurrentChapter()
+  } finally {
+    tocRefreshing.value = false
+  }
+}
+
+async function changeReaderLocalTocRule() {
+  if (!book.value || !isTextLocalBook.value) return
+  const result = await ElMessageBox.prompt('填写 TXT 目录行正则，留空则使用默认目录规则。', '修改目录规则', {
+    confirmButtonText: '刷新目录',
+    cancelButtonText: '取消',
+    inputType: 'textarea',
+    inputValue: book.value.tocRule || '',
+    inputPlaceholder: '^第.+章.*$',
+  }).catch(() => null)
+  if (!result) return
+  tocRefreshing.value = true
+  try {
+    const { data } = await refreshLocalBook(book.value.id, { tocRule: result.value || '' })
+    const updated = data?.book || data
+    if (updated?.id) {
+      book.value = { ...book.value, ...updated }
+      bookshelf.upsertBook(updated)
+      if (overlay.bookInfoBook?.id === updated.id) overlay.bookInfoBook = book.value
+    }
+    await loadChapters()
+    const nextIndex = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
+    await loadChapter(nextIndex, 0, { refresh: true, saveAfterLoad: true })
+    await computeBrowserCachedChapters()
+    locateTocCurrentChapter()
+    toastMsg.value = `目录规则已更新，共 ${data?.chapterCount || chapters.value.length} 章`
+    setTimeout(() => { toastMsg.value = '' }, 1600)
+  } catch (err) {
+    ElMessage.error(readError(err, '更新目录规则失败'))
   } finally {
     tocRefreshing.value = false
   }

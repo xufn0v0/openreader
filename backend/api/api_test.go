@@ -3083,6 +3083,25 @@ func TestRefreshLocalBookReparsesArchivedSource(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "新正文") || chapter.CachePath == "" {
 		t.Fatalf("expected refreshed chapter content and cache, chapter=%+v body=%s", chapter, w.Body.String())
 	}
+
+	next = "== 第一节 ==\n第一节正文\n== 第二节 ==\n第二节正文"
+	if err := os.WriteFile(sourcePath, []byte(next), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh-local", strings.NewReader(`{"tocRule":"^== .+ ==$"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh local book with toc rule: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := server.db.First(&refreshed, book.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.TOCRule != "^== .+ ==$" || refreshed.ChapterCount != 2 || refreshed.LastChapter != "== 第二节 ==" {
+		t.Fatalf("unexpected refreshed book with toc rule: %+v", refreshed)
+	}
 }
 
 func TestLocalStoreImportDirectoryRecursively(t *testing.T) {

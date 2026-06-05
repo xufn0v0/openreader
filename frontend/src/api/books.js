@@ -40,8 +40,8 @@ export function refreshBook(id) {
   return api.post(`/books/${id}/refresh`)
 }
 
-export function refreshLocalBook(id) {
-  return api.post(`/books/${id}/refresh-local`)
+export function refreshLocalBook(id, payload = undefined) {
+  return api.post(`/books/${id}/refresh-local`, payload)
 }
 
 export function cacheBookContent(id, payload) {

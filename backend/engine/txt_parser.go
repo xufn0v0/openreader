@@ -25,6 +25,26 @@ func ParseTXT(data []byte) ([]TXTChapter, error) {
 		return nil, err
 	}
 
+	return parseTXTText(text, nil), nil
+}
+
+func ParseTXTWithRule(data []byte, rule string) ([]TXTChapter, error) {
+	text, err := decodeTXT(data)
+	if err != nil {
+		return nil, err
+	}
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return parseTXTText(text, nil), nil
+	}
+	pattern, err := regexp.Compile(rule)
+	if err != nil {
+		return nil, err
+	}
+	return parseTXTText(text, pattern), nil
+}
+
+func parseTXTText(text string, titlePattern *regexp.Regexp) []TXTChapter {
 	chapters := make([]TXTChapter, 0)
 	current := TXTChapter{Index: 0, Title: "正文", Start: 0}
 	sawChapterTitle := false
@@ -34,7 +54,7 @@ func ParseTXT(data []byte) ([]TXTChapter, error) {
 		lineEnd := nextLineEnd(text, lineStart)
 		lineText := strings.TrimRight(text[lineStart:lineEnd], "\r\n")
 		line := strings.TrimSpace(lineText)
-		if isChapterTitle(line) {
+		if isChapterTitleWithRule(line, titlePattern) {
 			if lineStart > contentStart {
 				content := strings.TrimSpace(text[contentStart:lineStart])
 				if sawChapterTitle || shouldKeepFrontMatter(content) {
@@ -63,7 +83,7 @@ func ParseTXT(data []byte) ([]TXTChapter, error) {
 		}
 	}
 
-	return chapters, nil
+	return chapters
 }
 
 func nextLineEnd(text string, start int) int {
@@ -76,12 +96,19 @@ func nextLineEnd(text string, start int) int {
 }
 
 func isChapterTitle(line string) bool {
+	return isChapterTitleWithRule(line, nil)
+}
+
+func isChapterTitleWithRule(line string, titlePattern *regexp.Regexp) bool {
 	line = strings.TrimSpace(strings.TrimPrefix(line, "\ufeff"))
 	if line == "" || utf8.RuneCountInString(line) > 72 {
 		return false
 	}
 	if strings.ContainsAny(rightmostRune(line), "。！？!?；;") {
 		return false
+	}
+	if titlePattern != nil {
+		return titlePattern.MatchString(line)
 	}
 	return ChapterTitlePattern.MatchString(line)
 }

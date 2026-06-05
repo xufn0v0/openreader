@@ -96,6 +96,13 @@
         <el-option label="未分组" value="" />
         <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
       </el-select>
+      <el-input
+        v-if="importSupportsTocRule"
+        v-model="importDraft.tocRule"
+        type="textarea"
+        :rows="2"
+        placeholder="TXT目录规则（可选，留空使用默认规则，例如：^第.+章.*$）"
+      />
     </div>
     <template #footer>
       <el-button @click="overlay.importBookVisible = false">取消</el-button>
@@ -678,7 +685,7 @@ const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
 const importingBook = ref(false)
 const visibilitySavingId = ref(null)
-const importDraft = reactive({ title: '', author: '', categoryId: '', file: null })
+const importDraft = reactive({ title: '', author: '', categoryId: '', file: null, tocRule: '' })
 const sourceRows = ref([])
 const sourceSwitchVisible = ref(false)
 const sourceSwitchBook = ref(null)
@@ -737,6 +744,10 @@ let usersRefreshTimer
 let sourceRowsRefreshTimer
 
 const isMobileOverlay = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
+const importSupportsTocRule = computed(() => {
+  const name = String(importDraft.file?.name || '').toLowerCase()
+  return /\.(txt|text|md)$/.test(name)
+})
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -842,9 +853,10 @@ async function importLocalBook() {
       title: importDraft.title,
       author: importDraft.author,
       categoryId: importDraft.categoryId,
+      tocRule: importSupportsTocRule.value ? importDraft.tocRule : '',
     })
     ElMessage.success(`已导入《${book.title}》，共 ${book.chapterCount || 0} 章`)
-    Object.assign(importDraft, { title: '', author: '', categoryId: '', file: null })
+    Object.assign(importDraft, { title: '', author: '', categoryId: '', file: null, tocRule: '' })
     overlay.importBookVisible = false
   } catch (err) {
     ElMessage.error(readError(err, '导入失败'))
