@@ -129,7 +129,7 @@
                 <span>特殊模式</span>
                 <el-radio-group v-model="readerPageTypeModel" size="small">
                   <el-radio-button value="normal">正常</el-radio-button>
-                  <el-radio-button value="kindle">Kindle</el-radio-button>
+                  <el-radio-button value="kindle">简洁</el-radio-button>
                 </el-radio-group>
               </label>
               <label class="reader-config-schemes-row">
@@ -166,37 +166,66 @@
                   </button>
                 </div>
               </label>
-              <label>
-                <span>页面模式（本机）</span>
-                <el-radio-group v-model="readerPageModeModel" size="small">
-                  <el-radio-button value="auto">自适应</el-radio-button>
-                  <el-radio-button value="mobile">手机模式</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
-                <span>翻页方式</span>
-                <el-radio-group v-model="readerModeModel" size="small">
-                  <el-radio-button value="page">上下滑动</el-radio-button>
-                  <el-radio-button v-if="readerSettingsMiniInterface" value="flip">左右滑动</el-radio-button>
-                  <el-radio-button value="scroll">上下滚动</el-radio-button>
-                  <el-radio-button value="scroll2">上下滚动2</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
-                <span>全屏点击</span>
-                <el-radio-group v-model="readerClickMethodModel" size="small">
-                  <el-radio-button value="next">下一页</el-radio-button>
-                  <el-radio-button value="auto">自动</el-radio-button>
-                  <el-radio-button value="none">不翻页</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label>
-                <span>选择文字</span>
-                <el-radio-group v-model="readerSelectionActionModel" size="small">
-                  <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
-                  <el-radio-button value="忽略">忽略</el-radio-button>
-                </el-radio-group>
-              </label>
+              <div class="reader-theme-row">
+                <span>阅读主题</span>
+                <div class="theme-list">
+                  <button
+                    v-for="(theme, key) in themePresets"
+                    :key="key"
+                    type="button"
+                    class="theme-choice"
+                    :class="{ active: readerStore.theme === key }"
+                    @click="readerStore.setTheme(key)"
+                  >
+                    <span class="theme-swatch" :style="{ background: theme.bg }" />
+                    <span>{{ theme.label }}</span>
+                  </button>
+                  <button type="button" class="theme-choice" :class="{ active: readerStore.theme === 'custom' }" @click="readerStore.setTheme('custom')">
+                    <span class="theme-swatch custom-swatch" :style="{ background: readerStore.customBgColor || '#f4e9bd' }" />
+                    <span>自定义</span>
+                  </button>
+                </div>
+              </div>
+              <div v-if="readerStore.theme === 'custom'" class="reader-theme-row">
+                <span>自定义</span>
+                <div class="custom-theme-row">
+                  <div class="custom-theme-field">
+                    <span>页面背景颜色</span>
+                    <el-color-picker v-model="readerCustomBodyColorModel" />
+                    <el-button v-if="readerStore.customBodyColor" size="small" text type="danger" @click="readerStore.setCustomBodyColor('')">恢复默认</el-button>
+                  </div>
+                  <div class="custom-theme-field">
+                    <span>浮窗背景颜色</span>
+                    <el-color-picker v-model="readerCustomPopupColorModel" />
+                    <el-button v-if="readerStore.customPopupColor" size="small" text type="danger" @click="readerStore.setCustomPopupColor('')">恢复默认</el-button>
+                  </div>
+                  <div class="custom-theme-field">
+                    <span>阅读背景颜色</span>
+                    <el-color-picker v-model="readerCustomBgColorModel" />
+                  </div>
+                  <el-upload accept="image/*" :show-file-list="false" :auto-upload="false" @change="pickReaderBgImage">
+                    <el-button size="small" :icon="Upload" :loading="readerBgUploading">背景图</el-button>
+                  </el-upload>
+                  <el-button v-if="readerStore.customBgImage" size="small" text type="danger" @click="readerStore.setCustomBgImage('')">取消背景图</el-button>
+                  <div v-if="readerStore.customBgImageList?.length" class="settings-bg-list">
+                    <div
+                      v-for="image in readerStore.customBgImageList"
+                      :key="image"
+                      class="settings-bg-choice"
+                      :class="{ active: readerStore.customBgImage === image }"
+                      :style="{ backgroundImage: `url(${image})` }"
+                      role="button"
+                      tabindex="0"
+                      @click="readerStore.setCustomBgImage(readerStore.customBgImage === image ? '' : image)"
+                      @keydown.enter.prevent="readerStore.setCustomBgImage(readerStore.customBgImage === image ? '' : image)"
+                      @keydown.space.prevent="readerStore.setCustomBgImage(readerStore.customBgImage === image ? '' : image)"
+                    >
+                      <span>{{ readerStore.customBgImage === image ? '使用中' : '选择' }}</span>
+                      <button type="button" @click.stop="deleteReaderBgImage(image)">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <label>
                 <span>字体</span>
                 <el-select v-model="readerFontFamilyModel" size="small">
@@ -213,25 +242,6 @@
               <label>
                 <span>亮度 {{ readerStore.brightness }}%</span>
                 <el-slider v-model="readerBrightnessModel" :min="50" :max="150" />
-              </label>
-              <label>
-                <span>自动阅读</span>
-                <el-radio-group v-model="readerAutoReadingMethodModel" size="small">
-                  <el-radio-button value="像素滚动">像素滚动</el-radio-button>
-                  <el-radio-button value="段落滚动">段落滚动</el-radio-button>
-                </el-radio-group>
-              </label>
-              <label v-if="readerStore.autoReadingMethod === '像素滚动'">
-                <span>滚动像素 {{ readerStore.autoReadingPixel }}px</span>
-                <el-slider v-model="readerAutoReadingPixelModel" :min="1" :max="80" :step="1" />
-              </label>
-              <label>
-                <span>翻页速度 {{ readerStore.autoReadingLineTime }}ms</span>
-                <el-slider v-model="readerAutoReadingLineTimeModel" :min="50" :max="3000" :step="50" />
-              </label>
-              <label>
-                <span>动画时长 {{ readerStore.animateDuration }}ms</span>
-                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" :disabled="readerStore.pageType === 'kindle'" />
               </label>
               <label>
                 <span>字号 {{ readerStore.fontSize }}px</span>
@@ -254,6 +264,56 @@
                 <el-slider v-model="readerColumnWidthModel" :min="560" :max="1080" :step="20" />
               </label>
               <label>
+                <span>页面模式（本机）</span>
+                <el-radio-group v-model="readerPageModeModel" size="small">
+                  <el-radio-button value="auto">自适应</el-radio-button>
+                  <el-radio-button value="mobile">手机模式</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
+                <span>翻页方式</span>
+                <el-radio-group v-model="readerModeModel" size="small">
+                  <el-radio-button value="page">上下滑动</el-radio-button>
+                  <el-radio-button v-if="readerSettingsMiniInterface" value="flip">左右滑动</el-radio-button>
+                  <el-radio-button value="scroll">上下滚动</el-radio-button>
+                  <el-radio-button value="scroll2">上下滚动2</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
+                <span>动画时长 {{ readerStore.animateDuration }}ms</span>
+                <el-slider v-model="readerAnimateDurationModel" :min="0" :max="1000" :step="20" :disabled="readerStore.pageType === 'kindle'" />
+              </label>
+              <label>
+                <span>自动阅读</span>
+                <el-radio-group v-model="readerAutoReadingMethodModel" size="small">
+                  <el-radio-button value="像素滚动">像素滚动</el-radio-button>
+                  <el-radio-button value="段落滚动">段落滚动</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label v-if="readerStore.autoReadingMethod === '像素滚动'">
+                <span>滚动像素 {{ readerStore.autoReadingPixel }}px</span>
+                <el-slider v-model="readerAutoReadingPixelModel" :min="1" :max="80" :step="1" />
+              </label>
+              <label>
+                <span>翻页速度 {{ readerStore.autoReadingLineTime }}ms</span>
+                <el-slider v-model="readerAutoReadingLineTimeModel" :min="50" :max="3000" :step="50" />
+              </label>
+              <label>
+                <span>全屏点击</span>
+                <el-radio-group v-model="readerClickMethodModel" size="small">
+                  <el-radio-button value="next">下一页</el-radio-button>
+                  <el-radio-button value="auto">自动</el-radio-button>
+                  <el-radio-button value="none">不翻页</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
+                <span>选择文字</span>
+                <el-radio-group v-model="readerSelectionActionModel" size="small">
+                  <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
+                  <el-radio-button value="忽略">忽略</el-radio-button>
+                </el-radio-group>
+              </label>
+              <label>
                 <span>朗读语速 {{ readerStore.ttsRate }}</span>
                 <el-slider v-model="readerTTSRateModel" :min="0.5" :max="3" :step="0.1" />
               </label>
@@ -261,54 +321,6 @@
                 <span>朗读音调 {{ readerStore.ttsPitch }}</span>
                 <el-slider v-model="readerTTSPitchModel" :min="0.5" :max="2" :step="0.1" />
               </label>
-            </div>
-          </article>
-          <article class="app-panel settings-card">
-            <div class="card-head">
-              <el-icon><Moon /></el-icon>
-              <h2>主题</h2>
-            </div>
-            <div class="theme-list">
-              <button
-                v-for="(theme, key) in themePresets"
-                :key="key"
-                type="button"
-                class="theme-choice"
-                :class="{ active: readerStore.theme === key }"
-                @click="readerStore.setTheme(key)"
-              >
-                <span class="theme-swatch" :style="{ background: theme.bg }" />
-                <span>{{ theme.label }}</span>
-              </button>
-              <button type="button" class="theme-choice" :class="{ active: readerStore.theme === 'custom' }" @click="readerStore.setTheme('custom')">
-                <span class="theme-swatch custom-swatch" :style="{ background: readerStore.customBgColor || '#f4e9bd' }" />
-                <span>自定义</span>
-              </button>
-            </div>
-            <div v-if="readerStore.theme === 'custom'" class="custom-theme-row">
-              <span>背景色</span>
-              <el-color-picker v-model="readerCustomBgColorModel" />
-              <el-upload accept="image/*" :show-file-list="false" :auto-upload="false" @change="pickReaderBgImage">
-                <el-button size="small" :icon="Upload" :loading="readerBgUploading">背景图</el-button>
-              </el-upload>
-              <el-button v-if="readerStore.customBgImage" size="small" text type="danger" @click="readerStore.setCustomBgImage('')">取消背景图</el-button>
-              <div v-if="readerStore.customBgImageList?.length" class="settings-bg-list">
-                <div
-                  v-for="image in readerStore.customBgImageList"
-                  :key="image"
-                  class="settings-bg-choice"
-                  :class="{ active: readerStore.customBgImage === image }"
-                  :style="{ backgroundImage: `url(${image})` }"
-                  role="button"
-                  tabindex="0"
-                  @click="readerStore.setCustomBgImage(readerStore.customBgImage === image ? '' : image)"
-                  @keydown.enter.prevent="readerStore.setCustomBgImage(readerStore.customBgImage === image ? '' : image)"
-                  @keydown.space.prevent="readerStore.setCustomBgImage(readerStore.customBgImage === image ? '' : image)"
-                >
-                  <span>{{ readerStore.customBgImage === image ? '使用中' : '选择' }}</span>
-                  <button type="button" @click.stop="deleteReaderBgImage(image)">删除</button>
-                </div>
-              </div>
             </div>
           </article>
         </section>
@@ -366,7 +378,6 @@ import {
   User,
   UserFilled,
   View,
-  Moon,
 } from '@element-plus/icons-vue'
 import api from '../api/client'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
@@ -377,6 +388,7 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useOverlayStore } from '../stores/overlay'
 import { readerFontOptions } from '../utils/readerFonts'
 import { useUserStore } from '../stores/user'
+import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import RSSManager from '../components/RSSManager.vue'
 import WebDAVBrowser from '../components/WebDAVBrowser.vue'
 
@@ -399,8 +411,7 @@ const cacheLoading = ref(false)
 const cacheClearing = ref(false)
 const readerBgUploading = ref(false)
 const healthInfo = ref(null)
-const MINI_INTERFACE_MAX_WIDTH = 750
-const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const windowWidth = ref(currentViewportWidth())
 
 const fontOptions = readerFontOptions
 const configDefaultTypes = ['白天默认', '黑夜默认']
@@ -481,9 +492,17 @@ const readerTTSPitchModel = computed({
   get: () => readerStore.ttsPitch,
   set: value => readerStore.setTTSPitch(value),
 })
+const readerCustomBodyColorModel = computed({
+  get: () => readerStore.customBodyColor,
+  set: value => readerStore.setCustomBodyColor(value || ''),
+})
+const readerCustomPopupColorModel = computed({
+  get: () => readerStore.customPopupColor,
+  set: value => readerStore.setCustomPopupColor(value || ''),
+})
 const readerCustomBgColorModel = computed({
   get: () => readerStore.customBgColor,
-  set: value => readerStore.setCustomBgColor(value),
+  set: value => readerStore.setCustomBgColor(value || ''),
 })
 const readerSettingsSyncText = computed(() => {
   if (readerStore.settingsSyncing) return '同步中'
@@ -492,7 +511,7 @@ const readerSettingsSyncText = computed(() => {
   return '本地设置'
 })
 
-const readerSettingsMiniInterface = computed(() => readerStore.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const readerSettingsMiniInterface = computed(() => shouldUseMiniInterface(readerStore.pageMode, windowWidth.value))
 const isMobileDialog = computed(() => readerSettingsMiniInterface.value)
 const currentReaderCustomConfig = computed(() => {
   return (Array.isArray(readerStore.customConfigList) ? readerStore.customConfigList : []).find(config => config.name === readerStore.customConfigName) || null
@@ -552,7 +571,7 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener('resize', updateWindowWidth))
 
 function updateWindowWidth() {
-  windowWidth.value = window.innerWidth
+  windowWidth.value = currentViewportWidth()
 }
 
 watch(
@@ -920,7 +939,8 @@ function readError(err, fallback) {
   gap: 14px;
 }
 
-.reader-setting-list label {
+.reader-setting-list label,
+.reader-theme-row {
   display: grid;
   gap: 6px;
 }
@@ -1048,6 +1068,18 @@ function readError(err, fallback) {
   gap: 12px;
   color: var(--app-text-muted);
   font-size: 13px;
+}
+
+.custom-theme-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.custom-theme-field > span {
+  color: var(--app-text-muted);
+  white-space: nowrap;
 }
 
 .settings-bg-list {

@@ -39,7 +39,7 @@
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
       <el-button v-else plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshLocalBookInfo(overlay.bookInfoBook)">刷新本地书</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
-      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存后续100章</el-button>
+      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存到浏览器</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存到服务器</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookLocalCache')">清浏览器缓存</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookCache')">清服务器缓存</el-button>
@@ -153,7 +153,7 @@
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBookLocal">缓存后续100章</el-dropdown-item>
+                <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBookLocal">缓存到浏览器</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBook">缓存到服务器</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="deleteBookLocalCache">删除浏览器缓存</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="deleteBookCache">删除服务器缓存</el-dropdown-item>
@@ -193,7 +193,7 @@
         <footer>
           <el-button size="small" text @click="goDetail(book)">编辑</el-button>
           <el-button size="small" text @click="setBookGroup(book)">分组</el-button>
-          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBookLocal')">缓存100章</el-button>
+          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBookLocal')">缓存到浏览器</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookLocalCache')">清浏览器</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">服务器缓存</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookCache')">清服务器</el-button>
@@ -231,7 +231,7 @@
         </el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="cache">批量服务器缓存10章</el-dropdown-item>
+            <el-dropdown-item command="cache">批量缓存到服务器</el-dropdown-item>
             <el-dropdown-item command="clear-cache">批量清服务器缓存</el-dropdown-item>
             <el-dropdown-item command="export">批量导出</el-dropdown-item>
           </el-dropdown-menu>
@@ -269,42 +269,48 @@
       </div>
     </template>
     <template v-else>
-      <div class="group-create">
-        <el-input v-model="newGroupName" placeholder="新增分组" size="small" @keyup.enter="createCategory" />
-        <el-button size="small" type="primary" :disabled="!newGroupName.trim()" @click="createCategory">新增</el-button>
-      </div>
-      <div class="group-list">
-        <div v-for="category in bookshelf.categories" :key="category.id" class="group-row">
-          <span class="group-name">
-            <span>{{ category.name }}</span>
-            <small>{{ groupBookCount(category) }} 本</small>
-          </span>
-          <span class="group-visibility">
+      <el-table :data="bookshelf.categories" row-key="id" class="group-manage-table">
+        <el-table-column prop="name" label="分组名" min-width="130">
+          <template #default="{ row }">
+            <span class="group-table-name">
+              <span>{{ row.name }}</span>
+              <small>{{ groupBookCount(row) }} 本</small>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="显示" width="120">
+          <template #default="{ row }">
             <el-switch
-              :model-value="category.show !== false"
-              :loading="visibilitySavingId === category.id"
+              :model-value="row.show !== false"
+              :loading="visibilitySavingId === row.id"
               active-text="显示"
               inactive-text="隐藏"
-              @change="value => toggleGroupVisibility(category, value)"
+              @change="value => toggleGroupVisibility(row, value)"
             />
-          </span>
-          <span class="group-actions">
-            <el-button size="small" text @click="moveGroup(category, -1)">上移</el-button>
-            <el-button size="small" text @click="moveGroup(category, 1)">下移</el-button>
-            <el-button size="small" text @click="renameGroup(category)">重命名</el-button>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" min-width="180">
+          <template #default="{ row }">
+            <el-button size="small" text @click="moveGroup(row, -1)">上移</el-button>
+            <el-button size="small" text @click="moveGroup(row, 1)">下移</el-button>
+            <el-button size="small" text @click="renameGroup(row)">编辑</el-button>
             <el-button
-              v-if="groupBookCount(category) === 0"
+              v-if="groupBookCount(row) === 0"
               size="small"
               text
               type="danger"
-              @click="deleteGroup(category)"
+              @click="deleteGroup(row)"
             >
               删除
             </el-button>
-          </span>
-        </div>
-      </div>
+          </template>
+        </el-table-column>
+      </el-table>
       <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
+      <div class="manage-footer group-manage-footer">
+        <el-button type="primary" @click="createCategory">添加分组</el-button>
+        <el-button @click="overlay.bookGroupVisible = false">取消</el-button>
+      </div>
     </template>
   </el-drawer>
 
@@ -632,6 +638,7 @@ import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBro
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
+import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import {
   sourceCandidateAuthor,
   sourceCandidateBookUrl,
@@ -639,6 +646,7 @@ import {
   sourceCandidateIntro,
   sourceCandidateKey,
   sourceCandidateSourceId,
+  sourceCandidateSourceName,
   sourceCandidateTitle,
 } from '../utils/sourceCandidate'
 import BookInfoDialog from './BookInfoDialog.vue'
@@ -669,7 +677,6 @@ const settingCategoryId = ref('')
 const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
 const importingBook = ref(false)
-const newGroupName = ref('')
 const visibilitySavingId = ref(null)
 const importDraft = reactive({ title: '', author: '', categoryId: '', file: null })
 const sourceRows = ref([])
@@ -723,14 +730,13 @@ const replaceRuleDraft = ref({ name: '', pattern: '', replacement: '', enabled: 
 const replaceRuleTestText = ref('广告123\n正文内容')
 const replaceRuleTestResult = ref(null)
 const manageKeyword = ref('')
-const MINI_INTERFACE_MAX_WIDTH = 750
-const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const windowWidth = ref(currentViewportWidth())
 let replaceRulesRefreshTimer
 let bookmarkRefreshTimer
 let usersRefreshTimer
 let sourceRowsRefreshTimer
 
-const isMobileOverlay = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileOverlay = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -809,7 +815,7 @@ onBeforeUnmount(() => {
 })
 
 function updateWindowWidth() {
-  windowWidth.value = window.innerWidth
+  windowWidth.value = currentViewportWidth()
 }
 
 async function loadImportCategories() {
@@ -1209,7 +1215,7 @@ async function changeGlobalBookSource(source) {
     if (overlay.bookInfoBook?.id === data.id) overlay.bookInfoBook = data
     sourceSwitchLoadedKey.value = ''
     await loadGlobalSourceCandidates({ force: true })
-    ElMessage.success(`已切换到 ${source.sourceName}`)
+    ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`)
   } catch (err) {
     ElMessage.error(readError(err, '换源失败'))
   } finally {
@@ -2220,13 +2226,16 @@ function notifyReplaceRulesUpdated() {
 }
 
 async function createCategory() {
-  const name = newGroupName.value.trim()
-  if (!name) return
   try {
+    const { value } = await ElMessageBox.prompt('输入分组名称', '添加分组', {
+      inputValidator: value => !!value?.trim() || '分组名称不能为空',
+    })
+    const name = value.trim()
+    if (!name) return
     await bookshelf.addCategory({ name })
-    newGroupName.value = ''
     ElMessage.success('分组已创建')
   } catch (err) {
+    if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '创建分组失败'))
   }
 }
@@ -2336,18 +2345,6 @@ function readError(err, fallback) {
 
 .upload-text {
   color: var(--app-text-muted);
-}
-
-.group-list {
-  display: grid;
-  gap: 10px;
-}
-
-.group-row,
-.group-create {
-  display: grid;
-  align-items: center;
-  gap: 10px;
 }
 
 .manage-head {
@@ -2470,46 +2467,26 @@ function readError(err, fallback) {
   font-size: 13px;
 }
 
-.group-create {
-  grid-template-columns: minmax(0, 1fr) auto;
+.group-manage-table {
   margin-bottom: 12px;
 }
 
-.group-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  padding: 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-}
-
-.group-name {
+.group-table-name {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.group-name span {
+.group-table-name span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.group-name small {
+.group-table-name small {
   color: var(--app-text-muted);
   font-size: 12px;
-}
-
-.group-visibility {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.group-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 2px 8px;
 }
 
 .group-set-table {
@@ -2550,12 +2527,6 @@ function readError(err, fallback) {
   border-color: var(--el-color-primary);
   box-shadow: inset 0 0 0 4px #fff;
   background: var(--el-color-primary);
-}
-
-.group-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .bookmark-editor {
@@ -2806,42 +2777,6 @@ function readError(err, fallback) {
 
   .group-set-footer {
     grid-template-columns: 1fr;
-  }
-
-  .group-create {
-    grid-template-columns: 1fr;
-  }
-
-  .group-create :deep(.el-button) {
-    width: 100%;
-    min-height: 36px;
-  }
-
-  .group-row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .group-row > span:first-child {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .group-visibility {
-    justify-content: flex-start;
-  }
-
-  .group-actions {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    justify-content: stretch;
-  }
-
-  .group-actions :deep(.el-button) {
-    min-height: 32px;
-    margin-left: 0;
   }
 
   .manage-head {

@@ -1545,6 +1545,7 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 					<div class="book">
 						<a class="link" href="/book-new"><span class="title">候选书</span></a>
 						<span class="author">新作者</span>
+						<span class="latest">第一百章 新来源</span>
 						<p class="intro">新书源简介</p>
 					</div>
 				</body></html>`
@@ -1586,15 +1587,16 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 		Enabled: true,
 	}
 	if err := source.SetRules(models.BookSourceRule{
-		SearchURL:       upstream + "/search?q={keyword}",
-		BookListRule:    ".book",
-		BookNameRule:    ".title|text",
-		BookAuthorRule:  ".author|text",
-		BookIntroRule:   ".intro|text",
-		BookURLRule:     ".link|attr:href",
-		ChapterListRule: ".chapter",
-		ChapterNameRule: "a|text",
-		ChapterURLRule:  "a|attr:href",
+		SearchURL:         upstream + "/search?q={keyword}",
+		BookListRule:      ".book",
+		BookNameRule:      ".title|text",
+		BookAuthorRule:    ".author|text",
+		BookIntroRule:     ".intro|text",
+		LatestChapterRule: ".latest|text",
+		BookURLRule:       ".link|attr:href",
+		ChapterListRule:   ".chapter",
+		ChapterNameRule:   "a|text",
+		ChapterURLRule:    "a|attr:href",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1639,19 +1641,21 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	}
 
 	var candidates []struct {
-		SourceID uint   `json:"sourceId"`
-		Title    string `json:"title"`
-		BookURL  string `json:"bookUrl"`
-		Current  bool   `json:"current"`
+		SourceID           uint   `json:"sourceId"`
+		Title              string `json:"title"`
+		BookURL            string `json:"bookUrl"`
+		LatestChapterTitle string `json:"latestChapterTitle"`
+		Current            bool   `json:"current"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &candidates); err != nil {
 		t.Fatal(err)
 	}
 	var target struct {
-		SourceID uint   `json:"sourceId"`
-		Title    string `json:"title"`
-		BookURL  string `json:"bookUrl"`
-		Current  bool   `json:"current"`
+		SourceID           uint   `json:"sourceId"`
+		Title              string `json:"title"`
+		BookURL            string `json:"bookUrl"`
+		LatestChapterTitle string `json:"latestChapterTitle"`
+		Current            bool   `json:"current"`
 	}
 	for _, candidate := range candidates {
 		if !candidate.Current {
@@ -1665,6 +1669,9 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	if target.SourceID != source.ID {
 		t.Fatalf("source candidates should honor group filter, got source %d", target.SourceID)
 	}
+	if target.LatestChapterTitle != "第一百章 新来源" {
+		t.Fatalf("source candidates should expose latest chapter, got %+v", target)
+	}
 
 	pagedReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/source-candidates?group=%E4%BC%98%E5%85%88&limit=1&offset=0&paged=1", nil)
 	pagedReq.Header.Set("Authorization", token)
@@ -1675,9 +1682,10 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	}
 	var pagedCandidates struct {
 		List []struct {
-			SourceID uint   `json:"sourceId"`
-			BookURL  string `json:"bookUrl"`
-			Current  bool   `json:"current"`
+			SourceID           uint   `json:"sourceId"`
+			BookURL            string `json:"bookUrl"`
+			LatestChapterTitle string `json:"latestChapterTitle"`
+			Current            bool   `json:"current"`
 		} `json:"list"`
 		NextOffset int  `json:"nextOffset"`
 		HasMore    bool `json:"hasMore"`

@@ -7,7 +7,7 @@
       <div class="head-actions">
         <el-button type="primary" :icon="Plus" @click="openEditor()">新增</el-button>
         <el-button :icon="Download" @click="exportSources">导出</el-button>
-        <el-upload :show-file-list="false" :auto-upload="false" accept=".json" @change="importFile">
+        <el-upload ref="sourceUploadRef" :show-file-list="false" :auto-upload="false" accept=".json" @change="importFile">
           <el-button :icon="Upload">导入</el-button>
         </el-upload>
         <el-button :icon="Link" @click="showRemote = true">远程书源</el-button>
@@ -271,6 +271,7 @@ import {
   updateSource,
 } from '../api/sources'
 import { useReaderStore } from '../stores/reader'
+import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 
 const route = useRoute()
 const reader = useReaderStore()
@@ -288,6 +289,7 @@ const defaultRestoring = ref(false)
 const showRemote = ref(false)
 const remoteURL = ref('')
 const remoteLoading = ref(false)
+const sourceUploadRef = ref(null)
 
 const showEditor = ref(false)
 const editingSourceId = ref(null)
@@ -322,8 +324,7 @@ const debugChapterURL = ref('')
 const debugResult = ref(null)
 const testing = ref(false)
 const handledRouteAction = ref('')
-const MINI_INTERFACE_MAX_WIDTH = 750
-const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const windowWidth = ref(currentViewportWidth())
 let sourceReloadTimer
 
 const sourceGroupOptions = computed(() => buildSourceGroupOptions(sources.value))
@@ -354,7 +355,7 @@ const shownSources = computed(() => {
 const debugResultText = computed(() => debugResult.value ? JSON.stringify(debugResult.value, null, 2) : '')
 const debugSearchRows = computed(() => Array.isArray(debugResult.value?.results) ? debugResult.value.results : [])
 const debugChapterRows = computed(() => Array.isArray(debugResult.value?.chapters) ? debugResult.value.chapters : [])
-const isMobileDialog = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileDialog = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const drawerDirection = computed(() => isMobileDialog.value ? 'btt' : 'rtl')
 const editorDrawerSize = computed(() => isMobileDialog.value ? '88%' : '520px')
 
@@ -434,10 +435,16 @@ function applyRouteAction() {
     failedOnly.value = true
     if (!healthSummary.value.total && !checking.value) checkInvalidSources()
   }
+  if (route.query.action === 'import') {
+    openSourceImportPicker()
+  }
+  if (route.query.action === 'debug') {
+    openFirstDebugSource()
+  }
 }
 
 function handleResize() {
-  windowWidth.value = window.innerWidth
+  windowWidth.value = currentViewportWidth()
 }
 
 async function toggleSource(source, enabled) {
@@ -700,6 +707,15 @@ async function importFile(data) {
   }
 }
 
+function openSourceImportPicker() {
+  const input = sourceUploadRef.value?.$el?.querySelector?.('input[type="file"]')
+  if (input) {
+    input.click()
+    return
+  }
+  ElMessage.info('请点击页面右上角“导入”选择书源 JSON 文件')
+}
+
 function previewSourceNames(value) {
   const list = Array.isArray(value)
     ? value
@@ -795,6 +811,15 @@ function openDebug(source) {
   debugChapterURL.value = ''
   debugResult.value = null
   showDebug.value = true
+}
+
+function openFirstDebugSource() {
+  const source = sources.value.find(item => item.enabled) || sources.value[0]
+  if (source) {
+    openDebug(source)
+    return
+  }
+  ElMessage.info('请先添加书源后再调试')
 }
 
 function parseRules(value) {

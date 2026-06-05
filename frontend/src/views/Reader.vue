@@ -217,7 +217,6 @@
           {{ shelfLoading ? '刷新中...' : '刷新' }}
         </button>
       </div>
-      <el-input v-model="shelfKeyword" placeholder="搜索书名、作者或文件名..." clearable size="small" class="shelf-search" />
       <div ref="shelfListRef" v-loading="shelfLoading" class="reader-shelf-list">
         <button
           v-for="item in filteredShelfBooks"
@@ -228,18 +227,13 @@
           type="button"
           @click="changeBookFromShelf(item)"
         >
-          <span class="reader-shelf-cover" :style="shelfCoverStyle(item)">{{ shelfCoverInitial(item) }}</span>
-          <span class="reader-shelf-main">
-            <span class="reader-shelf-title-line">
-              <strong>{{ item.title }}</strong>
-              <em v-if="unreadCount(item)">{{ unreadCount(item) }}</em>
-            </span>
-            <small>{{ item.author || '未知作者' }} · {{ shelfProgressLabel(item) }}</small>
-            <small>{{ readChapterTitle(item) || '尚未阅读' }}</small>
-            <small v-if="item.lastChapter">最新：{{ item.lastChapter }}</small>
+          <span class="reader-shelf-title-line">
+            <strong>{{ item.title }}</strong>
+            <em v-if="unreadCount(item)">{{ unreadCount(item) }}</em>
           </span>
+          <span class="reader-shelf-chapter">{{ readChapterTitle(item) || '尚未阅读' }}</span>
         </button>
-        <el-empty v-if="!shelfLoading && !filteredShelfBooks.length" description="书架里没有匹配书籍" />
+        <el-empty v-if="!shelfLoading && !filteredShelfBooks.length" description="书架暂无书籍" />
       </div>
     </el-drawer>
 
@@ -476,14 +470,13 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
 import { useTTS } from '../composables/useTTS'
-import { bookCoverUrl } from '../utils/bookCover'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
-import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
+import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import {
   sourceCandidateAuthor,
   sourceCandidateBookUrl,
@@ -491,6 +484,7 @@ import {
   sourceCandidateIntro,
   sourceCandidateKey,
   sourceCandidateSourceId,
+  sourceCandidateSourceName,
   sourceCandidateTitle,
 } from '../utils/sourceCandidate'
 
@@ -537,7 +531,6 @@ const sourceOffset = ref(0)
 const sourceHasMore = ref(false)
 const sourceCandidatesLoadedKey = ref('')
 const sourceStats = ref(null)
-const shelfKeyword = ref('')
 const shelfLoading = ref(false)
 const shelfListRef = ref(null)
 const tocPanelRef = ref(null)
@@ -567,8 +560,7 @@ const customBg = ref('')
 const sliderLineHeight = ref(2.12)
 const pageHeight = ref(600)
 const pageWidth = ref(600)
-const windowWidth = ref(window.innerWidth)
-const mobileReaderMaxWidth = 750
+const windowWidth = ref(currentViewportWidth())
 const SAVE_PROGRESS_MIN_INTERVAL = 1200
 const MOBILE_TAP_MOVE_TOLERANCE = 14
 
@@ -600,20 +592,9 @@ const SHOW_PREV_CHAPTER_SIZE = 1
 const SHOW_NEXT_CHAPTER_SIZE = 2
 
 const filteredShelfBooks = computed(() => {
-  const value = normalizeLocalBookSearch(shelfKeyword.value)
   const books = Array.isArray(bookshelf.books) ? bookshelf.books : []
-  const values = value
-    ? books.filter(item => readerShelfSearchText(item).includes(value))
-    : books
-  return sortByShelfOrder(values, reader.progressByBook)
+  return sortByShelfOrder(books, reader.progressByBook)
 })
-
-function readerShelfSearchText(item) {
-  return localBookSearchText(item, [
-    shelfChapterTitle(item),
-    shelfProgressLabel(item),
-  ])
-}
 const sourceGroups = computed(() => {
   const sourceRows = sourceGroupOptions.value.length ? sourceGroupOptions.value : sourceCandidates.value
   return buildSourceGroupOptions(sourceRows)
@@ -685,7 +666,7 @@ const bodyStyle = computed(() => {
 })
 
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
-const isMobileReader = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= mobileReaderMaxWidth)
+const isMobileReader = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
 const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
 const bookProgress = computed(() => {
@@ -1412,7 +1393,6 @@ async function goShelf() {
   await router.push({ name: 'home' })
 }
 async function openShelfPanel() {
-  shelfKeyword.value = ''
   showShelfDrawer.value = true
   if (bookshelf.books.length) {
     window.setTimeout(locateReaderShelfCurrentBook, 0)
@@ -1471,38 +1451,8 @@ function unreadCount(item) {
   return Math.max(0, total - 1 - chapterIndex)
 }
 
-function shelfProgressLabel(item) {
-  const progress = shelfItemProgress(item)
-  return `${Math.round(Math.max(0, Math.min(1, progress?.percent || 0)) * 100)}%`
-}
-
 function shelfItemProgress(item) {
   return newestBookProgress(item, reader.progressByBook)
-}
-
-function shelfCoverInitial(item) {
-  if (bookCoverUrl(item)) return ''
-  return (item.title || '?').slice(0, 1)
-}
-
-function shelfCoverStyle(item) {
-  const url = bookCoverUrl(item)
-  if (url) {
-    return {
-      backgroundImage: `url(${url})`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      color: 'transparent',
-    }
-  }
-  const palettes = [
-    ['#6b4f18', '#f3dfab'],
-    ['#235d58', '#d7ece8'],
-    ['#734533', '#f0d8cb'],
-    ['#4f4b82', '#dddaf0'],
-  ]
-  const [fg, bg] = palettes[Number(item.id || 1) % palettes.length]
-  return { color: fg, background: bg }
 }
 
 async function refreshReaderShelf() {
@@ -1744,7 +1694,7 @@ async function changeSource(source) {
     resetContentSearchState()
     await loadSourceCandidates({ force: true })
     showSourceDrawer.value = false
-    ElMessage.success(`已切换到 ${source.sourceName}`)
+    ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`)
   } catch (err) {
     ElMessage.error(readError(err, '换源失败'))
   } finally {
@@ -2415,7 +2365,7 @@ function readableViewportSize() {
 }
 
 function handleResize() {
-  windowWidth.value = window.innerWidth
+  windowWidth.value = currentViewportWidth()
   updateFlipLayout()
 }
 
@@ -3716,12 +3666,12 @@ function readError(err, fallback) {
 }
 
 .desktop-progress-slider {
-  width: 124px;
-  height: 18px;
-  margin: 52px -42px;
+  width: 18px;
+  height: 124px;
+  margin: 0;
   accent-color: #2f6f6d;
   cursor: pointer;
-  transform: rotate(90deg);
+  writing-mode: vertical-lr;
 }
 
 .page-step {
@@ -3818,7 +3768,6 @@ function readError(err, fallback) {
   justify-content: flex-end;
   gap: 14px;
 }
-.shelf-search { margin-bottom: 12px; }
 .reader-shelf-list {
   display: grid;
   max-height: calc(100vh - 154px);
@@ -3827,11 +3776,11 @@ function readError(err, fallback) {
 }
 .reader-shelf-card {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
+  gap: 6px;
   width: 100%;
-  padding: 10px 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 8px 0;
   color: #24282c;
   background: transparent;
   border: 0;
@@ -3839,25 +3788,10 @@ function readError(err, fallback) {
   cursor: pointer;
   text-align: left;
 }
-.reader-shelf-cover {
-  display: grid;
-  width: 42px;
-  height: 56px;
-  place-items: center;
-  overflow: hidden;
-  border-radius: 4px;
-  font-size: 18px;
-  font-weight: 800;
-}
 .reader-shelf-card:hover,
 .reader-shelf-card.active {
   color: #ed4259;
   background: transparent;
-}
-.reader-shelf-main {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
 }
 .reader-shelf-title-line {
   display: flex;
@@ -3866,7 +3800,8 @@ function readError(err, fallback) {
   gap: 10px;
 }
 .reader-shelf-title-line strong,
-.reader-shelf-main small {
+.reader-shelf-chapter {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3882,9 +3817,9 @@ function readError(err, fallback) {
   font-size: 12px;
   font-style: normal;
 }
-.reader-shelf-main small {
-  color: #7b715e;
-  font-size: 12px;
+.reader-shelf-chapter {
+  color: #888;
+  font-size: 14px;
 }
 .reader-cache-panel {
   display: grid;

@@ -1,12 +1,25 @@
 <template>
-  <el-alert
-    class="source-alert"
-    type="info"
-    :closable="false"
-    show-icon
-    title="按当前书名搜索候选书源，切换时会使用候选书籍地址重新抓取目录。"
-  />
-  <div class="drawer-actions">
+  <div class="title-zone">
+    <div class="title">来源({{ sources.length }})</div>
+    <div class="title-actions" :class="{ loading }">
+      <el-select
+        :model-value="group"
+        size="small"
+        placeholder="全部分组"
+        clearable
+        filterable
+        class="source-group-select"
+        @update:model-value="$emit('groupChange', $event || '')"
+      >
+        <el-option v-for="item in normalizedGroups" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
+      <button type="button" :disabled="loading" @click="$emit('refresh')">{{ loading ? '刷新中...' : '刷新' }}</button>
+      <button type="button" :disabled="loading || !hasMore" @click="$emit('loadMore')">{{ loading ? '加载中...' : '加载更多' }}</button>
+      <button v-if="showInfoButton" type="button" @click="$emit('showInfo')">书籍信息</button>
+    </div>
+  </div>
+
+  <div class="source-query-row">
     <el-input
       :model-value="query"
       size="small"
@@ -17,57 +30,41 @@
       @keyup.enter="$emit('refresh')"
       @clear="$emit('refresh')"
     />
-    <el-select
-      :model-value="group"
-      size="small"
-      placeholder="全部分组"
-      clearable
-      class="source-group-select"
-      @update:model-value="$emit('groupChange', $event || '')"
-    >
-      <el-option v-for="item in normalizedGroups" :key="item.value" :label="item.label" :value="item.value" />
-    </el-select>
-    <el-button size="small" :loading="loading" @click="$emit('refresh')">刷新</el-button>
-    <el-button v-if="hasMore" size="small" :loading="loading" @click="$emit('loadMore')">加载更多</el-button>
-    <el-button v-if="showInfoButton" size="small" @click="$emit('showInfo')">书籍信息</el-button>
   </div>
+
   <p v-if="stats && stats.searched" class="source-stats">
     本轮搜索 {{ stats.searched }} 个书源，命中 {{ stats.matched || 0 }} 个，空结果 {{ stats.empty || 0 }} 个，失败 {{ stats.failed || 0 }} 个。
   </p>
-  <section v-if="book" class="current-source-card">
-    <div>
-      <strong>{{ currentSourceName || '当前来源' }}</strong>
-      <span>{{ bookTitle(book) }}<template v-if="book.author"> · {{ book.author }}</template></span>
-    </div>
-    <el-tag size="small" effect="plain" type="success">当前</el-tag>
-  </section>
-  <div class="source-switch-list">
+
+  <div ref="sourceList" class="source-switch-list">
     <button
       v-for="source in sources"
       :key="sourceKey(source)"
-      class="source-switch-card"
-      :class="{ active: source.current }"
+      :ref="setSourceItemRef"
+      class="source-item"
+      :class="{ selected: isSelected(source) }"
       type="button"
-      :disabled="source.current || changingSource === sourceId(source)"
+      :disabled="isSelected(source) || changingSource === sourceId(source)"
       @click="$emit('change', source)"
     >
-      <strong>{{ sourceTitle(source) }}</strong>
-      <span>{{ sourceName(source) }} · {{ sourceAuthor(source) || '未知作者' }}</span>
-      <span v-if="latestChapter(source)" class="source-latest">{{ latestChapter(source) }}</span>
-      <small>{{ source.current ? '当前来源' : (changingSource === sourceId(source) ? '切换中...' : '点击切换') }}</small>
+      <div class="source-title">
+        <span class="source-name">{{ sourceName(source) }}</span>
+        <span class="source-time">{{ sourceTime(source) }}</span>
+      </div>
+      <div class="source-latest-chapter">{{ latestChapter(source) || '无最新章节' }}</div>
+      <small v-if="changingSource === sourceId(source)" class="source-status">切换中...</small>
     </button>
     <el-empty v-if="!loading && !sources.length" description="没有找到可用来源" />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUpdate, ref, watch } from 'vue'
 import {
-  sourceCandidateAuthor,
+  sourceCandidateBookUrl,
   sourceCandidateKey,
   sourceCandidateSourceName,
   sourceCandidateSourceId,
-  sourceCandidateTitle,
 } from '../../utils/sourceCandidate'
 
 const props = defineProps({
@@ -119,6 +116,9 @@ const props = defineProps({
 
 defineEmits(['refresh', 'loadMore', 'groupChange', 'queryChange', 'showInfo', 'change'])
 
+const sourceList = ref(null)
+const sourceItemRefs = ref([])
+
 const normalizedGroups = computed(() => props.groups.map((item) => {
   if (typeof item === 'string') {
     return { value: item, label: item }
@@ -131,17 +131,15 @@ const normalizedGroups = computed(() => props.groups.map((item) => {
   }
 }).filter(item => item.value))
 
-function bookTitle(book) {
-  return book?.title || book?.name || book?.bookName || '未命名书籍'
-}
+onBeforeUpdate(() => {
+  sourceItemRefs.value = []
+})
 
-function sourceTitle(source) {
-  return sourceCandidateTitle(source, bookTitle(props.book))
-}
-
-function sourceAuthor(source) {
-  return sourceCandidateAuthor(source)
-}
+watch(
+  () => [props.sources.map(sourceKey).join('|'), currentBookKey()],
+  () => nextTick(jumpToActive),
+  { immediate: true },
+)
 
 function sourceName(source) {
   return sourceCandidateSourceName(source)
@@ -156,21 +154,91 @@ function sourceId(source) {
 }
 
 function latestChapter(source) {
-  return source?.latestChapter || source?.latestChapterTitle || source?.lastChapter || ''
+  return source?.latestChapterTitle || source?.latestChapter || source?.lastChapter || ''
+}
+
+function sourceTime(source) {
+  const time = Number(source?.time || 0)
+  return time > 0 ? `⏱ ${time}ms` : ''
+}
+
+function currentBookKey() {
+  if (!props.book) return ''
+  return `${props.book.sourceId || props.book.bookSourceId || ''}-${props.book.url || props.book.bookUrl || ''}`
+}
+
+function isSelected(source) {
+  if (source?.current) return true
+  const bookSourceId = String(props.book?.sourceId || props.book?.bookSourceId || '')
+  const bookUrl = String(props.book?.url || props.book?.bookUrl || '')
+  return String(sourceId(source)) === bookSourceId && String(sourceCandidateBookUrl(source)) === bookUrl
+}
+
+function setSourceItemRef(el) {
+  if (el) sourceItemRefs.value.push(el)
+}
+
+function jumpToActive() {
+  const index = props.sources.findIndex(isSelected)
+  const target = sourceItemRefs.value[index]
+  if (!target || !sourceList.value) return
+  const wrapper = sourceList.value
+  const nextTop = target.offsetTop - wrapper.clientHeight / 2 + target.clientHeight / 2
+  wrapper.scrollTop = Math.max(0, nextTop)
 }
 </script>
 
 <style scoped>
-.source-alert {
+.title-zone {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.title {
+  width: fit-content;
+  color: #ed4259;
+  border-bottom: 1px solid #ed4259;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.title-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #ed4259;
+  font-size: 14px;
+  line-height: 26px;
+}
+
+.title-actions button {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.title-actions button:disabled {
+  color: #999;
+  cursor: default;
+}
+
+.source-query-row {
+  display: flex;
+  justify-content: flex-end;
   margin-bottom: 12px;
 }
 
-.drawer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-  min-width: 0;
+.source-query-input {
+  width: min(260px, 100%);
 }
 
 .source-stats {
@@ -180,135 +248,118 @@ function latestChapter(source) {
 }
 
 .source-group-select {
-  width: 132px;
-}
-
-.source-query-input {
-  width: min(220px, 100%);
+  width: 140px;
 }
 
 .source-switch-list {
-  display: grid;
-  gap: 10px;
+  height: min(52vh, 360px);
+  overflow: auto;
   min-width: 0;
 }
 
-.current-source-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  color: #24282c;
-  background: #fff7dc;
-  border: 1px solid #dfc98a;
-  border-radius: 6px;
+.source-switch-list::-webkit-scrollbar {
+  width: 0 !important;
 }
 
-.current-source-card div {
+.source-item {
   display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-
-.current-source-card strong,
-.current-source-card span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.current-source-card span {
-  color: #7b715e;
-  font-size: 12px;
-}
-
-.source-switch-card {
-  display: grid;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
-  padding: 12px;
+  padding: 9px 0;
   color: #24282c;
-  background: #fffaf0;
-  border: 1px solid #eee4c9;
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #eee;
   cursor: pointer;
   text-align: left;
 }
 
-.source-switch-card:hover,
-.source-switch-card.active {
-  border-color: #0f5451;
-  background: #fff7dc;
+.source-item:hover {
+  background: rgba(237, 66, 89, 0.05);
 }
 
-.source-switch-card:disabled {
-  cursor: progress;
-  opacity: 0.7;
+.source-item:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
-.source-switch-card span,
-.source-switch-card small {
-  color: #7b715e;
-  font-size: 12px;
+.source-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
 }
 
-.source-switch-card .source-latest {
-  color: #0f5451;
-}
-
-.source-switch-card strong,
-.source-switch-card span,
-.source-switch-card small {
+.source-name {
   min-width: 0;
   overflow: hidden;
+  color: #24282c;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.source-time {
+  flex: 0 0 auto;
+  color: #888;
+  font-size: 12px;
+}
+
+.source-latest-chapter {
+  min-width: 0;
+  overflow: hidden;
+  color: #888;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-status {
+  color: #7b715e;
+  font-size: 12px;
+}
+
+.source-item.selected .source-name {
+  color: #ed4259;
+}
+
 @media (max-width: 750px) {
-  .source-alert {
-    margin-bottom: 10px;
+  .title-zone {
+    gap: 10px;
+    margin-bottom: 12px;
   }
 
-  .drawer-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-bottom: 10px;
+  .title-actions {
+    gap: 10px;
   }
 
   .source-group-select {
-    width: auto;
-    grid-column: 1 / -1;
+    width: 132px;
+  }
+
+  .source-query-row {
+    justify-content: stretch;
   }
 
   .source-query-input {
-    width: auto;
-    grid-column: 1 / -1;
-  }
-
-  .drawer-actions :deep(.el-button),
-  .drawer-actions :deep(.el-select .el-input__wrapper) {
-    min-height: 38px;
-  }
-
-  .current-source-card {
-    align-items: start;
-    margin-bottom: 10px;
-    padding: 9px;
+    width: 100%;
   }
 
   .source-switch-list {
-    gap: 8px;
+    height: 46vh;
     padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 
-  .source-switch-card {
-    min-height: 66px;
-    padding: 10px;
+  .source-item {
+    min-height: 58px;
+    padding: 10px 0;
+  }
+
+  .source-name {
+    font-size: 15px;
   }
 }
 </style>

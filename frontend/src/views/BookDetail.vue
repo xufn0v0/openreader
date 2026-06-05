@@ -27,15 +27,15 @@
           >
             <div class="hero-actions">
               <el-button type="primary" @click="startRead">开始阅读</el-button>
-	              <el-button @click="openBookEditor">编辑</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
-	              <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
-	              <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存后续100章</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="clearingLocalCache" @click="clearCurrentBookLocalCache">清浏览器缓存</el-button>
-	              <el-button v-if="book.sourceId > 0" :loading="clearingCache" @click="clearCurrentBookCache">清服务器缓存</el-button>
-	              <el-button type="danger" plain @click="deleteCurrentBook">删除</el-button>
+              <el-button @click="openBookEditor">编辑</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="refreshingBook" @click="refreshCurrentBook">刷新目录</el-button>
+              <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
+              <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存到浏览器</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="clearingLocalCache" @click="clearCurrentBookLocalCache">清浏览器缓存</el-button>
+              <el-button v-if="book.sourceId > 0" :loading="clearingCache" @click="clearCurrentBookCache">清服务器缓存</el-button>
+              <el-button type="danger" plain @click="deleteCurrentBook">删除</el-button>
               <el-select v-model="categoryDraft" placeholder="设置分组" clearable size="default" class="category-select" @change="changeCategory">
                 <el-option label="未分组" value="" />
                 <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
@@ -160,6 +160,16 @@ import { useReaderStore } from '../stores/reader'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
+import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
+import {
+  sourceCandidateAuthor,
+  sourceCandidateBookUrl,
+  sourceCandidateCover,
+  sourceCandidateIntro,
+  sourceCandidateKey,
+  sourceCandidateSourceId,
+  sourceCandidateTitle,
+} from '../utils/sourceCandidate'
 
 const route = useRoute()
 const router = useRouter()
@@ -199,11 +209,10 @@ const changingSource = ref(null)
 const changeMessage = ref('')
 const changeError = ref(false)
 const bookDraft = reactive({ title: '', author: '', coverUrl: '', intro: '' })
-const MINI_INTERFACE_MAX_WIDTH = 750
-const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+const windowWidth = ref(currentViewportWidth())
 
 const currentSource = computed(() => availableSources.value.find(source => Number(source.id) === Number(book.value?.sourceId)))
-const isMobileDialog = computed(() => reader.pageMode === 'mobile' || windowWidth.value <= MINI_INTERFACE_MAX_WIDTH)
+const isMobileDialog = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const sourceGroups = computed(() => {
   const groups = availableSources.value.map(source => source.group).filter(Boolean)
   return [...new Set(groups)].sort()
@@ -233,7 +242,7 @@ watch(activeTab, async (tab) => {
 })
 
 function updateWindowWidth() {
-  windowWidth.value = window.innerWidth
+  windowWidth.value = currentViewportWidth()
 }
 
 async function load() {
@@ -601,9 +610,9 @@ function changeSourceQuery(value) {
 }
 
 function mergeSourceCandidates(existing, incoming) {
-  const seen = new Set(existing.map(item => `${item.sourceId}-${item.bookUrl}`))
+  const seen = new Set(existing.map(item => sourceCandidateKey(item)))
   return existing.concat(incoming.filter(item => {
-    const key = `${item.sourceId}-${item.bookUrl}`
+    const key = sourceCandidateKey(item)
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -619,17 +628,18 @@ async function openChangeSource() {
 
 async function changeSource(source) {
   if (!book.value || source.current) return
-  changingSource.value = source.sourceId
+  const nextSourceId = sourceCandidateSourceId(source)
+  changingSource.value = nextSourceId
   changeMessage.value = ''
   changeError.value = false
   try {
     const { data } = await changeBookSource(book.value.id, {
-      sourceId: source.sourceId,
-      bookUrl: source.bookUrl,
-      title: source.title,
-      author: source.author,
-      coverUrl: source.coverUrl,
-      intro: source.intro,
+      sourceId: nextSourceId,
+      bookUrl: sourceCandidateBookUrl(source),
+      title: sourceCandidateTitle(source, book.value.title),
+      author: sourceCandidateAuthor(source),
+      coverUrl: sourceCandidateCover(source),
+      intro: sourceCandidateIntro(source),
     })
     book.value = data
     bookshelf.upsertBook(data)

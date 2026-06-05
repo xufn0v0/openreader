@@ -1,5 +1,5 @@
 <template>
-  <section class="book-info-shared">
+  <section class="book-info-shared" :class="`variant-${variant}`">
     <div class="book-cover-zone" :class="{ editable: coverEditable, uploading: coverUploading }" @click="triggerCoverUpload">
       <div class="book-cover-bg" :style="coverBgStyle" />
       <BookCover :book="book" />
@@ -16,7 +16,7 @@
     <div class="book-info-main">
       <div class="book-info-title">
         <h2>{{ bookTitle }}</h2>
-        <el-tag v-if="statusLabel" size="small" effect="plain" :type="statusType">{{ statusLabel }}</el-tag>
+        <el-tag v-if="statusLabel && variant !== 'dialog'" size="small" effect="plain" :type="statusType">{{ statusLabel }}</el-tag>
       </div>
       <div v-if="bookKindTags.length" class="book-kind-tags">
         <span v-for="tag in bookKindTags" :key="tag">{{ tag }}</span>
@@ -30,9 +30,17 @@
           <span>来源：</span>
           <strong>{{ displaySourceName }}</strong>
         </div>
-        <div>
+        <div class="book-latest-prop">
           <span>最新：</span>
           <strong>{{ latestChapterLabel }}</strong>
+          <span v-if="showUpdateSwitch && variant === 'dialog'" class="inline-update-switch">
+            追更
+            <el-switch
+              :model-value="canUpdateValue"
+              :loading="updateSwitchLoading"
+              @change="value => emit('can-update-change', value)"
+            />
+          </span>
         </div>
         <div>
           <span>分组：</span>
@@ -41,20 +49,20 @@
             {{ categoryActionLabel }}
           </button>
         </div>
-        <div>
+        <div v-if="showStats">
           <span>章节：</span>
           <strong>{{ chapterCount }}</strong>
         </div>
-        <div>
+        <div v-if="showStats">
           <span>进度：</span>
           <strong>{{ progressLabel }}</strong>
         </div>
-        <div v-if="browserCacheCount >= 0">
+        <div v-if="showStats && browserCacheCount >= 0">
           <span>浏览器缓存：</span>
           <strong>{{ browserCacheCount }} 章</strong>
         </div>
       </div>
-      <div v-if="showUpdateSwitch" class="book-info-controls">
+      <div v-if="showUpdateSwitch && variant !== 'dialog'" class="book-info-controls">
         <span>追更：</span>
         <el-switch
           :model-value="canUpdateValue"
@@ -138,6 +146,11 @@ const props = defineProps({
     type: String,
     default: '设置分组',
   },
+  variant: {
+    type: String,
+    default: 'detail',
+    validator: value => ['detail', 'dialog'].includes(value),
+  },
 })
 
 const emit = defineEmits(['cover-upload', 'can-update-change', 'category-action'])
@@ -159,6 +172,7 @@ const displaySourceName = computed(() => {
 })
 const progressLabel = computed(() => `${Math.round(Math.max(0, Math.min(1, props.progress || 0)) * 100)}%`)
 const canUpdateValue = computed(() => props.book?.canUpdate !== false && props.canUpdate !== false)
+const showStats = computed(() => props.variant !== 'dialog')
 const bookKindTags = computed(() => {
   const raw = props.book?.kind ?? props.book?.category ?? props.book?.categoryName ?? props.book?.genre ?? props.book?.tags ?? props.book?.type
   return normalizeKindTags(raw)
@@ -355,6 +369,98 @@ function handleCoverFileChange(event) {
   font-size: 13px;
 }
 
+.inline-update-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.book-info-shared.variant-dialog {
+  display: block;
+}
+
+.variant-dialog .book-cover-zone {
+  width: 100%;
+  height: 150px;
+  min-height: 150px;
+  border-radius: 0;
+}
+
+.variant-dialog .book-cover-bg {
+  filter: blur(50px);
+  opacity: 0.45;
+}
+
+.variant-dialog .book-cover-zone :deep(.book-cover-shared) {
+  width: 100px;
+  height: 150px;
+  margin: 0 auto;
+  box-shadow: 0 8px 24px rgba(58, 41, 10, 0.18);
+}
+
+.variant-dialog .cover-edit-label {
+  right: calc(50% - 50px);
+  bottom: 8px;
+  left: calc(50% - 50px);
+}
+
+.variant-dialog .book-info-main {
+  display: block;
+}
+
+.variant-dialog .book-info-title {
+  justify-content: center;
+  padding: 10px 0 4px;
+  text-align: center;
+}
+
+.variant-dialog .book-info-title h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.variant-dialog .book-kind-tags {
+  justify-content: center;
+  margin: 0;
+  padding: 4px 0;
+}
+
+.variant-dialog .book-kind-tags span {
+  padding: 0 3px;
+  color: #d03050;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: 13px;
+}
+
+.variant-dialog .book-props {
+  gap: 0;
+  padding: 5px 0;
+}
+
+.variant-dialog .book-props div {
+  padding: 3px 0;
+  font-size: 14px;
+}
+
+.variant-dialog .book-latest-prop strong {
+  flex: 1 1 auto;
+}
+
+.variant-dialog .book-info-controls {
+  justify-content: flex-end;
+  margin: 2px 0 8px;
+}
+
+.variant-dialog .book-info-intro {
+  max-height: calc(var(--vh, 1vh) * 70 - 54px - 60px - 150px - 75px - 120px);
+  line-height: 1.6;
+}
+
 @media (max-width: 560px) {
   .book-info-shared {
     grid-template-columns: 1fr;
@@ -374,6 +480,16 @@ function handleCoverFileChange(event) {
 
   .book-info-main {
     gap: 12px;
+  }
+
+  .variant-dialog .book-cover-zone {
+    justify-self: stretch;
+    width: 100%;
+    min-height: 150px;
+  }
+
+  .variant-dialog .book-info-intro {
+    max-height: calc(var(--vh, 1vh) * 100 - 54px - 60px - 150px - 75px - 120px);
   }
 }
 </style>
