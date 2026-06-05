@@ -477,7 +477,7 @@ export const useReaderStore = defineStore('reader', {
     },
     async loadProgress(bookId, options = {}) {
       const local = newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
-      if (options.preferLocal && local?.bookId) {
+      if (options.preferLocal && local?.bookId && local.pendingSync) {
         api.get(`/progress/${bookId}`)
           .then(({ data }) => {
             if (data?.bookId) this.applyServerProgress(data)

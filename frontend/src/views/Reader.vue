@@ -899,14 +899,15 @@ async function loadReaderBook() {
   sourceCandidatesLoadedKey.value = ''
   sourceOffset.value = 0
   if (saved?.bookId) bookshelf.applyBookProgress(saved)
-  if (route.query.chapter === undefined && saved?.chapterIndex !== undefined) {
+  const resumeFromProgress = route.query.resume === '1'
+  if ((resumeFromProgress || route.query.chapter === undefined) && saved?.chapterIndex !== undefined) {
     currentIndex.value = saved.chapterIndex
   } else {
     currentIndex.value = Number(route.query.chapter || 0)
   }
-  const hasRouteOffset = route.query.offset !== undefined
+  const hasRouteOffset = !resumeFromProgress && route.query.offset !== undefined
   const initialOffset = hasRouteOffset ? Number(route.query.offset || 0) : Number(saved?.offset || 0)
-  const routePercent = parseRoutePercent(route.query.percent)
+  const routePercent = resumeFromProgress ? null : parseRoutePercent(route.query.percent)
   const savedPercent = savedBookChapterPercent(saved, chapters.value.length)
   await loadChapter(currentIndex.value, initialOffset, {
     restorePercent: routePercent ?? (hasRouteOffset ? null : savedPercent),
