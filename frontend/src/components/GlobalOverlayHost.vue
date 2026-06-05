@@ -639,6 +639,7 @@ import {
   sourceCandidateIntro,
   sourceCandidateKey,
   sourceCandidateSourceId,
+  sourceCandidateSourceName,
   sourceCandidateTitle,
 } from '../utils/sourceCandidate'
 import BookInfoDialog from './BookInfoDialog.vue'
@@ -1209,7 +1210,7 @@ async function changeGlobalBookSource(source) {
     if (overlay.bookInfoBook?.id === data.id) overlay.bookInfoBook = data
     sourceSwitchLoadedKey.value = ''
     await loadGlobalSourceCandidates({ force: true })
-    ElMessage.success(`已切换到 ${source.sourceName}`)
+    ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`)
   } catch (err) {
     ElMessage.error(readError(err, '换源失败'))
   } finally {

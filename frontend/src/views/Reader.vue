@@ -491,6 +491,7 @@ import {
   sourceCandidateIntro,
   sourceCandidateKey,
   sourceCandidateSourceId,
+  sourceCandidateSourceName,
   sourceCandidateTitle,
 } from '../utils/sourceCandidate'
 
@@ -1744,7 +1745,7 @@ async function changeSource(source) {
     resetContentSearchState()
     await loadSourceCandidates({ force: true })
     showSourceDrawer.value = false
-    ElMessage.success(`已切换到 ${source.sourceName}`)
+    ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`)
   } catch (err) {
     ElMessage.error(readError(err, '换源失败'))
   } finally {

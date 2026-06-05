@@ -972,15 +972,17 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 	}
 
 	type sourceCandidate struct {
-		SourceID   uint   `json:"sourceId"`
-		SourceName string `json:"sourceName"`
-		Group      string `json:"group"`
-		Title      string `json:"title"`
-		Author     string `json:"author"`
-		CoverURL   string `json:"coverUrl"`
-		Intro      string `json:"intro"`
-		BookURL    string `json:"bookUrl"`
-		Current    bool   `json:"current"`
+		SourceID           uint   `json:"sourceId"`
+		SourceName         string `json:"sourceName"`
+		Group              string `json:"group"`
+		Title              string `json:"title"`
+		Author             string `json:"author"`
+		CoverURL           string `json:"coverUrl"`
+		Intro              string `json:"intro"`
+		LatestChapterTitle string `json:"latestChapterTitle"`
+		BookURL            string `json:"bookUrl"`
+		Time               int64  `json:"time,omitempty"`
+		Current            bool   `json:"current"`
 	}
 	type sourceCandidateBatch struct {
 		Candidates []sourceCandidate
@@ -993,15 +995,16 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 		var currentSource models.BookSource
 		if err := s.db.First(&currentSource, book.SourceID).Error; err == nil && (group == "" || currentSource.Group == group) {
 			results = append(results, sourceCandidate{
-				SourceID:   currentSource.ID,
-				SourceName: currentSource.Name,
-				Group:      currentSource.Group,
-				Title:      book.Title,
-				Author:     book.Author,
-				CoverURL:   book.CoverURL,
-				Intro:      book.Intro,
-				BookURL:    book.URL,
-				Current:    true,
+				SourceID:           currentSource.ID,
+				SourceName:         currentSource.Name,
+				Group:              currentSource.Group,
+				Title:              book.Title,
+				Author:             book.Author,
+				CoverURL:           book.CoverURL,
+				Intro:              book.Intro,
+				LatestChapterTitle: book.LastChapter,
+				BookURL:            book.URL,
+				Current:            true,
 			})
 		}
 	}
@@ -1018,7 +1021,9 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 
 			done := make(chan sourceCandidateBatch, 1)
 			go func() {
+				started := time.Now()
 				searchResults, err := engine.SearchBooks(source, keyword)
+				elapsed := time.Since(started).Milliseconds()
 				if err != nil {
 					done <- sourceCandidateBatch{Failed: true}
 					return
@@ -1029,15 +1034,17 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 						continue
 					}
 					candidates = append(candidates, sourceCandidate{
-						SourceID:   source.ID,
-						SourceName: source.Name,
-						Group:      source.Group,
-						Title:      item.Title,
-						Author:     item.Author,
-						CoverURL:   item.CoverURL,
-						Intro:      item.Intro,
-						BookURL:    item.BookURL,
-						Current:    source.ID == book.SourceID && item.BookURL == book.URL,
+						SourceID:           source.ID,
+						SourceName:         source.Name,
+						Group:              source.Group,
+						Title:              item.Title,
+						Author:             item.Author,
+						CoverURL:           item.CoverURL,
+						Intro:              item.Intro,
+						LatestChapterTitle: item.LatestChapter,
+						BookURL:            item.BookURL,
+						Time:               elapsed,
+						Current:            source.ID == book.SourceID && item.BookURL == book.URL,
 					})
 					if len(candidates) >= 3 {
 						break
