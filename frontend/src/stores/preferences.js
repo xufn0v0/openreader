@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import api from '../api/client'
 
 const PREFERENCE_KEYS = ['shelf', 'search']
-const DEFAULT_SHELF = { view: 'grid' }
+const SHELF_LAYOUT_VERSION = 2
+const DEFAULT_SHELF = { view: 'grid', layoutVersion: SHELF_LAYOUT_VERSION }
 const DEFAULT_SEARCH = { searchType: 'all', group: '', sourceId: '', concurrent: 60 }
 const concurrentOptions = [8, 16, 32, 60]
 const syncTimers = new Map()
@@ -18,7 +19,7 @@ export const usePreferencesStore = defineStore('preferences', {
   persist: true,
   actions: {
     setShelfView(view) {
-      this.shelf = { ...this.shelf, view: view === 'list' ? 'list' : 'grid' }
+      this.shelf = { ...this.shelf, layoutVersion: SHELF_LAYOUT_VERSION, view: view === 'list' ? 'list' : 'grid' }
       this.schedulePreferenceSync('shelf')
     },
     setSearchConfig(config = {}) {
@@ -94,7 +95,11 @@ function preferencePayload(state, key) {
 }
 
 function sanitizeShelfPreference(value = {}) {
-  return { ...DEFAULT_SHELF, view: value.view === 'list' ? 'list' : 'grid' }
+  const migrated = Number(value.layoutVersion || 0) < SHELF_LAYOUT_VERSION
+  return {
+    ...DEFAULT_SHELF,
+    view: !migrated && value.view === 'list' ? 'list' : 'grid',
+  }
 }
 
 function sanitizeSearchPreference(value = {}) {

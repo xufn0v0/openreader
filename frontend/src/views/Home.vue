@@ -659,9 +659,10 @@ function readError(err, fallback) {
 }
 
 .shelf-main.grid-view .list-main {
-  min-height: 112px;
+  height: 112px;
+  align-content: space-between;
   justify-content: start;
-  gap: 6px;
+  gap: 3px;
 }
 
 .shelf-main.grid-view .list-main strong {
@@ -823,12 +824,13 @@ function readError(err, fallback) {
 
 .shelf-page.mobile-shelf .shelf-title {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
   padding: 18px 16px 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .shelf-page.mobile-shelf .shelf-title-main {
@@ -844,7 +846,7 @@ function readError(err, fallback) {
 .shelf-page.mobile-shelf .title-actions {
   max-width: none;
   flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 12px;
   overflow: visible;
   scrollbar-width: none;
@@ -920,7 +922,8 @@ function readError(err, fallback) {
   width: auto;
   min-height: 122px;
   box-sizing: border-box;
-  justify-content: start;
+  align-content: space-between;
+  justify-content: stretch;
   gap: 6px;
   overflow: hidden;
 }
@@ -997,12 +1000,13 @@ function readError(err, fallback) {
 
   .shelf-title {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     align-items: center;
     justify-content: space-between;
     min-width: 0;
     padding: 18px 16px 0;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .shelf-title-main {
@@ -1019,7 +1023,7 @@ function readError(err, fallback) {
     max-width: none;
     flex: 0 0 auto;
     min-width: 0;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 14px;
     overflow: visible;
     scrollbar-width: none;
@@ -1086,7 +1090,8 @@ function readError(err, fallback) {
     max-width: 100%;
     min-height: 122px;
     box-sizing: border-box;
-    justify-content: start;
+    align-content: space-between;
+    justify-content: stretch;
     gap: 6px;
     padding-right: 0;
     overflow: hidden;
