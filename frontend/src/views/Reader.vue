@@ -32,7 +32,7 @@
     </aside>
 
     <aside class="reader-right-rail">
-      <button class="round-tool" type="button" title="书签" @click="showBookmarkDrawer = true">
+      <button class="round-tool" type="button" title="书签" @click="openBookmarkDrawer">
         <el-icon :size="18"><CollectionTag /></el-icon>
       </button>
       <button class="round-tool" type="button" title="搜索正文" @click="openContentSearch">
@@ -170,7 +170,7 @@
         <el-icon :size="20"><List /></el-icon>
         <span>目录</span>
       </button>
-      <button class="mobile-tool-button" type="button" @click="openMobileTool(() => { showBookmarkDrawer = true })">
+      <button class="mobile-tool-button" type="button" @click="openMobileTool(openBookmarkDrawer)">
         <el-icon :size="20"><CollectionTag /></el-icon>
         <span>书签</span>
       </button>
@@ -1320,6 +1320,7 @@ function locateTocCurrentChapter() {
 }
 
 function openTocDrawer() {
+  mobileChromeVisible.value = false
   tocFilter.value = ''
   computeBrowserCachedChapters()
   showTocDrawer.value = true
@@ -1364,6 +1365,7 @@ async function computeBrowserCachedChapters() {
 }
 
 function openSettingsDrawer() {
+  mobileChromeVisible.value = false
   customBg.value = reader.customBgColor
   sliderLineHeight.value = reader.lineHeight
   showSettingsDrawer.value = true
@@ -1378,6 +1380,7 @@ function showClickZone() {
 
 function openCacheDrawer() {
   if (!isRemoteBook.value) return
+  mobileChromeVisible.value = false
   computeBrowserCachedChapters()
   showCacheDrawer.value = true
 }
@@ -1388,11 +1391,13 @@ async function goBookDetail() {
 }
 
 async function goShelf() {
+  mobileChromeVisible.value = false
   saveCurrentProgress({ force: true, background: true })
   bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
   await router.push({ name: 'home' })
 }
 async function openShelfPanel() {
+  mobileChromeVisible.value = false
   showShelfDrawer.value = true
   if (bookshelf.books.length) {
     window.setTimeout(locateReaderShelfCurrentBook, 0)
@@ -1501,7 +1506,7 @@ function openInfoToc() {
 
 function openInfoBookmarks() {
   closeInfoAndMobileChrome()
-  showBookmarkDrawer.value = true
+  openBookmarkDrawer()
 }
 
 function openInfoSearch() {
@@ -1570,7 +1575,13 @@ async function loadChapters() {
 
 function goSourcePanel() {
   if (!isRemoteBook.value) return
+  mobileChromeVisible.value = false
   showSourceDrawer.value = true
+}
+
+function openBookmarkDrawer() {
+  mobileChromeVisible.value = false
+  showBookmarkDrawer.value = true
 }
 
 function runMobileAction(action) {
@@ -1711,6 +1722,7 @@ function openTocSearch() {
 }
 
 function openContentSearch() {
+  mobileChromeVisible.value = false
   showSearchDrawer.value = true
   nextTick(() => {
     const input = document.querySelector('.content-search-row input')
@@ -3151,7 +3163,8 @@ useKeyboard({
     if (showTocDrawer.value || showSettingsDrawer.value) {
       showTocDrawer.value = false; showSettingsDrawer.value = false
     } else {
-      router.push({ name: 'book-detail', params: { id: bookId.value } })
+      mobileChromeVisible.value = false
+      goShelf()
     }
   },
 })
