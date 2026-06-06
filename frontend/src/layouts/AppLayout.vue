@@ -76,7 +76,10 @@
       </section>
 
       <section class="sidebar-recent">
-        <p class="app-nav-title">最近阅读</p>
+        <div class="sidebar-recent-title">
+          <p class="app-nav-title">最近阅读</p>
+          <button v-if="recentBook" type="button" @click="clearRecentBook">清除</button>
+        </div>
         <button
           class="sidebar-recent-book"
           type="button"
@@ -147,9 +150,11 @@ import { useSync } from '../composables/useSync'
 import { clearCache, getCacheStats } from '../api/cache'
 import { listSources } from '../api/sources'
 import api from '../api/client'
-import { compareRecentBook, newestBookProgress } from '../utils/bookOrder'
+import { newestBookProgress, progressUpdatedAt } from '../utils/bookOrder'
+import { clearCurrentUserBrowserChapterCache, currentUserBrowserChapterCacheStats } from '../utils/bookChapterCache'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
+import { currentUserScope } from '../utils/authScope'
 
 const router = useRouter()
 const route = useRoute()
@@ -165,11 +170,14 @@ const mobileNavigationVisible = ref(false)
 const touchStart = ref(null)
 const touchMoveX = ref(0)
 const cacheStats = ref({})
+const browserCacheStats = ref({})
 const healthInfo = ref(null)
+const recentSuppressedAt = ref(readRecentSuppressedAt())
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
+const browserCacheClearing = ref(false)
 const MOBILE_NAV_TRIGGER = 72
-const FOREGROUND_REFRESH_INTERVAL = 5000
+const FOREGROUND_REFRESH_INTERVAL = 30000
 let lastForegroundRefreshAt = 0
 const { connected: syncConnected, connect, disconnect } = useSync()
 
@@ -222,7 +230,8 @@ const navSections = computed(() => [
     title: cacheSectionTitle.value,
     items: [
       { key: 'cacheStats', label: '刷新缓存统计', action: loadCacheStats },
-      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearChapterCacheLabel.value, action: clearSystemCache },
+      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearServerChapterCacheLabel.value, action: clearSystemCache },
+      { key: 'clearBrowserCache', label: browserCacheClearing.value ? '清理中' : clearBrowserChapterCacheLabel.value, action: clearBrowserChapterCache },
     ],
   },
   {
@@ -262,12 +271,16 @@ const sidebarSourceGroups = computed(() => {
   return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
 })
 const cacheSectionTitle = computed(() => {
-  const size = Number(cacheStats.value?.size || 0)
+  const size = Number(cacheStats.value?.size || 0) + Number(browserCacheStats.value?.size || 0)
   return size ? `本地缓存 ${formatSize(size)}` : '本地缓存'
 })
-const clearChapterCacheLabel = computed(() => {
+const clearServerChapterCacheLabel = computed(() => {
   const size = Number(cacheStats.value?.size || 0)
-  return size ? `清空章节缓存 ${formatSize(size)}` : '清空章节缓存'
+  return size ? `清空服务器缓存 ${formatSize(size)}` : '清空服务器缓存'
+})
+const clearBrowserChapterCacheLabel = computed(() => {
+  const size = Number(browserCacheStats.value?.size || 0)
+  return size ? `清空浏览器缓存 ${formatSize(size)}` : '清空浏览器缓存'
 })
 const isNightTheme = computed(() => reader.theme === 'dark' || reader.theme === 'black')
 const appVersionLabel = computed(() => {
@@ -293,8 +306,19 @@ const mobileNavigationStyle = computed(() => {
   return base
 })
 const recentBook = computed(() => {
-  const rows = [...(Array.isArray(bookshelf.books) ? bookshelf.books : [])]
-  rows.sort((a, b) => compareRecentBook(a, b, reader.progressByBook))
+  const rows = (Array.isArray(bookshelf.books) ? bookshelf.books : [])
+    .filter(book => {
+      const progress = progressForBook(book)
+      return hasReadingProgress(progress) && progressUpdatedAt(progress) > recentSuppressedAt.value
+    })
+    .sort((a, b) => {
+      const aProgress = progressForBook(a)
+      const bProgress = progressForBook(b)
+      const aTime = progressUpdatedAt(aProgress)
+      const bTime = progressUpdatedAt(bProgress)
+      if (aTime !== bTime) return bTime - aTime
+      return Number(b?.id || 0) - Number(a?.id || 0)
+    })
   return rows[0] || null
 })
 const quickSearchPlaceholder = computed(() => route.name === 'home' ? '搜索书架' : '搜索书籍')
@@ -404,14 +428,21 @@ async function loadSidebarSources() {
 
 async function loadCacheStats() {
   cacheLoading.value = true
-  try {
-    const { data } = await getCacheStats()
-    cacheStats.value = data || {}
-  } catch {
+  const [serverResult, browserResult] = await Promise.allSettled([
+    getCacheStats(),
+    currentUserBrowserChapterCacheStats(),
+  ])
+  if (serverResult.status === 'fulfilled') {
+    cacheStats.value = serverResult.value?.data || {}
+  } else {
     cacheStats.value = {}
-  } finally {
-    cacheLoading.value = false
   }
+  if (browserResult.status === 'fulfilled') {
+    browserCacheStats.value = browserResult.value || {}
+  } else {
+    browserCacheStats.value = {}
+  }
+  cacheLoading.value = false
 }
 
 async function syncUserConfig() {
@@ -451,7 +482,7 @@ function shortCommit(value) {
 
 async function clearSystemCache() {
   try {
-    await ElMessageBox.confirm('确定清理全部章节缓存吗？清理后阅读时会重新加载章节内容。', '清理缓存', { type: 'warning' })
+    await ElMessageBox.confirm('确定清理服务器章节缓存吗？清理后阅读时会重新加载远程章节内容。', '清理缓存', { type: 'warning' })
     cacheClearing.value = true
     const { data } = await clearCache()
     ElMessage.success(`已清理 ${data.clearedFiles || 0} 个文件，释放 ${formatSize(data.clearedSize || 0)}`)
@@ -461,6 +492,21 @@ async function clearSystemCache() {
     ElMessage.error(readError(err, '清理缓存失败'))
   } finally {
     cacheClearing.value = false
+  }
+}
+
+async function clearBrowserChapterCache() {
+  try {
+    await ElMessageBox.confirm('确定清理当前用户的浏览器章节缓存吗？清理后本机阅读时会重新加载章节内容。', '清理浏览器缓存', { type: 'warning' })
+    browserCacheClearing.value = true
+    const removed = await clearCurrentUserBrowserChapterCache()
+    ElMessage.success(`已清理浏览器章节缓存 ${removed} 章`)
+    await loadCacheStats()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '清理浏览器缓存失败'))
+  } finally {
+    browserCacheClearing.value = false
   }
 }
 
@@ -475,6 +521,13 @@ function formatSize(bytes) {
 function openRecentBook() {
   if (!recentBook.value) return
   router.push({ name: 'reader', params: { id: recentBook.value.id }, query: readerRouteQuery(recentBook.value) })
+}
+
+function clearRecentBook() {
+  const progress = recentBook.value ? progressForBook(recentBook.value) : null
+  const nextValue = Math.max(Date.now(), progressUpdatedAt(progress))
+  recentSuppressedAt.value = nextValue
+  writeRecentSuppressedAt(nextValue)
 }
 
 function toggleNightTheme() {
@@ -496,6 +549,36 @@ function progressForBook(book) {
   return newestBookProgress(book, reader.progressByBook)
 }
 
+function hasReadingProgress(progress) {
+  if (!progress?.bookId) return false
+  if (progressUpdatedAt(progress) > 0) return true
+  if (progress.chapterTitle) return true
+  if (Number.isInteger(progress.chapterIndex) && progress.chapterIndex >= 0) return true
+  return Number(progress.offset || 0) > 0 ||
+    Number(progress.percent || 0) > 0 ||
+    Number(progress.chapterPercent || 0) > 0
+}
+
+function recentSuppressedCacheKey() {
+  return `openreader:readingRecentClearedAt:${currentUserScope()}`
+}
+
+function readRecentSuppressedAt() {
+  try {
+    return Number(window.localStorage?.getItem(recentSuppressedCacheKey()) || 0)
+  } catch {
+    return 0
+  }
+}
+
+function writeRecentSuppressedAt(value) {
+  try {
+    window.localStorage?.setItem(recentSuppressedCacheKey(), String(Number(value || 0)))
+  } catch {
+    // Ignore private-mode storage errors; the in-memory value still hides it for this session.
+  }
+}
+
 async function refreshShelfData() {
   await Promise.all([bookshelf.loadCategories({ force: true }), bookshelf.loadBooks({ force: true, all: true })]).catch(() => {})
   router.push({ name: 'home' })
@@ -508,8 +591,8 @@ function refreshShelfInForeground() {
   if (now - lastForegroundRefreshAt < FOREGROUND_REFRESH_INTERVAL) return
   lastForegroundRefreshAt = now
   Promise.all([
-    bookshelf.loadCategories({ force: true }),
-    bookshelf.loadBooks({ force: true, all: true }),
+    bookshelf.loadCategories(),
+    bookshelf.loadBooks({ all: true }),
   ]).catch(() => {})
 }
 
@@ -587,6 +670,7 @@ function toggleMobileNavigation() {
 watch(
   () => userStore.token,
   (token) => {
+    recentSuppressedAt.value = readRecentSuppressedAt()
     if (token) {
       connect()
     } else {
@@ -868,6 +952,33 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 18px;
   margin: 0 0 36px;
+}
+
+.sidebar-recent-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebar-recent-title .app-nav-title {
+  margin: 0;
+}
+
+.sidebar-recent-title button {
+  flex: 0 0 auto;
+  padding: 0;
+  color: #b5b5b5;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.sidebar-recent-title button:hover {
+  color: var(--app-accent);
 }
 
 .sidebar-recent-book {

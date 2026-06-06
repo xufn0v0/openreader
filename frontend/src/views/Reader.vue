@@ -491,6 +491,7 @@ import { simplized, traditionalized } from '../utils/chinese'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
+import { invalidateReaderDataCache as invalidateReaderCache, readerDataCacheKey as scopedReaderDataCacheKey, writeReaderDataCache as writeReaderCache } from '../utils/readerDataCache'
 import {
   sourceCandidateAuthor,
   sourceCandidateBookUrl,
@@ -734,6 +735,7 @@ onMounted(async () => {
   window.addEventListener('pagehide', handleReaderPageHide)
   document.addEventListener('visibilitychange', handleReaderVisibilityChange)
   window.addEventListener('openreader:progress-updated', handleProgressUpdated)
+  window.addEventListener('openreader:reader-book-data-updated', handleReaderBookDataUpdated)
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   customBg.value = reader.customBgColor
@@ -751,6 +753,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('pagehide', handleReaderPageHide)
   document.removeEventListener('visibilitychange', handleReaderVisibilityChange)
   window.removeEventListener('openreader:progress-updated', handleProgressUpdated)
+  window.removeEventListener('openreader:reader-book-data-updated', handleReaderBookDataUpdated)
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   clearBookmarkReloadTimer()
@@ -897,12 +900,12 @@ async function loadReaderBook() {
   const [bookRes, chRes] = await Promise.all([
     cacheFirstRequest(
       () => api.get(`/books/${targetBookId}`),
-      `reader@book:${targetBookId}`,
+      readerDataCacheKey(`book:${targetBookId}`),
       { validate: data => Boolean(data?.id) },
     ),
     cacheFirstRequest(
       () => api.get(`/books/${targetBookId}/chapters`),
-      `reader@chapters:${targetBookId}`,
+      readerDataCacheKey(`chapters:${targetBookId}`),
       { validate: data => Array.isArray(data) },
     ),
   ])
@@ -1019,14 +1022,14 @@ async function refreshReaderBookCaches(options = {}) {
   if (options.book) {
     requests.push(networkFirstRequest(
       () => api.get(`/books/${targetBookId}`),
-      `reader@book:${targetBookId}`,
+      readerDataCacheKey(`book:${targetBookId}`),
       { validate: data => Boolean(data?.id) },
     ).then(res => ({ key: 'book', data: res.data })))
   }
   if (options.chapters) {
     requests.push(networkFirstRequest(
       () => api.get(`/books/${targetBookId}/chapters`),
-      `reader@chapters:${targetBookId}`,
+      readerDataCacheKey(`chapters:${targetBookId}`),
       { validate: data => Array.isArray(data) },
     ).then(res => ({ key: 'chapters', data: res.data })))
   }
@@ -1036,6 +1039,32 @@ async function refreshReaderBookCaches(options = {}) {
     if (row.key === 'book' && row.data?.id) book.value = row.data
     if (row.key === 'chapters' && Array.isArray(row.data)) chapters.value = row.data
   })
+}
+
+function readerDataCacheKey(key) {
+  const [type, targetBookId] = String(key || '').split(':')
+  return scopedReaderDataCacheKey(targetBookId || bookId.value, type || key)
+}
+
+async function invalidateReaderDataCache(options = {}) {
+  const targetBookId = options.bookId || bookId.value
+  await invalidateReaderCache(targetBookId, options)
+}
+
+async function writeReaderDataCache(options = {}) {
+  const targetBookId = options.bookId || bookId.value
+  await writeReaderCache(targetBookId, options)
+}
+
+async function resetReaderChapterCaches(options = {}) {
+  chapterContentCache = null
+  browserCachedChapters.value = {}
+  if (!options.clearBrowser) return 0
+  try {
+    return await clearBookBrowserChapterCache(options.book || book.value, bookId.value)
+  } catch {
+    return 0
+  }
 }
 
 async function loadChapter(index, offset = 0, options = {}) {
@@ -1325,14 +1354,38 @@ async function clearFontFile(font) {
 }
 
 async function goChapter(index, offset = 0) {
-  if (index === currentIndex.value) { showTocDrawer.value = false; return }
-  if (isContinuousScrollRead.value && jumpToLoadedChapter(index, offset)) {
+  const targetIndex = Math.max(0, Math.min(Number(index), Math.max(chapters.value.length - 1, 0)))
+  if (targetIndex === currentIndex.value) {
+    showTocDrawer.value = false
+    jumpWithinCurrentChapter(offset)
+    return
+  }
+  if (isContinuousScrollRead.value && jumpToLoadedChapter(targetIndex, offset)) {
     showTocDrawer.value = false
     return
   }
-  const query = { chapter: index }
+  const query = { chapter: targetIndex }
   if (offset) query.offset = offset
   await router.replace({ name: 'reader', params: { id: bookId.value }, query })
+}
+
+function jumpWithinCurrentChapter(offset = 0) {
+  if (reader.mode === 'flip') {
+    page.value = offset === CHAPTER_END_OFFSET ? Math.max(0, pageCount.value - 1) : 0
+    progressVersion.value += 1
+    saveCurrentProgress()
+    return
+  }
+  if (jumpToLoadedChapter(currentIndex.value, offset)) return
+  if (!contentEl.value) return
+  contentEl.value.scrollTo({
+    top: offset === CHAPTER_END_OFFSET
+      ? Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
+      : 0,
+    behavior: readerScrollBehavior(),
+  })
+  progressVersion.value += 1
+  saveCurrentProgress()
 }
 
 function jumpToLoadedChapter(index, offset = 0) {
@@ -1431,11 +1484,14 @@ async function changeReaderLocalTocRule() {
   tocRefreshing.value = true
   try {
     const { data } = await refreshLocalBook(book.value.id, { tocRule: result.value || '' })
+    await invalidateReaderDataCache({ chapters: true, book: true })
+    await resetReaderChapterCaches({ clearBrowser: true })
     const updated = data?.book || data
     if (updated?.id) {
       book.value = { ...book.value, ...updated }
       bookshelf.upsertBook(updated)
       if (overlay.bookInfoBook?.id === updated.id) overlay.bookInfoBook = book.value
+      await writeReaderDataCache({ bookData: book.value })
     }
     await loadChapters()
     const nextIndex = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
@@ -1488,8 +1544,8 @@ async function goBookDetail() {
 async function goShelf() {
   mobileChromeVisible.value = false
   saveCurrentProgress({ force: true, background: true })
-  bookshelf.loadBooks({ force: true, all: true }).catch(() => {})
   await router.push({ name: 'home' })
+  bookshelf.loadBooks({ all: true }).catch(() => {})
 }
 async function openShelfPanel() {
   mobileChromeVisible.value = false
@@ -1647,13 +1703,19 @@ function categoryName(id) {
 async function refreshReaderBookCatalog() {
   if (!book.value?.id || Number(book.value.sourceId || 0) <= 0) return
   try {
+    const restoreOffset = currentOffset()
+    const restorePercent = currentChapterPercent()
     const { data } = await refreshBook(book.value.id)
+    await invalidateReaderDataCache({ book: true, chapters: true })
+    await resetReaderChapterCaches({ clearBrowser: true })
     const updated = data?.book || data
     if (updated?.id) {
       book.value = { ...book.value, ...updated }
       bookshelf.upsertBook(updated)
+      await writeReaderDataCache({ bookData: book.value })
     }
     await loadChapters()
+    await loadChapter(currentIndex.value, restoreOffset, { restorePercent, refresh: true })
     overlay.bookInfoBook = book.value
     toastMsg.value = '目录已刷新'
     setTimeout(() => { toastMsg.value = '' }, 1400)
@@ -1663,9 +1725,12 @@ async function refreshReaderBookCatalog() {
 }
 
 async function loadChapters() {
-  const { data } = await api.get(`/books/${bookId.value}/chapters`)
+  const targetBookId = bookId.value
+  const { data } = await api.get(`/books/${targetBookId}/chapters`)
+  if (bookId.value !== targetBookId) return chapters.value
   chapters.value = Array.isArray(data) ? data : []
   currentIndex.value = Math.max(0, Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0)))
+  await writeReaderDataCache({ bookId: targetBookId, chaptersData: chapters.value })
   return chapters.value
 }
 
@@ -1781,6 +1846,7 @@ function mergeSourceCandidates(existing, incoming) {
 async function changeSource(source) {
   if (!book.value || source.current) return
   const nextSourceId = sourceCandidateSourceId(source)
+  const previousBook = book.value
   changingSource.value = nextSourceId
   try {
     const { data } = await changeBookSource(bookId.value, {
@@ -1791,10 +1857,13 @@ async function changeSource(source) {
       coverUrl: sourceCandidateCover(source),
       intro: sourceCandidateIntro(source),
     })
+    await invalidateReaderDataCache({ book: true, chapters: true })
+    await resetReaderChapterCaches({ clearBrowser: true, book: previousBook })
     book.value = data
     bookshelf.upsertBook(data)
     const chRes = await api.get(`/books/${bookId.value}/chapters`)
-    chapters.value = chRes.data
+    chapters.value = Array.isArray(chRes.data) ? chRes.data : []
+    await writeReaderDataCache({ bookData: data, chaptersData: chapters.value })
     currentIndex.value = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
     await loadChapter(currentIndex.value, 0)
     sourceCandidatesLoadedKey.value = ''
@@ -2375,7 +2444,7 @@ function handleReaderWheel(event) {
   if (!shellEl.value?.contains(event.target)) return
   const target = event.target
   if (target?.closest?.('button, a, input, textarea, select, [role="button"], .el-drawer, .el-dialog') && !target?.closest?.('.tap-zone')) return
-  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  const delta = normalizedWheelDelta(event)
   if (Math.abs(delta) < 4) return
   if (isScrollRead.value) {
     if (!contentEl.value) return
@@ -2392,6 +2461,18 @@ function handleReaderWheel(event) {
   } else {
     previousPage()
   }
+}
+
+function normalizedWheelDelta(event) {
+  const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  if (event.deltaMode === 1) {
+    const lineHeight = Number(reader.fontSize || 18) * Number(reader.lineHeight || 1.8)
+    return rawDelta * Math.max(12, lineHeight)
+  }
+  if (event.deltaMode === 2) {
+    return rawDelta * (contentEl.value?.clientHeight || window.innerHeight || 800)
+  }
+  return rawDelta
 }
 
 function scrollReaderByWheel(delta) {
@@ -2512,6 +2593,22 @@ async function handleProgressUpdated(event) {
   } catch {
     // If the chapter cannot be applied immediately, the stored progress will be used on the next open.
   }
+}
+
+async function handleReaderBookDataUpdated(event) {
+  const detail = event?.detail || {}
+  if (!detail.bookId || Number(detail.bookId) !== Number(bookId.value)) return
+  const restoreOffset = currentOffset()
+  const restorePercent = currentChapterPercent()
+  const targetIndex = Math.max(0, Math.min(currentIndex.value, Math.max((detail.chapters || chapters.value).length - 1, 0)))
+  if (detail.book?.id) book.value = detail.book
+  if (Array.isArray(detail.chapters)) chapters.value = detail.chapters
+  currentIndex.value = targetIndex
+  chapterContentCache = null
+  browserCachedChapters.value = {}
+  resetContentSearchState()
+  await computeBrowserCachedChapters()
+  await loadChapter(targetIndex, restoreOffset, { restorePercent, refresh: true, saveAfterLoad: false })
 }
 
 function onScroll() {
@@ -2646,6 +2743,7 @@ function updateCurrentChapterFromScroll() {
   currentIndex.value = nextIndex
   chapter.value = snapshot?.chapter || chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
   content.value = block?.content || content.value
+  pruneScroll2ChapterWindow()
 }
 
 function maybeExtendShowChapters() {
@@ -2663,6 +2761,28 @@ function maybeExtendShowChapters() {
     .finally(() => {
       extendingShowChapters = false
     })
+}
+
+function pruneScroll2ChapterWindow() {
+  if (reader.mode !== 'scroll2' || !contentEl.value || !chapterBlocks.value.length) return
+  const minIndex = Math.max(0, currentIndex.value - SHOW_PREV_CHAPTER_SIZE)
+  const maxIndex = Math.min(chapters.value.length - 1, currentIndex.value + SHOW_NEXT_CHAPTER_SIZE)
+  const currentBlocks = chapterBlocks.value
+  if (currentBlocks.every(block => block.index >= minIndex && block.index <= maxIndex)) return
+  const removedBeforeHeight = currentBlocks
+    .filter(block => block.index < minIndex)
+    .reduce((sum, block) => {
+      const element = contentBody.value?.querySelector(`.chapter-content[data-index="${block.index}"]`)
+      return sum + (element?.getBoundingClientRect?.().height || 0)
+    }, 0)
+  const beforeTop = contentEl.value.scrollTop
+  chapterBlocks.value = currentBlocks.filter(block => block.index >= minIndex && block.index <= maxIndex)
+  if (removedBeforeHeight > 0) {
+    nextTick(() => {
+      if (!contentEl.value) return
+      contentEl.value.scrollTop = Math.max(0, beforeTop - removedBeforeHeight)
+    })
+  }
 }
 
 function currentVisibleExcerpt() {
@@ -2810,7 +2930,12 @@ function sendProgressKeepAlive(payload) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ ...payload, mode: reader.mode }),
+      body: JSON.stringify({
+        ...payload,
+        mode: reader.mode,
+        clientUpdatedAt: reader.progressByBook[payload.bookId]?.updatedAt || new Date().toISOString(),
+        clientId: reader.ensureClientId(),
+      }),
     }).catch(() => {})
   } catch {
     // The queued local progress remains pending and will sync on the next open.

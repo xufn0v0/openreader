@@ -4,6 +4,7 @@ import { currentUserScope } from '../utils/authScope'
 import { newestProgress as pickNewestProgress, progressUpdatedAt } from '../utils/bookOrder'
 
 let readerSettingsSyncTimer
+const READER_CLIENT_ID = readerClientId()
 
 export const themePresets = {
   parchment: { label: '羊皮纸', bg: '#f4e9bd', text: '#24282c' },
@@ -49,7 +50,10 @@ export const useReaderStore = defineStore('reader', {
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
     settingsSyncError: '',
+    settingsScope: currentUserScope(),
+    progressScope: currentUserScope(),
     progressByBook: {},
+    clientId: READER_CLIENT_ID,
     normalModeSnapshot: null,
     customConfigName: '内置白天',
     customConfigList: defaultCustomConfigList(),
@@ -69,6 +73,49 @@ export const useReaderStore = defineStore('reader', {
     },
   },
   actions: {
+    ensureClientId() {
+      if (this.clientId !== READER_CLIENT_ID) {
+        this.clientId = READER_CLIENT_ID
+      }
+      return this.clientId
+    },
+    ensureProgressScope() {
+      const scope = currentUserScope()
+      if (!this.progressScope) {
+        this.progressScope = scope
+        return scope
+      }
+      if (this.progressScope !== scope) {
+        this.progressByBook = {}
+        this.progressScope = scope
+      }
+      return scope
+    },
+    ensureReaderSettingsScope() {
+      const scope = currentUserScope()
+      if (!this.settingsScope) {
+        this.settingsScope = scope
+        return scope
+      }
+      if (this.settingsScope !== scope) {
+        this.resetReaderSettingsState(scope)
+      }
+      return scope
+    },
+    resetReaderSettingsState(scope = currentUserScope()) {
+      clearTimeout(readerSettingsSyncTimer)
+      const pageMode = this.pageMode === 'mobile' ? 'mobile' : 'auto'
+      Object.assign(this, defaultReaderSettings(), {
+        pageMode,
+        settingsScope: scope,
+        settingsUpdatedAt: '',
+        settingsSyncBaseUpdatedAt: '',
+        settingsSyncing: false,
+        settingsSyncError: '',
+        normalModeSnapshot: null,
+      })
+      this.ensureClientId()
+    },
     setMode(mode) {
       this.mode = ['scroll', 'scroll2', 'flip', 'page'].includes(mode) ? mode : 'page'
       this.markSettingsDirty()
@@ -302,6 +349,7 @@ export const useReaderStore = defineStore('reader', {
       this.markSettingsDirty()
     },
     normalizeSettings() {
+      this.ensureProgressScope()
       if (!['scroll', 'scroll2', 'flip', 'page'].includes(this.mode)) this.mode = 'page'
       if (this.pageType === 'simple' || this.pageType === 'Kindle') this.pageType = 'kindle'
       if (!['normal', 'kindle'].includes(this.pageType)) this.pageType = 'normal'
@@ -348,6 +396,7 @@ export const useReaderStore = defineStore('reader', {
       this.settingsSyncing = false
     },
     markSettingsDirty(options = {}) {
+      this.ensureReaderSettingsScope()
       if (!options.skipCustomConfigSync) this.syncActiveCustomConfig()
       this.settingsUpdatedAt = new Date().toISOString()
       this.settingsSyncError = ''
@@ -365,6 +414,7 @@ export const useReaderStore = defineStore('reader', {
       this.customConfigList = this.customConfigList.map((item, itemIndex) => itemIndex === index ? next : item)
     },
     scheduleSettingsSync() {
+      this.ensureReaderSettingsScope()
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return
       clearTimeout(readerSettingsSyncTimer)
       readerSettingsSyncTimer = setTimeout(() => {
@@ -372,6 +422,7 @@ export const useReaderStore = defineStore('reader', {
       }, 700)
     },
     applyReaderSettings(payload, updatedAt = '') {
+      this.ensureReaderSettingsScope()
       if (!payload || typeof payload !== 'object') return
       const next = sanitizeReaderSettings(payload)
       Object.assign(this, next)
@@ -383,6 +434,7 @@ export const useReaderStore = defineStore('reader', {
       this.settingsSyncError = ''
     },
     async loadReaderSettings() {
+      this.ensureReaderSettingsScope()
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return null
       try {
         const { data } = await api.get('/settings/reader')
@@ -403,6 +455,7 @@ export const useReaderStore = defineStore('reader', {
       }
     },
     async saveReaderSettings() {
+      this.ensureReaderSettingsScope()
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return null
       clearTimeout(readerSettingsSyncTimer)
       this.settingsSyncing = true
@@ -430,6 +483,7 @@ export const useReaderStore = defineStore('reader', {
     },
     applyProgress(progress) {
       if (!progress?.bookId) return
+      this.ensureProgressScope()
       const current = pickNewestProgress(this.progressByBook[progress.bookId], readLocalChapterProgress(progress.bookId))
       const next = pickNewestProgress(current, progress)
       if (!next) return
@@ -438,6 +492,7 @@ export const useReaderStore = defineStore('reader', {
     },
     applyServerProgress(progress) {
       if (!progress?.bookId) return null
+      this.ensureProgressScope()
       const local = newestProgress(this.progressByBook[progress.bookId], readLocalChapterProgress(progress.bookId))
       if (local?.bookId && progressUpdatedAt(local) > progressUpdatedAt(progress)) {
         if (local.pendingSync) this.syncLocalProgress(local, local.baseUpdatedAt || progress.updatedAt || '').catch(() => {})
@@ -448,15 +503,18 @@ export const useReaderStore = defineStore('reader', {
     },
     cachedProgress(bookId) {
       if (!bookId) return null
+      this.ensureProgressScope()
       return newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
     },
     replaceProgress(progress) {
       if (!progress?.bookId) return
+      this.ensureProgressScope()
       const next = clearLocalProgressFlags(progress)
       this.progressByBook[progress.bookId] = next
       persistLocalChapterProgress(next)
     },
     async saveProgress(payload) {
+      this.ensureProgressScope()
       const currentProgress = this.progressByBook[payload.bookId]
       const optimistic = {
         ...payload,
@@ -470,6 +528,8 @@ export const useReaderStore = defineStore('reader', {
         ...payload,
         mode: this.mode,
         baseUpdatedAt: optimistic.baseUpdatedAt,
+        clientUpdatedAt: optimistic.updatedAt,
+        clientId: this.ensureClientId(),
       })
       const merged = mergeProgressResponse(response.data, optimistic)
       if (isProgressConflict(response) && shouldRetryProgressConflict(optimistic, merged)) {
@@ -480,6 +540,7 @@ export const useReaderStore = defineStore('reader', {
       return merged
     },
     async loadProgress(bookId, options = {}) {
+      this.ensureProgressScope()
       const local = newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
       if (options.preferLocal && local?.bookId && local.pendingSync) {
         api.get(`/progress/${bookId}`)
@@ -509,6 +570,7 @@ export const useReaderStore = defineStore('reader', {
     },
     async syncLocalProgress(progress, baseUpdatedAt = '', options = {}) {
       if (!progress?.bookId) return null
+      this.ensureProgressScope()
       try {
         const response = await api.put('/progress', {
           bookId: progress.bookId,
@@ -520,6 +582,8 @@ export const useReaderStore = defineStore('reader', {
           chapterTitle: progress.chapterTitle,
           mode: progress.mode || this.mode,
           baseUpdatedAt: baseUpdatedAt || progress.baseUpdatedAt || '',
+          clientUpdatedAt: progress.updatedAt || '',
+          clientId: this.ensureClientId(),
         })
         const next = mergeProgressResponse(response.data, progress)
         if (isProgressConflict(response) && shouldRetryProgressConflict(progress, next) && !options.force) {
@@ -624,7 +688,11 @@ function persistLocalChapterProgress(progress) {
 function readLocalChapterProgress(bookId) {
   if (typeof localStorage === 'undefined' || !bookId) return null
   try {
-    const raw = localStorage.getItem(localChapterProgressKey(bookId)) || localStorage.getItem(legacyLocalChapterProgressKey(bookId))
+    const scopedKey = localChapterProgressKey(bookId)
+    const legacyKey = legacyLocalChapterProgressKey(bookId)
+    const scopedRaw = localStorage.getItem(scopedKey)
+    const legacyRaw = scopedRaw ? '' : localStorage.getItem(legacyKey)
+    const raw = scopedRaw || legacyRaw
     if (!raw) return null
     const data = JSON.parse(raw)
     if (!data || Number(data.bookId) !== Number(bookId)) return null
@@ -639,6 +707,10 @@ function readLocalChapterProgress(bookId) {
       const chapterPercent = Number(data.chapterPercent)
       if (Number.isFinite(chapterPercent)) progress.chapterPercent = Math.max(0, Math.min(1, chapterPercent))
     }
+    if (!scopedRaw && legacyRaw && currentUserScope() !== 'anonymous') {
+      localStorage.setItem(scopedKey, JSON.stringify(progress))
+      localStorage.removeItem(legacyKey)
+    }
     return progress
   } catch {
     return null
@@ -648,6 +720,27 @@ function readLocalChapterProgress(bookId) {
 function clampNumber(value, min, max, fallback) {
   const number = Number(value)
   return Math.max(min, Math.min(max, Number.isFinite(number) ? number : fallback))
+}
+
+function readerClientId() {
+  if (typeof sessionStorage === 'undefined') return makeClientId()
+  const key = 'openreader_reader_client_id'
+  try {
+    const current = sessionStorage.getItem(key)
+    if (current) return current
+    const next = makeClientId()
+    sessionStorage.setItem(key, next)
+    return next
+  } catch {
+    return makeClientId()
+  }
+}
+
+function makeClientId() {
+  const random = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  return `web-${random}`
 }
 
 function readerSettingsPayload(state) {

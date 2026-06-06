@@ -1,5 +1,8 @@
 import { defineStore } from 'pinia'
 import { getMe, loginUser } from '../api/user'
+import { useBookshelfStore } from './bookshelf'
+import { usePreferencesStore } from './preferences'
+import { useReaderStore } from './reader'
 
 export const useUserStore = defineStore('user', {
   state: () => ({
@@ -21,6 +24,11 @@ export const useUserStore = defineStore('user', {
       this.token = ''
       this.profile = null
       localStorage.removeItem('openreader_token')
+      useBookshelfStore().resetShelfState()
+      usePreferencesStore().resetPreferenceState()
+      const reader = useReaderStore()
+      reader.resetReaderSettingsState()
+      reader.ensureProgressScope()
     },
   },
 })

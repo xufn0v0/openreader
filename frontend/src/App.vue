@@ -21,12 +21,14 @@ import AppLayout from './layouts/AppLayout.vue'
 import GlobalOverlayHost from './components/GlobalOverlayHost.vue'
 import { useUserStore } from './stores/user'
 import { useReaderStore } from './stores/reader'
+import { useBookshelfStore } from './stores/bookshelf'
 import { usePreferencesStore } from './stores/preferences'
 import { useSync } from './composables/useSync'
 
 const route = useRoute()
 const userStore = useUserStore()
 const readerStore = useReaderStore()
+const bookshelf = useBookshelfStore()
 const preferences = usePreferencesStore()
 const { connect, disconnect } = useSync()
 
@@ -41,6 +43,9 @@ onMounted(() => {
     userStore.loadMe().catch(() => {})
   }
   if (userStore.token) {
+    bookshelf.ensureShelfScope()
+    preferences.ensurePreferenceScope()
+    readerStore.ensureReaderSettingsScope()
     connect()
     readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})
@@ -59,6 +64,10 @@ onBeforeUnmount(() => {
 
 watch(isLoggedIn, (loggedIn) => {
   if (loggedIn) {
+    bookshelf.ensureShelfScope()
+    readerStore.ensureProgressScope()
+    readerStore.ensureReaderSettingsScope()
+    preferences.ensurePreferenceScope()
     connect()
     readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})

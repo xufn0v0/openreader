@@ -101,6 +101,20 @@ export async function setBrowserCache(key, value) {
   }
 }
 
+export async function removeBrowserCache(key) {
+  const cacheKey = prefixedKey(key)
+  try {
+    await idbRemove(cacheKey)
+  } catch {
+    // Ignore missing IndexedDB entries; the legacy path is handled below.
+  }
+  try {
+    window.localStorage?.removeItem(cacheKey)
+  } catch {
+    // Ignore private-mode storage errors.
+  }
+}
+
 async function idbKeys(prefix) {
   const db = await openDB()
   return new Promise((resolve, reject) => {
@@ -152,18 +166,7 @@ export async function listBrowserCacheKeys(prefix = '') {
 
 export async function removeBrowserCacheKeys(prefix = '') {
   const keys = await listBrowserCacheKeys(prefix)
-  await Promise.all(keys.map(async (key) => {
-    try {
-      await idbRemove(key)
-    } catch {
-      // Ignore missing IndexedDB entries; the legacy path is handled below.
-    }
-    try {
-      window.localStorage?.removeItem(key)
-    } catch {
-      // Ignore private-mode storage errors.
-    }
-  }))
+  await Promise.all(keys.map(key => removeBrowserCache(key)))
   return keys.length
 }
 

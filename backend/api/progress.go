@@ -14,15 +14,22 @@ import (
 )
 
 type progressRequest struct {
-	BookID         uint    `json:"bookId" binding:"required"`
-	ChapterID      uint    `json:"chapterId"`
-	ChapterIndex   int     `json:"chapterIndex"`
-	Offset         int     `json:"offset"`
-	Percent        float64 `json:"percent"`
-	ChapterPercent float64 `json:"chapterPercent"`
-	ChapterTitle   string  `json:"chapterTitle"`
-	Mode           string  `json:"mode"`
-	BaseUpdatedAt  string  `json:"baseUpdatedAt"`
+	BookID          uint    `json:"bookId" binding:"required"`
+	ChapterID       uint    `json:"chapterId"`
+	ChapterIndex    int     `json:"chapterIndex"`
+	Offset          int     `json:"offset"`
+	Percent         float64 `json:"percent"`
+	ChapterPercent  float64 `json:"chapterPercent"`
+	ChapterTitle    string  `json:"chapterTitle"`
+	Mode            string  `json:"mode"`
+	BaseUpdatedAt   string  `json:"baseUpdatedAt"`
+	ClientUpdatedAt string  `json:"clientUpdatedAt"`
+	ClientID        string  `json:"clientId"`
+}
+
+type progressBroadcast struct {
+	models.ReadingProgress
+	ClientID string `json:"clientId,omitempty"`
 }
 
 func (s *Server) getProgress(c *gin.Context) {
@@ -76,7 +83,7 @@ func (s *Server) updateProgress(c *gin.Context) {
 
 	var existing models.ReadingProgress
 	err := s.db.Where("user_id = ? AND book_id = ?", userID, request.BookID).First(&existing).Error
-	if err == nil && isStaleProgressUpdate(existing.UpdatedAt, request.BaseUpdatedAt) {
+	if err == nil && isStaleProgressUpdate(existing.UpdatedAt, request.BaseUpdatedAt, request.ClientUpdatedAt) {
 		c.Header("X-OpenReader-Progress-Conflict", "1")
 		c.JSON(http.StatusOK, existing)
 		return
@@ -96,21 +103,32 @@ func (s *Server) updateProgress(c *gin.Context) {
 
 	_ = s.hub.Broadcast(userID, nil, gin.H{
 		"type":    "progress_update",
-		"payload": progress,
+		"payload": progressBroadcast{ReadingProgress: progress, ClientID: request.ClientID},
 	})
 
 	c.JSON(http.StatusOK, progress)
 }
 
-func isStaleProgressUpdate(serverUpdatedAt time.Time, baseUpdatedAt string) bool {
+func isStaleProgressUpdate(serverUpdatedAt time.Time, baseUpdatedAt string, clientUpdatedAt string) bool {
 	if baseUpdatedAt == "" || serverUpdatedAt.IsZero() {
-		return false
+		return isServerNewerThanClient(serverUpdatedAt, clientUpdatedAt)
 	}
 	base, err := time.Parse(time.RFC3339Nano, baseUpdatedAt)
 	if err != nil {
-		return false
+		return isServerNewerThanClient(serverUpdatedAt, clientUpdatedAt)
 	}
 	return serverUpdatedAt.After(base)
+}
+
+func isServerNewerThanClient(serverUpdatedAt time.Time, clientUpdatedAt string) bool {
+	if clientUpdatedAt == "" || serverUpdatedAt.IsZero() {
+		return false
+	}
+	clientTime, err := time.Parse(time.RFC3339Nano, clientUpdatedAt)
+	if err != nil {
+		return false
+	}
+	return serverUpdatedAt.After(clientTime)
 }
 
 func clampProgressPercent(percent float64) float64 {

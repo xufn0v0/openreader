@@ -37,8 +37,8 @@ export function useSync() {
       connected.value = true
       reconnectDelay = 1500
       Promise.all([
-        bookshelf.loadCategories({ force: true }),
-        bookshelf.loadBooks({ force: true, all: true }),
+        bookshelf.loadCategories(),
+        bookshelf.loadBooks({ all: true }),
       ]).catch(() => {})
     })
     socket.addEventListener('close', () => {
@@ -57,7 +57,9 @@ export function useSync() {
         return
       }
       if (message.type === 'progress_update') {
-        const progress = reader.applyServerProgress(message.payload) || message.payload
+        if (message.payload?.clientId && message.payload.clientId === reader.ensureClientId()) return
+        const progressPayload = stripProgressClientId(message.payload)
+        const progress = reader.applyServerProgress(progressPayload) || progressPayload
         bookshelf.applyBookProgress(progress, { replace: true })
         dispatchWindowEvent('openreader:progress-updated', {
           progress,
@@ -246,5 +248,11 @@ export function useSync() {
     userStore.loadMe().catch(() => {
       if (['delete', 'cleanup'].includes(detail?.kind)) userStore.logout()
     })
+  }
+
+  function stripProgressClientId(progress = {}) {
+    if (!progress || typeof progress !== 'object') return progress
+    const { clientId, ...rest } = progress
+    return rest
   }
 }

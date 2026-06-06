@@ -649,6 +649,45 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	}
 }
 
+func TestBookShelfListItemIncludesProgressOrder(t *testing.T) {
+	_, server := setupTestServer(t)
+
+	user := models.User{Username: "payload-user", PasswordHash: "hash"}
+	if err := server.db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "广播书"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&book).Updates(map[string]any{
+		"created_at": time.Now().Add(-3 * time.Hour),
+		"updated_at": time.Now().Add(-3 * time.Hour),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{
+		UserID:         user.ID,
+		BookID:         book.ID,
+		ChapterIndex:   9,
+		Offset:         2048,
+		Percent:        0.31,
+		ChapterPercent: 0.55,
+		ChapterTitle:   "第十章",
+	}
+	if err := server.db.Create(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	item := server.bookShelfListItem(user.ID, book)
+	if item.Progress == nil || item.Progress.BookID != book.ID || item.Progress.ChapterIndex != 9 {
+		t.Fatalf("expected embedded progress in shelf payload, got %+v", item.Progress)
+	}
+	if item.ShelfOrderAt.IsZero() || !item.ShelfOrderAt.Equal(item.Progress.UpdatedAt) {
+		t.Fatalf("expected shelf order to follow progress update time, got shelf=%s progress=%s", item.ShelfOrderAt, item.Progress.UpdatedAt)
+	}
+}
+
 func TestUpdateProgressPersistsChapterPosition(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -754,6 +793,55 @@ func TestUpdateProgressRejectsStaleClientBase(t *testing.T) {
 	}
 	if saved.ChapterIndex != existing.ChapterIndex || saved.Offset != existing.Offset || saved.ChapterTitle != existing.ChapterTitle {
 		t.Fatalf("stale update overwrote progress: %+v", saved)
+	}
+}
+
+func TestUpdateProgressRejectsOlderClientWithoutBase(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "无基线旧进度"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	existing := models.ReadingProgress{
+		UserID:         user.ID,
+		BookID:         book.ID,
+		ChapterIndex:   20,
+		Offset:         8000,
+		Percent:        0.6,
+		ChapterPercent: 0.44,
+		ChapterTitle:   "第二十一章",
+		UpdatedAt:      time.Now().UTC(),
+	}
+	if err := server.db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	clientUpdatedAt := existing.UpdatedAt.Add(-2 * time.Minute).Format(time.RFC3339Nano)
+	body := fmt.Sprintf(`{"bookId":%d,"chapterIndex":2,"offset":12,"percent":0.02,"chapterPercent":0.03,"chapterTitle":"第三章","clientUpdatedAt":%q}`, book.ID, clientUpdatedAt)
+	req := httptest.NewRequest(http.MethodPut, "/api/progress", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update progress: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Header().Get("X-OpenReader-Progress-Conflict") != "1" {
+		t.Fatalf("expected stale progress conflict header, got %q", w.Header().Get("X-OpenReader-Progress-Conflict"))
+	}
+
+	var saved models.ReadingProgress
+	if err := server.db.Where("user_id = ? AND book_id = ?", user.ID, book.ID).First(&saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.ChapterIndex != existing.ChapterIndex || saved.Offset != existing.Offset || saved.ChapterTitle != existing.ChapterTitle {
+		t.Fatalf("stale no-base update overwrote progress: %+v", saved)
 	}
 }
 
