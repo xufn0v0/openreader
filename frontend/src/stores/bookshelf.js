@@ -4,7 +4,7 @@ import { createCategory, deleteCategory, listCategories, reorderCategories, upda
 import api from '../api/client'
 import { useReaderStore } from './reader'
 import { newestProgress, sortByShelfOrder } from '../utils/bookOrder'
-import { getBrowserCache, setBrowserCache } from '../utils/browserCache'
+import { getBrowserCache, listBrowserCacheKeys, setBrowserCache } from '../utils/browserCache'
 import { currentUserScope } from '../utils/authScope'
 
 function asList(data) {
@@ -158,16 +158,19 @@ export const useBookshelfStore = defineStore('bookshelf', {
       const { data } = await createBook(book)
       this.books = sortBooks([data, ...this.books])
       this.invalidateBooks()
+      syncCachedBookUpsert(data)
       return data
     },
     async removeBook(bookId) {
       await deleteBook(bookId)
       this.books = this.books.filter(book => book.id !== bookId)
       this.invalidateBooks()
+      syncCachedBookRemoval(bookId)
     },
     removeBookLocal(bookId) {
       this.books = this.books.filter(book => Number(book.id) !== Number(bookId))
       this.invalidateBooks()
+      syncCachedBookRemoval(bookId)
     },
     upsertBook(book) {
       if (!book?.id) return
@@ -177,6 +180,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
         : [book, ...this.books]
       this.books = sortBooks(nextBooks)
       this.invalidateBooks()
+      syncCachedBookUpsert(book)
     },
     replaceCategories(categories) {
       this.categories = sortCategories(categories)
@@ -213,17 +217,21 @@ export const useBookshelfStore = defineStore('bookshelf', {
         this.books = sortBooks(nextBooks)
         this.booksLoadedAt = Date.now()
         if (this.booksLoadedKey) writeShelfCache(scopedShelfCacheKey(`${SHELF_CACHE_KEY}:${this.booksLoadedKey}`), this.books)
+        syncCachedBookProgress(progress, options)
       }
     },
     async batchDeleteBooks(bookIds) {
       await batchBooks({ action: 'delete', bookIds })
       this.books = this.books.filter(book => !bookIds.includes(book.id))
       this.invalidateBooks()
+      bookIds.forEach(bookId => syncCachedBookRemoval(bookId))
     },
     async batchSetCategory(bookIds, categoryId) {
       await batchBooks({ action: 'category', bookIds, categoryId })
-      this.books = sortBooks(this.books.map(book => bookIds.includes(book.id) ? { ...book, categoryId } : book))
+      const nextBooks = this.books.map(book => bookIds.includes(book.id) ? { ...book, categoryId } : book)
+      this.books = sortBooks(nextBooks)
       this.invalidateBooks()
+      nextBooks.filter(book => bookIds.includes(book.id)).forEach(book => syncCachedBookUpsert(book))
     },
     async batchCacheBooks(bookIds) {
       const { data } = await batchBooks({ action: 'cache', bookIds })
@@ -254,8 +262,10 @@ export const useBookshelfStore = defineStore('bookshelf', {
     async removeCategory(categoryId) {
       await deleteCategory(categoryId)
       this.categories = this.categories.filter(category => category.id !== categoryId)
-      this.books = sortBooks(this.books.map(book => String(book.categoryId) === String(categoryId) ? { ...book, categoryId: null } : book))
+      const nextBooks = this.books.map(book => String(book.categoryId) === String(categoryId) ? { ...book, categoryId: null } : book)
+      this.books = sortBooks(nextBooks)
       this.invalidateShelf()
+      nextBooks.filter(book => String(book.categoryId || '') === '').forEach(book => syncCachedBookUpsert(book))
     },
     async reorderCategoryIds(ids) {
       const { data } = await reorderCategories(ids)
@@ -301,4 +311,92 @@ function syncServerProgressFromBooks(books) {
   asList(books).forEach(book => {
     if (book?.progress?.bookId) reader.applyServerProgress(book.progress)
   })
+}
+
+async function syncCachedBookProgress(progress, options = {}) {
+  if (!progress?.bookId) return
+  try {
+    const keys = await listBrowserCacheKeys(SHELF_CACHE_KEY)
+    const scopedKeys = keys.filter(isCurrentUserShelfCacheKey)
+    await Promise.all(scopedKeys.map(async (key) => {
+      const cached = asList(await getBrowserCache(key))
+      if (!cached.length) return
+      let changed = false
+      const next = cached.map(book => {
+        if (Number(book.id) !== Number(progress.bookId)) return book
+        const nextProgress = options.replace ? progress : newestProgress(book.progress || null, progress)
+        if (nextProgress === book.progress) return book
+        changed = true
+        return { ...book, progress: nextProgress }
+      })
+      if (changed) await setBrowserCache(key, sortBooks(next))
+    }))
+  } catch {
+    // Shelf memory state is authoritative; cache sync is a best-effort fast resume path.
+  }
+}
+
+function isCurrentUserShelfCacheKey(key) {
+  const value = String(key || '')
+  const unprefixed = value.startsWith('localCache@') ? value.slice('localCache@'.length) : value
+  return unprefixed.startsWith(`${SHELF_CACHE_KEY}:`) && unprefixed.endsWith(`:${currentUserScope()}`)
+}
+
+async function syncCachedBookUpsert(book) {
+  if (!book?.id) return
+  await mutateCachedShelfLists((rows, requestParams) => {
+    const index = rows.findIndex(item => Number(item.id) === Number(book.id))
+    if (index >= 0) {
+      if (!matchesShelfRequest(book, requestParams)) {
+        return rows.filter(item => Number(item.id) !== Number(book.id))
+      }
+      return rows.map(item => Number(item.id) === Number(book.id) ? { ...item, ...book } : item)
+    }
+    if (matchesShelfRequest(book, requestParams)) return [book, ...rows]
+    return rows
+  })
+}
+
+async function syncCachedBookRemoval(bookId) {
+  if (!bookId) return
+  await mutateCachedShelfLists(rows => rows.filter(book => Number(book.id) !== Number(bookId)))
+}
+
+async function mutateCachedShelfLists(mutator) {
+  try {
+    const keys = (await listBrowserCacheKeys(SHELF_CACHE_KEY)).filter(isCurrentUserShelfCacheKey)
+    await Promise.all(keys.map(async (key) => {
+      const cached = asList(await getBrowserCache(key))
+      if (!cached.length) return
+      const next = asList(mutator(cached, shelfRequestParamsFromCacheKey(key)))
+      if (sameBookIdList(cached, next) && cached.every((book, index) => book === next[index])) return
+      await setBrowserCache(key, sortBooks(next))
+    }))
+  } catch {
+    // Cache updates are best-effort; the in-memory shelf and next network load remain authoritative.
+  }
+}
+
+function shelfRequestParamsFromCacheKey(key) {
+  const value = String(key || '')
+  const unprefixed = value.startsWith('localCache@') ? value.slice('localCache@'.length) : value
+  const suffix = `:${currentUserScope()}`
+  if (!unprefixed.startsWith(`${SHELF_CACHE_KEY}:`) || !unprefixed.endsWith(suffix)) return {}
+  const requestKey = unprefixed.slice(`${SHELF_CACHE_KEY}:`.length, -suffix.length)
+  try {
+    return JSON.parse(requestKey || '{}') || {}
+  } catch {
+    return {}
+  }
+}
+
+function matchesShelfRequest(book, requestParams = {}) {
+  if (!requestParams.categoryId) return true
+  if (requestParams.categoryId === 'none') return !book.categoryId
+  return String(book.categoryId || '') === String(requestParams.categoryId)
+}
+
+function sameBookIdList(a, b) {
+  if (a.length !== b.length) return false
+  return a.every((book, index) => Number(book.id) === Number(b[index]?.id))
 }
