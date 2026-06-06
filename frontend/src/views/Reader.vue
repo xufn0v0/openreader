@@ -1354,14 +1354,38 @@ async function clearFontFile(font) {
 }
 
 async function goChapter(index, offset = 0) {
-  if (index === currentIndex.value) { showTocDrawer.value = false; return }
-  if (isContinuousScrollRead.value && jumpToLoadedChapter(index, offset)) {
+  const targetIndex = Math.max(0, Math.min(Number(index), Math.max(chapters.value.length - 1, 0)))
+  if (targetIndex === currentIndex.value) {
+    showTocDrawer.value = false
+    jumpWithinCurrentChapter(offset)
+    return
+  }
+  if (isContinuousScrollRead.value && jumpToLoadedChapter(targetIndex, offset)) {
     showTocDrawer.value = false
     return
   }
-  const query = { chapter: index }
+  const query = { chapter: targetIndex }
   if (offset) query.offset = offset
   await router.replace({ name: 'reader', params: { id: bookId.value }, query })
+}
+
+function jumpWithinCurrentChapter(offset = 0) {
+  if (reader.mode === 'flip') {
+    page.value = offset === CHAPTER_END_OFFSET ? Math.max(0, pageCount.value - 1) : 0
+    progressVersion.value += 1
+    saveCurrentProgress()
+    return
+  }
+  if (jumpToLoadedChapter(currentIndex.value, offset)) return
+  if (!contentEl.value) return
+  contentEl.value.scrollTo({
+    top: offset === CHAPTER_END_OFFSET
+      ? Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
+      : 0,
+    behavior: readerScrollBehavior(),
+  })
+  progressVersion.value += 1
+  saveCurrentProgress()
 }
 
 function jumpToLoadedChapter(index, offset = 0) {
@@ -2420,7 +2444,7 @@ function handleReaderWheel(event) {
   if (!shellEl.value?.contains(event.target)) return
   const target = event.target
   if (target?.closest?.('button, a, input, textarea, select, [role="button"], .el-drawer, .el-dialog') && !target?.closest?.('.tap-zone')) return
-  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  const delta = normalizedWheelDelta(event)
   if (Math.abs(delta) < 4) return
   if (isScrollRead.value) {
     if (!contentEl.value) return
@@ -2437,6 +2461,18 @@ function handleReaderWheel(event) {
   } else {
     previousPage()
   }
+}
+
+function normalizedWheelDelta(event) {
+  const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+  if (event.deltaMode === 1) {
+    const lineHeight = Number(reader.fontSize || 18) * Number(reader.lineHeight || 1.8)
+    return rawDelta * Math.max(12, lineHeight)
+  }
+  if (event.deltaMode === 2) {
+    return rawDelta * (contentEl.value?.clientHeight || window.innerHeight || 800)
+  }
+  return rawDelta
 }
 
 function scrollReaderByWheel(delta) {
@@ -2707,6 +2743,7 @@ function updateCurrentChapterFromScroll() {
   currentIndex.value = nextIndex
   chapter.value = snapshot?.chapter || chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
   content.value = block?.content || content.value
+  pruneScroll2ChapterWindow()
 }
 
 function maybeExtendShowChapters() {
@@ -2724,6 +2761,28 @@ function maybeExtendShowChapters() {
     .finally(() => {
       extendingShowChapters = false
     })
+}
+
+function pruneScroll2ChapterWindow() {
+  if (reader.mode !== 'scroll2' || !contentEl.value || !chapterBlocks.value.length) return
+  const minIndex = Math.max(0, currentIndex.value - SHOW_PREV_CHAPTER_SIZE)
+  const maxIndex = Math.min(chapters.value.length - 1, currentIndex.value + SHOW_NEXT_CHAPTER_SIZE)
+  const currentBlocks = chapterBlocks.value
+  if (currentBlocks.every(block => block.index >= minIndex && block.index <= maxIndex)) return
+  const removedBeforeHeight = currentBlocks
+    .filter(block => block.index < minIndex)
+    .reduce((sum, block) => {
+      const element = contentBody.value?.querySelector(`.chapter-content[data-index="${block.index}"]`)
+      return sum + (element?.getBoundingClientRect?.().height || 0)
+    }, 0)
+  const beforeTop = contentEl.value.scrollTop
+  chapterBlocks.value = currentBlocks.filter(block => block.index >= minIndex && block.index <= maxIndex)
+  if (removedBeforeHeight > 0) {
+    nextTick(() => {
+      if (!contentEl.value) return
+      contentEl.value.scrollTop = Math.max(0, beforeTop - removedBeforeHeight)
+    })
+  }
 }
 
 function currentVisibleExcerpt() {
