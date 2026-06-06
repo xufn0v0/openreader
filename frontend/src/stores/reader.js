@@ -688,7 +688,11 @@ function persistLocalChapterProgress(progress) {
 function readLocalChapterProgress(bookId) {
   if (typeof localStorage === 'undefined' || !bookId) return null
   try {
-    const raw = localStorage.getItem(localChapterProgressKey(bookId)) || localStorage.getItem(legacyLocalChapterProgressKey(bookId))
+    const scopedKey = localChapterProgressKey(bookId)
+    const legacyKey = legacyLocalChapterProgressKey(bookId)
+    const scopedRaw = localStorage.getItem(scopedKey)
+    const legacyRaw = scopedRaw ? '' : localStorage.getItem(legacyKey)
+    const raw = scopedRaw || legacyRaw
     if (!raw) return null
     const data = JSON.parse(raw)
     if (!data || Number(data.bookId) !== Number(bookId)) return null
@@ -702,6 +706,10 @@ function readLocalChapterProgress(bookId) {
     if (data.chapterPercent !== undefined && data.chapterPercent !== null) {
       const chapterPercent = Number(data.chapterPercent)
       if (Number.isFinite(chapterPercent)) progress.chapterPercent = Math.max(0, Math.min(1, chapterPercent))
+    }
+    if (!scopedRaw && legacyRaw && currentUserScope() !== 'anonymous') {
+      localStorage.setItem(scopedKey, JSON.stringify(progress))
+      localStorage.removeItem(legacyKey)
     }
     return progress
   } catch {

@@ -1,5 +1,5 @@
 import { getChapterContent } from '../api/books'
-import { getBrowserCache, listBrowserCacheKeys, removeBrowserCacheKeys, setBrowserCache } from './browserCache'
+import { getBrowserCache, listBrowserCacheKeys, removeBrowserCache, removeBrowserCacheKeys, setBrowserCache } from './browserCache'
 import { currentUserScope } from './authScope'
 
 export function chapterCacheBookKey(book, fallbackBookId) {
@@ -96,6 +96,26 @@ export async function clearBookBrowserChapterCache(book, bookId) {
   return scoped + legacy
 }
 
+export async function currentUserBrowserChapterCacheStats() {
+  const keys = await currentUserBrowserChapterCacheKeys()
+  let size = 0
+  await Promise.all(keys.map(async (key) => {
+    const cached = await getBrowserCache(key)
+    size += estimateCacheValueSize(cached)
+  }))
+  return {
+    chapters: keys.length,
+    files: keys.length,
+    size,
+  }
+}
+
+export async function clearCurrentUserBrowserChapterCache() {
+  const keys = await currentUserBrowserChapterCacheKeys()
+  await Promise.all(keys.map(key => removeBrowserCache(key)))
+  return keys.length
+}
+
 export async function cacheBookChaptersToBrowser(book, bookId, chapters, options = {}) {
   const cachedMap = await listBookBrowserCachedChapters(book, bookId)
   const startIndex = Math.max(0, Number(options.startIndex || 0))
@@ -129,4 +149,31 @@ export async function cacheBookChaptersToBrowser(book, bookId, chapters, options
 async function getValidCachedChapter(cacheKey) {
   const cached = await getBrowserCache(cacheKey)
   return isValidChapterContentResponse(cached) ? cached : null
+}
+
+async function currentUserBrowserChapterCacheKeys() {
+  const keys = await listBrowserCacheKeys('')
+  return keys.filter(isCurrentUserOrLegacyChapterCacheKey)
+}
+
+function isCurrentUserOrLegacyChapterCacheKey(key) {
+  if (!String(key).includes('@chapterContent-')) return false
+  const unprefixed = String(key).replace(/^localCache@/, '')
+  const scope = currentUserScope()
+  if (unprefixed.startsWith(`${scope}@`)) return true
+  if (/^(user:[^@]+|anonymous)@/.test(unprefixed)) return false
+  return true
+}
+
+function estimateCacheValueSize(value) {
+  if (!value) return 0
+  try {
+    return new Blob([JSON.stringify(value)]).size
+  } catch {
+    try {
+      return JSON.stringify(value).length
+    } catch {
+      return 0
+    }
+  }
 }

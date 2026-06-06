@@ -148,6 +148,7 @@ import { clearCache, getCacheStats } from '../api/cache'
 import { listSources } from '../api/sources'
 import api from '../api/client'
 import { compareRecentBook, newestBookProgress } from '../utils/bookOrder'
+import { clearCurrentUserBrowserChapterCache, currentUserBrowserChapterCacheStats } from '../utils/bookChapterCache'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 
@@ -165,9 +166,11 @@ const mobileNavigationVisible = ref(false)
 const touchStart = ref(null)
 const touchMoveX = ref(0)
 const cacheStats = ref({})
+const browserCacheStats = ref({})
 const healthInfo = ref(null)
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
+const browserCacheClearing = ref(false)
 const MOBILE_NAV_TRIGGER = 72
 const FOREGROUND_REFRESH_INTERVAL = 30000
 let lastForegroundRefreshAt = 0
@@ -222,7 +225,8 @@ const navSections = computed(() => [
     title: cacheSectionTitle.value,
     items: [
       { key: 'cacheStats', label: '刷新缓存统计', action: loadCacheStats },
-      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearChapterCacheLabel.value, action: clearSystemCache },
+      { key: 'clearCache', label: cacheClearing.value ? '清理中' : clearServerChapterCacheLabel.value, action: clearSystemCache },
+      { key: 'clearBrowserCache', label: browserCacheClearing.value ? '清理中' : clearBrowserChapterCacheLabel.value, action: clearBrowserChapterCache },
     ],
   },
   {
@@ -262,12 +266,16 @@ const sidebarSourceGroups = computed(() => {
   return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
 })
 const cacheSectionTitle = computed(() => {
-  const size = Number(cacheStats.value?.size || 0)
+  const size = Number(cacheStats.value?.size || 0) + Number(browserCacheStats.value?.size || 0)
   return size ? `本地缓存 ${formatSize(size)}` : '本地缓存'
 })
-const clearChapterCacheLabel = computed(() => {
+const clearServerChapterCacheLabel = computed(() => {
   const size = Number(cacheStats.value?.size || 0)
-  return size ? `清空章节缓存 ${formatSize(size)}` : '清空章节缓存'
+  return size ? `清空服务器缓存 ${formatSize(size)}` : '清空服务器缓存'
+})
+const clearBrowserChapterCacheLabel = computed(() => {
+  const size = Number(browserCacheStats.value?.size || 0)
+  return size ? `清空浏览器缓存 ${formatSize(size)}` : '清空浏览器缓存'
 })
 const isNightTheme = computed(() => reader.theme === 'dark' || reader.theme === 'black')
 const appVersionLabel = computed(() => {
@@ -405,10 +413,15 @@ async function loadSidebarSources() {
 async function loadCacheStats() {
   cacheLoading.value = true
   try {
-    const { data } = await getCacheStats()
+    const [{ data }, browserStats] = await Promise.all([
+      getCacheStats(),
+      currentUserBrowserChapterCacheStats(),
+    ])
     cacheStats.value = data || {}
+    browserCacheStats.value = browserStats || {}
   } catch {
     cacheStats.value = {}
+    browserCacheStats.value = {}
   } finally {
     cacheLoading.value = false
   }
@@ -451,7 +464,7 @@ function shortCommit(value) {
 
 async function clearSystemCache() {
   try {
-    await ElMessageBox.confirm('确定清理全部章节缓存吗？清理后阅读时会重新加载章节内容。', '清理缓存', { type: 'warning' })
+    await ElMessageBox.confirm('确定清理服务器章节缓存吗？清理后阅读时会重新加载远程章节内容。', '清理缓存', { type: 'warning' })
     cacheClearing.value = true
     const { data } = await clearCache()
     ElMessage.success(`已清理 ${data.clearedFiles || 0} 个文件，释放 ${formatSize(data.clearedSize || 0)}`)
@@ -461,6 +474,21 @@ async function clearSystemCache() {
     ElMessage.error(readError(err, '清理缓存失败'))
   } finally {
     cacheClearing.value = false
+  }
+}
+
+async function clearBrowserChapterCache() {
+  try {
+    await ElMessageBox.confirm('确定清理当前用户的浏览器章节缓存吗？清理后本机阅读时会重新加载章节内容。', '清理浏览器缓存', { type: 'warning' })
+    browserCacheClearing.value = true
+    const removed = await clearCurrentUserBrowserChapterCache()
+    ElMessage.success(`已清理浏览器章节缓存 ${removed} 章`)
+    await loadCacheStats()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '清理浏览器缓存失败'))
+  } finally {
+    browserCacheClearing.value = false
   }
 }
 

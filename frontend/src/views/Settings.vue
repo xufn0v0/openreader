@@ -100,6 +100,22 @@
               <el-button type="danger" plain :icon="Delete" :loading="cacheClearing" @click="clearSystemCache">清理缓存</el-button>
             </div>
           </article>
+          <article class="app-panel settings-card">
+            <div class="card-head">
+              <el-icon><Files /></el-icon>
+              <h2>浏览器章节缓存</h2>
+            </div>
+            <dl class="info-list">
+              <div><dt>缓存位置</dt><dd>当前浏览器</dd></div>
+              <div><dt>缓存文件</dt><dd>{{ browserCacheStats.files || 0 }}</dd></div>
+              <div><dt>缓存大小</dt><dd>{{ formatSize(browserCacheStats.size || 0) }}</dd></div>
+              <div><dt>章节状态</dt><dd>{{ browserCacheStats.chapters || 0 }} 章已缓存</dd></div>
+            </dl>
+            <div class="panel-actions">
+              <el-button :icon="Refresh" :loading="cacheLoading" @click="loadCacheStats">刷新</el-button>
+              <el-button type="danger" plain :icon="Delete" :loading="browserCacheClearing" @click="clearBrowserChapterCache">清理浏览器缓存</el-button>
+            </div>
+          </article>
         </section>
       </el-tab-pane>
 
@@ -388,6 +404,7 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useOverlayStore } from '../stores/overlay'
 import { readerFontOptions } from '../utils/readerFonts'
 import { useUserStore } from '../stores/user'
+import { clearCurrentUserBrowserChapterCache, currentUserBrowserChapterCacheStats } from '../utils/bookChapterCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import RSSManager from '../components/RSSManager.vue'
 import WebDAVBrowser from '../components/WebDAVBrowser.vue'
@@ -407,8 +424,10 @@ const backupListLoading = ref(false)
 const restoreLoading = ref(false)
 const backups = ref([])
 const cacheStats = ref({})
+const browserCacheStats = ref({})
 const cacheLoading = ref(false)
 const cacheClearing = ref(false)
+const browserCacheClearing = ref(false)
 const readerBgUploading = ref(false)
 const healthInfo = ref(null)
 const windowWidth = ref(currentViewportWidth())
@@ -663,9 +682,14 @@ async function download(row) {
 async function loadCacheStats() {
   cacheLoading.value = true
   try {
-    const { data } = await getCacheStats()
+    const [{ data }, browserStats] = await Promise.all([
+      getCacheStats(),
+      currentUserBrowserChapterCacheStats(),
+    ])
     cacheStats.value = data || {}
+    browserCacheStats.value = browserStats || {}
   } catch (err) {
+    browserCacheStats.value = {}
     ElMessage.error(readError(err, '加载缓存统计失败'))
   } finally {
     cacheLoading.value = false
@@ -674,7 +698,7 @@ async function loadCacheStats() {
 
 async function clearSystemCache() {
   try {
-    await ElMessageBox.confirm('确定清理全部章节缓存吗？清理后阅读时会重新加载章节内容。', '清理缓存', { type: 'warning' })
+    await ElMessageBox.confirm('确定清理服务器章节缓存吗？清理后阅读时会重新加载远程章节内容。', '清理缓存', { type: 'warning' })
     cacheClearing.value = true
     const { data } = await clearCache()
     ElMessage.success(`已清理 ${data.clearedFiles || 0} 个文件，释放 ${formatSize(data.clearedSize || 0)}`)
@@ -684,6 +708,21 @@ async function clearSystemCache() {
     ElMessage.error(readError(err, '清理缓存失败'))
   } finally {
     cacheClearing.value = false
+  }
+}
+
+async function clearBrowserChapterCache() {
+  try {
+    await ElMessageBox.confirm('确定清理当前用户的浏览器章节缓存吗？清理后本机阅读时会重新加载章节内容。', '清理浏览器缓存', { type: 'warning' })
+    browserCacheClearing.value = true
+    const removed = await clearCurrentUserBrowserChapterCache()
+    ElMessage.success(`已清理浏览器章节缓存 ${removed} 章`)
+    await loadCacheStats()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '清理浏览器缓存失败'))
+  } finally {
+    browserCacheClearing.value = false
   }
 }
 
