@@ -79,8 +79,7 @@ func (s *Server) importTXT(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusCreated, book)
+	c.JSON(http.StatusCreated, s.broadcastBookShelfUpdate(userID, book))
 }
 
 func parseOptionalCategoryID(value string) *uint {

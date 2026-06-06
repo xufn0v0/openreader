@@ -105,6 +105,12 @@ func bookShelfListItem(book models.Book, progress models.ReadingProgress) bookLi
 	return item
 }
 
+func (s *Server) broadcastBookShelfUpdate(userID uint, book models.Book) bookListItem {
+	item := s.bookShelfListItem(userID, book)
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": item})
+	return item
+}
+
 func shelfOrderAt(book models.Book, progress *models.ReadingProgress) time.Time {
 	orderAt := book.UpdatedAt
 	if book.CreatedAt.After(orderAt) {
@@ -138,8 +144,7 @@ func (s *Server) createBook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create book"})
 		return
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusCreated, book)
+	c.JSON(http.StatusCreated, s.broadcastBookShelfUpdate(userID, book))
 }
 
 func (s *Server) getBook(c *gin.Context) {
@@ -228,8 +233,7 @@ func (s *Server) updateBook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update book"})
 		return
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusOK, book)
+	c.JSON(http.StatusOK, s.broadcastBookShelfUpdate(userID, book))
 }
 
 func (s *Server) deleteBook(c *gin.Context) {
@@ -537,8 +541,7 @@ func (s *Server) refreshBook(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusOK, gin.H{"book": book, "added": added, "chapterCount": len(remoteChapters)})
+	c.JSON(http.StatusOK, gin.H{"book": s.broadcastBookShelfUpdate(userID, book), "added": added, "chapterCount": len(remoteChapters)})
 }
 
 func (s *Server) refreshLocalBook(c *gin.Context) {
@@ -695,8 +698,7 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 			Where("user_id = ? AND book_id = ? AND chapter_index = ?", userID, book.ID, index).
 			Update("chapter_id", chapterID).Error
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusOK, gin.H{"book": book, "chapterCount": len(parsed)})
+	c.JSON(http.StatusOK, gin.H{"book": s.broadcastBookShelfUpdate(userID, book), "chapterCount": len(parsed)})
 }
 
 type cacheBookRequest struct {
@@ -864,8 +866,7 @@ func (s *Server) updateBookCategory(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update category"})
 		return
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusOK, book)
+	c.JSON(http.StatusOK, s.broadcastBookShelfUpdate(userID, book))
 }
 
 func (s *Server) listChapters(c *gin.Context) {
@@ -921,7 +922,7 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 			existing.CategoryID = req.CategoryID
 			_ = s.db.Save(&existing).Error
 		}
-		c.JSON(http.StatusOK, existing)
+		c.JSON(http.StatusOK, s.broadcastBookShelfUpdate(userID, existing))
 		return
 	}
 
@@ -971,8 +972,7 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusCreated, book)
+	c.JSON(http.StatusCreated, s.broadcastBookShelfUpdate(userID, book))
 }
 
 type changeSourceRequest struct {
@@ -1258,8 +1258,7 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
-	c.JSON(http.StatusOK, book)
+	c.JSON(http.StatusOK, s.broadcastBookShelfUpdate(userID, book))
 }
 
 func (s *Server) chapterContent(c *gin.Context) {

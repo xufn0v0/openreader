@@ -296,8 +296,9 @@ func (s *Server) importFromLocalStore(c *gin.Context) {
 				imported = append(imported, gin.H{"path": file.relativePath, "error": err.Error()})
 				continue
 			}
-			imported = append(imported, gin.H{"path": file.relativePath, "book": book})
-			importedBooks = append(importedBooks, s.bookShelfListItem(userID, book))
+			item := s.bookShelfListItem(userID, book)
+			imported = append(imported, gin.H{"path": file.relativePath, "book": item})
+			importedBooks = append(importedBooks, item)
 		}
 	}
 
