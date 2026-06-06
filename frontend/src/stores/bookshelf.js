@@ -382,7 +382,7 @@ async function syncCachedBookUpsert(book) {
       if (!matchesShelfRequest(book, requestParams)) {
         return rows.filter(item => Number(item.id) !== Number(book.id))
       }
-      return rows.map(item => Number(item.id) === Number(book.id) ? { ...item, ...book } : item)
+      return rows.map(item => Number(item.id) === Number(book.id) ? mergeShelfBook(item, book) : item)
     }
     if (matchesShelfRequest(book, requestParams)) return [book, ...rows]
     return rows
@@ -433,7 +433,7 @@ function sameBookIdList(a, b) {
   return a.every((book, index) => Number(book.id) === Number(b[index]?.id))
 }
 
-function mergeShelfBook(current, incoming) {
+export function mergeShelfBook(current, incoming) {
   if (!current) return incoming
   const next = { ...current, ...incoming }
   const progress = newestProgress(current.progress || null, incoming?.progress || null)

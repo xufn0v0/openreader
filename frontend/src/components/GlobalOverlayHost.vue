@@ -653,7 +653,7 @@ import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from 
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
-import { useBookshelfStore } from '../stores/bookshelf'
+import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
@@ -1174,6 +1174,25 @@ async function refreshBookChaptersCache(book) {
   }
 }
 
+function mergedShelfBook(book) {
+  if (!book?.id) return book
+  const current = bookshelf.books.find(item => Number(item.id) === Number(book.id)) ||
+    (Number(overlay.bookInfoBook?.id) === Number(book.id) ? overlay.bookInfoBook : null)
+  return mergeShelfBook(current, book)
+}
+
+function applyUpdatedBookToOverlay(book, chapters = null) {
+  if (!book?.id) return book
+  const nextBook = mergedShelfBook(book)
+  bookshelf.upsertBook(nextBook)
+  if (Number(overlay.bookInfoBook?.id) === Number(nextBook.id)) overlay.bookInfoBook = nextBook
+  if (Number(sourceSwitchBook.value?.id) === Number(nextBook.id)) sourceSwitchBook.value = nextBook
+  window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', {
+    detail: { bookId: nextBook.id, book: nextBook, chapters },
+  }))
+  return nextBook
+}
+
 function localCacheCount(book) {
   return localCacheCounts.value[book?.id] || 0
 }
@@ -1290,12 +1309,10 @@ async function changeGlobalBookSource(source) {
       intro: sourceCandidateIntro(source),
     })
     await invalidateBookReaderCaches(book, { clearBrowser: true })
-    const chapters = await refreshBookChaptersCache(data)
-    bookshelf.upsertBook(data)
-    sourceSwitchBook.value = data
-    if (overlay.bookInfoBook?.id === data.id) overlay.bookInfoBook = data
-    await refreshBookInfoBrowserCacheCount(data)
-    window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', { detail: { bookId: data.id, book: data, chapters } }))
+    const updatedBook = mergedShelfBook(data)
+    const chapters = await refreshBookChaptersCache(updatedBook)
+    applyUpdatedBookToOverlay(updatedBook, chapters)
+    await refreshBookInfoBrowserCacheCount(updatedBook)
     sourceSwitchLoadedKey.value = ''
     await loadGlobalSourceCandidates({ force: true })
     ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`)
@@ -1336,11 +1353,10 @@ async function refreshBookInfo(book) {
     await invalidateBookReaderCaches(book, { clearBrowser: true })
     const updatedBook = data?.book || data
     if (updatedBook?.id) {
-      const chapters = await refreshBookChaptersCache(updatedBook)
-      bookshelf.upsertBook(updatedBook)
-      overlay.bookInfoBook = updatedBook
-      await refreshBookInfoBrowserCacheCount(updatedBook)
-      window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', { detail: { bookId: updatedBook.id, book: updatedBook, chapters } }))
+      const mergedBook = mergedShelfBook(updatedBook)
+      const chapters = await refreshBookChaptersCache(mergedBook)
+      applyUpdatedBookToOverlay(mergedBook, chapters)
+      await refreshBookInfoBrowserCacheCount(mergedBook)
     } else {
       await bookshelf.loadBooks({ force: true, all: true })
     }
@@ -1360,11 +1376,10 @@ async function refreshLocalBookInfo(book) {
     await invalidateBookReaderCaches(book, { clearBrowser: true })
     const updatedBook = data?.book || data
     if (updatedBook?.id) {
-      const chapters = await refreshBookChaptersCache(updatedBook)
-      bookshelf.upsertBook(updatedBook)
-      overlay.bookInfoBook = updatedBook
-      await refreshBookInfoBrowserCacheCount(updatedBook)
-      window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', { detail: { bookId: updatedBook.id, book: updatedBook, chapters } }))
+      const mergedBook = mergedShelfBook(updatedBook)
+      const chapters = await refreshBookChaptersCache(mergedBook)
+      applyUpdatedBookToOverlay(mergedBook, chapters)
+      await refreshBookInfoBrowserCacheCount(mergedBook)
     } else {
       await bookshelf.loadBooks({ force: true, all: true })
     }

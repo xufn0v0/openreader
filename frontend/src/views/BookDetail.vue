@@ -156,12 +156,13 @@ import BookInfoPanel from '../components/BookInfoPanel.vue'
 import ReaderBookmarkPanel from '../components/reader/ReaderBookmarkPanel.vue'
 import ReaderTocPanel from '../components/reader/ReaderTocPanel.vue'
 import SourceSwitchPanel from '../components/reader/SourceSwitchPanel.vue'
-import { useBookshelfStore } from '../stores/bookshelf'
+import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress } from '../utils/bookOrder'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
+import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import {
   sourceCandidateAuthor,
@@ -324,8 +325,7 @@ async function changeCategory(value) {
   try {
     const categoryId = value ? Number(value) : null
     const { data } = await updateBookCategory(book.value.id, categoryId)
-    book.value = data
-    bookshelf.upsertBook(data)
+    await applyBookUpdate(data)
     ElMessage.success('分组已更新')
   } catch (err) {
     ElMessage.error(readError(err, '更新分组失败'))
@@ -373,8 +373,7 @@ async function saveBookEdit() {
       categoryId: book.value.categoryId || null,
       canUpdate: book.value.canUpdate !== false,
     })
-    book.value = data
-    bookshelf.upsertBook(data)
+    await applyBookUpdate(data)
     showBookEditor.value = false
     ElMessage.success('书籍已更新')
   } catch (err) {
@@ -412,8 +411,7 @@ async function uploadBookCoverFromPanel(file) {
       categoryId: book.value.categoryId || null,
       canUpdate: book.value.canUpdate !== false,
     })
-    book.value = data
-    bookshelf.upsertBook(data)
+    await applyBookUpdate(data)
     ElMessage.success('封面已更新')
   } catch (err) {
     ElMessage.error(readError(err, '上传封面失败'))
@@ -434,8 +432,7 @@ async function toggleBookCanUpdate(value) {
       categoryId: book.value.categoryId || null,
       canUpdate: value,
     })
-    book.value = data
-    bookshelf.upsertBook(data)
+    await applyBookUpdate(data)
     ElMessage.success(value ? '已开启追更' : '已关闭追更')
   } catch (err) {
     ElMessage.error(readError(err, '更新追更状态失败'))
@@ -448,11 +445,12 @@ async function refreshCurrentBook() {
   if (!book.value) return
   refreshingBook.value = true
   try {
+    const previousBook = book.value
     const { data } = await refreshBook(book.value.id)
-    book.value = data?.book || data
-    if (book.value?.id) bookshelf.upsertBook(book.value)
-    const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
-    chapters.value = chaptersRes.data
+    const updatedBook = mergeBookUpdate(data?.book || data)
+    await invalidateBookReaderCaches(previousBook, { clearBrowser: true })
+    const nextChapters = await loadBookChapters(updatedBook)
+    await applyBookUpdate(updatedBook, { chapters: nextChapters })
     ElMessage.success(data.added ? `新增 ${data.added} 章` : '目录已刷新')
   } catch (err) {
     ElMessage.error(readError(err, '刷新目录失败'))
@@ -465,10 +463,12 @@ async function refreshCurrentLocalBook() {
   if (!book.value) return
   refreshingBook.value = true
   try {
+    const previousBook = book.value
     const { data } = await refreshLocalBook(book.value.id)
-    book.value = data?.book || data
-    if (book.value?.id) bookshelf.upsertBook(book.value)
-    await reloadChapters()
+    const updatedBook = mergeBookUpdate(data?.book || data)
+    await invalidateBookReaderCaches(previousBook, { clearBrowser: true })
+    const nextChapters = await loadBookChapters(updatedBook)
+    await applyBookUpdate(updatedBook, { chapters: nextChapters })
     ElMessage.success(`本地书已刷新，共 ${data?.chapterCount || book.value?.chapterCount || chapters.value.length} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '刷新本地书失败'))
@@ -490,10 +490,12 @@ async function changeLocalTocRule() {
   if (!result) return
   refreshingBook.value = true
   try {
+    const previousBook = book.value
     const { data } = await refreshLocalBook(book.value.id, { tocRule: result.value || '' })
-    book.value = data?.book || data
-    if (book.value?.id) bookshelf.upsertBook(book.value)
-    await reloadChapters()
+    const updatedBook = mergeBookUpdate(data?.book || data)
+    await invalidateBookReaderCaches(previousBook, { clearBrowser: true })
+    const nextChapters = await loadBookChapters(updatedBook)
+    await applyBookUpdate(updatedBook, { chapters: nextChapters })
     ElMessage.success(`目录规则已更新，共 ${data?.chapterCount || book.value?.chapterCount || chapters.value.length} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '更新目录规则失败'))
@@ -574,9 +576,47 @@ async function clearCurrentBookLocalCache() {
 
 async function reloadChapters() {
   if (!book.value) return
-  const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
-  chapters.value = chaptersRes.data
+  chapters.value = await loadBookChapters(book.value)
   await refreshBrowserCacheMap()
+}
+
+async function loadBookChapters(targetBook = book.value) {
+  if (!targetBook?.id) return []
+  const chaptersRes = await api.get(`/books/${targetBook.id}/chapters`)
+  return Array.isArray(chaptersRes.data) ? chaptersRes.data : []
+}
+
+function mergeBookUpdate(incoming) {
+  if (!incoming?.id) return incoming
+  const current = bookshelf.books.find(item => Number(item.id) === Number(incoming.id)) ||
+    (Number(book.value?.id) === Number(incoming.id) ? book.value : null)
+  return mergeShelfBook(current, incoming)
+}
+
+async function applyBookUpdate(incoming, options = {}) {
+  if (!incoming?.id) return incoming
+  const nextBook = mergeBookUpdate(incoming)
+  book.value = nextBook
+  bookshelf.upsertBook(nextBook)
+  const nextChapters = Array.isArray(options.chapters) ? options.chapters : null
+  if (nextChapters) chapters.value = nextChapters
+  await writeReaderDataCache(nextBook.id, {
+    bookData: nextBook,
+    ...(nextChapters ? { chaptersData: nextChapters } : {}),
+  })
+  window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', {
+    detail: { bookId: nextBook.id, book: nextBook, chapters: nextChapters },
+  }))
+  return nextBook
+}
+
+async function invalidateBookReaderCaches(targetBook, options = {}) {
+  if (!targetBook?.id) return
+  await invalidateReaderDataCache(targetBook.id, { book: true, chapters: true })
+  if (options.clearBrowser && Number(targetBook.sourceId || 0) > 0) {
+    await clearBookBrowserChapterCache(targetBook, targetBook.id).catch(() => 0)
+    browserCachedChapters.value = {}
+  }
 }
 
 async function refreshBrowserCacheMap() {
@@ -665,6 +705,7 @@ async function changeSource(source) {
   changeMessage.value = ''
   changeError.value = false
   try {
+    const previousBook = book.value
     const { data } = await changeBookSource(book.value.id, {
       sourceId: nextSourceId,
       bookUrl: sourceCandidateBookUrl(source),
@@ -673,11 +714,11 @@ async function changeSource(source) {
       coverUrl: sourceCandidateCover(source),
       intro: sourceCandidateIntro(source),
     })
-    book.value = data
-    bookshelf.upsertBook(data)
-    const chaptersRes = await api.get(`/books/${book.value.id}/chapters`)
-    chapters.value = chaptersRes.data
-    changeMessage.value = `已切换，共 ${data.chapterCount || chapters.value.length} 章`
+    const updatedBook = mergeBookUpdate(data)
+    await invalidateBookReaderCaches(previousBook, { clearBrowser: true })
+    const nextChapters = await loadBookChapters(updatedBook)
+    await applyBookUpdate(updatedBook, { chapters: nextChapters })
+    changeMessage.value = `已切换，共 ${updatedBook.chapterCount || chapters.value.length} 章`
     await loadSourceCandidates()
     ElMessage.success('换源成功')
   } catch (err) {
