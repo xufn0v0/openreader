@@ -50,6 +50,7 @@ export const useReaderStore = defineStore('reader', {
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
     settingsSyncError: '',
+    settingsScope: currentUserScope(),
     progressScope: currentUserScope(),
     progressByBook: {},
     clientId: READER_CLIENT_ID,
@@ -89,6 +90,31 @@ export const useReaderStore = defineStore('reader', {
         this.progressScope = scope
       }
       return scope
+    },
+    ensureReaderSettingsScope() {
+      const scope = currentUserScope()
+      if (!this.settingsScope) {
+        this.settingsScope = scope
+        return scope
+      }
+      if (this.settingsScope !== scope) {
+        this.resetReaderSettingsState(scope)
+      }
+      return scope
+    },
+    resetReaderSettingsState(scope = currentUserScope()) {
+      clearTimeout(readerSettingsSyncTimer)
+      const pageMode = this.pageMode === 'mobile' ? 'mobile' : 'auto'
+      Object.assign(this, defaultReaderSettings(), {
+        pageMode,
+        settingsScope: scope,
+        settingsUpdatedAt: '',
+        settingsSyncBaseUpdatedAt: '',
+        settingsSyncing: false,
+        settingsSyncError: '',
+        normalModeSnapshot: null,
+      })
+      this.ensureClientId()
     },
     setMode(mode) {
       this.mode = ['scroll', 'scroll2', 'flip', 'page'].includes(mode) ? mode : 'page'
@@ -370,6 +396,7 @@ export const useReaderStore = defineStore('reader', {
       this.settingsSyncing = false
     },
     markSettingsDirty(options = {}) {
+      this.ensureReaderSettingsScope()
       if (!options.skipCustomConfigSync) this.syncActiveCustomConfig()
       this.settingsUpdatedAt = new Date().toISOString()
       this.settingsSyncError = ''
@@ -387,6 +414,7 @@ export const useReaderStore = defineStore('reader', {
       this.customConfigList = this.customConfigList.map((item, itemIndex) => itemIndex === index ? next : item)
     },
     scheduleSettingsSync() {
+      this.ensureReaderSettingsScope()
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return
       clearTimeout(readerSettingsSyncTimer)
       readerSettingsSyncTimer = setTimeout(() => {
@@ -394,6 +422,7 @@ export const useReaderStore = defineStore('reader', {
       }, 700)
     },
     applyReaderSettings(payload, updatedAt = '') {
+      this.ensureReaderSettingsScope()
       if (!payload || typeof payload !== 'object') return
       const next = sanitizeReaderSettings(payload)
       Object.assign(this, next)
@@ -405,6 +434,7 @@ export const useReaderStore = defineStore('reader', {
       this.settingsSyncError = ''
     },
     async loadReaderSettings() {
+      this.ensureReaderSettingsScope()
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return null
       try {
         const { data } = await api.get('/settings/reader')
@@ -425,6 +455,7 @@ export const useReaderStore = defineStore('reader', {
       }
     },
     async saveReaderSettings() {
+      this.ensureReaderSettingsScope()
       if (typeof localStorage === 'undefined' || !localStorage.getItem('openreader_token')) return null
       clearTimeout(readerSettingsSyncTimer)
       this.settingsSyncing = true

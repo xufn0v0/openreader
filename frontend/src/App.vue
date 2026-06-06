@@ -44,6 +44,8 @@ onMounted(() => {
   }
   if (userStore.token) {
     bookshelf.ensureShelfScope()
+    preferences.ensurePreferenceScope()
+    readerStore.ensureReaderSettingsScope()
     connect()
     readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})
@@ -64,6 +66,8 @@ watch(isLoggedIn, (loggedIn) => {
   if (loggedIn) {
     bookshelf.ensureShelfScope()
     readerStore.ensureProgressScope()
+    readerStore.ensureReaderSettingsScope()
+    preferences.ensurePreferenceScope()
     connect()
     readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})

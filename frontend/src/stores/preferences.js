@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import api from '../api/client'
+import { currentUserScope } from '../utils/authScope'
 
 const PREFERENCE_KEYS = ['shelf', 'search']
 const SHELF_LAYOUT_VERSION = 2
@@ -10,6 +11,7 @@ const syncTimers = new Map()
 
 export const usePreferencesStore = defineStore('preferences', {
   state: () => ({
+    preferenceScope: currentUserScope(),
     shelf: readLocalShelfPreference(),
     search: readLocalSearchPreference(),
     syncBaseUpdatedAt: {},
@@ -18,24 +20,49 @@ export const usePreferencesStore = defineStore('preferences', {
   }),
   persist: true,
   actions: {
+    ensurePreferenceScope() {
+      const scope = currentUserScope()
+      if (!this.preferenceScope) {
+        this.preferenceScope = scope
+        return scope
+      }
+      if (this.preferenceScope !== scope) {
+        this.resetPreferenceState(scope)
+      }
+      return scope
+    },
+    resetPreferenceState(scope = currentUserScope()) {
+      clearPreferenceSyncTimers()
+      this.preferenceScope = scope
+      this.shelf = { ...DEFAULT_SHELF }
+      this.search = { ...DEFAULT_SEARCH }
+      this.syncBaseUpdatedAt = {}
+      this.syncing = {}
+      this.syncError = {}
+    },
     setShelfView(view) {
+      this.ensurePreferenceScope()
       this.shelf = { ...this.shelf, layoutVersion: SHELF_LAYOUT_VERSION, view: view === 'list' ? 'list' : 'grid' }
       this.schedulePreferenceSync('shelf')
     },
     setSearchConfig(config = {}) {
+      this.ensurePreferenceScope()
       this.search = sanitizeSearchPreference({ ...this.search, ...config })
       this.schedulePreferenceSync('search')
     },
     applyPreference(key, value, updatedAt = '') {
+      this.ensurePreferenceScope()
       if (key === 'shelf') this.shelf = sanitizeShelfPreference(value)
       if (key === 'search') this.search = sanitizeSearchPreference(value)
       if (updatedAt) this.syncBaseUpdatedAt[key] = updatedAt
       this.syncError[key] = ''
     },
     async loadPreferences() {
+      this.ensurePreferenceScope()
       await Promise.all(PREFERENCE_KEYS.map(key => this.loadPreference(key)))
     },
     async loadPreference(key) {
+      this.ensurePreferenceScope()
       if (!PREFERENCE_KEYS.includes(key) || !hasAuthToken()) return null
       try {
         const { data } = await api.get(`/settings/${key}`)
@@ -51,6 +78,7 @@ export const usePreferencesStore = defineStore('preferences', {
       }
     },
     schedulePreferenceSync(key) {
+      this.ensurePreferenceScope()
       if (!PREFERENCE_KEYS.includes(key) || !hasAuthToken()) return
       this.syncError[key] = ''
       if (syncTimers.has(key)) clearTimeout(syncTimers.get(key))
@@ -60,6 +88,7 @@ export const usePreferencesStore = defineStore('preferences', {
       }, 700))
     },
     async savePreference(key) {
+      this.ensurePreferenceScope()
       if (!PREFERENCE_KEYS.includes(key) || !hasAuthToken()) return null
       if (syncTimers.has(key)) {
         clearTimeout(syncTimers.get(key))
@@ -87,6 +116,13 @@ export const usePreferencesStore = defineStore('preferences', {
     },
   },
 })
+
+function clearPreferenceSyncTimers() {
+  for (const timer of syncTimers.values()) {
+    clearTimeout(timer)
+  }
+  syncTimers.clear()
+}
 
 function preferencePayload(state, key) {
   if (key === 'shelf') return sanitizeShelfPreference(state.shelf)
