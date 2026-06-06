@@ -50,6 +50,7 @@ export const useReaderStore = defineStore('reader', {
     settingsSyncBaseUpdatedAt: '',
     settingsSyncing: false,
     settingsSyncError: '',
+    progressScope: currentUserScope(),
     progressByBook: {},
     clientId: READER_CLIENT_ID,
     normalModeSnapshot: null,
@@ -76,6 +77,18 @@ export const useReaderStore = defineStore('reader', {
         this.clientId = READER_CLIENT_ID
       }
       return this.clientId
+    },
+    ensureProgressScope() {
+      const scope = currentUserScope()
+      if (!this.progressScope) {
+        this.progressScope = scope
+        return scope
+      }
+      if (this.progressScope !== scope) {
+        this.progressByBook = {}
+        this.progressScope = scope
+      }
+      return scope
     },
     setMode(mode) {
       this.mode = ['scroll', 'scroll2', 'flip', 'page'].includes(mode) ? mode : 'page'
@@ -310,6 +323,7 @@ export const useReaderStore = defineStore('reader', {
       this.markSettingsDirty()
     },
     normalizeSettings() {
+      this.ensureProgressScope()
       if (!['scroll', 'scroll2', 'flip', 'page'].includes(this.mode)) this.mode = 'page'
       if (this.pageType === 'simple' || this.pageType === 'Kindle') this.pageType = 'kindle'
       if (!['normal', 'kindle'].includes(this.pageType)) this.pageType = 'normal'
@@ -438,6 +452,7 @@ export const useReaderStore = defineStore('reader', {
     },
     applyProgress(progress) {
       if (!progress?.bookId) return
+      this.ensureProgressScope()
       const current = pickNewestProgress(this.progressByBook[progress.bookId], readLocalChapterProgress(progress.bookId))
       const next = pickNewestProgress(current, progress)
       if (!next) return
@@ -446,6 +461,7 @@ export const useReaderStore = defineStore('reader', {
     },
     applyServerProgress(progress) {
       if (!progress?.bookId) return null
+      this.ensureProgressScope()
       const local = newestProgress(this.progressByBook[progress.bookId], readLocalChapterProgress(progress.bookId))
       if (local?.bookId && progressUpdatedAt(local) > progressUpdatedAt(progress)) {
         if (local.pendingSync) this.syncLocalProgress(local, local.baseUpdatedAt || progress.updatedAt || '').catch(() => {})
@@ -456,15 +472,18 @@ export const useReaderStore = defineStore('reader', {
     },
     cachedProgress(bookId) {
       if (!bookId) return null
+      this.ensureProgressScope()
       return newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
     },
     replaceProgress(progress) {
       if (!progress?.bookId) return
+      this.ensureProgressScope()
       const next = clearLocalProgressFlags(progress)
       this.progressByBook[progress.bookId] = next
       persistLocalChapterProgress(next)
     },
     async saveProgress(payload) {
+      this.ensureProgressScope()
       const currentProgress = this.progressByBook[payload.bookId]
       const optimistic = {
         ...payload,
@@ -490,6 +509,7 @@ export const useReaderStore = defineStore('reader', {
       return merged
     },
     async loadProgress(bookId, options = {}) {
+      this.ensureProgressScope()
       const local = newestProgress(this.progressByBook[bookId], readLocalChapterProgress(bookId))
       if (options.preferLocal && local?.bookId && local.pendingSync) {
         api.get(`/progress/${bookId}`)
@@ -519,6 +539,7 @@ export const useReaderStore = defineStore('reader', {
     },
     async syncLocalProgress(progress, baseUpdatedAt = '', options = {}) {
       if (!progress?.bookId) return null
+      this.ensureProgressScope()
       try {
         const response = await api.put('/progress', {
           bookId: progress.bookId,

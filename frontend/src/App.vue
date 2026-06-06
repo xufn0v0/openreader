@@ -59,6 +59,7 @@ onBeforeUnmount(() => {
 
 watch(isLoggedIn, (loggedIn) => {
   if (loggedIn) {
+    readerStore.ensureProgressScope()
     connect()
     readerStore.loadReaderSettings().then(applyAutoThemeFromSystem).catch(() => {})
     preferences.loadPreferences().catch(() => {})
