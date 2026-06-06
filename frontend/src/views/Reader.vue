@@ -1050,7 +1050,7 @@ async function refreshReaderBookCaches(options = {}) {
   const rows = await Promise.all(requests)
   if (bookId.value !== targetBookId) return
   rows.forEach(row => {
-    if (row.key === 'book' && row.data?.id) book.value = row.data
+    if (row.key === 'book' && row.data?.id) book.value = mergeLoadedBook(row.data)
     if (row.key === 'chapters' && Array.isArray(row.data)) chapters.value = row.data
   })
 }
@@ -1502,8 +1502,8 @@ async function changeReaderLocalTocRule() {
     await resetReaderChapterCaches({ clearBrowser: true })
     const updated = data?.book || data
     if (updated?.id) {
-      book.value = { ...book.value, ...updated }
-      bookshelf.upsertBook(updated)
+      book.value = mergeLoadedBook(updated)
+      bookshelf.upsertBook(book.value)
       if (overlay.bookInfoBook?.id === updated.id) overlay.bookInfoBook = book.value
       await writeReaderDataCache({ bookData: book.value })
     }
@@ -1559,7 +1559,6 @@ async function goShelf() {
   mobileChromeVisible.value = false
   saveCurrentProgress({ force: true, background: true })
   await router.push({ name: 'home' })
-  bookshelf.loadBooks({ all: true }).catch(() => {})
 }
 async function openShelfPanel() {
   mobileChromeVisible.value = false
@@ -1724,8 +1723,8 @@ async function refreshReaderBookCatalog() {
     await resetReaderChapterCaches({ clearBrowser: true })
     const updated = data?.book || data
     if (updated?.id) {
-      book.value = { ...book.value, ...updated }
-      bookshelf.upsertBook(updated)
+      book.value = mergeLoadedBook(updated)
+      bookshelf.upsertBook(book.value)
       await writeReaderDataCache({ bookData: book.value })
     }
     await loadChapters()
@@ -1873,11 +1872,11 @@ async function changeSource(source) {
     })
     await invalidateReaderDataCache({ book: true, chapters: true })
     await resetReaderChapterCaches({ clearBrowser: true, book: previousBook })
-    book.value = data
-    bookshelf.upsertBook(data)
+    book.value = mergeLoadedBook(data)
+    bookshelf.upsertBook(book.value)
     const chRes = await api.get(`/books/${bookId.value}/chapters`)
     chapters.value = Array.isArray(chRes.data) ? chRes.data : []
-    await writeReaderDataCache({ bookData: data, chaptersData: chapters.value })
+    await writeReaderDataCache({ bookData: book.value, chaptersData: chapters.value })
     currentIndex.value = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
     await loadChapter(currentIndex.value, 0)
     sourceCandidatesLoadedKey.value = ''
