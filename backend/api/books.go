@@ -47,6 +47,27 @@ func (s *Server) listBooks(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, s.bookShelfListItems(userID, books))
+}
+
+func (s *Server) bookShelfListItem(userID uint, book models.Book) bookListItem {
+	var progress models.ReadingProgress
+	err := s.db.Where("user_id = ? AND book_id = ?", userID, book.ID).First(&progress).Error
+	if err != nil {
+		return bookShelfListItem(book, models.ReadingProgress{})
+	}
+	return bookShelfListItem(book, progress)
+}
+
+func (s *Server) listAllBookShelfItems(userID uint) ([]bookListItem, error) {
+	var books []models.Book
+	if err := s.db.Where("user_id = ?", userID).Find(&books).Error; err != nil {
+		return nil, err
+	}
+	return s.bookShelfListItems(userID, books), nil
+}
+
+func (s *Server) bookShelfListItems(userID uint, books []models.Book) []bookListItem {
 	bookIDs := make([]uint, 0, len(books))
 	for _, book := range books {
 		bookIDs = append(bookIDs, book.ID)
@@ -72,16 +93,7 @@ func (s *Server) listBooks(c *gin.Context) {
 		}
 		return items[i].ID > items[j].ID
 	})
-	c.JSON(http.StatusOK, items)
-}
-
-func (s *Server) bookShelfListItem(userID uint, book models.Book) bookListItem {
-	var progress models.ReadingProgress
-	err := s.db.Where("user_id = ? AND book_id = ?", userID, book.ID).First(&progress).Error
-	if err != nil {
-		return bookShelfListItem(book, models.ReadingProgress{})
-	}
-	return bookShelfListItem(book, progress)
+	return items
 }
 
 func bookShelfListItem(book models.Book, progress models.ReadingProgress) bookListItem {

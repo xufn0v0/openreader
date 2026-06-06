@@ -3577,6 +3577,48 @@ func TestRestoreLegadoBackupImportsBookshelf(t *testing.T) {
 	if progress.ChapterIndex != 2 || progress.Offset != 88 {
 		t.Fatalf("unexpected restored progress: %+v", progress)
 	}
+
+	var updateBuffer bytes.Buffer
+	updateZip := zip.NewWriter(&updateBuffer)
+	updateFile, err := updateZip.Create("myBookShelf.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := updateFile.Write([]byte(`[{"name":"恢复书","author":"二次恢复作者","bookUrl":"https://book.example/1","intro":"二次简介"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateZip.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var updateBody bytes.Buffer
+	updateWriter := multipart.NewWriter(&updateBody)
+	updatePart, err := updateWriter.CreateFormFile("file", "backup-update.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := updatePart.Write(updateBuffer.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := updateWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	updateReq := httptest.NewRequest(http.MethodPost, "/api/backup/restore-legado", &updateBody)
+	updateReq.Header.Set("Content-Type", updateWriter.FormDataContentType())
+	updateReq.Header.Set("Authorization", token)
+	updateW := httptest.NewRecorder()
+	router.ServeHTTP(updateW, updateReq)
+	if updateW.Code != http.StatusOK {
+		t.Fatalf("restore existing backup: expected 200, got %d: %s", updateW.Code, updateW.Body.String())
+	}
+	if !strings.Contains(updateW.Body.String(), `"books":1`) {
+		t.Fatalf("expected existing restored book to count as updated, got %s", updateW.Body.String())
+	}
+	if err := server.db.First(&book, book.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if book.Author != "二次恢复作者" || book.Intro != "二次简介" {
+		t.Fatalf("expected existing book metadata to update, got %+v", book)
+	}
 }
 
 func TestRestoreWebDAVBackupImportsBookshelf(t *testing.T) {

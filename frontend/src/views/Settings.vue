@@ -406,6 +406,7 @@ import { readerFontOptions } from '../utils/readerFonts'
 import { useUserStore } from '../stores/user'
 import { clearCurrentUserBrowserChapterCache, currentUserBrowserChapterCacheStats } from '../utils/bookChapterCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
+import { applyRestoreResult } from '../utils/restoreSync'
 import RSSManager from '../components/RSSManager.vue'
 import WebDAVBrowser from '../components/WebDAVBrowser.vue'
 
@@ -659,6 +660,7 @@ async function restoreBackup(data) {
     form.append('file', file)
     const { data: result } = await restoreLegadoBackup(form)
     ElMessage.success(`恢复完成：书源 ${result.sources || 0}，书籍 ${result.books || 0}，进度 ${result.progress || 0}`)
+    await applyRestoreResult(result)
   } catch (err) {
     ElMessage.error(readError(err, '恢复失败'))
   } finally {

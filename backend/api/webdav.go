@@ -462,8 +462,20 @@ func (s *Server) broadcastRestoreUpdates(userID uint, result gin.H) {
 	if restoreResultCount(result, "settings") > 0 {
 		_ = s.hub.Broadcast(userID, nil, gin.H{"type": "settings_update", "payload": gin.H{"key": "all"}})
 	}
-	if restoreResultCount(result, "books")+restoreResultCount(result, "progress")+restoreResultCount(result, "categories") > 0 {
-		_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update"})
+	if restoreResultCount(result, "categories") > 0 {
+		var categories []models.Category
+		if err := s.db.Where("user_id = ?", userID).Order("sort_order asc, name asc").Find(&categories).Error; err == nil {
+			_ = s.hub.Broadcast(userID, nil, gin.H{"type": "categories_update", "payload": categories})
+		} else {
+			_ = s.hub.Broadcast(userID, nil, gin.H{"type": "categories_update"})
+		}
+	}
+	if restoreResultCount(result, "books")+restoreResultCount(result, "progress") > 0 {
+		if items, err := s.listAllBookShelfItems(userID); err == nil {
+			_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": items})
+		} else {
+			_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update"})
+		}
 	}
 	if restoreResultCount(result, "bookmarks") > 0 {
 		s.broadcastBookmarksUpdate(userID, "restore-backup", 0, nil)
@@ -644,7 +656,10 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 			if book.URL != "" {
 				existing.URL = book.URL
 			}
-			_ = s.db.Save(&existing).Error
+			if err := s.db.Save(&existing).Error; err != nil {
+				continue
+			}
+			count++
 			if s.restoreBookshelfProgress(userID, existing.ID, b.DurChapter, b.DurChapterPos, b.DurChapterTitle) {
 				progressCount++
 			}

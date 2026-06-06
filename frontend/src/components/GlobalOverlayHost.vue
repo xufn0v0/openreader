@@ -664,6 +664,7 @@ import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBoo
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
+import { applyRestoreResult } from '../utils/restoreSync'
 import {
   sourceCandidateAuthor,
   sourceCandidateBookUrl,
@@ -1980,7 +1981,7 @@ async function restoreBackup(data) {
     form.append('file', file)
     const { data: result } = await restoreLegadoBackup(form)
     ElMessage.success(`恢复完成：书源 ${result.sources || 0}，书籍 ${result.books || 0}，进度 ${result.progress || 0}`)
-    await bookshelf.loadBooks({ force: true, all: true })
+    await applyRestoreResult(result)
   } catch (err) {
     ElMessage.error(readError(err, '恢复备份失败'))
   } finally {
