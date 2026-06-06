@@ -649,6 +649,64 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	}
 }
 
+func TestGetBookIncludesShelfProgress(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "详情进度"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{
+		UserID:         user.ID,
+		BookID:         book.ID,
+		ChapterIndex:   5,
+		Offset:         1234,
+		Percent:        0.12,
+		ChapterPercent: 0.34,
+		ChapterTitle:   "第六章",
+	}
+	if err := server.db.Create(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10), nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get book: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var item struct {
+		ID           uint      `json:"id"`
+		ShelfOrderAt time.Time `json:"shelfOrderAt"`
+		Progress     *struct {
+			BookID         uint    `json:"bookId"`
+			ChapterIndex   int     `json:"chapterIndex"`
+			Offset         int     `json:"offset"`
+			ChapterPercent float64 `json:"chapterPercent"`
+			ChapterTitle   string  `json:"chapterTitle"`
+		} `json:"progress"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.ID != book.ID || item.Progress == nil || item.Progress.BookID != book.ID {
+		t.Fatalf("expected detail shelf item with progress, got %+v", item)
+	}
+	if item.Progress.ChapterIndex != 5 || item.Progress.Offset != 1234 || item.Progress.ChapterPercent != 0.34 || item.Progress.ChapterTitle != "第六章" {
+		t.Fatalf("unexpected detail progress: %+v", item.Progress)
+	}
+	if item.ShelfOrderAt.IsZero() || !item.ShelfOrderAt.Equal(progress.UpdatedAt) {
+		t.Fatalf("expected shelfOrderAt to follow progress update time, got shelf=%s progress=%s", item.ShelfOrderAt, progress.UpdatedAt)
+	}
+}
+
 func TestBookShelfListItemIncludesProgressOrder(t *testing.T) {
 	_, server := setupTestServer(t)
 

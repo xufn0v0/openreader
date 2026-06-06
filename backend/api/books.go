@@ -158,7 +158,7 @@ func (s *Server) getBook(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, book)
+	c.JSON(http.StatusOK, s.bookShelfListItem(userID, book))
 }
 
 type bookUpdateRequest struct {

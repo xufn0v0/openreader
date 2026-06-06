@@ -478,7 +478,7 @@ import ReaderSearchPanel from '../components/reader/ReaderSearchPanel.vue'
 import ReaderSettingsPanel from '../components/reader/ReaderSettingsPanel.vue'
 import SourceSwitchPanel from '../components/reader/SourceSwitchPanel.vue'
 import ReaderTocPanel from '../components/reader/ReaderTocPanel.vue'
-import { useBookshelfStore } from '../stores/bookshelf'
+import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore, themePresets } from '../stores/reader'
 import { useKeyboard } from '../composables/useKeyboard'
@@ -912,8 +912,15 @@ async function loadReaderBook() {
   if (bookId.value !== targetBookId) return
   const saved = cachedProgress?.bookId ? cachedProgress : await progressRequest
   if (bookId.value !== targetBookId) return
-  book.value = bookRes.data
+  book.value = mergeLoadedBook(bookRes.data)
   chapters.value = chRes.data
+  if (book.value?.progress?.bookId) {
+    reader.applyServerProgress(book.value.progress)
+    bookshelf.applyBookProgress(book.value.progress)
+  }
+  if (saved?.bookId) {
+    book.value = mergeShelfBook(book.value, { id: book.value.id, progress: saved })
+  }
   sourceQuery.value = ''
   sourceCandidates.value = []
   sourceCandidatesLoadedKey.value = ''
@@ -982,6 +989,13 @@ async function reconcileInitialServerProgress(serverSaved, options = {}) {
     saveAfterLoad: false,
   })
   lastProgressSaveKey = progressSaveKey(currentProgressPayload())
+}
+
+function mergeLoadedBook(incoming) {
+  if (!incoming?.id) return incoming
+  const current = bookshelf.books.find(item => Number(item.id) === Number(incoming.id)) ||
+    (Number(book.value?.id) === Number(incoming.id) ? book.value : null)
+  return mergeShelfBook(current, incoming)
 }
 
 async function loadBookmarks(targetBookId = bookId.value) {
