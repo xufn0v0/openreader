@@ -258,14 +258,21 @@ async function load() {
   try {
     const id = route.params.id
     await bookshelf.loadCategories()
-    const [bookRes, chapterRes, bookmarkRes, sourceRes] = await Promise.all([
+    const [bookRes, chapterRes, bookmarkRes, sourceRes, progressRes] = await Promise.all([
       api.get(`/books/${id}`),
       api.get(`/books/${id}/chapters`),
       listBookmarks(id),
       api.get('/sources'),
       reader.loadProgress(id).catch(() => null),
     ])
-    book.value = bookRes.data
+    book.value = mergeBookUpdate(bookRes.data)
+    if (book.value?.progress?.bookId) {
+      reader.applyServerProgress(book.value.progress)
+      bookshelf.applyBookProgress(book.value.progress)
+    }
+    if (progressRes?.bookId) {
+      book.value = mergeShelfBook(book.value, { id: book.value.id, progress: progressRes })
+    }
     chapters.value = chapterRes.data
     bookmarks.value = bookmarkRes.data
     availableSources.value = sourceRes.data.filter(source => source.enabled)

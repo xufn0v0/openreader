@@ -1340,7 +1340,7 @@ async function refreshShelf() {
     const updatedBooks = normalizeList(data?.books)
     if (updatedBooks.length) {
       updatedBooks.forEach(book => bookshelf.upsertBook(book))
-    } else {
+    } else if (Number(data?.newChapters || 0) > 0) {
       await bookshelf.loadBooks({ force: true, all: true })
     }
     ElMessage.success(data?.newChapters ? `发现 ${data.newChapters} 个新章节` : '暂未发现新章节')
