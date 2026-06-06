@@ -324,7 +324,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
       const { data } = await api.post('/imports/books', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      await this.loadBooks({ force: true, all: true })
+      this.upsertBook(data)
       return data
     },
   },

@@ -2012,7 +2012,6 @@ async function clearCurrentBookCache() {
     const data = await bookshelf.batchClearCache([bookId.value])
     const localCleared = await clearCurrentBookBrowserCache()
     await loadChapters()
-    await bookshelf.loadBooks({ force: true, all: true })
     toastMsg.value = `已清理服务器 ${data.cleared || 0} 章，本地 ${localCleared} 章`
     setTimeout(() => { toastMsg.value = '' }, 1600)
   } catch (err) {

@@ -382,7 +382,7 @@ async function searchLocalBooks() {
   try {
     const [storeResult, shelfResult] = await Promise.allSettled([
       listLocalStore('', localRecursiveScan.value),
-      bookshelf.loadBooks({ force: true, all: true }),
+      bookshelf.loadBooks({ all: true }),
     ])
     if (shelfResult.status === 'rejected') throw shelfResult.reason
     localItems.value = storeResult.status === 'fulfilled' ? (storeResult.value.data.items || []) : []

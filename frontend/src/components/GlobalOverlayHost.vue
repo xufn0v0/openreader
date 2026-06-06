@@ -1613,7 +1613,6 @@ async function cacheBook(book, command) {
     const chapterIndex = cacheStartChapterIndex(book)
     const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
-    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '缓存失败'))
   } finally {
@@ -1654,7 +1653,6 @@ async function clearBookCache(book) {
   cachingBookId.value = book.id
   try {
     const data = await bookshelf.batchClearCache([book.id])
-    await bookshelf.loadBooks({ force: true, all: true })
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
   } catch (err) {
     ElMessage.error(readError(err, '清理缓存失败'))
