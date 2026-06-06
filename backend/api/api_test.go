@@ -649,6 +649,45 @@ func TestListBooksIncludesProgress(t *testing.T) {
 	}
 }
 
+func TestBookShelfListItemIncludesProgressOrder(t *testing.T) {
+	_, server := setupTestServer(t)
+
+	user := models.User{Username: "payload-user", PasswordHash: "hash"}
+	if err := server.db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "广播书"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Model(&book).Updates(map[string]any{
+		"created_at": time.Now().Add(-3 * time.Hour),
+		"updated_at": time.Now().Add(-3 * time.Hour),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{
+		UserID:         user.ID,
+		BookID:         book.ID,
+		ChapterIndex:   9,
+		Offset:         2048,
+		Percent:        0.31,
+		ChapterPercent: 0.55,
+		ChapterTitle:   "第十章",
+	}
+	if err := server.db.Create(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	item := server.bookShelfListItem(user.ID, book)
+	if item.Progress == nil || item.Progress.BookID != book.ID || item.Progress.ChapterIndex != 9 {
+		t.Fatalf("expected embedded progress in shelf payload, got %+v", item.Progress)
+	}
+	if item.ShelfOrderAt.IsZero() || !item.ShelfOrderAt.Equal(item.Progress.UpdatedAt) {
+		t.Fatalf("expected shelf order to follow progress update time, got shelf=%s progress=%s", item.ShelfOrderAt, item.Progress.UpdatedAt)
+	}
+}
+
 func TestUpdateProgressPersistsChapterPosition(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

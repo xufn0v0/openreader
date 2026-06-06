@@ -24,6 +24,12 @@ import (
 	"openreader/backend/models"
 )
 
+type bookListItem struct {
+	models.Book
+	Progress     *models.ReadingProgress `json:"progress,omitempty"`
+	ShelfOrderAt time.Time               `json:"shelfOrderAt"`
+}
+
 func (s *Server) listBooks(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 
@@ -54,19 +60,9 @@ func (s *Server) listBooks(c *gin.Context) {
 		progressByBookID[progress.BookID] = progress
 	}
 
-	type bookListItem struct {
-		models.Book
-		Progress     *models.ReadingProgress `json:"progress,omitempty"`
-		ShelfOrderAt time.Time               `json:"shelfOrderAt"`
-	}
 	items := make([]bookListItem, 0, len(books))
 	for _, book := range books {
-		item := bookListItem{Book: book}
-		if progress, ok := progressByBookID[book.ID]; ok {
-			item.Progress = &progress
-		}
-		item.ShelfOrderAt = shelfOrderAt(item.Book, item.Progress)
-		items = append(items, item)
+		items = append(items, bookShelfListItem(book, progressByBookID[book.ID]))
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		iShelfAt := items[i].ShelfOrderAt
@@ -77,6 +73,24 @@ func (s *Server) listBooks(c *gin.Context) {
 		return items[i].ID > items[j].ID
 	})
 	c.JSON(http.StatusOK, items)
+}
+
+func (s *Server) bookShelfListItem(userID uint, book models.Book) bookListItem {
+	var progress models.ReadingProgress
+	err := s.db.Where("user_id = ? AND book_id = ?", userID, book.ID).First(&progress).Error
+	if err != nil {
+		return bookShelfListItem(book, models.ReadingProgress{})
+	}
+	return bookShelfListItem(book, progress)
+}
+
+func bookShelfListItem(book models.Book, progress models.ReadingProgress) bookListItem {
+	item := bookListItem{Book: book}
+	if progress.BookID != 0 {
+		item.Progress = &progress
+	}
+	item.ShelfOrderAt = shelfOrderAt(item.Book, item.Progress)
+	return item
 }
 
 func shelfOrderAt(book models.Book, progress *models.ReadingProgress) time.Time {
@@ -112,7 +126,7 @@ func (s *Server) createBook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create book"})
 		return
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusCreated, book)
 }
 
@@ -202,7 +216,7 @@ func (s *Server) updateBook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update book"})
 		return
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusOK, book)
 }
 
@@ -489,7 +503,7 @@ func (s *Server) refreshBook(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusOK, gin.H{"book": book, "added": added, "chapterCount": len(remoteChapters)})
 }
 
@@ -647,7 +661,7 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 			Where("user_id = ? AND book_id = ? AND chapter_index = ?", userID, book.ID, index).
 			Update("chapter_id", chapterID).Error
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusOK, gin.H{"book": book, "chapterCount": len(parsed)})
 }
 
@@ -816,7 +830,7 @@ func (s *Server) updateBookCategory(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update category"})
 		return
 	}
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusOK, book)
 }
 
@@ -923,7 +937,7 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusCreated, book)
 }
 
@@ -1210,7 +1224,7 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		return
 	}
 
-	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": book})
+	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": s.bookShelfListItem(userID, book)})
 	c.JSON(http.StatusOK, book)
 }
 

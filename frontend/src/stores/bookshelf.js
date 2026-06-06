@@ -201,13 +201,18 @@ export const useBookshelfStore = defineStore('bookshelf', {
     },
     upsertBook(book) {
       if (!book?.id) return
-      const index = this.books.findIndex(item => item.id === book.id)
+      const index = this.books.findIndex(item => Number(item.id) === Number(book.id))
+      const nextBook = index >= 0 ? mergeShelfBook(this.books[index], book) : book
+      if (nextBook?.progress?.bookId) {
+        const reader = useReaderStore()
+        reader.applyServerProgress(nextBook.progress)
+      }
       const nextBooks = index >= 0
-        ? this.books.map(item => item.id === book.id ? book : item)
-        : [book, ...this.books]
+        ? this.books.map(item => Number(item.id) === Number(book.id) ? nextBook : item)
+        : [nextBook, ...this.books]
       this.books = sortBooks(nextBooks)
       this.invalidateBooks()
-      syncCachedBookUpsert(book)
+      syncCachedBookUpsert(nextBook)
     },
     replaceCategories(categories) {
       this.categories = sortCategories(categories)
@@ -426,4 +431,22 @@ function matchesShelfRequest(book, requestParams = {}) {
 function sameBookIdList(a, b) {
   if (a.length !== b.length) return false
   return a.every((book, index) => Number(book.id) === Number(b[index]?.id))
+}
+
+function mergeShelfBook(current, incoming) {
+  if (!current) return incoming
+  const next = { ...current, ...incoming }
+  const progress = newestProgress(current.progress || null, incoming?.progress || null)
+  if (progress) next.progress = progress
+  next.shelfOrderAt = newestShelfOrderAt(current.shelfOrderAt, incoming?.shelfOrderAt)
+  return next
+}
+
+function newestShelfOrderAt(current, incoming) {
+  const currentTime = Date.parse(current || '')
+  const incomingTime = Date.parse(incoming || '')
+  if (Number.isFinite(currentTime) && Number.isFinite(incomingTime)) {
+    return incomingTime > currentTime ? incoming : current
+  }
+  return incoming || current
 }
