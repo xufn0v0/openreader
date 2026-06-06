@@ -67,14 +67,21 @@ export function useSync() {
         })
       }
       if (message.type === 'bookshelf_update') {
-        if (message.payload?.id) {
+        if (Array.isArray(message.payload)) {
+          message.payload.forEach(book => {
+            if (book?.id) bookshelf.upsertBook(book)
+          })
+        } else if (message.payload?.id) {
           bookshelf.upsertBook(message.payload)
         } else {
           scheduleBookshelfRefresh({ books: true, categories: true })
         }
       }
       if (message.type === 'bookshelf_delete') {
-        bookshelf.removeBookLocal(message.payload?.id)
+        const ids = Array.isArray(message.payload?.ids)
+          ? message.payload.ids
+          : [message.payload?.id]
+        ids.filter(Boolean).forEach(id => bookshelf.removeBookLocal(id))
       }
       if (message.type === 'category_update') {
         bookshelf.upsertCategory(message.payload)

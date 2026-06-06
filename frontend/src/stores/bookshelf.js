@@ -253,17 +253,25 @@ export const useBookshelfStore = defineStore('bookshelf', {
       }
     },
     async batchDeleteBooks(bookIds) {
-      await batchBooks({ action: 'delete', bookIds })
-      this.books = this.books.filter(book => !bookIds.includes(book.id))
+      const { data } = await batchBooks({ action: 'delete', bookIds })
+      const deletedIds = Array.isArray(data?.deletedIds) && data.deletedIds.length ? data.deletedIds : bookIds
+      const deletedSet = new Set(deletedIds.map(id => Number(id)))
+      this.books = this.books.filter(book => !deletedSet.has(Number(book.id)))
       this.invalidateBooks()
-      bookIds.forEach(bookId => syncCachedBookRemoval(bookId))
+      deletedIds.forEach(bookId => syncCachedBookRemoval(bookId))
     },
     async batchSetCategory(bookIds, categoryId) {
-      await batchBooks({ action: 'category', bookIds, categoryId })
-      const nextBooks = this.books.map(book => bookIds.includes(book.id) ? { ...book, categoryId } : book)
+      const { data } = await batchBooks({ action: 'category', bookIds, categoryId })
+      const updatedBooks = asList(data?.books)
+      if (updatedBooks.length) {
+        updatedBooks.forEach(book => this.upsertBook(book))
+        return
+      }
+      const idSet = new Set(bookIds.map(id => Number(id)))
+      const nextBooks = this.books.map(book => idSet.has(Number(book.id)) ? { ...book, categoryId } : book)
       this.books = sortBooks(nextBooks)
       this.invalidateBooks()
-      nextBooks.filter(book => bookIds.includes(book.id)).forEach(book => syncCachedBookUpsert(book))
+      nextBooks.filter(book => idSet.has(Number(book.id))).forEach(book => syncCachedBookUpsert(book))
     },
     async batchCacheBooks(bookIds) {
       const { data } = await batchBooks({ action: 'cache', bookIds })
@@ -316,7 +324,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
       const { data } = await api.post('/imports/books', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      await this.loadBooks({ force: true, all: true })
+      this.upsertBook(data)
       return data
     },
   },
@@ -382,7 +390,7 @@ async function syncCachedBookUpsert(book) {
       if (!matchesShelfRequest(book, requestParams)) {
         return rows.filter(item => Number(item.id) !== Number(book.id))
       }
-      return rows.map(item => Number(item.id) === Number(book.id) ? { ...item, ...book } : item)
+      return rows.map(item => Number(item.id) === Number(book.id) ? mergeShelfBook(item, book) : item)
     }
     if (matchesShelfRequest(book, requestParams)) return [book, ...rows]
     return rows
@@ -433,7 +441,7 @@ function sameBookIdList(a, b) {
   return a.every((book, index) => Number(book.id) === Number(b[index]?.id))
 }
 
-function mergeShelfBook(current, incoming) {
+export function mergeShelfBook(current, incoming) {
   if (!current) return incoming
   const next = { ...current, ...incoming }
   const progress = newestProgress(current.progress || null, incoming?.progress || null)

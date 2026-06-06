@@ -2012,7 +2012,6 @@ async function clearCurrentBookCache() {
     const data = await bookshelf.batchClearCache([bookId.value])
     const localCleared = await clearCurrentBookBrowserCache()
     await loadChapters()
-    await bookshelf.loadBooks({ force: true, all: true })
     toastMsg.value = `已清理服务器 ${data.cleared || 0} 章，本地 ${localCleared} 章`
     setTimeout(() => { toastMsg.value = '' }, 1600)
   } catch (err) {
@@ -2598,11 +2597,12 @@ async function handleProgressUpdated(event) {
 async function handleReaderBookDataUpdated(event) {
   const detail = event?.detail || {}
   if (!detail.bookId || Number(detail.bookId) !== Number(bookId.value)) return
+  if (detail.book?.id) book.value = detail.book
+  if (!Array.isArray(detail.chapters)) return
   const restoreOffset = currentOffset()
   const restorePercent = currentChapterPercent()
-  const targetIndex = Math.max(0, Math.min(currentIndex.value, Math.max((detail.chapters || chapters.value).length - 1, 0)))
-  if (detail.book?.id) book.value = detail.book
-  if (Array.isArray(detail.chapters)) chapters.value = detail.chapters
+  const targetIndex = Math.max(0, Math.min(currentIndex.value, Math.max(detail.chapters.length - 1, 0)))
+  chapters.value = detail.chapters
   currentIndex.value = targetIndex
   chapterContentCache = null
   browserCachedChapters.value = {}

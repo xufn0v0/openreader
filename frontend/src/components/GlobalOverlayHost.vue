@@ -653,7 +653,7 @@ import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from 
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
-import { useBookshelfStore } from '../stores/bookshelf'
+import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
@@ -664,6 +664,7 @@ import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBoo
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
+import { applyRestoreResult } from '../utils/restoreSync'
 import {
   sourceCandidateAuthor,
   sourceCandidateBookUrl,
@@ -1174,6 +1175,25 @@ async function refreshBookChaptersCache(book) {
   }
 }
 
+function mergedShelfBook(book) {
+  if (!book?.id) return book
+  const current = bookshelf.books.find(item => Number(item.id) === Number(book.id)) ||
+    (Number(overlay.bookInfoBook?.id) === Number(book.id) ? overlay.bookInfoBook : null)
+  return mergeShelfBook(current, book)
+}
+
+function applyUpdatedBookToOverlay(book, chapters = null) {
+  if (!book?.id) return book
+  const nextBook = mergedShelfBook(book)
+  bookshelf.upsertBook(nextBook)
+  if (Number(overlay.bookInfoBook?.id) === Number(nextBook.id)) overlay.bookInfoBook = nextBook
+  if (Number(sourceSwitchBook.value?.id) === Number(nextBook.id)) sourceSwitchBook.value = nextBook
+  window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', {
+    detail: { bookId: nextBook.id, book: nextBook, chapters },
+  }))
+  return nextBook
+}
+
 function localCacheCount(book) {
   return localCacheCounts.value[book?.id] || 0
 }
@@ -1290,12 +1310,10 @@ async function changeGlobalBookSource(source) {
       intro: sourceCandidateIntro(source),
     })
     await invalidateBookReaderCaches(book, { clearBrowser: true })
-    const chapters = await refreshBookChaptersCache(data)
-    bookshelf.upsertBook(data)
-    sourceSwitchBook.value = data
-    if (overlay.bookInfoBook?.id === data.id) overlay.bookInfoBook = data
-    await refreshBookInfoBrowserCacheCount(data)
-    window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', { detail: { bookId: data.id, book: data, chapters } }))
+    const updatedBook = mergedShelfBook(data)
+    const chapters = await refreshBookChaptersCache(updatedBook)
+    applyUpdatedBookToOverlay(updatedBook, chapters)
+    await refreshBookInfoBrowserCacheCount(updatedBook)
     sourceSwitchLoadedKey.value = ''
     await loadGlobalSourceCandidates({ force: true })
     ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`)
@@ -1319,13 +1337,26 @@ async function refreshShelf() {
   loadingUpdates.value = true
   try {
     const { data } = await checkBookUpdates()
-    await bookshelf.loadBooks({ force: true, all: true })
+    const updatedBooks = normalizeList(data?.books)
+    if (updatedBooks.length) {
+      updatedBooks.forEach(book => bookshelf.upsertBook(book))
+    } else {
+      await bookshelf.loadBooks({ force: true, all: true })
+    }
     ElMessage.success(data?.newChapters ? `发现 ${data.newChapters} 个新章节` : '暂未发现新章节')
   } catch (err) {
     ElMessage.error(readError(err, '刷新失败'))
   } finally {
     loadingUpdates.value = false
   }
+}
+
+function normalizeList(data) {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.list)) return data.list
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.data)) return data.data
+  return []
 }
 
 async function refreshBookInfo(book) {
@@ -1336,11 +1367,10 @@ async function refreshBookInfo(book) {
     await invalidateBookReaderCaches(book, { clearBrowser: true })
     const updatedBook = data?.book || data
     if (updatedBook?.id) {
-      const chapters = await refreshBookChaptersCache(updatedBook)
-      bookshelf.upsertBook(updatedBook)
-      overlay.bookInfoBook = updatedBook
-      await refreshBookInfoBrowserCacheCount(updatedBook)
-      window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', { detail: { bookId: updatedBook.id, book: updatedBook, chapters } }))
+      const mergedBook = mergedShelfBook(updatedBook)
+      const chapters = await refreshBookChaptersCache(mergedBook)
+      applyUpdatedBookToOverlay(mergedBook, chapters)
+      await refreshBookInfoBrowserCacheCount(mergedBook)
     } else {
       await bookshelf.loadBooks({ force: true, all: true })
     }
@@ -1360,11 +1390,10 @@ async function refreshLocalBookInfo(book) {
     await invalidateBookReaderCaches(book, { clearBrowser: true })
     const updatedBook = data?.book || data
     if (updatedBook?.id) {
-      const chapters = await refreshBookChaptersCache(updatedBook)
-      bookshelf.upsertBook(updatedBook)
-      overlay.bookInfoBook = updatedBook
-      await refreshBookInfoBrowserCacheCount(updatedBook)
-      window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', { detail: { bookId: updatedBook.id, book: updatedBook, chapters } }))
+      const mergedBook = mergedShelfBook(updatedBook)
+      const chapters = await refreshBookChaptersCache(mergedBook)
+      applyUpdatedBookToOverlay(mergedBook, chapters)
+      await refreshBookInfoBrowserCacheCount(mergedBook)
     } else {
       await bookshelf.loadBooks({ force: true, all: true })
     }
@@ -1584,7 +1613,6 @@ async function cacheBook(book, command) {
     const chapterIndex = cacheStartChapterIndex(book)
     const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
-    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '缓存失败'))
   } finally {
@@ -1625,7 +1653,6 @@ async function clearBookCache(book) {
   cachingBookId.value = book.id
   try {
     const data = await bookshelf.batchClearCache([book.id])
-    await bookshelf.loadBooks({ force: true, all: true })
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
   } catch (err) {
     ElMessage.error(readError(err, '清理缓存失败'))
@@ -1952,7 +1979,7 @@ async function restoreBackup(data) {
     form.append('file', file)
     const { data: result } = await restoreLegadoBackup(form)
     ElMessage.success(`恢复完成：书源 ${result.sources || 0}，书籍 ${result.books || 0}，进度 ${result.progress || 0}`)
-    await bookshelf.loadBooks({ force: true, all: true })
+    await applyRestoreResult(result)
   } catch (err) {
     ElMessage.error(readError(err, '恢复备份失败'))
   } finally {

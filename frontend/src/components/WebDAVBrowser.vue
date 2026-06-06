@@ -134,6 +134,7 @@ import { Document, FolderOpened, Refresh, Upload } from '@element-plus/icons-vue
 import { restoreWebDAVBackup } from '../api/backup'
 import { createWebDAVDirectory, deleteWebDAV, downloadWebDAV, importFromWebDAV, listWebDAV, renameWebDAV, uploadWebDAV } from '../api/webdav'
 import { useBookshelfStore } from '../stores/bookshelf'
+import { applyRestoreResult } from '../utils/restoreSync'
 
 const props = defineProps({
   title: {
@@ -250,6 +251,7 @@ async function restoreBackupFile(row) {
     restoring.value = row.name
     const { data } = await restoreWebDAVBackup(backupPath)
     ElMessage.success(`恢复完成：书源 ${data.sources || 0}，书籍 ${data.books || 0}，进度 ${data.progress || 0}`)
+    await applyRestoreResult(data)
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '恢复 WebDAV 备份失败'))
@@ -336,7 +338,9 @@ async function importBooks(paths) {
     const failed = importResults.value.filter(item => item.error).length
     ElMessage.success(`导入 ${success} 本` + (failed ? `，${failed} 本失败` : ''))
     importResultDialog.value = true
-    await bookshelf.loadBooks({ force: true, all: true })
+    importResults.value.forEach(item => {
+      if (item.book) bookshelf.upsertBook(item.book)
+    })
     emit('imported', importResults.value)
   } catch (err) {
     ElMessage.error(readError(err, '导入 WebDAV 文件失败'))
