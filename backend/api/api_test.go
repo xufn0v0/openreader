@@ -971,6 +971,55 @@ func TestListBooksOrdersByRecentProgressThenShelfTime(t *testing.T) {
 	}
 }
 
+func TestListBooksIncludesRemoteCachedChapterCount(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	remoteBook := models.Book{UserID: user.ID, SourceID: 1, Title: "远程缓存书"}
+	localBook := models.Book{UserID: user.ID, SourceID: 0, Title: "本地书"}
+	if err := server.db.Create(&remoteBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&localBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: remoteBook.ID, Index: 0, Title: "远程已缓存", CachePath: "remote-cache/chapter-1.txt"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: remoteBook.ID, Index: 1, Title: "远程未缓存"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: localBook.ID, Index: 0, Title: "本地章节", CachePath: "local-cache/chapter-1.txt"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list books: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var items []bookListItem
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	countByTitle := map[string]int64{}
+	for _, item := range items {
+		countByTitle[item.Title] = item.CachedChapterCount
+	}
+	if countByTitle["远程缓存书"] != 1 {
+		t.Fatalf("expected remote cached count 1, got %+v", countByTitle)
+	}
+	if countByTitle["本地书"] != 0 {
+		t.Fatalf("expected local book server cached count 0, got %+v", countByTitle)
+	}
+}
+
 func TestListBooksOrdersNewImportBeforeStaleProgress(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -2812,6 +2861,15 @@ func TestCacheBookContentUsesCachedChapter(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"cached":1`) {
 		t.Fatalf("expected cached count 1, got %s", w.Body.String())
+	}
+	var result struct {
+		Book bookListItem `json:"book"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Book.CachedChapterCount != 1 {
+		t.Fatalf("expected cached chapter count in response book, got %+v", result.Book)
 	}
 }
 

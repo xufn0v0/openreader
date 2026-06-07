@@ -26,8 +26,9 @@ import (
 
 type bookListItem struct {
 	models.Book
-	Progress     *models.ReadingProgress `json:"progress,omitempty"`
-	ShelfOrderAt time.Time               `json:"shelfOrderAt"`
+	Progress           *models.ReadingProgress `json:"progress,omitempty"`
+	ShelfOrderAt       time.Time               `json:"shelfOrderAt"`
+	CachedChapterCount int64                   `json:"cachedChapterCount"`
 }
 
 func (s *Server) listBooks(c *gin.Context) {
@@ -53,10 +54,11 @@ func (s *Server) listBooks(c *gin.Context) {
 func (s *Server) bookShelfListItem(userID uint, book models.Book) bookListItem {
 	var progress models.ReadingProgress
 	err := s.db.Where("user_id = ? AND book_id = ?", userID, book.ID).First(&progress).Error
+	cachedCount := s.cachedChapterCount(book.ID, book.SourceID)
 	if err != nil {
-		return bookShelfListItem(book, models.ReadingProgress{})
+		return bookShelfListItem(book, models.ReadingProgress{}, cachedCount)
 	}
-	return bookShelfListItem(book, progress)
+	return bookShelfListItem(book, progress, cachedCount)
 }
 
 func (s *Server) listAllBookShelfItems(userID uint) ([]bookListItem, error) {
@@ -80,10 +82,11 @@ func (s *Server) bookShelfListItems(userID uint, books []models.Book) []bookList
 	for _, progress := range progresses {
 		progressByBookID[progress.BookID] = progress
 	}
+	cacheCountByBookID := s.cachedChapterCounts(books)
 
 	items := make([]bookListItem, 0, len(books))
 	for _, book := range books {
-		items = append(items, bookShelfListItem(book, progressByBookID[book.ID]))
+		items = append(items, bookShelfListItem(book, progressByBookID[book.ID], cacheCountByBookID[book.ID]))
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		iShelfAt := items[i].ShelfOrderAt
@@ -96,13 +99,49 @@ func (s *Server) bookShelfListItems(userID uint, books []models.Book) []bookList
 	return items
 }
 
-func bookShelfListItem(book models.Book, progress models.ReadingProgress) bookListItem {
-	item := bookListItem{Book: book}
+func bookShelfListItem(book models.Book, progress models.ReadingProgress, cachedChapterCount int64) bookListItem {
+	item := bookListItem{Book: book, CachedChapterCount: cachedChapterCount}
 	if progress.BookID != 0 {
 		item.Progress = &progress
 	}
 	item.ShelfOrderAt = shelfOrderAt(item.Book, item.Progress)
 	return item
+}
+
+func (s *Server) cachedChapterCount(bookID uint, sourceID uint) int64 {
+	if sourceID == 0 {
+		return 0
+	}
+	var count int64
+	_ = s.db.Model(&models.Chapter{}).Where("book_id = ? AND cache_path <> ''", bookID).Count(&count).Error
+	return count
+}
+
+func (s *Server) cachedChapterCounts(books []models.Book) map[uint]int64 {
+	bookIDs := make([]uint, 0, len(books))
+	for _, book := range books {
+		if book.SourceID > 0 {
+			bookIDs = append(bookIDs, book.ID)
+		}
+	}
+	if len(bookIDs) == 0 {
+		return map[uint]int64{}
+	}
+	type row struct {
+		BookID uint
+		Count  int64
+	}
+	var rows []row
+	_ = s.db.Model(&models.Chapter{}).
+		Select("book_id, COUNT(*) as count").
+		Where("book_id IN ? AND cache_path <> ''", bookIDs).
+		Group("book_id").
+		Scan(&rows).Error
+	counts := make(map[uint]int64, len(rows))
+	for _, row := range rows {
+		counts[row.BookID] = row.Count
+	}
+	return counts
 }
 
 func (s *Server) broadcastBookShelfUpdate(userID uint, book models.Book) bookListItem {
@@ -737,7 +776,7 @@ func (s *Server) cacheBookContent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list chapters"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"cached": cached, "requested": requested})
+	c.JSON(http.StatusOK, gin.H{"cached": cached, "requested": requested, "book": s.bookShelfListItem(userID, book)})
 }
 
 func (s *Server) cacheBookChapters(book models.Book, chapterIndex *int, all bool, count int) (int, int, error) {

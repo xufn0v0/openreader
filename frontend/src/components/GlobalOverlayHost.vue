@@ -163,6 +163,7 @@
           <span>共 {{ row.chapterCount || 0 }} 章</span><br>
           <span>阅读进度：{{ progressLabel(row) }}</span>
           <template v-if="Number(row.sourceId || 0) > 0">
+            <br><span>服务器缓存：{{ serverCacheCount(row) }} 章</span>
             <br><span>浏览器缓存：{{ localCacheCount(row) }} 章</span>
           </template>
         </template>
@@ -213,7 +214,7 @@
             <span>{{ Number(book.sourceId || 0) > 0 ? '远程书籍' : '本地书籍' }} · {{ progressLabel(book) }}</span>
           </button>
         </header>
-        <p>共 {{ book.chapterCount || 0 }} 章<template v-if="Number(book.sourceId || 0) > 0"> · 浏览器缓存 {{ localCacheCount(book) }} 章</template><template v-if="book.lastChapter"> · 最新：{{ book.lastChapter }}</template></p>
+        <p>共 {{ book.chapterCount || 0 }} 章<template v-if="Number(book.sourceId || 0) > 0"> · 服务器缓存 {{ serverCacheCount(book) }} 章 · 浏览器缓存 {{ localCacheCount(book) }} 章</template><template v-if="book.lastChapter"> · 最新：{{ book.lastChapter }}</template></p>
         <footer>
           <el-button size="small" text @click="goDetail(book)">编辑</el-button>
           <el-button size="small" text @click="setBookGroup(book)">分组</el-button>
@@ -1208,6 +1209,20 @@ function localCacheCount(book) {
   return localCacheCounts.value[book?.id] || 0
 }
 
+function serverCacheCount(book) {
+  return Number(book?.cachedChapterCount || 0)
+}
+
+function updateServerCacheCount(book, count) {
+  if (!book?.id) return
+  const nextCount = Math.max(0, Number(count || 0))
+  const nextBook = { ...book, cachedChapterCount: nextCount }
+  bookshelf.upsertBook(nextBook)
+  if (Number(overlay.bookInfoBook?.id) === Number(book.id)) {
+    overlay.bookInfoBook = { ...overlay.bookInfoBook, cachedChapterCount: nextCount }
+  }
+}
+
 function openContentSearch(book) {
   overlay.closeBookInfo()
   overlay.openSearchBookContent(book)
@@ -1526,6 +1541,7 @@ async function batchCacheBooks() {
   try {
     const data = await bookshelf.batchCacheBooks(remoteBookIds)
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
+    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '批量缓存失败'))
   } finally {
@@ -1545,6 +1561,10 @@ async function batchClearCache() {
     batchBusy.value = true
     const data = await bookshelf.batchClearCache(remoteBookIds)
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
+    for (const bookId of remoteBookIds) {
+      const book = managedBooks.value.find(item => Number(item.id) === Number(bookId))
+      if (book) updateServerCacheCount(book, 0)
+    }
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '清理缓存失败'))
@@ -1622,6 +1642,7 @@ async function cacheBook(book, command) {
   try {
     const chapterIndex = cacheStartChapterIndex(book)
     const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
+    if (data?.book) bookshelf.upsertBook(data.book)
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '缓存失败'))
@@ -1663,6 +1684,7 @@ async function clearBookCache(book) {
   cachingBookId.value = book.id
   try {
     const data = await bookshelf.batchClearCache([book.id])
+    updateServerCacheCount(book, 0)
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
   } catch (err) {
     ElMessage.error(readError(err, '清理缓存失败'))
