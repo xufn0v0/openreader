@@ -3002,6 +3002,80 @@ func TestReplaceRuleCRUDAndChapterContentAppliesRules(t *testing.T) {
 	}
 }
 
+func TestReplaceRuleScopeAndPlainTextMode(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules", strings.NewReader(`{"name":"当前书文本规则","pattern":"广告[0-9]+","replacement":"净化","scope":"目标书;local://target","isRegex":false,"isEnabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create replace rule: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var rule models.ReplaceRule
+	if err := json.Unmarshal(w.Body.Bytes(), &rule); err != nil {
+		t.Fatal(err)
+	}
+	if rule.Scope != "目标书;local://target" || rule.IsRegex == nil || *rule.IsRegex {
+		t.Fatalf("unexpected replace rule fields: %+v", rule)
+	}
+
+	cachePath := filepath.Join("replace", "plain.txt")
+	fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("广告[0-9]+\n广告123\n正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "目标书", URL: "local://target"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	chapter := models.Chapter{BookID: book.ID, Index: 0, Title: "第一章", CachePath: cachePath}
+	if err := server.db.Create(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("chapter content: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	body := w2.Body.String()
+	if !strings.Contains(body, "净化") || !strings.Contains(body, "广告123") {
+		t.Fatalf("expected plain text scoped replacement only, got: %s", body)
+	}
+
+	other := models.Book{UserID: user.ID, Title: "其他书", URL: "local://target"}
+	if err := server.db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherChapter := models.Chapter{BookID: other.ID, Index: 0, Title: "第一章", CachePath: cachePath}
+	if err := server.db.Create(&otherChapter).Error; err != nil {
+		t.Fatal(err)
+	}
+	req3 := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(other.ID), 10)+"/chapters/0/content", nil)
+	req3.Header.Set("Authorization", token)
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("other chapter content: expected 200, got %d: %s", w3.Code, w3.Body.String())
+	}
+	if strings.Contains(w3.Body.String(), "净化") {
+		t.Fatalf("scoped replace rule should not affect other book: %s", w3.Body.String())
+	}
+}
+
 func TestBatchBooksCache(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -3958,6 +4032,13 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if _, err := ruleFile.Write([]byte(`[{"name":"规则","pattern":"foo","replacement":"bar","enabled":true}]`)); err != nil {
 		t.Fatal(err)
 	}
+	rssFile, err := zipWriter.Create("rssSources.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rssFile.Write([]byte(`[{"sourceName":"OpenReader RSS","sourceUrl":"https://rss.example/openreader.xml","sourceIcon":"https://rss.example/icon.png","sourceGroup":"资讯","customOrder":7,"enabled":false}]`)); err != nil {
+		t.Fatal(err)
+	}
 	if err := zipWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -3983,7 +4064,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("restore openreader backup: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	for _, expected := range []string{`"books":1`, `"categories":1`, `"bookmarks":1`, `"progress":1`, `"replaceRules":1`} {
+	for _, expected := range []string{`"books":1`, `"categories":1`, `"bookmarks":1`, `"progress":1`, `"replaceRules":1`, `"rssSources":1`} {
 		if !strings.Contains(w.Body.String(), expected) {
 			t.Fatalf("expected %s in restore result, got %s", expected, w.Body.String())
 		}
@@ -4028,6 +4109,13 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if rule.Replacement != "bar" || !rule.Enabled {
 		t.Fatalf("unexpected restored replace rule: %+v", rule)
 	}
+	var rssSource models.RSSSource
+	if err := server.db.Where("user_id = ? AND url = ?", user.ID, "https://rss.example/openreader.xml").First(&rssSource).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rssSource.Title != "OpenReader RSS" || rssSource.Icon != "https://rss.example/icon.png" || rssSource.Group != "资讯" || rssSource.CustomOrder != 7 || rssSource.Enabled {
+		t.Fatalf("unexpected restored rss source: %+v", rssSource)
+	}
 }
 
 func TestCreateReplaceRuleRespectsEnabledFlag(t *testing.T) {
@@ -4055,7 +4143,7 @@ func TestReplaceRuleTestEndpoint(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules/test", strings.NewReader(`{"pattern":"广告[0-9]+","replacement":"","text":"广告123\n正文"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules/test", strings.NewReader(`{"pattern":"广告[0-9]+","replacement":"","isRegex":true,"text":"广告123\n正文"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
 	w := httptest.NewRecorder()
@@ -4065,6 +4153,18 @@ func TestReplaceRuleTestEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"changed":true`) || !strings.Contains(w.Body.String(), `\n正文`) {
 		t.Fatalf("unexpected replace rule test result: %s", w.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/api/replace-rules/test", strings.NewReader(`{"pattern":"广告[0-9]+","replacement":"净化","isRegex":false,"text":"广告[0-9]+\n广告123"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("test plain replace rule: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	if !strings.Contains(w2.Body.String(), `净化\n广告123`) {
+		t.Fatalf("unexpected plain replace rule test result: %s", w2.Body.String())
 	}
 }
 
@@ -4149,6 +4249,109 @@ func TestCreateRSSSourceRespectsEnabledFlag(t *testing.T) {
 	}
 	if source.Enabled {
 		t.Fatalf("expected rss source to remain disabled: %+v", source)
+	}
+}
+
+func TestRSSSourcePreservesUpstreamFieldsAndOrder(t *testing.T) {
+	router, _ := setupTestServer(t)
+	token := authHeader(t, router)
+
+	first := `{"sourceName":"后导入","sourceUrl":"https://rss.example/late.xml","sourceIcon":"https://rss.example/late.png","sourceGroup":"新闻","customOrder":20,"enabled":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/rss/sources", strings.NewReader(first))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create upstream rss source: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var source models.RSSSource
+	if err := json.Unmarshal(w.Body.Bytes(), &source); err != nil {
+		t.Fatal(err)
+	}
+	if source.Title != "后导入" || source.URL != "https://rss.example/late.xml" || source.Icon != "https://rss.example/late.png" || source.Group != "新闻" || source.CustomOrder != 20 {
+		t.Fatalf("upstream rss fields were not preserved: %+v", source)
+	}
+
+	second := `{"title":"先显示","url":"https://rss.example/early.xml","icon":"https://rss.example/early.png","group":"技术","customOrder":1,"enabled":true}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/rss/sources", strings.NewReader(second))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("create current rss source: expected 201, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	req3 := httptest.NewRequest(http.MethodGet, "/api/rss/sources", nil)
+	req3.Header.Set("Authorization", token)
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("list rss sources: expected 200, got %d: %s", w3.Code, w3.Body.String())
+	}
+	var sources []models.RSSSource
+	if err := json.Unmarshal(w3.Body.Bytes(), &sources); err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Title != "先显示" || sources[1].Title != "后导入" {
+		t.Fatalf("expected sources ordered by customOrder, got %+v", sources)
+	}
+}
+
+func TestBackupExportsRSSSources(t *testing.T) {
+	_, server := setupTestServer(t)
+	user := models.User{Username: "rss-backup", PasswordHash: "hash", LastActiveAt: time.Now()}
+	if err := server.db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := models.RSSSource{
+		UserID:      user.ID,
+		Title:       "备份 RSS",
+		URL:         "https://rss.example/backup.xml",
+		Icon:        "https://rss.example/backup.png",
+		Group:       "资讯",
+		CustomOrder: 4,
+		Enabled:     true,
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	backupDir := t.TempDir()
+	backupSvc := backup.New(server.db, backupDir)
+	backupPath, err := backupSvc.RunNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.OpenReader(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	var found bool
+	for _, file := range reader.File {
+		if file.Name != "rssSources.json" {
+			continue
+		}
+		found = true
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, expected := range []string{`"sourceName": "备份 RSS"`, `"sourceUrl": "https://rss.example/backup.xml"`, `"sourceIcon": "https://rss.example/backup.png"`, `"sourceGroup": "资讯"`} {
+			if !strings.Contains(string(data), expected) {
+				t.Fatalf("expected %s in rssSources.json, got %s", expected, string(data))
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected rssSources.json in backup")
 	}
 }
 

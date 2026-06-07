@@ -7,21 +7,27 @@
           <span>{{ sources.length }} 个订阅</span>
         </div>
         <div class="rss-actions">
-          <el-button size="small" type="primary" @click="openEditor()">新增</el-button>
           <el-button size="small" @click="rssEditMode = !rssEditMode">{{ rssEditMode ? '取消' : '编辑' }}</el-button>
+          <el-button size="small" :loading="importingSources" @click="triggerSourceImport">导入</el-button>
+          <el-button size="small" type="primary" @click="openEditor()">新增</el-button>
           <el-button size="small" :loading="sourcesLoading" @click="loadSources">刷新</el-button>
+          <input ref="sourceImportInput" class="rss-source-import-input" type="file" accept=".json,application/json" @change="importRSSSources" />
         </div>
       </header>
       <div v-loading="sourcesLoading" class="rss-source-list">
         <div
           v-for="source in sources"
           :key="source.id"
-          class="rss-source-row"
+          class="rss-source-card"
           :class="{ active: selectedSourceId === source.id }"
         >
           <button type="button" @click="selectSource(source.id)">
+            <span class="rss-source-icon" :class="{ placeholder: !source.icon }">
+              <img v-if="source.icon" :src="source.icon" alt="" loading="lazy" @error="source.icon = ''" />
+              <span v-else>{{ sourceInitial(source) }}</span>
+            </span>
             <strong>{{ source.title || '未命名 RSS' }}</strong>
-            <small>{{ source.url }}</small>
+            <small v-if="source.group">{{ source.group }}</small>
           </button>
           <span class="rss-source-tools">
             <el-tag size="small" :type="source.enabled === false ? 'info' : 'success'" effect="plain">
@@ -85,6 +91,9 @@
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="draft.title" /></el-form-item>
         <el-form-item label="订阅地址"><el-input v-model="draft.url" /></el-form-item>
+        <el-form-item label="图标地址"><el-input v-model="draft.icon" /></el-form-item>
+        <el-form-item label="分组"><el-input v-model="draft.group" /></el-form-item>
+        <el-form-item label="排序"><el-input-number v-model="draft.customOrder" :min="0" :step="1" controls-position="right" /></el-form-item>
         <el-form-item><el-switch v-model="draft.enabled" active-text="启用" inactive-text="停用" /></el-form-item>
       </el-form>
       <template #footer>
@@ -93,11 +102,11 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="articleDialogVisible" title="RSS 文章" width="720px" class="rss-reader-dialog" :fullscreen="isMobile">
+    <el-dialog v-model="articleDialogVisible" :title="selectedArticle?.title || 'RSS 文章'" width="720px" class="rss-reader-dialog" :fullscreen="isMobile">
       <article v-if="selectedArticle" class="rss-reader">
         <h2>{{ selectedArticle.title }}</h2>
         <small>{{ formatDate(selectedArticle.publishedAt || selectedArticle.updatedAt) }} · {{ selectedArticle.author || '未知作者' }}</small>
-        <div class="rss-reader-content" v-html="articleBodyHTML(selectedArticle)" />
+        <div class="rss-reader-content" v-html="articleBodyHTML(selectedArticle)" @click="handleArticleContentClick" />
       </article>
       <template #footer>
         <el-button @click="articleDialogVisible = false">关闭</el-button>
@@ -110,6 +119,13 @@
         <el-button v-if="selectedArticle?.link" type="primary" @click="openExternal(selectedArticle.link)">打开原文</el-button>
       </template>
     </el-dialog>
+
+    <el-image-viewer
+      v-if="articleImagePreviewVisible"
+      :url-list="articlePreviewImages"
+      :initial-index="articlePreviewIndex"
+      @close="articleImagePreviewVisible = false"
+    />
   </section>
 </template>
 
@@ -137,13 +153,18 @@ const refreshingSourceId = ref(null)
 const rssEditMode = ref(false)
 const editorVisible = ref(false)
 const savingSource = ref(false)
+const importingSources = ref(false)
 const editingSourceId = ref(null)
-const draft = ref({ title: '', url: '', enabled: true })
+const draft = ref({ title: '', url: '', icon: '', group: '', customOrder: 0, enabled: true })
 const articleDialogVisible = ref(false)
 const selectedArticle = ref(null)
 const articleFilter = ref('all')
 const articlePage = ref(1)
 const hasMoreArticles = ref(false)
+const sourceImportInput = ref(null)
+const articleImagePreviewVisible = ref(false)
+const articlePreviewImages = ref([])
+const articlePreviewIndex = ref(0)
 let rssReloadTimer
 
 const articleCountText = computed(() => `${articles.value.length} 篇${hasMoreArticles.value ? '+' : ''}`)
@@ -265,6 +286,9 @@ function openEditor(source = null) {
   draft.value = {
     title: source?.title || '',
     url: source?.url || '',
+    icon: source?.icon || '',
+    group: source?.group || '',
+    customOrder: Number(source?.customOrder || 0),
     enabled: source?.enabled ?? true,
   }
   editorVisible.value = true
@@ -277,7 +301,14 @@ async function saveSource() {
   }
   savingSource.value = true
   try {
-    const payload = { ...draft.value, url: draft.value.url.trim() }
+    const payload = {
+      ...draft.value,
+      title: draft.value.title.trim(),
+      url: draft.value.url.trim(),
+      icon: draft.value.icon.trim(),
+      group: draft.value.group.trim(),
+      customOrder: Number(draft.value.customOrder || 0),
+    }
     if (editingSourceId.value) {
       await updateRSSSource(editingSourceId.value, payload)
       ElMessage.success('RSS 源已更新')
@@ -293,6 +324,82 @@ async function saveSource() {
   } finally {
     savingSource.value = false
   }
+}
+
+function triggerSourceImport() {
+  sourceImportInput.value?.click()
+}
+
+async function importRSSSources(event) {
+  const file = event?.target?.files?.[0]
+  if (event?.target) event.target.value = ''
+  if (!file) return
+  importingSources.value = true
+  try {
+    const text = await file.text()
+    const parsed = JSON.parse(text)
+    const imported = normalizeRSSSourceImport(parsed)
+    if (!imported.length) {
+      ElMessage.warning('没有找到可导入的 RSS 源')
+      return
+    }
+    const existingURLs = new Set(sources.value.map(source => normalizeURL(source.url)).filter(Boolean))
+    const nextSources = imported.filter(source => !existingURLs.has(normalizeURL(source.url)))
+    const skipped = imported.length - nextSources.length
+    if (!nextSources.length) {
+      ElMessage.warning('导入文件中的 RSS 源已存在')
+      return
+    }
+    await ElMessageBox.confirm(
+      `将导入 ${nextSources.length} 个 RSS 源${skipped ? `，跳过 ${skipped} 个已存在源` : ''}。`,
+      '导入 RSS 源',
+      { type: 'info' },
+    )
+    for (const source of nextSources) {
+      await createRSSSource(source)
+    }
+    ElMessage.success(`已导入 ${nextSources.length} 个 RSS 源`)
+    await loadSources()
+    await loadArticles()
+    window.dispatchEvent(new CustomEvent('openreader:rss-updated', { detail: { sources: true, articles: true } }))
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(readError(err, '导入 RSS 源失败'))
+  } finally {
+    importingSources.value = false
+  }
+}
+
+function normalizeRSSSourceImport(payload) {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.sources)
+      ? payload.sources
+      : Array.isArray(payload?.rssSources)
+        ? payload.rssSources
+        : Array.isArray(payload?.rssSourceList)
+          ? payload.rssSourceList
+          : payload && typeof payload === 'object'
+            ? [payload]
+            : []
+  return list
+    .map((source, index) => {
+      const title = String(source.title || source.sourceName || source.name || `RSS ${index + 1}`).trim()
+      const url = String(source.url || source.sourceUrl || source.feedUrl || source.link || '').trim()
+      const icon = String(source.icon || source.sourceIcon || '').trim()
+      const group = String(source.group || source.sourceGroup || '').trim()
+      const order = Number(source.customOrder || source.order || 0)
+      const enabled = source.enabled ?? source.isEnabled
+      return {
+        title,
+        url,
+        icon,
+        group,
+        customOrder: Number.isFinite(order) ? order : 0,
+        enabled: enabled !== false,
+      }
+    })
+    .filter(source => source.title && source.url)
 }
 
 async function refreshSource(source) {
@@ -326,6 +433,7 @@ async function removeSource(source) {
 async function openArticle(article) {
   selectedArticle.value = article
   articleDialogVisible.value = true
+  articleImagePreviewVisible.value = false
   if (!article.isRead) await updateArticleState(article, { isRead: true }, { silent: true })
 }
 
@@ -375,6 +483,24 @@ function openExternal(url) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function handleArticleContentClick(event) {
+  const image = event?.target?.closest?.('img')
+  if (!image) return
+  const root = event.currentTarget
+  const images = Array.from(root.querySelectorAll('img'))
+    .map(item => item.currentSrc || item.src)
+    .filter(Boolean)
+  if (!images.length) return
+  const clickedURL = image.currentSrc || image.src
+  articlePreviewImages.value = images
+  articlePreviewIndex.value = Math.max(0, images.indexOf(clickedURL))
+  articleImagePreviewVisible.value = true
+}
+
+function sourceInitial(source) {
+  return String(source?.title || source?.url || 'R').trim().slice(0, 1).toUpperCase() || 'R'
+}
+
 function formatDate(value) {
   if (!value) return '-'
   return new Date(value).toLocaleString()
@@ -382,6 +508,10 @@ function formatDate(value) {
 
 function readError(err, fallback) {
   return err?.response?.data?.error?.message || err?.response?.data?.error || fallback
+}
+
+function normalizeURL(value) {
+  return String(value || '').trim()
 }
 </script>
 
@@ -432,6 +562,10 @@ function readError(err, fallback) {
   gap: 8px;
 }
 
+.rss-source-import-input {
+  display: none;
+}
+
 .rss-source-list,
 .rss-article-list {
   display: grid;
@@ -440,7 +574,7 @@ function readError(err, fallback) {
   overflow: auto;
 }
 
-.rss-source-row,
+.rss-source-card,
 .rss-article-row {
   display: grid;
   gap: 8px;
@@ -448,16 +582,26 @@ function readError(err, fallback) {
   border-bottom: 1px solid var(--app-border);
 }
 
-.rss-source-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+.rss-source-list {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+  padding: 12px;
 }
 
-.rss-source-row.active {
+.rss-source-card {
+  position: relative;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  text-align: center;
+}
+
+.rss-source-card.active {
   background: rgba(145, 118, 62, 0.12);
+  border-color: rgba(145, 118, 62, 0.3);
 }
 
-.rss-source-row button,
+.rss-source-card button,
 .rss-article-row button {
   display: grid;
   min-width: 0;
@@ -470,8 +614,32 @@ function readError(err, fallback) {
   text-align: left;
 }
 
-.rss-source-row strong,
-.rss-source-row small,
+.rss-source-card button {
+  justify-items: center;
+  text-align: center;
+}
+
+.rss-source-icon {
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--app-border);
+  color: var(--app-primary-strong);
+  font-weight: 700;
+}
+
+.rss-source-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rss-source-card strong,
+.rss-source-card small,
 .rss-article-row strong,
 .rss-article-row small,
 .rss-article-row span {
@@ -485,6 +653,11 @@ function readError(err, fallback) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+
+.rss-source-tools {
+  justify-content: center;
+  flex-wrap: wrap;
 }
 
 .rss-article-tools {
@@ -545,6 +718,10 @@ function readError(err, fallback) {
   height: auto;
 }
 
+.rss-reader-content :deep(img) {
+  cursor: zoom-in;
+}
+
 @media (max-width: 750px) {
   .rss-manager {
     grid-template-columns: 1fr;
@@ -556,7 +733,7 @@ function readError(err, fallback) {
     max-height: 40vh;
   }
 
-  .rss-source-row,
+  .rss-source-card,
   .rss-article-row {
     grid-template-columns: 1fr;
   }
