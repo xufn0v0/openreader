@@ -62,9 +62,14 @@
       <div v-loading="articlesLoading" class="rss-article-list">
         <article v-for="article in articles" :key="article.id" class="rss-article-row" :class="{ read: article.isRead }">
           <button type="button" @click="openArticle(article)">
-            <strong>{{ article.title }}</strong>
-            <small>{{ formatDate(article.publishedAt || article.updatedAt) }} · {{ article.author || '未知作者' }}</small>
-            <span>{{ stripHTML(article.summary || article.content || '无摘要') }}</span>
+            <span class="rss-article-info">
+              <strong>{{ article.title }}</strong>
+              <small>{{ formatDate(article.publishedAt || article.updatedAt) }} · {{ article.author || '未知作者' }}</small>
+              <span>{{ stripHTML(article.summary || article.content || '无摘要') }}</span>
+            </span>
+            <span v-if="article.image" class="rss-article-image">
+              <img :src="article.image" alt="" loading="lazy" />
+            </span>
           </button>
           <span class="rss-article-tools">
             <el-button size="small" text @click="toggleRead(article)">
@@ -640,9 +645,9 @@ function normalizeURL(value) {
 
 .rss-source-card strong,
 .rss-source-card small,
-.rss-article-row strong,
-.rss-article-row small,
-.rss-article-row span {
+.rss-article-info strong,
+.rss-article-info small,
+.rss-article-info span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -668,6 +673,33 @@ function normalizeURL(value) {
 .rss-article-row {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+}
+
+.rss-article-row button {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.rss-article-info {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.rss-article-image {
+  width: 88px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: var(--app-radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--app-border);
+}
+
+.rss-article-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .rss-article-row.read {
@@ -736,6 +768,14 @@ function normalizeURL(value) {
   .rss-source-card,
   .rss-article-row {
     grid-template-columns: 1fr;
+  }
+
+  .rss-article-row button {
+    grid-template-columns: 1fr auto;
+  }
+
+  .rss-article-image {
+    width: 72px;
   }
 
   .rss-source-tools,

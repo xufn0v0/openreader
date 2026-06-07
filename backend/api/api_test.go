@@ -4183,6 +4183,7 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 							<link>https://rss.example/a</link>
 							<description>文章摘要</description>
 							<author>作者</author>
+							<enclosure url="https://rss.example/a.jpg" type="image/jpeg"></enclosure>
 							<pubDate>Mon, 02 Jan 2006 15:04:05 +0000</pubDate>
 						</item>
 					</channel></rss>`)),
@@ -4221,6 +4222,9 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 	if w3.Code != http.StatusOK || !strings.Contains(w3.Body.String(), "RSS 文章") || !strings.Contains(w3.Body.String(), "文章摘要") {
 		t.Fatalf("list rss articles: expected article, got %d: %s", w3.Code, w3.Body.String())
 	}
+	if !strings.Contains(w3.Body.String(), "https://rss.example/a.jpg") {
+		t.Fatalf("list rss articles: expected article image, got %d: %s", w3.Code, w3.Body.String())
+	}
 
 	var count int64
 	if err := server.db.Model(&models.RSSArticle{}).Count(&count).Error; err != nil {
@@ -4228,6 +4232,13 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected one rss article, got %d", count)
+	}
+	var article models.RSSArticle
+	if err := server.db.Where("link = ?", "https://rss.example/a").First(&article).Error; err != nil {
+		t.Fatal(err)
+	}
+	if article.Image != "https://rss.example/a.jpg" {
+		t.Fatalf("expected rss article image to persist, got %+v", article)
 	}
 }
 
