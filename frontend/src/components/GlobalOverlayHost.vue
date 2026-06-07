@@ -39,9 +39,9 @@
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
       <el-button v-else plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshLocalBookInfo(overlay.bookInfoBook)">刷新本地书</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
-      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存到浏览器</el-button>
+      <el-button plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存到浏览器</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存到服务器</el-button>
-      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookLocalCache')">清浏览器缓存</el-button>
+      <el-button plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookLocalCache')">清浏览器缓存</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookCache')">清服务器缓存</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
@@ -163,8 +163,9 @@
           <span>共 {{ row.chapterCount || 0 }} 章</span><br>
           <span>阅读进度：{{ progressLabel(row) }}</span>
           <template v-if="Number(row.sourceId || 0) > 0">
-            <br><span>浏览器缓存：{{ localCacheCount(row) }} 章</span>
+            <br><span>服务器缓存：{{ serverCacheCount(row) }} 章</span>
           </template>
+          <br><span>浏览器缓存：{{ localCacheCount(row) }} 章</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
@@ -177,9 +178,9 @@
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBookLocal">缓存到浏览器</el-dropdown-item>
+                <el-dropdown-item command="cacheBookLocal">缓存到浏览器</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="cacheBook">缓存到服务器</el-dropdown-item>
-                <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="deleteBookLocalCache">删除浏览器缓存</el-dropdown-item>
+                <el-dropdown-item command="deleteBookLocalCache">删除浏览器缓存</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) > 0" command="deleteBookCache">删除服务器缓存</el-dropdown-item>
                 <el-dropdown-item v-if="Number(row.sourceId || 0) === 0" disabled>本地书无需服务器缓存</el-dropdown-item>
               </el-dropdown-menu>
@@ -191,6 +192,8 @@
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item command="txt">导出为 TXT</el-dropdown-item>
+                <el-dropdown-item command="epub">导出为 Epub</el-dropdown-item>
                 <el-dropdown-item command="json">导出书籍数据</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -213,15 +216,16 @@
             <span>{{ Number(book.sourceId || 0) > 0 ? '远程书籍' : '本地书籍' }} · {{ progressLabel(book) }}</span>
           </button>
         </header>
-        <p>共 {{ book.chapterCount || 0 }} 章<template v-if="Number(book.sourceId || 0) > 0"> · 浏览器缓存 {{ localCacheCount(book) }} 章</template><template v-if="book.lastChapter"> · 最新：{{ book.lastChapter }}</template></p>
+        <p>共 {{ book.chapterCount || 0 }} 章<template v-if="Number(book.sourceId || 0) > 0"> · 服务器缓存 {{ serverCacheCount(book) }} 章</template> · 浏览器缓存 {{ localCacheCount(book) }} 章<template v-if="book.lastChapter"> · 最新：{{ book.lastChapter }}</template></p>
         <footer>
           <el-button size="small" text @click="goDetail(book)">编辑</el-button>
           <el-button size="small" text @click="setBookGroup(book)">分组</el-button>
-          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBookLocal')">缓存到浏览器</el-button>
-          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookLocalCache')">清浏览器</el-button>
+          <el-button size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBookLocal')">缓存到浏览器</el-button>
+          <el-button size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookLocalCache')">清浏览器</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">服务器缓存</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookCache')">清服务器</el-button>
-          <el-button size="small" text @click="exportBook(book)">导出</el-button>
+          <el-button size="small" text @click="exportBook(book, 'txt')">导出TXT</el-button>
+          <el-button size="small" text @click="exportBook(book, 'epub')">导出Epub</el-button>
         </footer>
       </article>
     </div>
@@ -293,7 +297,23 @@
       </div>
     </template>
     <template v-else>
-      <el-table :data="bookshelf.categories" row-key="id" class="group-manage-table">
+      <el-table :data="groupManageRows" row-key="id" class="group-manage-table">
+        <el-table-column width="46">
+          <template #default="{ row }">
+            <button
+              type="button"
+              class="group-drag-handle"
+              draggable="true"
+              title="拖动排序"
+              @dragstart="startGroupDrag(row)"
+              @dragover.prevent
+              @drop.prevent="dropGroupOn(row)"
+              @dragend="finishGroupDrag"
+            >
+              <el-icon><Rank /></el-icon>
+            </button>
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="分组名" min-width="130">
           <template #default="{ row }">
             <span class="group-table-name">
@@ -315,8 +335,6 @@
         </el-table-column>
         <el-table-column label="操作" min-width="180">
           <template #default="{ row }">
-            <el-button size="small" text @click="moveGroup(row, -1)">上移</el-button>
-            <el-button size="small" text @click="moveGroup(row, 1)">下移</el-button>
             <el-button size="small" text @click="renameGroup(row)">编辑</el-button>
             <el-button
               v-if="groupBookCount(row) === 0"
@@ -333,6 +351,7 @@
       <el-empty v-if="!bookshelf.categories.length" description="还没有自定义分组" />
       <div class="manage-footer group-manage-footer">
         <el-button type="primary" @click="createCategory">添加分组</el-button>
+        <el-button v-if="isGroupOrderDirty" type="primary" :loading="groupOrderSaving" @click="saveGroupOrderDraft">保存排序</el-button>
         <el-button @click="overlay.bookGroupVisible = false">取消</el-button>
       </div>
     </template>
@@ -656,7 +675,7 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Delete, Edit, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { ArrowDown, Delete, Edit, Rank, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, createUser, deleteUsers, listUsers, resetUserPassword, updateUser } from '../api/admin'
 import { cacheBookContent, changeBookSource, checkBookUpdates, createBookmark, deleteBookmark, listBookSourceCandidates, listBookmarks, listChapters, listTXTTocRules, refreshBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
@@ -714,6 +733,9 @@ const settingCategorySaving = ref(false)
 const loadingUpdates = ref(false)
 const importingBook = ref(false)
 const visibilitySavingId = ref(null)
+const groupOrderDraftIds = ref([])
+const draggingGroupId = ref(null)
+const groupOrderSaving = ref(false)
 const importDraft = reactive({ title: '', author: '', categoryId: '', file: null, tocRule: '' })
 const tocRuleOptions = ref([])
 const tocRulesLoading = ref(false)
@@ -804,7 +826,7 @@ const bookInfoProgress = computed(() => {
   return bookProgress(book)?.percent || 0
 })
 const bookInfoBrowserCacheCount = computed(() => (
-  overlay.bookInfoBook?.sourceId ? localCacheCount(overlay.bookInfoBook) : -1
+  overlay.bookInfoBook?.id ? localCacheCount(overlay.bookInfoBook) : -1
 ))
 const sourceStatusLabel = computed(() => overlay.bookInfoBook?.sourceId ? '远程书籍' : '本地书籍')
 const groupSetRows = computed(() => [
@@ -815,6 +837,21 @@ const groupSetRows = computed(() => [
     description: `${groupBookCount(category)} 本`,
   })),
 ])
+const groupManageRows = computed(() => {
+  const categoryById = new Map(bookshelf.categories.map(category => [String(category.id), category]))
+  const rows = []
+  for (const id of groupOrderDraftIds.value) {
+    const category = categoryById.get(String(id))
+    if (category) rows.push(category)
+  }
+  for (const category of bookshelf.categories) {
+    if (!groupOrderDraftIds.value.includes(String(category.id))) rows.push(category)
+  }
+  return rows
+})
+const isGroupOrderDirty = computed(() => (
+  groupManageRows.value.map(category => String(category.id)).join(',') !== bookshelf.categories.map(category => String(category.id)).join(',')
+))
 const managedBooks = computed(() => sortByShelfOrder(bookshelf.books, reader.progressByBook))
 const filteredManagedBooks = computed(() => {
   const value = normalizeLocalBookSearch(manageKeyword.value)
@@ -933,6 +970,8 @@ watch(
       if (overlay.bookManageVisible) await refreshManagedBrowserCacheCounts()
       if (overlay.bookGroupVisible && overlay.bookGroupMode === 'set') {
         settingCategoryId.value = overlay.bookInfoBook?.categoryId ? String(overlay.bookInfoBook.categoryId) : ''
+      } else if (overlay.bookGroupVisible) {
+        resetGroupOrderDraft()
       }
     } catch (err) {
       ElMessage.error(readError(err, '加载书架数据失败'))
@@ -949,7 +988,7 @@ watch(
       if (overlay.bookInfoBook?.sourceId && !sourceRows.value.length) {
         await loadSourceRows()
       }
-      if (overlay.bookInfoBook?.sourceId) {
+      if (overlay.bookInfoBook?.id) {
         await refreshBookInfoBrowserCacheCount(overlay.bookInfoBook)
       }
     } catch (err) {
@@ -1136,7 +1175,7 @@ async function saveBookGroupSetting() {
 }
 
 async function refreshManagedBrowserCacheCounts() {
-  const rows = managedBooks.value.filter(book => Number(book.sourceId || 0) > 0)
+  const rows = managedBooks.value.filter(book => book?.id)
   try {
     localCacheCounts.value = await countBooksBrowserCachedChapters(rows)
   } catch {
@@ -1145,7 +1184,7 @@ async function refreshManagedBrowserCacheCounts() {
 }
 
 async function refreshBookInfoBrowserCacheCount(book) {
-  if (!book?.id || Number(book.sourceId || 0) <= 0) return
+  if (!book?.id) return
   try {
     const map = await listBookBrowserCachedChapters(book, book.id)
     localCacheCounts.value = {
@@ -1206,6 +1245,20 @@ function applyUpdatedBookToOverlay(book, chapters = null) {
 
 function localCacheCount(book) {
   return localCacheCounts.value[book?.id] || 0
+}
+
+function serverCacheCount(book) {
+  return Number(book?.cachedChapterCount || 0)
+}
+
+function updateServerCacheCount(book, count) {
+  if (!book?.id) return
+  const nextCount = Math.max(0, Number(count || 0))
+  const nextBook = { ...book, cachedChapterCount: nextCount }
+  bookshelf.upsertBook(nextBook)
+  if (Number(overlay.bookInfoBook?.id) === Number(book.id)) {
+    overlay.bookInfoBook = { ...overlay.bookInfoBook, cachedChapterCount: nextCount }
+  }
 }
 
 function openContentSearch(book) {
@@ -1526,6 +1579,7 @@ async function batchCacheBooks() {
   try {
     const data = await bookshelf.batchCacheBooks(remoteBookIds)
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
+    await bookshelf.loadBooks({ force: true, all: true })
   } catch (err) {
     ElMessage.error(readError(err, '批量缓存失败'))
   } finally {
@@ -1545,6 +1599,10 @@ async function batchClearCache() {
     batchBusy.value = true
     const data = await bookshelf.batchClearCache(remoteBookIds)
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
+    for (const bookId of remoteBookIds) {
+      const book = managedBooks.value.find(item => Number(item.id) === Number(bookId))
+      if (book) updateServerCacheCount(book, 0)
+    }
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '清理缓存失败'))
@@ -1591,7 +1649,7 @@ async function batchExportBooks() {
   batchBusy.value = true
   try {
     const bookIds = [...selectedBookIds.value]
-    const blob = await bookshelf.exportSelectedBooks(bookIds)
+    const blob = await bookshelf.exportSelectedBooks(bookIds, 'json')
     downloadBlob(blob, `openreader-books-${bookIds.length}.json`)
     ElMessage.success(`已导出 ${bookIds.length} 本书`)
   } catch (err) {
@@ -1602,8 +1660,8 @@ async function batchExportBooks() {
 }
 
 async function cacheBook(book, command) {
-  if (Number(book?.sourceId || 0) === 0) {
-    ElMessage.info(command?.includes?.('Local') ? '本地书无需浏览器章节缓存' : '本地书无需服务器缓存')
+  if (Number(book?.sourceId || 0) === 0 && command !== 'cacheBookLocal' && command !== 'deleteBookLocalCache') {
+    ElMessage.info('本地书无需服务器缓存')
     return
   }
   if (command === 'deleteBookCache') {
@@ -1622,6 +1680,7 @@ async function cacheBook(book, command) {
   try {
     const chapterIndex = cacheStartChapterIndex(book)
     const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
+    if (data?.book) bookshelf.upsertBook(data.book)
     ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '缓存失败'))
@@ -1663,6 +1722,7 @@ async function clearBookCache(book) {
   cachingBookId.value = book.id
   try {
     const data = await bookshelf.batchClearCache([book.id])
+    updateServerCacheCount(book, 0)
     ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
   } catch (err) {
     ElMessage.error(readError(err, '清理缓存失败'))
@@ -1685,17 +1745,24 @@ async function clearBookLocalCache(book) {
   }
 }
 
-async function exportBook(book) {
+async function exportBook(book, format = 'txt') {
   batchBusy.value = true
   try {
-    const blob = await bookshelf.exportSelectedBooks([book.id])
-    downloadBlob(blob, `openreader-book-${book.id}.json`)
+    const normalizedFormat = ['json', 'txt', 'epub'].includes(format) ? format : 'txt'
+    const blob = await bookshelf.exportSelectedBooks([book.id], normalizedFormat)
+    downloadBlob(blob, exportBookFilename(book, normalizedFormat))
     ElMessage.success(`已导出《${book.title}》`)
   } catch (err) {
     ElMessage.error(readError(err, '导出失败'))
   } finally {
     batchBusy.value = false
   }
+}
+
+function exportBookFilename(book, format) {
+  const fallback = `book-${book?.id || Date.now()}`
+  const title = String(book?.title || fallback).replace(/[\\/:*?"<>|]/g, '-').trim() || fallback
+  return `${title}.${format === 'json' ? 'json' : format === 'epub' ? 'epub' : 'txt'}`
 }
 
 function downloadBlob(blob, filename) {
@@ -2393,6 +2460,7 @@ async function createCategory() {
     const name = value.trim()
     if (!name) return
     await bookshelf.addCategory({ name })
+    resetGroupOrderDraft()
     ElMessage.success('分组已创建')
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
@@ -2409,6 +2477,7 @@ async function renameGroup(category) {
     const name = value.trim()
     if (!name || name === category.name) return
     await bookshelf.renameCategory(category.id, { name })
+    resetGroupOrderDraft()
     ElMessage.success('分组已重命名')
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
@@ -2454,6 +2523,7 @@ async function deleteGroup(category) {
   try {
     await ElMessageBox.confirm(`确定删除分组“${category.name}”吗？`, '删除分组', { type: 'warning' })
     await bookshelf.removeCategory(category.id)
+    resetGroupOrderDraft()
     ElMessage.success('分组已删除')
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
@@ -2461,18 +2531,44 @@ async function deleteGroup(category) {
   }
 }
 
-async function moveGroup(category, direction) {
-  const categories = [...bookshelf.categories]
-  const index = categories.findIndex(item => item.id === category.id)
-  const targetIndex = index + direction
-  if (index < 0 || targetIndex < 0 || targetIndex >= categories.length) return
-  const [moved] = categories.splice(index, 1)
-  categories.splice(targetIndex, 0, moved)
+function resetGroupOrderDraft() {
+  groupOrderDraftIds.value = bookshelf.categories.map(category => String(category.id))
+  draggingGroupId.value = null
+}
+
+function startGroupDrag(category) {
+  draggingGroupId.value = String(category.id)
+}
+
+function finishGroupDrag() {
+  draggingGroupId.value = null
+}
+
+function dropGroupOn(targetCategory) {
+  const sourceId = draggingGroupId.value
+  const targetId = String(targetCategory.id)
+  if (!sourceId || sourceId === targetId) return
+  const ids = groupManageRows.value.map(category => String(category.id))
+  const sourceIndex = ids.indexOf(sourceId)
+  const targetIndex = ids.indexOf(targetId)
+  if (sourceIndex < 0 || targetIndex < 0) return
+  const [moved] = ids.splice(sourceIndex, 1)
+  ids.splice(targetIndex, 0, moved)
+  groupOrderDraftIds.value = ids
+}
+
+async function saveGroupOrderDraft() {
+  if (!isGroupOrderDirty.value) return
+  const orderedIds = groupManageRows.value.map(item => item.id)
+  groupOrderSaving.value = true
   try {
-    await bookshelf.reorderCategoryIds(categories.map(item => item.id))
+    await bookshelf.reorderCategoryIds(orderedIds)
+    resetGroupOrderDraft()
     ElMessage.success('分组排序已更新')
   } catch (err) {
     ElMessage.error(readError(err, '分组排序失败'))
+  } finally {
+    groupOrderSaving.value = false
   }
 }
 
@@ -2647,6 +2743,21 @@ function readError(err, fallback) {
 
 .group-manage-table {
   margin-bottom: 12px;
+}
+
+.group-drag-handle {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--app-text-muted);
+  cursor: move;
+}
+
+.group-drag-handle:hover {
+  background: var(--app-bg-soft);
+  color: var(--app-text);
 }
 
 .group-table-name {

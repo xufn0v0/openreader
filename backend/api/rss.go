@@ -19,6 +19,16 @@ type rssSourceRequest struct {
 	Icon              string `json:"icon"`
 	Group             string `json:"group"`
 	CustomOrder       *int   `json:"customOrder"`
+	SingleURL         *bool  `json:"singleUrl"`
+	ArticleStyle      *int   `json:"articleStyle"`
+	SortURL           string `json:"sortUrl"`
+	RuleArticles      string `json:"ruleArticles"`
+	RuleTitle         string `json:"ruleTitle"`
+	RulePubDate       string `json:"rulePubDate"`
+	RuleImage         string `json:"ruleImage"`
+	RuleLink          string `json:"ruleLink"`
+	RuleContent       string `json:"ruleContent"`
+	EnableJS          *bool  `json:"enableJs"`
 	Enabled           *bool  `json:"enabled"`
 	UpstreamTitle     string `json:"sourceName"`
 	UpstreamURL       string `json:"sourceUrl"`
@@ -51,13 +61,23 @@ func (s *Server) createRSSSource(c *gin.Context) {
 	}
 	customOrder := req.orderOrDefault(s, userID)
 	source := models.RSSSource{
-		UserID:      userID,
-		Title:       strings.TrimSpace(req.Title),
-		URL:         strings.TrimSpace(req.URL),
-		Icon:        strings.TrimSpace(req.Icon),
-		Group:       strings.TrimSpace(req.Group),
-		CustomOrder: customOrder,
-		Enabled:     enabled,
+		UserID:       userID,
+		Title:        strings.TrimSpace(req.Title),
+		URL:          strings.TrimSpace(req.URL),
+		Icon:         strings.TrimSpace(req.Icon),
+		Group:        strings.TrimSpace(req.Group),
+		CustomOrder:  customOrder,
+		SingleURL:    req.singleURLOrDefault(),
+		ArticleStyle: req.articleStyleOrDefault(),
+		SortURL:      strings.TrimSpace(req.SortURL),
+		RuleArticles: strings.TrimSpace(req.RuleArticles),
+		RuleTitle:    strings.TrimSpace(req.RuleTitle),
+		RulePubDate:  strings.TrimSpace(req.RulePubDate),
+		RuleImage:    strings.TrimSpace(req.RuleImage),
+		RuleLink:     strings.TrimSpace(req.RuleLink),
+		RuleContent:  strings.TrimSpace(req.RuleContent),
+		EnableJS:     req.enableJSOrDefault(),
+		Enabled:      enabled,
 	}
 	if source.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
@@ -97,6 +117,22 @@ func (s *Server) updateRSSSource(c *gin.Context) {
 	source.Group = strings.TrimSpace(req.Group)
 	if req.CustomOrder != nil {
 		source.CustomOrder = *req.CustomOrder
+	}
+	if req.SingleURL != nil {
+		source.SingleURL = *req.SingleURL
+	}
+	if req.ArticleStyle != nil {
+		source.ArticleStyle = *req.ArticleStyle
+	}
+	source.SortURL = strings.TrimSpace(req.SortURL)
+	source.RuleArticles = strings.TrimSpace(req.RuleArticles)
+	source.RuleTitle = strings.TrimSpace(req.RuleTitle)
+	source.RulePubDate = strings.TrimSpace(req.RulePubDate)
+	source.RuleImage = strings.TrimSpace(req.RuleImage)
+	source.RuleLink = strings.TrimSpace(req.RuleLink)
+	source.RuleContent = strings.TrimSpace(req.RuleContent)
+	if req.EnableJS != nil {
+		source.EnableJS = *req.EnableJS
 	}
 	if req.Enabled != nil {
 		source.Enabled = *req.Enabled
@@ -141,6 +177,27 @@ func (r rssSourceRequest) orderOrDefault(s *Server, userID uint) int {
 	var maxOrder int
 	_ = s.db.Model(&models.RSSSource{}).Where("user_id = ?", userID).Select("COALESCE(MAX(custom_order), 0)").Scan(&maxOrder).Error
 	return maxOrder + 1
+}
+
+func (r rssSourceRequest) singleURLOrDefault() bool {
+	if r.SingleURL != nil {
+		return *r.SingleURL
+	}
+	return true
+}
+
+func (r rssSourceRequest) articleStyleOrDefault() int {
+	if r.ArticleStyle != nil {
+		return *r.ArticleStyle
+	}
+	return 0
+}
+
+func (r rssSourceRequest) enableJSOrDefault() bool {
+	if r.EnableJS != nil {
+		return *r.EnableJS
+	}
+	return true
 }
 
 func (s *Server) deleteRSSSource(c *gin.Context) {
@@ -190,6 +247,7 @@ func (s *Server) refreshRSSSource(c *gin.Context) {
 		if article.Link != "" && s.db.Where("user_id = ? AND source_id = ? AND link = ?", userID, source.ID, article.Link).First(&existing).Error == nil {
 			existing.Title = article.Title
 			existing.Author = article.Author
+			existing.Image = article.Image
 			existing.Summary = article.Summary
 			existing.Content = article.Content
 			existing.PublishedAt = article.PublishedAt
@@ -319,20 +377,42 @@ type parsedRSS struct {
 			Author      string `xml:"author"`
 			PubDate     string `xml:"pubDate"`
 			Encoded     string `xml:"encoded"`
+			Enclosure   struct {
+				URL  string `xml:"url,attr"`
+				Type string `xml:"type,attr"`
+			} `xml:"enclosure"`
+			MediaThumbnail []struct {
+				URL string `xml:"url,attr"`
+			} `xml:"thumbnail"`
+			MediaContent []struct {
+				URL    string `xml:"url,attr"`
+				Type   string `xml:"type,attr"`
+				Medium string `xml:"medium,attr"`
+			} `xml:"content"`
 		} `xml:"item"`
 	} `xml:"channel"`
 	Entries []struct {
 		Title string `xml:"title"`
 		Link  []struct {
 			Href string `xml:"href,attr"`
+			Rel  string `xml:"rel,attr"`
+			Type string `xml:"type,attr"`
 		} `xml:"link"`
 		Summary string `xml:"summary"`
 		Content string `xml:"content"`
 		Author  struct {
 			Name string `xml:"name"`
 		} `xml:"author"`
-		Published string `xml:"published"`
-		Updated   string `xml:"updated"`
+		Published      string `xml:"published"`
+		Updated        string `xml:"updated"`
+		MediaThumbnail []struct {
+			URL string `xml:"url,attr"`
+		} `xml:"thumbnail"`
+		MediaContent []struct {
+			URL    string `xml:"url,attr"`
+			Type   string `xml:"type,attr"`
+			Medium string `xml:"medium,attr"`
+		} `xml:"content"`
 	} `xml:"entry"`
 }
 
@@ -351,6 +431,7 @@ func fetchRSSArticles(source models.RSSSource) ([]models.RSSArticle, error) {
 			Title:       strings.TrimSpace(item.Title),
 			Link:        strings.TrimSpace(item.Link),
 			Author:      firstNonEmpty(item.Creator, item.Author),
+			Image:       rssItemImage(item.Enclosure.URL, item.Enclosure.Type, item.MediaThumbnail, item.MediaContent),
 			Summary:     strings.TrimSpace(item.Description),
 			Content:     strings.TrimSpace(item.Encoded),
 			PublishedAt: parseRSSDate(item.PubDate),
@@ -365,6 +446,7 @@ func fetchRSSArticles(source models.RSSSource) ([]models.RSSArticle, error) {
 			Title:       strings.TrimSpace(entry.Title),
 			Link:        strings.TrimSpace(link),
 			Author:      strings.TrimSpace(entry.Author.Name),
+			Image:       atomEntryImage(entry.Link, entry.MediaThumbnail, entry.MediaContent),
 			Summary:     strings.TrimSpace(entry.Summary),
 			Content:     strings.TrimSpace(entry.Content),
 			PublishedAt: parseRSSDate(firstNonEmpty(entry.Published, entry.Updated)),
@@ -377,6 +459,89 @@ func fetchRSSArticles(source models.RSSSource) ([]models.RSSArticle, error) {
 		}
 	}
 	return filtered, nil
+}
+
+func rssItemImage(enclosureURL string, enclosureType string, thumbnails []struct {
+	URL string `xml:"url,attr"`
+}, contents []struct {
+	URL    string `xml:"url,attr"`
+	Type   string `xml:"type,attr"`
+	Medium string `xml:"medium,attr"`
+}) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(enclosureType)), "image/") {
+		if url := strings.TrimSpace(enclosureURL); url != "" {
+			return url
+		}
+	}
+	for _, thumb := range thumbnails {
+		if url := strings.TrimSpace(thumb.URL); url != "" {
+			return url
+		}
+	}
+	for _, content := range contents {
+		if isRSSImageMedia(content.URL, content.Type, content.Medium) {
+			return strings.TrimSpace(content.URL)
+		}
+	}
+	if url := strings.TrimSpace(enclosureURL); looksLikeImageURL(url) {
+		return url
+	}
+	return ""
+}
+
+func atomEntryImage(links []struct {
+	Href string `xml:"href,attr"`
+	Rel  string `xml:"rel,attr"`
+	Type string `xml:"type,attr"`
+}, thumbnails []struct {
+	URL string `xml:"url,attr"`
+}, contents []struct {
+	URL    string `xml:"url,attr"`
+	Type   string `xml:"type,attr"`
+	Medium string `xml:"medium,attr"`
+}) string {
+	for _, link := range links {
+		rel := strings.ToLower(strings.TrimSpace(link.Rel))
+		if rel == "enclosure" || rel == "image" {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(link.Type)), "image/") || looksLikeImageURL(link.Href) {
+				return strings.TrimSpace(link.Href)
+			}
+		}
+	}
+	for _, thumb := range thumbnails {
+		if url := strings.TrimSpace(thumb.URL); url != "" {
+			return url
+		}
+	}
+	for _, content := range contents {
+		if isRSSImageMedia(content.URL, content.Type, content.Medium) {
+			return strings.TrimSpace(content.URL)
+		}
+	}
+	return ""
+}
+
+func isRSSImageMedia(url string, mediaType string, medium string) bool {
+	if strings.TrimSpace(url) == "" {
+		return false
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	medium = strings.ToLower(strings.TrimSpace(medium))
+	return strings.HasPrefix(mediaType, "image/") || medium == "image" || looksLikeImageURL(url)
+}
+
+func looksLikeImageURL(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.HasSuffix(value, ".jpg") ||
+		strings.HasSuffix(value, ".jpeg") ||
+		strings.HasSuffix(value, ".png") ||
+		strings.HasSuffix(value, ".gif") ||
+		strings.HasSuffix(value, ".webp") ||
+		strings.Contains(value, ".jpg?") ||
+		strings.Contains(value, ".jpeg?") ||
+		strings.Contains(value, ".png?") ||
+		strings.Contains(value, ".gif?") ||
+		strings.Contains(value, ".webp?")
 }
 
 func parseRSSDate(value string) time.Time {

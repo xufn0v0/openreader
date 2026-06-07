@@ -14,7 +14,7 @@
             :category-name="categoryName(book.categoryId)"
             :chapters="chapters"
             :progress="bookProgress?.percent || 0"
-            :browser-cache-count="book.sourceId > 0 ? browserCacheCount : -1"
+            :browser-cache-count="book.id ? browserCacheCount : -1"
             :status-label="book.sourceId ? '远程书籍' : '本地书籍'"
             :status-type="book.sourceId ? 'success' : 'info'"
             :cover-editable="true"
@@ -32,9 +32,9 @@
               <el-button v-else :loading="refreshingBook" @click="refreshCurrentLocalBook">刷新本地书</el-button>
               <el-button v-if="isTextLocalBook" :loading="refreshingBook" @click="changeLocalTocRule">修改目录规则</el-button>
               <el-button v-if="book.sourceId > 0" :icon="Switch" :loading="loadingSourceCandidates" @click="openChangeSource">换源</el-button>
-              <el-button v-if="book.sourceId > 0" :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存到浏览器</el-button>
+              <el-button :loading="cachingLocalBook" @click="cacheCurrentBookLocal">缓存到浏览器</el-button>
               <el-button v-if="book.sourceId > 0" :loading="cachingBook" @click="cacheCurrentBook">缓存到服务器</el-button>
-              <el-button v-if="book.sourceId > 0" :loading="clearingLocalCache" @click="clearCurrentBookLocalCache">清浏览器缓存</el-button>
+              <el-button :loading="clearingLocalCache" @click="clearCurrentBookLocalCache">清浏览器缓存</el-button>
               <el-button v-if="book.sourceId > 0" :loading="clearingCache" @click="clearCurrentBookCache">清服务器缓存</el-button>
               <el-button type="danger" plain @click="deleteCurrentBook">删除</el-button>
               <el-select v-model="categoryDraft" placeholder="设置分组" clearable size="default" class="category-select" @change="changeCategory">
@@ -50,7 +50,7 @@
             <section class="app-panel tab-panel">
               <div class="tab-toolbar">
                 <el-switch v-model="tocReverse" active-text="倒序" inactive-text="正序" />
-                <span v-if="book.sourceId > 0" class="toc-cache-summary">浏览器缓存 {{ browserCacheCount }} 章</span>
+                <span class="toc-cache-summary">浏览器缓存 {{ browserCacheCount }} 章</span>
               </div>
               <ReaderTocPanel
                 ref="tocPanelRef"
@@ -620,14 +620,14 @@ async function applyBookUpdate(incoming, options = {}) {
 async function invalidateBookReaderCaches(targetBook, options = {}) {
   if (!targetBook?.id) return
   await invalidateReaderDataCache(targetBook.id, { book: true, chapters: true })
-  if (options.clearBrowser && Number(targetBook.sourceId || 0) > 0) {
+  if (options.clearBrowser) {
     await clearBookBrowserChapterCache(targetBook, targetBook.id).catch(() => 0)
     browserCachedChapters.value = {}
   }
 }
 
 async function refreshBrowserCacheMap() {
-  if (!book.value || Number(book.value.sourceId || 0) <= 0) {
+  if (!book.value?.id) {
     browserCachedChapters.value = {}
     return
   }

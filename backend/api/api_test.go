@@ -971,6 +971,55 @@ func TestListBooksOrdersByRecentProgressThenShelfTime(t *testing.T) {
 	}
 }
 
+func TestListBooksIncludesRemoteCachedChapterCount(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	remoteBook := models.Book{UserID: user.ID, SourceID: 1, Title: "远程缓存书"}
+	localBook := models.Book{UserID: user.ID, SourceID: 0, Title: "本地书"}
+	if err := server.db.Create(&remoteBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&localBook).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: remoteBook.ID, Index: 0, Title: "远程已缓存", CachePath: "remote-cache/chapter-1.txt"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: remoteBook.ID, Index: 1, Title: "远程未缓存"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: localBook.ID, Index: 0, Title: "本地章节", CachePath: "local-cache/chapter-1.txt"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/books", nil)
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list books: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var items []bookListItem
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	countByTitle := map[string]int64{}
+	for _, item := range items {
+		countByTitle[item.Title] = item.CachedChapterCount
+	}
+	if countByTitle["远程缓存书"] != 1 {
+		t.Fatalf("expected remote cached count 1, got %+v", countByTitle)
+	}
+	if countByTitle["本地书"] != 0 {
+		t.Fatalf("expected local book server cached count 0, got %+v", countByTitle)
+	}
+}
+
 func TestListBooksOrdersNewImportBeforeStaleProgress(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -2813,6 +2862,15 @@ func TestCacheBookContentUsesCachedChapter(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"cached":1`) {
 		t.Fatalf("expected cached count 1, got %s", w.Body.String())
 	}
+	var result struct {
+		Book bookListItem `json:"book"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Book.CachedChapterCount != 1 {
+		t.Fatalf("expected cached chapter count in response book, got %+v", result.Book)
+	}
 }
 
 func TestCacheBookContentDefaultsToFiftyChapters(t *testing.T) {
@@ -3276,6 +3334,171 @@ func TestExportBooks(t *testing.T) {
 	}
 	if exported.Count != 1 || len(exported.Books) != 1 || exported.Books[0].Book.Title != "导出书" || len(exported.Books[0].Chapters) != 1 || len(exported.Books[0].Bookmarks) != 1 {
 		t.Fatalf("unexpected export payload: %+v", exported)
+	}
+}
+
+func TestExportBooksAsTXT(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	cachePath := filepath.Join("export", "chapter.txt")
+	fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("第一章正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "导出TXT书", Author: "作者"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: book.ID, Index: 0, Title: "第一章", CachePath: cachePath}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"bookIds":[` + strconv.FormatUint(uint64(book.ID), 10) + `],"format":"txt"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books/export", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export txt: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "text/plain") {
+		t.Fatalf("expected text/plain export, got %q", contentType)
+	}
+	text := w.Body.String()
+	if !strings.Contains(text, "导出TXT书") || !strings.Contains(text, "第一章") || !strings.Contains(text, "第一章正文") {
+		t.Fatalf("unexpected txt export: %q", text)
+	}
+}
+
+func TestExportMultipleBooksAsTXTZip(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	var bookIDs []string
+	for i := 0; i < 2; i++ {
+		cachePath := filepath.Join("export-zip", fmt.Sprintf("chapter-%d.txt", i))
+		fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(fmt.Sprintf("正文%d", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		book := models.Book{UserID: user.ID, Title: fmt.Sprintf("导出Zip书%d", i)}
+		if err := server.db.Create(&book).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := server.db.Create(&models.Chapter{BookID: book.ID, Index: 0, Title: "第一章", CachePath: cachePath}).Error; err != nil {
+			t.Fatal(err)
+		}
+		bookIDs = append(bookIDs, strconv.FormatUint(uint64(book.ID), 10))
+	}
+
+	body := `{"bookIds":[` + strings.Join(bookIDs, ",") + `],"format":"txt"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books/export", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export txt zip: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	reader, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.File) != 2 {
+		t.Fatalf("expected 2 txt files, got %d", len(reader.File))
+	}
+	var contents string
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents += string(data)
+	}
+	if !strings.Contains(contents, "正文0") || !strings.Contains(contents, "正文1") {
+		t.Fatalf("unexpected zip contents: %q", contents)
+	}
+}
+
+func TestExportBookAsEPUB(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	cachePath := filepath.Join("export-epub", "chapter.txt")
+	fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte("EPUB正文"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "导出EPUB书", Author: "作者"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&models.Chapter{BookID: book.ID, Index: 0, Title: "第一章", CachePath: cachePath}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"bookIds":[` + strconv.FormatUint(uint64(book.ID), 10) + `],"format":"epub"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books/export", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("export epub: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "application/epub+zip") {
+		t.Fatalf("expected epub content type, got %q", contentType)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, file := range reader.File {
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(handle)
+		_ = handle.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[file.Name] = string(data)
+	}
+	if files["mimetype"] != "application/epub+zip" {
+		t.Fatalf("missing epub mimetype: %q", files["mimetype"])
+	}
+	if !strings.Contains(files["OEBPS/content.opf"], "导出EPUB书") || !strings.Contains(files["OEBPS/nav.xhtml"], "第一章") || !strings.Contains(files["OEBPS/chapter-0001.xhtml"], "EPUB正文") {
+		t.Fatalf("unexpected epub files: %+v", files)
 	}
 }
 
@@ -4036,7 +4259,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rssFile.Write([]byte(`[{"sourceName":"OpenReader RSS","sourceUrl":"https://rss.example/openreader.xml","sourceIcon":"https://rss.example/icon.png","sourceGroup":"资讯","customOrder":7,"enabled":false}]`)); err != nil {
+	if _, err := rssFile.Write([]byte(`[{"sourceName":"OpenReader RSS","sourceUrl":"https://rss.example/openreader.xml","sourceIcon":"https://rss.example/icon.png","sourceGroup":"资讯","customOrder":7,"singleUrl":false,"articleStyle":2,"sortUrl":"综合::https://rss.example/openreader-sort.xml","ruleArticles":"article","ruleTitle":"title","rulePubDate":"date","ruleImage":"img","ruleLink":"a@href","ruleContent":"content","enableJs":false,"enabled":false}]`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := zipWriter.Close(); err != nil {
@@ -4116,6 +4339,9 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if rssSource.Title != "OpenReader RSS" || rssSource.Icon != "https://rss.example/icon.png" || rssSource.Group != "资讯" || rssSource.CustomOrder != 7 || rssSource.Enabled {
 		t.Fatalf("unexpected restored rss source: %+v", rssSource)
 	}
+	if rssSource.SingleURL || rssSource.ArticleStyle != 2 || rssSource.SortURL != "综合::https://rss.example/openreader-sort.xml" || rssSource.RuleArticles != "article" || rssSource.RuleTitle != "title" || rssSource.RulePubDate != "date" || rssSource.RuleImage != "img" || rssSource.RuleLink != "a@href" || rssSource.RuleContent != "content" || rssSource.EnableJS {
+		t.Fatalf("unexpected restored advanced rss source fields: %+v", rssSource)
+	}
 }
 
 func TestCreateReplaceRuleRespectsEnabledFlag(t *testing.T) {
@@ -4183,6 +4409,7 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 							<link>https://rss.example/a</link>
 							<description>文章摘要</description>
 							<author>作者</author>
+							<enclosure url="https://rss.example/a.jpg" type="image/jpeg"></enclosure>
 							<pubDate>Mon, 02 Jan 2006 15:04:05 +0000</pubDate>
 						</item>
 					</channel></rss>`)),
@@ -4221,6 +4448,9 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 	if w3.Code != http.StatusOK || !strings.Contains(w3.Body.String(), "RSS 文章") || !strings.Contains(w3.Body.String(), "文章摘要") {
 		t.Fatalf("list rss articles: expected article, got %d: %s", w3.Code, w3.Body.String())
 	}
+	if !strings.Contains(w3.Body.String(), "https://rss.example/a.jpg") {
+		t.Fatalf("list rss articles: expected article image, got %d: %s", w3.Code, w3.Body.String())
+	}
 
 	var count int64
 	if err := server.db.Model(&models.RSSArticle{}).Count(&count).Error; err != nil {
@@ -4228,6 +4458,13 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected one rss article, got %d", count)
+	}
+	var article models.RSSArticle
+	if err := server.db.Where("link = ?", "https://rss.example/a").First(&article).Error; err != nil {
+		t.Fatal(err)
+	}
+	if article.Image != "https://rss.example/a.jpg" {
+		t.Fatalf("expected rss article image to persist, got %+v", article)
 	}
 }
 
@@ -4256,7 +4493,7 @@ func TestRSSSourcePreservesUpstreamFieldsAndOrder(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
 
-	first := `{"sourceName":"后导入","sourceUrl":"https://rss.example/late.xml","sourceIcon":"https://rss.example/late.png","sourceGroup":"新闻","customOrder":20,"enabled":true}`
+	first := `{"sourceName":"后导入","sourceUrl":"https://rss.example/late.xml","sourceIcon":"https://rss.example/late.png","sourceGroup":"新闻","customOrder":20,"singleUrl":false,"articleStyle":1,"sortUrl":"分类::https://rss.example/cat.xml","ruleArticles":"//item","ruleTitle":"title","rulePubDate":"pubDate","ruleImage":"image","ruleLink":"link","ruleContent":"content","enableJs":false,"enabled":true}`
 	req := httptest.NewRequest(http.MethodPost, "/api/rss/sources", strings.NewReader(first))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -4271,6 +4508,9 @@ func TestRSSSourcePreservesUpstreamFieldsAndOrder(t *testing.T) {
 	}
 	if source.Title != "后导入" || source.URL != "https://rss.example/late.xml" || source.Icon != "https://rss.example/late.png" || source.Group != "新闻" || source.CustomOrder != 20 {
 		t.Fatalf("upstream rss fields were not preserved: %+v", source)
+	}
+	if source.SingleURL || source.ArticleStyle != 1 || source.SortURL != "分类::https://rss.example/cat.xml" || source.RuleArticles != "//item" || source.RuleTitle != "title" || source.RulePubDate != "pubDate" || source.RuleImage != "image" || source.RuleLink != "link" || source.RuleContent != "content" || source.EnableJS {
+		t.Fatalf("upstream advanced rss fields were not preserved: %+v", source)
 	}
 
 	second := `{"title":"先显示","url":"https://rss.example/early.xml","icon":"https://rss.example/early.png","group":"技术","customOrder":1,"enabled":true}`
@@ -4306,13 +4546,19 @@ func TestBackupExportsRSSSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := models.RSSSource{
-		UserID:      user.ID,
-		Title:       "备份 RSS",
-		URL:         "https://rss.example/backup.xml",
-		Icon:        "https://rss.example/backup.png",
-		Group:       "资讯",
-		CustomOrder: 4,
-		Enabled:     true,
+		UserID:       user.ID,
+		Title:        "备份 RSS",
+		URL:          "https://rss.example/backup.xml",
+		Icon:         "https://rss.example/backup.png",
+		Group:        "资讯",
+		CustomOrder:  4,
+		SingleURL:    false,
+		ArticleStyle: 1,
+		SortURL:      "分类::https://rss.example/backup-cat.xml",
+		RuleImage:    "cover",
+		RuleContent:  "content",
+		EnableJS:     false,
+		Enabled:      true,
 	}
 	if err := server.db.Create(&source).Error; err != nil {
 		t.Fatal(err)
@@ -4344,7 +4590,7 @@ func TestBackupExportsRSSSources(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, expected := range []string{`"sourceName": "备份 RSS"`, `"sourceUrl": "https://rss.example/backup.xml"`, `"sourceIcon": "https://rss.example/backup.png"`, `"sourceGroup": "资讯"`} {
+		for _, expected := range []string{`"sourceName": "备份 RSS"`, `"sourceUrl": "https://rss.example/backup.xml"`, `"sourceIcon": "https://rss.example/backup.png"`, `"sourceGroup": "资讯"`, `"singleUrl": false`, `"sortUrl": "分类::https://rss.example/backup-cat.xml"`, `"ruleImage": "cover"`, `"ruleContent": "content"`} {
 			if !strings.Contains(string(data), expected) {
 				t.Fatalf("expected %s in rssSources.json, got %s", expected, string(data))
 			}

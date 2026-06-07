@@ -20,8 +20,8 @@ export function batchBooks(payload) {
   return api.post('/books/batch', payload)
 }
 
-export function exportBooks(bookIds) {
-  return api.post('/books/export', { bookIds }, { responseType: 'blob' })
+export function exportBooks(bookIds, format = 'json') {
+  return api.post('/books/export', { bookIds, format }, { responseType: 'blob' })
 }
 
 export function getBook(id) {
