@@ -39,9 +39,9 @@
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshBookInfo(overlay.bookInfoBook)">刷新目录</el-button>
       <el-button v-else plain :loading="refreshingBookId === overlay.bookInfoBook.id" @click="refreshLocalBookInfo(overlay.bookInfoBook)">刷新本地书</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="sourceSwitchLoading" @click="openGlobalSourceSwitch(overlay.bookInfoBook)">换源</el-button>
-      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存到浏览器</el-button>
+      <el-button plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBookLocal')">缓存到浏览器</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'cacheBook')">缓存到服务器</el-button>
-      <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookLocalCache')">清浏览器缓存</el-button>
+      <el-button plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookLocalCache')">清浏览器缓存</el-button>
       <el-button v-if="Number(overlay.bookInfoBook.sourceId || 0) > 0" plain :loading="cachingBookId === overlay.bookInfoBook.id" @click="cacheBook(overlay.bookInfoBook, 'deleteBookCache')">清服务器缓存</el-button>
       <el-button plain @click="goDetail(overlay.bookInfoBook)">详情</el-button>
       <el-button plain :loading="loadingUpdates" @click="refreshShelf">刷新书架</el-button>
@@ -826,7 +826,7 @@ const bookInfoProgress = computed(() => {
   return bookProgress(book)?.percent || 0
 })
 const bookInfoBrowserCacheCount = computed(() => (
-  overlay.bookInfoBook?.sourceId ? localCacheCount(overlay.bookInfoBook) : -1
+  overlay.bookInfoBook?.id ? localCacheCount(overlay.bookInfoBook) : -1
 ))
 const sourceStatusLabel = computed(() => overlay.bookInfoBook?.sourceId ? '远程书籍' : '本地书籍')
 const groupSetRows = computed(() => [
@@ -988,7 +988,7 @@ watch(
       if (overlay.bookInfoBook?.sourceId && !sourceRows.value.length) {
         await loadSourceRows()
       }
-      if (overlay.bookInfoBook?.sourceId) {
+      if (overlay.bookInfoBook?.id) {
         await refreshBookInfoBrowserCacheCount(overlay.bookInfoBook)
       }
     } catch (err) {
@@ -1175,7 +1175,7 @@ async function saveBookGroupSetting() {
 }
 
 async function refreshManagedBrowserCacheCounts() {
-  const rows = managedBooks.value.filter(book => Number(book.sourceId || 0) > 0)
+  const rows = managedBooks.value.filter(book => book?.id)
   try {
     localCacheCounts.value = await countBooksBrowserCachedChapters(rows)
   } catch {
@@ -1184,7 +1184,7 @@ async function refreshManagedBrowserCacheCounts() {
 }
 
 async function refreshBookInfoBrowserCacheCount(book) {
-  if (!book?.id || Number(book.sourceId || 0) <= 0) return
+  if (!book?.id) return
   try {
     const map = await listBookBrowserCachedChapters(book, book.id)
     localCacheCounts.value = {
