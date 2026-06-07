@@ -281,8 +281,8 @@ export const useBookshelfStore = defineStore('bookshelf', {
       const { data } = await batchBooks({ action: 'clear-cache', bookIds })
       return data
     },
-    async exportSelectedBooks(bookIds) {
-      const { data } = await exportBooks(bookIds)
+    async exportSelectedBooks(bookIds, format = 'json') {
+      const { data } = await exportBooks(bookIds, format)
       return data
     },
     async renameCategory(categoryId, payload) {

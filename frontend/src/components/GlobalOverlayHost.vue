@@ -192,6 +192,7 @@
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item command="txt">导出为 TXT</el-dropdown-item>
                 <el-dropdown-item command="json">导出书籍数据</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -222,7 +223,7 @@
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookLocalCache')">清浏览器</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">服务器缓存</el-button>
           <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookCache')">清服务器</el-button>
-          <el-button size="small" text @click="exportBook(book)">导出</el-button>
+          <el-button size="small" text @click="exportBook(book, 'txt')">导出TXT</el-button>
         </footer>
       </article>
     </div>
@@ -1611,7 +1612,7 @@ async function batchExportBooks() {
   batchBusy.value = true
   try {
     const bookIds = [...selectedBookIds.value]
-    const blob = await bookshelf.exportSelectedBooks(bookIds)
+    const blob = await bookshelf.exportSelectedBooks(bookIds, 'json')
     downloadBlob(blob, `openreader-books-${bookIds.length}.json`)
     ElMessage.success(`已导出 ${bookIds.length} 本书`)
   } catch (err) {
@@ -1707,17 +1708,24 @@ async function clearBookLocalCache(book) {
   }
 }
 
-async function exportBook(book) {
+async function exportBook(book, format = 'txt') {
   batchBusy.value = true
   try {
-    const blob = await bookshelf.exportSelectedBooks([book.id])
-    downloadBlob(blob, `openreader-book-${book.id}.json`)
+    const normalizedFormat = format === 'json' ? 'json' : 'txt'
+    const blob = await bookshelf.exportSelectedBooks([book.id], normalizedFormat)
+    downloadBlob(blob, exportBookFilename(book, normalizedFormat))
     ElMessage.success(`已导出《${book.title}》`)
   } catch (err) {
     ElMessage.error(readError(err, '导出失败'))
   } finally {
     batchBusy.value = false
   }
+}
+
+function exportBookFilename(book, format) {
+  const fallback = `book-${book?.id || Date.now()}`
+  const title = String(book?.title || fallback).replace(/[\\/:*?"<>|]/g, '-').trim() || fallback
+  return `${title}.${format === 'json' ? 'json' : 'txt'}`
 }
 
 function downloadBlob(blob, filename) {

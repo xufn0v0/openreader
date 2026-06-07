@@ -1,11 +1,14 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -305,6 +308,7 @@ type batchBooksRequest struct {
 
 type bookIDsRequest struct {
 	BookIDs []uint `json:"bookIds" binding:"required"`
+	Format  string `json:"format"`
 }
 
 func (s *Server) batchBooks(c *gin.Context) {
@@ -476,7 +480,19 @@ func (s *Server) exportBooks(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load books"})
 		return
 	}
+	format := strings.ToLower(strings.TrimSpace(request.Format))
+	if format == "" || format == "json" {
+		s.exportBooksJSON(c, userID, books)
+		return
+	}
+	if format == "txt" {
+		s.exportBooksTXT(c, books)
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported export format"})
+}
 
+func (s *Server) exportBooksJSON(c *gin.Context, userID uint, books []models.Book) {
 	type exportedBook struct {
 		Book      models.Book       `json:"book"`
 		Chapters  []models.Chapter  `json:"chapters"`
@@ -509,6 +525,112 @@ func (s *Server) exportBooks(c *gin.Context) {
 		"count":      len(exported),
 		"books":      exported,
 	})
+}
+
+func (s *Server) exportBooksTXT(c *gin.Context, books []models.Book) {
+	if len(books) == 1 {
+		book := books[0]
+		content, err := s.exportBookPlainText(book)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export book"})
+			return
+		}
+		filename := safeDownloadFilename(book.Title, "txt")
+		setAttachmentHeader(c, filename)
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(content))
+		return
+	}
+
+	var buffer bytes.Buffer
+	zipWriter := zip.NewWriter(&buffer)
+	for _, book := range books {
+		content, err := s.exportBookPlainText(book)
+		if err != nil {
+			_ = zipWriter.Close()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export book"})
+			return
+		}
+		writer, err := zipWriter.Create(safeDownloadFilename(fmt.Sprintf("%s-%d", book.Title, book.ID), "txt"))
+		if err != nil {
+			_ = zipWriter.Close()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export book"})
+			return
+		}
+		if _, err := writer.Write([]byte(content)); err != nil {
+			_ = zipWriter.Close()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export book"})
+			return
+		}
+	}
+	if err := zipWriter.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export book"})
+		return
+	}
+	setAttachmentHeader(c, "openreader-books-txt.zip")
+	c.Data(http.StatusOK, "application/zip", buffer.Bytes())
+}
+
+func (s *Server) exportBookPlainText(book models.Book) (string, error) {
+	var chapters []models.Chapter
+	if err := s.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		return "", err
+	}
+	var builder strings.Builder
+	title := strings.TrimSpace(book.Title)
+	if title != "" {
+		builder.WriteString(title)
+		builder.WriteString("\n")
+	}
+	author := strings.TrimSpace(book.Author)
+	if author != "" {
+		builder.WriteString("作者：")
+		builder.WriteString(author)
+		builder.WriteString("\n")
+	}
+	if title != "" || author != "" {
+		builder.WriteString("\n")
+	}
+	for _, chapter := range chapters {
+		chapterTitle := strings.TrimSpace(chapter.Title)
+		if chapterTitle != "" {
+			builder.WriteString(chapterTitle)
+			builder.WriteString("\n\n")
+		}
+		content := strings.TrimSpace(s.loadChapterText(book, &chapter))
+		if content != "" {
+			builder.WriteString(content)
+			builder.WriteString("\n")
+		}
+		builder.WriteString("\n")
+	}
+	return builder.String(), nil
+}
+
+func safeDownloadFilename(name string, ext string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "openreader-book"
+	}
+	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "", "<", "-", ">", "-", "|", "-", "\r", "", "\n", "")
+	name = replacer.Replace(name)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "openreader-book"
+	}
+	return name + "." + strings.TrimPrefix(ext, ".")
+}
+
+func setAttachmentHeader(c *gin.Context, filename string) {
+	ascii := strings.Map(func(r rune) rune {
+		if r > 127 {
+			return -1
+		}
+		return r
+	}, filename)
+	if strings.TrimSpace(ascii) == "" || strings.HasPrefix(ascii, ".") {
+		ascii = "openreader-export" + filepath.Ext(filename)
+	}
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii, url.PathEscape(filename)))
 }
 
 func (s *Server) refreshBook(c *gin.Context) {
