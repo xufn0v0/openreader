@@ -4238,6 +4238,53 @@ func TestCreateRSSSourceRespectsEnabledFlag(t *testing.T) {
 	}
 }
 
+func TestRSSSourcePreservesUpstreamFieldsAndOrder(t *testing.T) {
+	router, _ := setupTestServer(t)
+	token := authHeader(t, router)
+
+	first := `{"sourceName":"后导入","sourceUrl":"https://rss.example/late.xml","sourceIcon":"https://rss.example/late.png","sourceGroup":"新闻","customOrder":20,"enabled":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/rss/sources", strings.NewReader(first))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create upstream rss source: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var source models.RSSSource
+	if err := json.Unmarshal(w.Body.Bytes(), &source); err != nil {
+		t.Fatal(err)
+	}
+	if source.Title != "后导入" || source.URL != "https://rss.example/late.xml" || source.Icon != "https://rss.example/late.png" || source.Group != "新闻" || source.CustomOrder != 20 {
+		t.Fatalf("upstream rss fields were not preserved: %+v", source)
+	}
+
+	second := `{"title":"先显示","url":"https://rss.example/early.xml","icon":"https://rss.example/early.png","group":"技术","customOrder":1,"enabled":true}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/rss/sources", strings.NewReader(second))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", token)
+	w2 := httptest.NewRecorder()
+	router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("create current rss source: expected 201, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	req3 := httptest.NewRequest(http.MethodGet, "/api/rss/sources", nil)
+	req3.Header.Set("Authorization", token)
+	w3 := httptest.NewRecorder()
+	router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("list rss sources: expected 200, got %d: %s", w3.Code, w3.Body.String())
+	}
+	var sources []models.RSSSource
+	if err := json.Unmarshal(w3.Body.Bytes(), &sources); err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Title != "先显示" || sources[1].Title != "后导入" {
+		t.Fatalf("expected sources ordered by customOrder, got %+v", sources)
+	}
+}
+
 func TestUploadAssetStoresPublicFile(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)

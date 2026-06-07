@@ -14,15 +14,23 @@ import (
 )
 
 type rssSourceRequest struct {
-	Title   string `json:"title"`
-	URL     string `json:"url" binding:"required"`
-	Enabled *bool  `json:"enabled"`
+	Title             string `json:"title"`
+	URL               string `json:"url"`
+	Icon              string `json:"icon"`
+	Group             string `json:"group"`
+	CustomOrder       *int   `json:"customOrder"`
+	Enabled           *bool  `json:"enabled"`
+	UpstreamTitle     string `json:"sourceName"`
+	UpstreamURL       string `json:"sourceUrl"`
+	UpstreamIcon      string `json:"sourceIcon"`
+	UpstreamGroup     string `json:"sourceGroup"`
+	UpstreamIsEnabled *bool  `json:"isEnabled"`
 }
 
 func (s *Server) listRSSSources(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	var sources []models.RSSSource
-	if err := s.db.Where("user_id = ?", userID).Order("updated_at desc").Find(&sources).Error; err != nil {
+	if err := s.db.Where("user_id = ?", userID).Order("custom_order asc, updated_at desc").Find(&sources).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list RSS sources"})
 		return
 	}
@@ -36,15 +44,20 @@ func (s *Server) createRSSSource(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
 		return
 	}
+	req.normalize()
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	customOrder := req.orderOrDefault(s, userID)
 	source := models.RSSSource{
-		UserID:  userID,
-		Title:   strings.TrimSpace(req.Title),
-		URL:     strings.TrimSpace(req.URL),
-		Enabled: enabled,
+		UserID:      userID,
+		Title:       strings.TrimSpace(req.Title),
+		URL:         strings.TrimSpace(req.URL),
+		Icon:        strings.TrimSpace(req.Icon),
+		Group:       strings.TrimSpace(req.Group),
+		CustomOrder: customOrder,
+		Enabled:     enabled,
 	}
 	if source.URL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
@@ -77,8 +90,14 @@ func (s *Server) updateRSSSource(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
 		return
 	}
+	req.normalize()
 	source.Title = strings.TrimSpace(req.Title)
 	source.URL = strings.TrimSpace(req.URL)
+	source.Icon = strings.TrimSpace(req.Icon)
+	source.Group = strings.TrimSpace(req.Group)
+	if req.CustomOrder != nil {
+		source.CustomOrder = *req.CustomOrder
+	}
 	if req.Enabled != nil {
 		source.Enabled = *req.Enabled
 	}
@@ -95,6 +114,33 @@ func (s *Server) updateRSSSource(c *gin.Context) {
 	}
 	s.broadcastRSSUpdate(userID, "source-update", gin.H{"sourceId": source.ID})
 	c.JSON(http.StatusOK, source)
+}
+
+func (r *rssSourceRequest) normalize() {
+	if strings.TrimSpace(r.Title) == "" {
+		r.Title = r.UpstreamTitle
+	}
+	if strings.TrimSpace(r.URL) == "" {
+		r.URL = r.UpstreamURL
+	}
+	if strings.TrimSpace(r.Icon) == "" {
+		r.Icon = r.UpstreamIcon
+	}
+	if strings.TrimSpace(r.Group) == "" {
+		r.Group = r.UpstreamGroup
+	}
+	if r.Enabled == nil && r.UpstreamIsEnabled != nil {
+		r.Enabled = r.UpstreamIsEnabled
+	}
+}
+
+func (r rssSourceRequest) orderOrDefault(s *Server, userID uint) int {
+	if r.CustomOrder != nil && *r.CustomOrder > 0 {
+		return *r.CustomOrder
+	}
+	var maxOrder int
+	_ = s.db.Model(&models.RSSSource{}).Where("user_id = ?", userID).Select("COALESCE(MAX(custom_order), 0)").Scan(&maxOrder).Error
+	return maxOrder + 1
 }
 
 func (s *Server) deleteRSSSource(c *gin.Context) {

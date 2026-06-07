@@ -121,13 +121,16 @@ type ReplaceRule struct {
 }
 
 type RSSSource struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	UserID    uint      `json:"userId" gorm:"not null;index"`
-	Title     string    `json:"title" gorm:"size:160;not null"`
-	URL       string    `json:"url" gorm:"size:800;not null"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          uint      `json:"id" gorm:"primaryKey"`
+	UserID      uint      `json:"userId" gorm:"not null;index"`
+	Title       string    `json:"title" gorm:"size:160;not null"`
+	URL         string    `json:"url" gorm:"size:800;not null"`
+	Icon        string    `json:"icon" gorm:"size:800"`
+	Group       string    `json:"group" gorm:"size:120"`
+	CustomOrder int       `json:"customOrder" gorm:"default:0"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 type RSSArticle struct {
