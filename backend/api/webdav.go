@@ -274,16 +274,27 @@ func (s *Server) restoreWebDAVBackup(c *gin.Context) {
 func (s *Server) importFromWebDAV(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 
-	var req struct {
-		Paths      []string `json:"paths" binding:"required"`
-		CategoryID *uint    `json:"categoryId"`
-	}
+	var req localBookImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "paths is required"})
 		return
 	}
-	if !s.validateCategory(c, userID, req.CategoryID) {
+	paths := req.requestedPaths()
+	if len(paths) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "paths is required"})
 		return
+	}
+	categoryIDs := categoryIDsFromRequest(req.CategoryID, req.CategoryIDs)
+	if len(req.CategoryIDs) > 0 {
+		if !s.validateCategoryIDs(c, userID, categoryIDs) {
+			return
+		}
+	} else if !s.validateCategory(c, userID, req.CategoryID) {
+		return
+	}
+	var primaryCategoryID *uint
+	if len(categoryIDs) > 0 {
+		primaryCategoryID = &categoryIDs[0]
 	}
 
 	userName, ok := s.currentUserName(c, userID)
@@ -295,8 +306,9 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 	imported := make([]gin.H, 0)
 	importedBooks := make([]bookListItem, 0)
 	seen := make(map[string]bool)
+	itemByPath := req.itemByPath()
 
-	for _, rawPath := range req.Paths {
+	for _, rawPath := range paths {
 		files, ok := s.webDAVImportFiles(c, rawPath)
 		if !ok {
 			continue
@@ -313,17 +325,24 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 				continue
 			}
 
+			override := itemByPath[file.relativePath]
 			book, err := importer.Import(localbook.ImportRequest{
 				UserID:     userID,
 				UserName:   userName,
 				FileName:   filepath.Base(file.filePath),
 				Extension:  file.extension,
 				Data:       data,
-				CategoryID: req.CategoryID,
+				Title:      override.Title,
+				Author:     override.Author,
+				CategoryID: primaryCategoryID,
+				TOCRule:    override.TOCRule,
 			})
 			if err != nil {
 				imported = append(imported, gin.H{"path": file.relativePath, "error": err.Error()})
 				continue
+			}
+			if len(categoryIDs) > 0 {
+				_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
 			}
 			item := s.bookShelfListItem(userID, book)
 			imported = append(imported, gin.H{"path": file.relativePath, "book": item})
@@ -333,6 +352,55 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 
 	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
 	c.JSON(http.StatusOK, gin.H{"imported": imported})
+}
+
+func (s *Server) previewWebDAVImport(c *gin.Context) {
+	var req localBookImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "paths is required"})
+		return
+	}
+	paths := req.requestedPaths()
+	if len(paths) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "paths is required"})
+		return
+	}
+	importer := localbook.NewImporter(s.cfg, s.db)
+	results := make([]gin.H, 0)
+	seen := make(map[string]bool)
+	itemByPath := req.itemByPath()
+	for _, rawPath := range paths {
+		files, ok := s.webDAVImportFiles(c, rawPath)
+		if !ok {
+			continue
+		}
+		for _, file := range files {
+			if seen[file.relativePath] {
+				continue
+			}
+			seen[file.relativePath] = true
+			data, err := os.ReadFile(file.filePath)
+			if err != nil {
+				results = append(results, gin.H{"path": file.relativePath, "error": err.Error()})
+				continue
+			}
+			override := itemByPath[file.relativePath]
+			preview, err := importer.Preview(localbook.ImportRequest{
+				FileName:  filepath.Base(file.filePath),
+				Extension: file.extension,
+				Data:      data,
+				Title:     override.Title,
+				Author:    override.Author,
+				TOCRule:   override.TOCRule,
+			})
+			if err != nil {
+				results = append(results, gin.H{"path": file.relativePath, "error": err.Error()})
+				continue
+			}
+			results = append(results, gin.H{"path": file.relativePath, "book": preview})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"items": results})
 }
 
 func (s *Server) webDAVImportFiles(c *gin.Context, rawPath string) ([]localStoreImportFile, bool) {
@@ -674,22 +742,23 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 	}
 
 	var books []struct {
-		Title           string `json:"title"`
-		Name            string `json:"name"`
-		Author          string `json:"author"`
-		URL             string `json:"url"`
-		BookURL         string `json:"bookUrl"`
-		CoverURL        string `json:"coverUrl"`
-		CustomCoverURL  string `json:"customCoverUrl"`
-		Intro           string `json:"intro"`
-		LastChapter     string `json:"lastChapter"`
-		ChapterCount    int    `json:"chapterCount"`
-		CanUpdate       *bool  `json:"canUpdate"`
-		CategoryName    string `json:"categoryName"`
-		OriginName      string `json:"originName"`
-		DurChapter      int    `json:"durChapter"`
-		DurChapterPos   int    `json:"durChapterPos"`
-		DurChapterTitle string `json:"durChapterTitle"`
+		Title           string   `json:"title"`
+		Name            string   `json:"name"`
+		Author          string   `json:"author"`
+		URL             string   `json:"url"`
+		BookURL         string   `json:"bookUrl"`
+		CoverURL        string   `json:"coverUrl"`
+		CustomCoverURL  string   `json:"customCoverUrl"`
+		Intro           string   `json:"intro"`
+		LastChapter     string   `json:"lastChapter"`
+		ChapterCount    int      `json:"chapterCount"`
+		CanUpdate       *bool    `json:"canUpdate"`
+		CategoryName    string   `json:"categoryName"`
+		CategoryNames   []string `json:"categoryNames"`
+		OriginName      string   `json:"originName"`
+		DurChapter      int      `json:"durChapter"`
+		DurChapterPos   int      `json:"durChapterPos"`
+		DurChapterTitle string   `json:"durChapterTitle"`
 	}
 	if err := json.Unmarshal(data, &books); err != nil {
 		return 0, 0, err
@@ -725,8 +794,9 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 			ChapterCount:   b.ChapterCount,
 			CanUpdate:      canUpdate,
 		}
-		if categoryID := s.findRestoredCategoryID(userID, b.CategoryName); categoryID != nil {
-			book.CategoryID = categoryID
+		categoryIDs := s.restoredCategoryIDs(userID, b.CategoryName, b.CategoryNames)
+		if len(categoryIDs) > 0 {
+			book.CategoryID = &categoryIDs[0]
 		}
 		query := s.db.Where("user_id = ? AND title = ?", userID, book.Title)
 		if book.URL != "" {
@@ -748,6 +818,7 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 			if err := s.db.Save(&existing).Error; err != nil {
 				continue
 			}
+			_ = s.setBookCategories(s.db, userID, existing.ID, categoryIDs)
 			count++
 			if s.restoreBookshelfProgress(userID, existing.ID, b.DurChapter, b.DurChapterPos, b.DurChapterTitle) {
 				progressCount++
@@ -757,6 +828,7 @@ func (s *Server) restoreBookshelfFromZip(file *zip.File, userID uint) (int, int,
 		if err := s.db.Create(&book).Error; err != nil {
 			continue
 		}
+		_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
 		if s.restoreBookshelfProgress(userID, book.ID, b.DurChapter, b.DurChapterPos, b.DurChapterTitle) {
 			progressCount++
 		}
@@ -991,6 +1063,30 @@ func (s *Server) findRestoredCategoryID(userID uint, categoryName string) *uint 
 		return nil
 	}
 	return &category.ID
+}
+
+func (s *Server) restoredCategoryIDs(userID uint, categoryName string, categoryNames []string) []uint {
+	names := make([]string, 0, len(categoryNames)+1)
+	names = append(names, categoryNames...)
+	if strings.TrimSpace(categoryName) != "" {
+		names = append(names, categoryName)
+	}
+	seen := make(map[string]struct{}, len(names))
+	ids := make([]uint, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		if categoryID := s.findRestoredCategoryID(userID, name); categoryID != nil {
+			ids = append(ids, *categoryID)
+		}
+	}
+	return ids
 }
 
 func (s *Server) findRestoredBook(userID uint, bookURL string, title string) (models.Book, bool) {

@@ -8,14 +8,15 @@
     :chapters="overlay.bookInfoBook?.chapterCount || 0"
     :status-label="overlay.bookInfoOptions.statusLabel || sourceStatusLabel"
     :status-type="overlay.bookInfoOptions.statusType || 'info'"
-    :cover-editable="!!overlay.bookInfoBook?.id"
+    :cover-editable="bookInfoInShelf"
     :cover-uploading="coverUploadingBookId === overlay.bookInfoBook?.id"
-    :show-update-switch="!!overlay.bookInfoBook?.id && Number(overlay.bookInfoBook?.sourceId || 0) > 0"
+    :show-update-switch="bookInfoInShelf && Number(overlay.bookInfoBook?.sourceId || 0) > 0"
     :can-update="overlay.bookInfoBook?.canUpdate !== false"
     :update-switch-loading="updatingBookId === overlay.bookInfoBook?.id"
     :browser-cache-count="bookInfoBrowserCacheCount"
-    :show-category-action="!!overlay.bookInfoBook?.id"
-    :show-local-refresh-action="!!overlay.bookInfoBook?.id && Number(overlay.bookInfoBook?.sourceId || 0) <= 0"
+    :in-shelf="bookInfoInShelf"
+    :show-category-action="bookInfoInShelf"
+    :show-local-refresh-action="bookInfoInShelf && Number(overlay.bookInfoBook?.sourceId || 0) <= 0"
     :local-refresh-loading="refreshingBookId === overlay.bookInfoBook?.id"
     @cover-upload="uploadBookInfoCover"
     @can-update-change="toggleBookCanUpdate"
@@ -37,6 +38,13 @@
     </div>
   </BookInfoDialog>
 
+  <BookEditDialog
+    v-model="overlay.bookEditVisible"
+    :book="overlay.bookEditBook"
+    :saving="editingBookSaving"
+    @save="saveEditedBook"
+  />
+
   <el-dialog
     v-model="overlay.importBookVisible"
     title="导入本地书籍"
@@ -52,8 +60,7 @@
       </el-upload>
       <el-input v-model="importDraft.title" placeholder="书名（可选，不填则使用文件名）" />
       <el-input v-model="importDraft.author" placeholder="作者（可选）" />
-      <el-select v-model="importDraft.categoryId" placeholder="分组（可选）" clearable>
-        <el-option label="未分组" value="" />
+      <el-select v-model="importDraft.categoryIds" placeholder="分组（可多选）" multiple clearable>
         <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
       </el-select>
       <el-select
@@ -80,10 +87,19 @@
         :rows="2"
         placeholder="TXT目录规则（可选，留空使用默认规则，例如：^第.+章.*$）"
       />
+      <div v-if="importDraft.file" class="direct-import-preview">
+        <div>
+          <strong>{{ importPreview ? `已解析 ${importPreview.chapterCount || 0} 章` : '尚未解析目录' }}</strong>
+          <el-button size="small" text :loading="previewingImport" @click="previewImportFile">重新解析</el-button>
+        </div>
+        <div v-if="importPreview?.chapters?.length" class="direct-import-chapters">
+          <span v-for="chapter in importPreview.chapters" :key="chapter.index">{{ chapter.title }}</span>
+        </div>
+      </div>
     </div>
     <template #footer>
       <el-button @click="overlay.importBookVisible = false">取消</el-button>
-      <el-button type="primary" :loading="importingBook" :disabled="!importDraft.file" @click="importLocalBook">导入</el-button>
+      <el-button type="primary" :loading="importingBook" :disabled="!importDraft.file || !importPreview" @click="importLocalBook">导入</el-button>
     </template>
   </el-dialog>
 
@@ -116,7 +132,7 @@
       </el-table-column>
       <el-table-column prop="author" label="作者" min-width="120" show-overflow-tooltip />
       <el-table-column label="分组" min-width="120">
-        <template #default="{ row }">{{ categoryName(row.categoryId) }}</template>
+        <template #default="{ row }">{{ categoryName(row) }}</template>
       </el-table-column>
       <el-table-column label="章节" min-width="150">
         <template #default="{ row }">
@@ -130,7 +146,7 @@
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button text class="text-button" @click="goDetail(row)">编辑</el-button>
+          <el-button text class="text-button" @click="overlay.openBookEdit(row)">编辑</el-button>
           <el-button text class="text-button" @click="setBookGroup(row)">分组</el-button>
           <el-dropdown @command="cacheBook(row, $event)">
             <el-button text class="text-button" :loading="cachingBookId === row.id">
@@ -172,20 +188,39 @@
           >{{ coverInitial(book) }}</span>
           <button type="button" @click="overlay.openBookInfo(book)">
             <strong>{{ book.title }}</strong>
-            <span>{{ book.author || '未知作者' }} · {{ categoryName(book.categoryId) }}</span>
+            <span>{{ book.author || '未知作者' }} · {{ categoryName(book) }}</span>
             <span>{{ Number(book.sourceId || 0) > 0 ? '远程书籍' : '本地书籍' }} · {{ progressLabel(book) }}</span>
           </button>
         </header>
         <p>共 {{ book.chapterCount || 0 }} 章<template v-if="Number(book.sourceId || 0) > 0"> · 服务器缓存 {{ serverCacheCount(book) }} 章</template> · 浏览器缓存 {{ localCacheCount(book) }} 章<template v-if="book.lastChapter"> · 最新：{{ book.lastChapter }}</template></p>
         <footer>
-          <el-button size="small" text @click="goDetail(book)">编辑</el-button>
+          <el-button size="small" text @click="overlay.openBookEdit(book)">编辑</el-button>
           <el-button size="small" text @click="setBookGroup(book)">分组</el-button>
-          <el-button size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBookLocal')">缓存到浏览器</el-button>
-          <el-button size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookLocalCache')">清浏览器</el-button>
-          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'cacheBook')">服务器缓存</el-button>
-          <el-button v-if="Number(book.sourceId || 0) > 0" size="small" text :loading="cachingBookId === book.id" @click="cacheBook(book, 'deleteBookCache')">清服务器</el-button>
-          <el-button size="small" text @click="exportBook(book, 'txt')">导出TXT</el-button>
-          <el-button size="small" text @click="exportBook(book, 'epub')">导出Epub</el-button>
+          <el-dropdown @command="cacheBook(book, $event)">
+            <el-button size="small" text :loading="cachingBookId === book.id">
+              缓存<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="cacheBookLocal">缓存到浏览器</el-dropdown-item>
+                <el-dropdown-item v-if="Number(book.sourceId || 0) > 0" command="cacheBook">缓存到服务器</el-dropdown-item>
+                <el-dropdown-item command="deleteBookLocalCache">删除浏览器缓存</el-dropdown-item>
+                <el-dropdown-item v-if="Number(book.sourceId || 0) > 0" command="deleteBookCache">删除服务器缓存</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown @command="exportBook(book, $event)">
+            <el-button size="small" text>
+              导出<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="txt">导出为 TXT</el-dropdown-item>
+                <el-dropdown-item command="epub">导出为 Epub</el-dropdown-item>
+                <el-dropdown-item command="json">导出书籍数据</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </footer>
       </article>
     </div>
@@ -234,12 +269,14 @@
     :title="overlay.bookGroupMode === 'set' ? '设置分组' : '分组管理'"
     :direction="narrowDrawerDirection"
     :size="narrowDrawerSize"
+    @opened="handleBookGroupOpened"
+    @closed="destroyGroupSortable"
   >
     <template v-if="overlay.bookGroupMode === 'set'">
-      <el-table :data="groupSetRows" row-key="id" class="group-set-table" @row-click="selectBookGroup">
+      <el-table :data="groupSetRows" row-key="id" class="group-set-table" @row-click="toggleBookGroupSelection">
         <el-table-column width="46">
           <template #default="{ row }">
-            <span class="radio-cell" :class="{ active: String(settingCategoryId) === String(row.id) }" />
+            <el-checkbox :model-value="isBookGroupSelected(row)" @change="() => toggleBookGroupSelection(row)" @click.stop />
           </template>
         </el-table-column>
         <el-table-column label="分组名">
@@ -257,18 +294,13 @@
       </div>
     </template>
     <template v-else>
-      <el-table :data="groupManageRows" row-key="id" class="group-manage-table">
+      <el-table ref="groupManageTableRef" :data="groupManageRows" row-key="id" class="group-manage-table">
         <el-table-column width="46">
-          <template #default="{ row }">
+          <template #default>
             <button
               type="button"
               class="group-drag-handle"
-              draggable="true"
               title="拖动排序"
-              @dragstart="startGroupDrag(row)"
-              @dragover.prevent
-              @drop.prevent="dropGroupOn(row)"
-              @dragend="finishGroupDrag"
             >
               <el-icon><Rank /></el-icon>
             </button>
@@ -632,17 +664,18 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import Sortable from 'sortablejs'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Edit, Rank, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, createUser, deleteUsers, listUsers, resetUserPassword, updateUser } from '../api/admin'
-import { cacheBookContent, createBookmark, deleteBookmark, listBookmarks, listChapters, listTXTTocRules, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
+import { cacheBookContent, createBookmark, deleteBookmark, listBookmarks, listChapters, listTXTTocRules, previewLocalBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, listReplaceRules, testReplaceRule, updateReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
-import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
+import { bookCategoryIds, bookHasCategory, mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
@@ -653,6 +686,7 @@ import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBoo
 import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { applyRestoreResult } from '../utils/restoreSync'
+import BookEditDialog from './BookEditDialog.vue'
 import BookInfoDialog from './BookInfoDialog.vue'
 import RSSManager from './RSSManager.vue'
 import WebDAVBrowser from './WebDAVBrowser.vue'
@@ -674,14 +708,17 @@ const localCacheCounts = ref({})
 const refreshingBookId = ref(null)
 const coverUploadingBookId = ref(null)
 const updatingBookId = ref(null)
-const settingCategoryId = ref('')
+const editingBookSaving = ref(false)
+const selectedCategoryIds = ref([])
 const settingCategorySaving = ref(false)
 const importingBook = ref(false)
+const previewingImport = ref(false)
+const importPreview = ref(null)
 const visibilitySavingId = ref(null)
 const groupOrderDraftIds = ref([])
-const draggingGroupId = ref(null)
 const groupOrderSaving = ref(false)
-const importDraft = reactive({ title: '', author: '', categoryId: '', file: null, tocRule: '' })
+const groupManageTableRef = ref(null)
+const importDraft = reactive({ title: '', author: '', categoryIds: [], file: null, tocRule: '' })
 const tocRuleOptions = ref([])
 const tocRulesLoading = ref(false)
 const sourceRows = ref([])
@@ -729,6 +766,7 @@ let replaceRulesRefreshTimer
 let bookmarkRefreshTimer
 let usersRefreshTimer
 let sourceRowsRefreshTimer
+let groupSortable
 
 const isMobileOverlay = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const importSupportsTocRule = computed(() => {
@@ -739,7 +777,7 @@ const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl'
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const narrowDrawerSize = computed(() => isMobileOverlay.value ? '86%' : '420px')
-const bookInfoCategory = computed(() => overlay.bookInfoOptions.categoryName || categoryName(overlay.bookInfoBook?.categoryId))
+const bookInfoCategory = computed(() => overlay.bookInfoOptions.categoryName || categoryName(overlay.bookInfoBook))
 const bookInfoSourceName = computed(() => {
   if (overlay.bookInfoOptions.sourceName) return overlay.bookInfoOptions.sourceName
   const sourceId = overlay.bookInfoBook?.sourceId
@@ -753,15 +791,15 @@ const bookInfoProgress = computed(() => {
 const bookInfoBrowserCacheCount = computed(() => (
   overlay.bookInfoBook?.id ? localCacheCount(overlay.bookInfoBook) : -1
 ))
+const bookInfoInShelf = computed(() => isShelfBook(overlay.bookInfoBook))
 const sourceStatusLabel = computed(() => overlay.bookInfoBook?.sourceId ? '远程书籍' : '本地书籍')
-const groupSetRows = computed(() => [
-  { id: '', name: '未分组', description: '从当前分组移出' },
-  ...bookshelf.categories.map(category => ({
+const groupSetRows = computed(() => (
+  bookshelf.categories.map(category => ({
     ...category,
     id: String(category.id),
     description: `${groupBookCount(category)} 本`,
-  })),
-])
+  }))
+))
 const groupManageRows = computed(() => {
   const categoryById = new Map(bookshelf.categories.map(category => [String(category.id), category]))
   const rows = []
@@ -787,8 +825,16 @@ const filteredManagedBooks = computed(() => {
 function manageBookSearchText(book) {
   return localBookSearchText(book, [
     progressLabel(book),
-    categoryName(book.categoryId),
+    categoryName(book),
   ])
+}
+
+function isShelfBook(book) {
+  if (!book) return false
+  if (book.id && bookshelf.books.some(item => Number(item.id) === Number(book.id))) return true
+  const bookUrl = String(book.url || book.bookUrl || '').trim()
+  if (!bookUrl) return false
+  return bookshelf.books.some(item => String(item.url || item.bookUrl || '').trim() === bookUrl)
 }
 const contentSearchStatus = computed(() => {
   if (!contentSearched.value) return ''
@@ -816,6 +862,7 @@ onBeforeUnmount(() => {
   clearBookmarkRefreshTimer()
   clearUsersRefreshTimer()
   clearSourceRowsRefreshTimer()
+  destroyGroupSortable()
 })
 
 function updateWindowWidth() {
@@ -845,25 +892,47 @@ async function loadTXTTocRuleOptions() {
 
 function pickImportFile(data) {
   importDraft.file = data.raw || null
+  importDraft.title = ''
+  importDraft.author = ''
+  importPreview.value = null
   if (!importSupportsTocRule.value) importDraft.tocRule = ''
-  if (importDraft.file && !importDraft.title) {
-    importDraft.title = importDraft.file.name.replace(/\.[^.]+$/, '')
+  if (importDraft.file) previewImportFile()
+}
+
+async function previewImportFile() {
+  if (!importDraft.file) return
+  previewingImport.value = true
+  try {
+    const { data } = await previewLocalBook(importDraft.file, {
+      title: importDraft.title,
+      author: importDraft.author,
+      tocRule: importSupportsTocRule.value ? importDraft.tocRule : '',
+    })
+    importPreview.value = data
+    if (!importDraft.title && data.title) importDraft.title = data.title
+    if (!importDraft.author && data.author) importDraft.author = data.author
+  } catch (err) {
+    importPreview.value = null
+    ElMessage.error(readError(err, '解析书籍失败'))
+  } finally {
+    previewingImport.value = false
   }
 }
 
 async function importLocalBook() {
-  if (!importDraft.file) return
+  if (!importDraft.file || !importPreview.value) return
   importingBook.value = true
   try {
     const book = await bookshelf.importTXT({
       file: importDraft.file,
       title: importDraft.title,
       author: importDraft.author,
-      categoryId: importDraft.categoryId,
+      categoryIds: importDraft.categoryIds,
       tocRule: importSupportsTocRule.value ? importDraft.tocRule : '',
     })
     ElMessage.success(`已导入《${book.title}》，共 ${book.chapterCount || 0} 章`)
-    Object.assign(importDraft, { title: '', author: '', categoryId: '', file: null, tocRule: '' })
+    Object.assign(importDraft, { title: '', author: '', categoryIds: [], file: null, tocRule: '' })
+    importPreview.value = null
     overlay.importBookVisible = false
   } catch (err) {
     ElMessage.error(readError(err, '导入失败'))
@@ -877,6 +946,15 @@ watch(
   (supported) => {
     if (supported) loadTXTTocRuleOptions()
     else importDraft.tocRule = ''
+  },
+)
+
+watch(
+  () => overlay.importBookVisible,
+  (visible) => {
+    if (visible) return
+    Object.assign(importDraft, { title: '', author: '', categoryIds: [], file: null, tocRule: '' })
+    importPreview.value = null
   },
 )
 
@@ -916,7 +994,7 @@ watch(
       }
     }
     if (overlay.bookGroupVisible && overlay.bookGroupMode === 'set') {
-      settingCategoryId.value = overlay.bookInfoBook?.categoryId ? String(overlay.bookInfoBook.categoryId) : ''
+      selectedCategoryIds.value = bookCategoryIds(overlay.bookInfoBook).map(id => String(id))
     } else if (overlay.bookGroupVisible) {
       resetGroupOrderDraft()
     }
@@ -927,9 +1005,15 @@ watch(
   () => overlay.bookInfoVisible,
   async (visible) => {
     if (!visible) return
-    await warmOverlayCategories().catch((err) => {
-      ElMessage.warning(readError(err, '分组加载失败，书籍信息仍可查看'))
-    })
+    const warmTasks = [warmOverlayCategories()]
+    if (overlay.bookInfoBook?.id) warmTasks.push(warmOverlayBooks())
+    const [categoryResult, booksResult] = await Promise.allSettled(warmTasks)
+    if (categoryResult.status === 'rejected') {
+      ElMessage.warning(readError(categoryResult.reason, '分组加载失败，书籍信息仍可查看'))
+    }
+    if (booksResult?.status === 'rejected') {
+      ElMessage.warning(readError(booksResult.reason, '书架状态加载失败，书籍信息仍可查看'))
+    }
     if (overlay.bookInfoBook?.sourceId && !sourceRows.value.length) {
       await loadSourceRows().catch((err) => {
         ElMessage.warning(readError(err, '书源加载失败，书籍信息仍可查看'))
@@ -937,6 +1021,17 @@ watch(
     }
     if (overlay.bookInfoBook?.id) {
       await refreshBookInfoBrowserCacheCount(overlay.bookInfoBook)
+    }
+  },
+)
+
+watch(
+  () => overlay.bookGroupMode,
+  async (mode) => {
+    destroyGroupSortable()
+    if (mode === 'manage' && overlay.bookGroupVisible) {
+      await nextTick()
+      handleBookGroupOpened()
     }
   },
 )
@@ -1003,9 +1098,13 @@ watch(
   },
 )
 
-function categoryName(id) {
-  if (!id) return '未分组'
-  return bookshelf.categories.find(category => String(category.id) === String(id))?.name || '未分组'
+function categoryName(bookOrId) {
+  const ids = typeof bookOrId === 'object' ? bookCategoryIds(bookOrId) : (bookOrId ? [Number(bookOrId)] : [])
+  if (!ids.length) return '未分组'
+  const names = ids
+    .map(id => bookshelf.categories.find(category => String(category.id) === String(id))?.name)
+    .filter(Boolean)
+  return names.length ? names.join('、') : '未分组'
 }
 
 function progressLabel(book) {
@@ -1076,21 +1175,46 @@ function coverStyle(book) {
   return url ? { backgroundImage: `url(${url})` } : {}
 }
 
-function goDetail(book) {
-  overlay.closeBookInfo()
-  overlay.bookManageVisible = false
-  router.push({ name: 'book-detail', params: { id: book.id } })
-}
-
 function setBookGroup(book) {
   overlay.openBookGroup('set', book, {
-    categoryName: categoryName(book.categoryId),
+    categoryName: categoryName(book),
     progress: bookProgress(book)?.percent || 0,
   })
 }
 
-function selectBookGroup(category) {
-  settingCategoryId.value = String(category.id)
+async function saveEditedBook(payload) {
+  const book = overlay.bookEditBook
+  if (!book?.id) return
+  editingBookSaving.value = true
+  try {
+    const { data } = await updateBook(book.id, {
+      ...payload,
+      categoryIds: bookCategoryIds(book),
+      canUpdate: book.canUpdate !== false,
+    })
+    const nextBook = applyUpdatedBookToOverlay(data)
+    overlay.bookEditBook = nextBook
+    overlay.bookEditVisible = false
+    ElMessage.success('书籍已更新')
+  } catch (err) {
+    ElMessage.error(readError(err, '更新书籍失败'))
+  } finally {
+    editingBookSaving.value = false
+  }
+}
+
+function isBookGroupSelected(category) {
+  return selectedCategoryIds.value.includes(String(category.id))
+}
+
+function toggleBookGroupSelection(category) {
+  const id = String(category.id)
+  if (!id) return
+  if (selectedCategoryIds.value.includes(id)) {
+    selectedCategoryIds.value = selectedCategoryIds.value.filter(item => item !== id)
+    return
+  }
+  selectedCategoryIds.value = [...selectedCategoryIds.value, id]
 }
 
 async function saveBookGroupSetting() {
@@ -1098,13 +1222,16 @@ async function saveBookGroupSetting() {
   if (!book?.id) return
   settingCategorySaving.value = true
   try {
-    const categoryId = settingCategoryId.value ? Number(settingCategoryId.value) : null
-    const { data } = await updateBookCategory(book.id, categoryId)
+    const categoryIds = selectedCategoryIds.value.map(id => Number(id)).filter(Boolean)
+    const { data } = await updateBookCategory(book.id, categoryIds)
     bookshelf.upsertBook(data)
     overlay.bookInfoBook = data
+    window.dispatchEvent(new CustomEvent('openreader:book-info-updated', {
+      detail: { book: data },
+    }))
     overlay.bookInfoOptions = {
       ...overlay.bookInfoOptions,
-      categoryName: categoryName(data.categoryId),
+      categoryName: categoryName(data),
       progress: bookProgress(data)?.percent || 0,
     }
     overlay.bookGroupVisible = false
@@ -1178,6 +1305,9 @@ function applyUpdatedBookToOverlay(book, chapters = null) {
   const nextBook = mergedShelfBook(book)
   bookshelf.upsertBook(nextBook)
   if (Number(overlay.bookInfoBook?.id) === Number(nextBook.id)) overlay.bookInfoBook = nextBook
+  window.dispatchEvent(new CustomEvent('openreader:book-info-updated', {
+    detail: { book: nextBook },
+  }))
   window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', {
     detail: { bookId: nextBook.id, book: nextBook, chapters },
   }))
@@ -1236,11 +1366,10 @@ async function uploadBookInfoCover(file) {
       author: book.author || '',
       customCoverUrl: uploadResult.url,
       intro: book.intro || '',
-      categoryId: book.categoryId || null,
+      categoryIds: bookCategoryIds(book),
       canUpdate: book.canUpdate !== false,
     })
-    bookshelf.upsertBook(updatedBook)
-    overlay.bookInfoBook = updatedBook
+    applyUpdatedBookToOverlay(updatedBook)
     ElMessage.success('封面已更新')
   } catch (err) {
     ElMessage.error(readError(err, '更新封面失败'))
@@ -1259,11 +1388,10 @@ async function toggleBookCanUpdate(value) {
       author: book.author || '',
       coverUrl: book.coverUrl || '',
       intro: book.intro || '',
-      categoryId: book.categoryId || null,
+      categoryIds: bookCategoryIds(book),
       canUpdate: value,
     })
-    bookshelf.upsertBook(updatedBook)
-    overlay.bookInfoBook = updatedBook
+    applyUpdatedBookToOverlay(updatedBook)
     ElMessage.success(value ? '已开启追更' : '已关闭追更')
   } catch (err) {
     ElMessage.error(readError(err, '更新追更状态失败'))
@@ -1276,7 +1404,7 @@ async function batchAddCategory(category) {
   if (!selectedBookIds.value.length) return
   batchBusy.value = true
   try {
-    await bookshelf.batchSetCategory([...selectedBookIds.value], category.id)
+    await bookshelf.batchSetCategory([...selectedBookIds.value], category.id, { action: 'category-add' })
     ElMessage.success(`已添加到“${category.name}”分组`)
   } catch (err) {
     ElMessage.error(readError(err, '批量添加分组失败'))
@@ -1288,7 +1416,7 @@ async function batchAddCategory(category) {
 async function batchRemoveCategory(category) {
   if (!selectedBookIds.value.length) return
   const targetIds = managedBooks.value
-    .filter(book => selectedBookIds.value.includes(book.id) && String(book.categoryId) === String(category.id))
+    .filter(book => selectedBookIds.value.includes(book.id) && bookHasCategory(book, category.id))
     .map(book => book.id)
   if (!targetIds.length) {
     ElMessage.info('选中书籍不在该分组中')
@@ -1296,7 +1424,7 @@ async function batchRemoveCategory(category) {
   }
   batchBusy.value = true
   try {
-    await bookshelf.batchSetCategory(targetIds, null)
+    await bookshelf.batchSetCategory(targetIds, category.id, { action: 'category-remove' })
     ElMessage.success(`已从“${category.name}”分组移除`)
   } catch (err) {
     ElMessage.error(readError(err, '批量移除分组失败'))
@@ -2223,7 +2351,7 @@ async function renameGroup(category) {
 }
 
 function groupBookCount(category) {
-  return managedBooks.value.filter(book => String(book.categoryId || '') === String(category.id)).length
+  return managedBooks.value.filter(book => bookHasCategory(book, category.id)).length
 }
 
 function buildSourceGroupOptions(rows) {
@@ -2270,28 +2398,32 @@ async function deleteGroup(category) {
 
 function resetGroupOrderDraft() {
   groupOrderDraftIds.value = bookshelf.categories.map(category => String(category.id))
-  draggingGroupId.value = null
 }
 
-function startGroupDrag(category) {
-  draggingGroupId.value = String(category.id)
+async function handleBookGroupOpened() {
+  if (overlay.bookGroupMode !== 'manage') return
+  await nextTick()
+  destroyGroupSortable()
+  const tableBody = groupManageTableRef.value?.$el?.querySelector('.el-table__body-wrapper tbody')
+  if (!tableBody) return
+  groupSortable = Sortable.create(tableBody, {
+    handle: '.group-drag-handle',
+    animation: 150,
+    forceFallback: true,
+    fallbackTolerance: 4,
+    onEnd: ({ oldIndex, newIndex }) => {
+      if (oldIndex == null || newIndex == null || oldIndex === newIndex) return
+      const ids = groupManageRows.value.map(category => String(category.id))
+      const [moved] = ids.splice(oldIndex, 1)
+      ids.splice(newIndex, 0, moved)
+      groupOrderDraftIds.value = ids
+    },
+  })
 }
 
-function finishGroupDrag() {
-  draggingGroupId.value = null
-}
-
-function dropGroupOn(targetCategory) {
-  const sourceId = draggingGroupId.value
-  const targetId = String(targetCategory.id)
-  if (!sourceId || sourceId === targetId) return
-  const ids = groupManageRows.value.map(category => String(category.id))
-  const sourceIndex = ids.indexOf(sourceId)
-  const targetIndex = ids.indexOf(targetId)
-  if (sourceIndex < 0 || targetIndex < 0) return
-  const [moved] = ids.splice(sourceIndex, 1)
-  ids.splice(targetIndex, 0, moved)
-  groupOrderDraftIds.value = ids
+function destroyGroupSortable() {
+  groupSortable?.destroy()
+  groupSortable = null
 }
 
 async function saveGroupOrderDraft() {
@@ -2356,6 +2488,32 @@ function readError(err, fallback) {
 
 .upload-text {
   color: var(--app-text-muted);
+}
+
+.direct-import-preview {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+}
+
+.direct-import-preview > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.direct-import-chapters {
+  display: grid;
+  max-height: 180px;
+  overflow: auto;
+  gap: 5px;
+  padding: 8px;
+  background: var(--app-bg-soft);
+  color: var(--app-text-muted);
+  font-size: 12px;
 }
 
 .manage-head {
