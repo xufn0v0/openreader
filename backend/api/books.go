@@ -1949,7 +1949,7 @@ func (s *Server) searchBookContent(c *gin.Context) {
 		matchLimit := parseBoundedInt(c.Query("matchLimit"), 80, 1, 200)
 		perChapterLimit := parseBoundedInt(c.Query("perChapterLimit"), 20, 1, 100)
 		if book.SourceID == 0 && (c.Query("localFull") == "1" || c.Query("localFull") == "true") {
-			chapterLimit = len(chapters)
+			chapterLimit = parseBoundedInt(c.Query("chapterLimit"), 160, 1, 2000)
 			matchLimit = parseBoundedInt(c.Query("matchLimit"), 5000, 1, 20000)
 			perChapterLimit = parseBoundedInt(c.Query("perChapterLimit"), 500, 1, 2000)
 		}
@@ -2312,7 +2312,7 @@ func parseLocalBookChapters(ext string, data []byte, tocRule string) ([]engine.T
 	case ".txt", ".text", ".md":
 		return engine.ParseTXTWithRule(data, tocRule)
 	case ".epub":
-		book, err := engine.ParseEPUB(data)
+		book, err := engine.ParseEPUBWithRule(data, tocRule)
 		return book.Chapters, err
 	case ".pdf":
 		book, err := engine.ParsePDF(data)

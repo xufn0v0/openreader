@@ -99,6 +99,10 @@
       >
         <div ref="contentBody" class="reader-body" :style="bodyStyle">
           <p v-if="chapterLoading" class="empty-hint">正在加载章节...</p>
+          <div v-else-if="chapterLoadError" class="chapter-load-error">
+            <p>{{ chapterLoadError }}</p>
+            <button type="button" @click="reloadChapter">重新加载</button>
+          </div>
           <template v-else>
             <section
               v-for="block in displayedChapterBlocks"
@@ -107,7 +111,21 @@
               :data-index="block.index"
             >
               <h1 data-pos="0">{{ block.title || '正文' }}</h1>
-              <p v-for="(line, index) in block.paragraphs" :key="`${block.index}-${index}`" :data-pos="line.pos">{{ line.text }}</p>
+              <template v-for="(line, index) in block.paragraphs" :key="`${block.index}-${index}`">
+                <figure v-if="line.type === 'image'" class="reader-content-image" :data-pos="line.pos" data-reader-block>
+                  <el-image
+                    :src="line.src"
+                    :alt="line.alt"
+                    :preview-src-list="block.imageUrls"
+                    :initial-index="imageIndex(block, line.src)"
+                    fit="contain"
+                    lazy
+                    preview-teleported
+                  />
+                  <figcaption v-if="line.alt">{{ line.alt }}</figcaption>
+                </figure>
+                <p v-else :data-pos="line.pos" data-reader-block>{{ line.text }}</p>
+              </template>
               <p v-if="chapterLoaded && block.paragraphs.length === 0" class="empty-hint">当前章节暂无正文内容</p>
             </section>
           </template>
@@ -258,7 +276,7 @@
           <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
           <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
           <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
-          <button v-if="isTextLocalBook" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
+          <button v-if="canChangeLocalTocRule" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
           <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
         </div>
       </div>
@@ -438,7 +456,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -483,8 +501,10 @@ import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
+import { epubTocRuleOptions, isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
+import { parseReaderContentBlocks } from '../utils/readerContent'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { invalidateReaderDataCache as invalidateReaderCache, readerDataCacheKey as scopedReaderDataCacheKey, writeReaderDataCache as writeReaderCache } from '../utils/readerDataCache'
 import {
@@ -512,6 +532,7 @@ const bookmarks = ref([])
 const content = ref('')
 const chapterBlocks = ref([])
 const chapterLoading = ref(true)
+const chapterLoadError = ref('')
 const chapterLoaded = ref(false)
 const contentEl = ref(null)
 const contentBody = ref(null)
@@ -612,16 +633,14 @@ const currentSourceName = computed(() => {
   return sourceGroupOptions.value.find(source => Number(source.id) === Number(book.value.sourceId))?.name || '当前来源'
 })
 const isRemoteBook = computed(() => Number(book.value?.sourceId || 0) > 0)
-const isTextLocalBook = computed(() => {
-  if (isRemoteBook.value) return false
-  const name = String(book.value?.originalFile || book.value?.libraryPath || book.value?.title || '').toLowerCase()
-  return /\.(txt|text|md)$/.test(name)
-})
+const isTextLocalBook = computed(() => checkTextLocalBook(book.value))
+const isEPUBLocalBook = computed(() => checkEPUBLocalBook(book.value))
+const canChangeLocalTocRule = computed(() => isTextLocalBook.value || isEPUBLocalBook.value)
 
 const chapterParagraphs = computed(() => {
   return makeParagraphs(content.value, chapter.value?.title)
 })
-const lines = computed(() => chapterParagraphs.value.map(item => item.text))
+const lines = computed(() => chapterParagraphs.value.filter(item => item.type === 'text').map(item => item.text))
 const chapterTextLength = computed(() => {
   return chapterBlockTextLength({ paragraphs: chapterParagraphs.value })
 })
@@ -728,7 +747,12 @@ function onModeChange(mode) {
 onMounted(async () => {
   reader.normalizeSettings()
   syncReaderFontFaces(reader.customFontsMap)
-  await loadReaderBook()
+  try {
+    await loadReaderBook()
+  } catch (err) {
+    chapterLoadError.value = readError(err, '章节加载失败')
+    chapterLoading.value = false
+  }
   window.addEventListener('resize', handleResize)
   window.addEventListener('wheel', handleReaderWheel, { passive: false })
   window.addEventListener('pagehide', handleReaderPageHide)
@@ -763,7 +787,13 @@ onBeforeRouteLeave(() => {
 })
 
 watch(bookId, async () => {
-  await loadReaderBook()
+  chapterLoadError.value = ''
+  try {
+    await loadReaderBook()
+  } catch (err) {
+    chapterLoadError.value = readError(err, '章节加载失败')
+    chapterLoading.value = false
+  }
 })
 
 watch(() => [route.query.chapter, route.query.offset, route.query.percent], async ([q, offset, percent]) => {
@@ -830,15 +860,7 @@ watch(contentSearch, () => {
 })
 
 function makeParagraphs(value, heading = '') {
-  let wordCount = String(heading || '').length + 2
-  return String(value || '').split(/\n+/).reduce((items, rawLine) => {
-    const text = rawLine.trim()
-    if (!text) return items
-    const pos = wordCount
-    wordCount += text.length + 2
-    items.push({ text: formatChineseText(text), pos })
-    return items
-  }, [])
+  return parseReaderContentBlocks(value, heading, formatChineseText)
 }
 
 function formatChineseText(text) {
@@ -866,12 +888,14 @@ function buildSourceGroupOptions(rows) {
 function makeChapterBlock(index, chapterRow, text) {
   const fallback = chapters.value[index] || {}
   const title = chapterRow?.title || fallback.title || `第 ${index + 1} 章`
+  const paragraphs = makeParagraphs(text, title)
   return {
     index,
     id: chapterRow?.id || fallback.id,
     title: displayChapterTitle(title),
     content: String(text || ''),
-    paragraphs: makeParagraphs(text, title),
+    paragraphs,
+    imageUrls: paragraphs.filter(item => item.type === 'image').map(item => item.src),
   }
 }
 
@@ -879,7 +903,11 @@ function chapterBlockTextLength(block) {
   const paragraphs = Array.isArray(block?.paragraphs) ? block.paragraphs : []
   if (!paragraphs.length) return 0
   const last = paragraphs[paragraphs.length - 1]
-  return Number(last.pos || 0) + String(last.text || '').length
+  return Number(last.endPos || last.pos || 0)
+}
+
+function imageIndex(block, src) {
+  return Math.max(0, (block?.imageUrls || []).indexOf(src))
 }
 
 function resetContentSearchState() {
@@ -1084,6 +1112,7 @@ async function loadChapter(index, offset = 0, options = {}) {
   mobileChromeVisible.value = false
   restoringPosition = true
   chapterLoaded.value = false
+  chapterLoadError.value = ''
   clearTimeout(saveTimer)
   clearTimeout(chapterLoadingTimer)
   const cachedBeforeLoad = !options.refresh && getChapterContentFromMemory(currentIndex.value)
@@ -1100,11 +1129,7 @@ async function loadChapter(index, offset = 0, options = {}) {
     chapter.value = data.chapter
     content.value = data.content || ''
     page.value = 0
-    if (isContinuousScrollRead.value) {
-      await computeShowChapterList({ reset: true })
-    } else {
-      chapterBlocks.value = [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
-    }
+    chapterBlocks.value = [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
     chapterLoading.value = false
     await nextTick()
     updateFlipLayout()
@@ -1117,6 +1142,11 @@ async function loadChapter(index, offset = 0, options = {}) {
       lastProgressSaveKey = progressSaveKey(currentProgressPayload())
     }
     chapterLoaded.value = true
+    if (isContinuousScrollRead.value) {
+      computeShowChapterList({ anchorIndex: currentIndex.value }).catch(() => {})
+    }
+  } catch (err) {
+    chapterLoadError.value = readError(err, '章节加载失败，请检查书源或网络后重试')
   } finally {
     clearTimeout(chapterLoadingTimer)
     await nextFrame()
@@ -1125,23 +1155,32 @@ async function loadChapter(index, offset = 0, options = {}) {
   }
 }
 
-async function computeShowChapterList() {
+async function computeShowChapterList(options = {}) {
   if (!chapters.value.length) {
     chapterBlocks.value = []
     return
   }
+  const anchorIndex = Number.isInteger(options.anchorIndex) ? options.anchorIndex : currentIndex.value
   const startIndex = reader.mode === 'scroll2'
-    ? Math.max(0, currentIndex.value - SHOW_PREV_CHAPTER_SIZE)
-    : currentIndex.value
+    ? Math.max(0, anchorIndex - SHOW_PREV_CHAPTER_SIZE)
+    : anchorIndex
   const endIndex = isContinuousScrollRead.value
-    ? Math.min(chapters.value.length - 1, currentIndex.value + SHOW_NEXT_CHAPTER_SIZE)
-    : currentIndex.value
-  const blocks = []
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    const data = await loadChapterContent(index)
-    blocks.push(makeChapterBlock(index, data.chapter || chapters.value[index], data.content || ''))
+    ? Math.min(chapters.value.length - 1, anchorIndex + SHOW_NEXT_CHAPTER_SIZE)
+    : anchorIndex
+  const indexes = Array.from({ length: endIndex - startIndex + 1 }, (_, offset) => startIndex + offset)
+  const rows = await Promise.all(indexes.map(async index => {
+    try {
+      const data = await loadChapterContent(index)
+      return makeChapterBlock(index, data.chapter || chapters.value[index], data.content || '')
+    } catch {
+      return null
+    }
+  }))
+  if (currentIndex.value !== anchorIndex) return
+  const blocks = rows.filter(Boolean)
+  if (blocks.some(block => block.index === anchorIndex)) {
+    chapterBlocks.value = blocks
   }
-  chapterBlocks.value = blocks
 }
 
 async function appendNextShowChapter() {
@@ -1291,7 +1330,7 @@ function restoreByChapterPosition(position) {
 
 function paragraphByChapterPosition(chapterEl, position) {
   if (!chapterEl || !Number.isFinite(position) || position <= 0) return null
-  const nodes = [...chapterEl.querySelectorAll('h1[data-pos], p[data-pos]')]
+  const nodes = [...chapterEl.querySelectorAll('h1[data-pos], [data-reader-block][data-pos]')]
   if (!nodes.length) return null
   return [...nodes].reverse().find(node => Number(node.dataset.pos) <= position) || nodes[0]
 }
@@ -1484,18 +1523,12 @@ async function refreshTocDrawer() {
 }
 
 async function changeReaderLocalTocRule() {
-  if (!book.value || !isTextLocalBook.value) return
-  const result = await ElMessageBox.prompt('填写 TXT 目录行正则，留空则使用默认目录规则。', '修改目录规则', {
-    confirmButtonText: '刷新目录',
-    cancelButtonText: '取消',
-    inputType: 'textarea',
-    inputValue: book.value.tocRule || '',
-    inputPlaceholder: '^第.+章.*$',
-  }).catch(() => null)
-  if (!result) return
+  if (!book.value || !canChangeLocalTocRule.value) return
+  const tocRule = await chooseReaderLocalTocRule()
+  if (tocRule === null) return
   tocRefreshing.value = true
   try {
-    const { data } = await refreshLocalBook(book.value.id, { tocRule: result.value || '' })
+    const { data } = await refreshLocalBook(book.value.id, { tocRule })
     await invalidateReaderDataCache({ chapters: true, book: true })
     await resetReaderChapterCaches({ clearBrowser: true })
     const updated = data?.book || data
@@ -1517,6 +1550,30 @@ async function changeReaderLocalTocRule() {
   } finally {
     tocRefreshing.value = false
   }
+}
+
+async function chooseReaderLocalTocRule() {
+  if (!isEPUBLocalBook.value) {
+    const result = await ElMessageBox.prompt('填写 TXT 目录行正则，留空则使用默认目录规则。', '修改目录规则', {
+      confirmButtonText: '刷新目录',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputValue: book.value?.tocRule || '',
+      inputPlaceholder: '^第.+章.*$',
+    }).catch(() => null)
+    return result ? (result.value || '') : null
+  }
+  const selected = ref(book.value?.tocRule || 'spin+toc')
+  const selector = h('select', {
+    value: selected.value,
+    style: 'width:100%;min-height:38px;padding:0 10px;border:1px solid var(--el-border-color);border-radius:4px;background:var(--el-bg-color);color:var(--el-text-color-primary)',
+    onChange: event => { selected.value = event.target.value },
+  }, epubTocRuleOptions.map(rule => h('option', { value: rule.value }, rule.label)))
+  const confirmed = await ElMessageBox.confirm(selector, '修改 EPUB 目录规则', {
+    confirmButtonText: '刷新目录',
+    cancelButtonText: '取消',
+  }).catch(() => false)
+  return confirmed ? selected.value : null
 }
 
 async function computeBrowserCachedChapters() {
@@ -1939,9 +1996,9 @@ async function runBookContentSearch({ append = false, scanAll = false } = {}) {
 
 function contentSearchPagingParams(targetBook) {
   if (Number(targetBook?.sourceId || 0) > 0) {
-    return { chapterLimit: 80, scanLimit: 240, matchLimit: 200, perChapterLimit: 20 }
+    return { chapterLimit: 10, scanLimit: 10, matchLimit: 120, perChapterLimit: 20 }
   }
-  return { chapterLimit: 500, scanLimit: 2000, matchLimit: 5000, perChapterLimit: 500, localFull: 1 }
+  return { chapterLimit: 160, scanLimit: 480, matchLimit: 1000, perChapterLimit: 100, localFull: 1 }
 }
 
 function openNoteDialog() {
@@ -2100,7 +2157,7 @@ async function autoReadByParagraph() {
 }
 
 function nextParagraphAfter(paragraph) {
-  const paragraphs = [...(contentBody.value?.querySelectorAll('p') || [])]
+  const paragraphs = [...(contentBody.value?.querySelectorAll('[data-reader-block]') || [])]
   if (!paragraph) return paragraphs[0] || null
   const index = paragraphs.indexOf(paragraph)
   return index >= 0 ? paragraphs[index + 1] || null : paragraphs[0] || null
@@ -2748,7 +2805,7 @@ function visibleParagraphOffset(paragraph, paragraphPos) {
 
 function currentVisibleParagraph() {
   const viewport = contentEl.value?.getBoundingClientRect()
-  const paragraphs = [...(contentBody.value?.querySelectorAll('p') || [])]
+  const paragraphs = [...(contentBody.value?.querySelectorAll('[data-reader-block]') || [])]
   if (!viewport || !paragraphs.length) return null
   const visibleTop = viewport.top + 8
   const visibleBottom = viewport.bottom - 8
@@ -3877,6 +3934,51 @@ function readError(err, fallback) {
   margin: 0 0 var(--reader-paragraph-space);
   font-weight: var(--reader-font-weight);
   text-indent: 2em;
+}
+.reader-content-image {
+  display: grid;
+  width: 100%;
+  margin: 0 auto var(--reader-paragraph-space);
+  place-items: center;
+  text-indent: 0;
+}
+.reader-content-image :deep(.el-image) {
+  display: block;
+  width: min(100%, 960px);
+  min-height: 1px;
+}
+.reader-content-image :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.reader-content-image figcaption {
+  margin-top: 8px;
+  color: rgba(36, 40, 44, 0.55);
+  font-size: 0.78em;
+  text-align: center;
+}
+.chapter-load-error {
+  display: grid;
+  min-height: 180px;
+  place-content: center;
+  gap: 14px;
+  text-align: center;
+}
+.chapter-load-error p {
+  margin: 0;
+  color: rgba(112, 48, 42, 0.8);
+  text-indent: 0;
+}
+.chapter-load-error button {
+  justify-self: center;
+  padding: 8px 18px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
 }
 .reader-content p.reader-search-active {
   background: rgba(47, 111, 109, 0.16);
