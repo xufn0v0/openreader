@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	stdhtml "html"
 	"net/url"
@@ -42,6 +43,10 @@ type RemoteChapter struct {
 
 // SearchBooks performs a remote search against a single book source.
 func SearchBooks(source models.BookSource, keyword string) ([]SearchResult, error) {
+	return SearchBooksContext(context.Background(), source, keyword)
+}
+
+func SearchBooksContext(ctx context.Context, source models.BookSource, keyword string) ([]SearchResult, error) {
 	rule, err := source.ParsedRules()
 	if err != nil {
 		return nil, fmt.Errorf("parse rules: %w", err)
@@ -56,7 +61,7 @@ func SearchBooks(source models.BookSource, keyword string) ([]SearchResult, erro
 		charset = "utf-8"
 	}
 
-	doc, err := FetchDocument(searchURL, charset)
+	doc, err := FetchDocumentWithHeadersContext(ctx, searchURL, charset, rule.Headers)
 	if err != nil {
 		return nil, fmt.Errorf("fetch search page: %w", err)
 	}
@@ -103,14 +108,15 @@ func ExploreBooksPageWithURL(source models.BookSource, exploreURLOverride string
 		activeExploreURL = resolveURL(baseURL, activeExploreURL)
 	}
 	exploreURL := strings.ReplaceAll(activeExploreURL, "{page}", fmt.Sprintf("%d", page))
-	doc, err := FetchDocument(exploreURL, charset)
+	doc, err := FetchDocumentWithHeaders(exploreURL, charset, rule.Headers)
 	if err != nil {
 		return ExploreResult{}, fmt.Errorf("fetch explore page: %w", err)
 	}
-	items := parseBookResults(doc, rule, source, exploreURL)
+	exploreRule := effectiveExploreRule(rule)
+	items := parseBookResults(doc, exploreRule, source, exploreURL)
 	nextURL := ""
-	if rule.PaginationRule != "" {
-		nextURL = resolveURL(exploreURL, firstMatch(doc.Selection, rule.PaginationRule))
+	if exploreRule.PaginationRule != "" {
+		nextURL = resolveURL(exploreURL, firstMatch(doc.Selection, exploreRule.PaginationRule))
 	}
 	hasMore := strings.Contains(activeExploreURL, "{page}") && len(items) > 0
 	if nextURL != "" {
@@ -122,6 +128,22 @@ func ExploreBooksPageWithURL(source models.BookSource, exploreURLOverride string
 		HasMore: hasMore,
 		NextURL: nextURL,
 	}, nil
+}
+
+func effectiveExploreRule(rule models.BookSourceRule) models.BookSourceRule {
+	if strings.TrimSpace(rule.ExploreBookListRule) == "" {
+		return rule
+	}
+	exploreRule := rule
+	exploreRule.BookListRule = rule.ExploreBookListRule
+	exploreRule.BookNameRule = rule.ExploreBookNameRule
+	exploreRule.BookAuthorRule = rule.ExploreBookAuthorRule
+	exploreRule.BookCoverRule = rule.ExploreBookCoverRule
+	exploreRule.BookIntroRule = rule.ExploreBookIntroRule
+	exploreRule.LatestChapterRule = rule.ExploreLatestChapterRule
+	exploreRule.BookURLRule = rule.ExploreBookURLRule
+	exploreRule.PaginationRule = rule.ExplorePaginationRule
+	return exploreRule
 }
 
 func parseSearchResults(doc *goquery.Document, rule models.BookSourceRule, source models.BookSource) []SearchResult {
@@ -163,17 +185,37 @@ func ParseTOC(bookURL string, source models.BookSource) ([]RemoteChapter, error)
 		return nil, fmt.Errorf("parse rules: %w", err)
 	}
 
-	tocURL := bookURL
-	if rule.TOCURLRule != "" {
-		tocURL = resolveURL(bookURL, rule.TOCURLRule)
-	}
-
 	charset := source.Charset
 	if charset == "" {
 		charset = "utf-8"
 	}
 
-	doc, err := FetchDocument(tocURL, charset)
+	tocURL := bookURL
+	var doc *goquery.Document
+	tocURLRule := strings.TrimSpace(rule.TOCURLRule)
+	switch {
+	case tocURLRule == "":
+		doc, err = FetchDocumentWithHeaders(bookURL, charset, rule.Headers)
+	case isDirectTOCURLRule(tocURLRule):
+		tocURL = resolveURL(bookURL, tocURLRule)
+		doc, err = FetchDocumentWithHeaders(tocURL, charset, rule.Headers)
+	default:
+		var bookDoc *goquery.Document
+		bookDoc, err = FetchDocumentWithHeaders(bookURL, charset, rule.Headers)
+		if err == nil {
+			parsedTOCURL := firstMatch(bookDoc.Selection, tocURLRule)
+			if parsedTOCURL == "" {
+				doc = bookDoc
+			} else {
+				tocURL = resolveURL(bookURL, parsedTOCURL)
+				if tocURL == bookURL {
+					doc = bookDoc
+				} else {
+					doc, err = FetchDocumentWithHeaders(tocURL, charset, rule.Headers)
+				}
+			}
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("fetch toc page: %w", err)
 	}
@@ -183,6 +225,20 @@ func ParseTOC(bookURL string, source models.BookSource) ([]RemoteChapter, error)
 		return nil, fmt.Errorf("no chapters found on toc page")
 	}
 	return chapters, nil
+}
+
+func isDirectTOCURLRule(rule string) bool {
+	value := strings.TrimSpace(rule)
+	if value == "" || strings.Contains(value, "|") {
+		return false
+	}
+	lower := strings.ToLower(value)
+	return strings.HasPrefix(lower, "http://") ||
+		strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(value, "//") ||
+		strings.HasPrefix(value, "/") ||
+		strings.HasPrefix(value, "./") ||
+		strings.HasPrefix(value, "../")
 }
 
 func parseChapterList(doc *goquery.Document, rule models.BookSourceRule, baseURL string) []RemoteChapter {
@@ -220,7 +276,7 @@ func FetchChapterContent(chapterURL string, source models.BookSource) (string, e
 		charset = "utf-8"
 	}
 
-	doc, err := FetchDocument(contentURL, charset)
+	doc, err := FetchDocumentWithHeaders(contentURL, charset, rule.Headers)
 	if err != nil {
 		return "", fmt.Errorf("fetch content page: %w", err)
 	}

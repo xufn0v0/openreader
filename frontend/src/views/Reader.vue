@@ -482,7 +482,7 @@ import {
   View,
 } from '@element-plus/icons-vue'
 import api from '../api/client'
-import { changeBookSource, listBookSourceCandidates, refreshBook, refreshLocalBook, searchBookContent as searchBookContentApi } from '../api/books'
+import { changeBookSource, createBookmarks, deleteBookmarks, listBookSourceCandidates, refreshBook, refreshLocalBook, searchBookContent as searchBookContentApi } from '../api/books'
 import { createReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
@@ -491,13 +491,15 @@ import ReaderSearchPanel from '../components/reader/ReaderSearchPanel.vue'
 import ReaderSettingsPanel from '../components/reader/ReaderSettingsPanel.vue'
 import SourceSwitchPanel from '../components/reader/SourceSwitchPanel.vue'
 import ReaderTocPanel from '../components/reader/ReaderTocPanel.vue'
-import { bookCategoryIds, mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
+import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore, themePresets } from '../stores/reader'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
 import { useTTS } from '../composables/useTTS'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
+import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
+import { normalizeImportedBookmarks } from '../utils/bookmark'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, isValidChapterContentResponse, listBookBrowserCachedChapters, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
@@ -523,6 +525,7 @@ const router = useRouter()
 const reader = useReaderStore()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
+const categoryName = createBookCategoryNameResolver(() => bookshelf.categories)
 const bookId = computed(() => Number(route.params.id))
 
 const book = ref(null)
@@ -1759,15 +1762,6 @@ async function openInfoGroup() {
     statusLabel: `阅读中 · ${bookProgressLabel.value}`,
     statusType: 'success',
   })
-}
-
-function categoryName(bookOrId) {
-  const ids = typeof bookOrId === 'object' ? bookCategoryIds(bookOrId) : (bookOrId ? [Number(bookOrId)] : [])
-  if (!ids.length) return '未分组'
-  const names = ids
-    .map(id => bookshelf.categories.find(category => Number(category.id) === Number(id))?.name)
-    .filter(Boolean)
-  return names.length ? names.join('、') : '未分组'
 }
 
 async function refreshReaderBookCatalog() {
@@ -3193,8 +3187,8 @@ async function removeBookmarks(rows) {
   if (!Array.isArray(rows) || !rows.length) return
   try {
     await ElMessageBox.confirm(`确认要删除所选择的 ${rows.length} 条书签吗？`, '批量删除书签', { type: 'warning' })
-    await Promise.all(rows.map(item => api.delete(`/bookmarks/${item.id}`)))
-    const deleted = new Set(rows.map(item => item.id))
+    const { data } = await deleteBookmarks(bookId.value, rows.map(item => item.id))
+    const deleted = new Set(data?.deletedIds || [])
     bookmarks.value = bookmarks.value.filter(item => !deleted.has(item.id))
     ElMessage.success('书签已删除')
   } catch (err) {
@@ -3211,33 +3205,14 @@ async function importBookmarks(rows) {
   }
   try {
     await ElMessageBox.confirm(`确认要导入文件中的 ${payloads.length} 条书签到当前书籍吗？`, '导入书签', { type: 'info' })
-    const created = []
-    for (const payload of payloads) {
-      const { data } = await api.post(`/books/${bookId.value}/bookmarks`, payload)
-      if (data?.id) created.push(data)
-    }
+    const { data } = await createBookmarks(bookId.value, payloads)
+    const created = Array.isArray(data) ? data : []
     bookmarks.value = [...created, ...bookmarks.value]
     ElMessage.success(`已导入 ${created.length} 条书签`)
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
     ElMessage.error(readError(err, '导入书签失败'))
   }
-}
-
-function normalizeImportedBookmarks(rows) {
-  return (Array.isArray(rows) ? rows : [])
-    .map(row => {
-      const chapterIndex = Math.max(0, Math.floor(Number(row.chapterIndex ?? row.durChapterIndex ?? 0)))
-      return {
-        chapterIndex,
-        offset: Math.max(0, Math.floor(Number(row.offset ?? 0))),
-        percent: clampPercent(row.percent),
-        title: String(row.title || row.chapterName || row.chapterTitle || `第 ${chapterIndex + 1} 章`).trim(),
-        excerpt: String(row.excerpt || row.bookText || '').trim(),
-        note: String(row.note || row.content || '').trim(),
-      }
-    })
-    .filter(row => row.title || row.excerpt || row.note)
 }
 
 function openBookmarkEditor(bookmark) {
@@ -3293,11 +3268,6 @@ function parseRoutePercent(value) {
   if (value === undefined || value === null || value === '') return null
   const percent = Number(value)
   return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : null
-}
-
-function clampPercent(value) {
-  const percent = Number(value)
-  return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : 0
 }
 
 async function jumpToBookSearchResult(result) {

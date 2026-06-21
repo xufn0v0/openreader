@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -28,7 +29,19 @@ func SetHTTPClient(client *http.Client) func() {
 }
 
 func FetchDocument(url, charset string) (*goquery.Document, error) {
-	decoded, err := FetchText(url, charset)
+	return FetchDocumentContext(context.Background(), url, charset)
+}
+
+func FetchDocumentContext(ctx context.Context, url, charset string) (*goquery.Document, error) {
+	return FetchDocumentWithHeadersContext(ctx, url, charset, nil)
+}
+
+func FetchDocumentWithHeaders(url, charset string, headers map[string]string) (*goquery.Document, error) {
+	return FetchDocumentWithHeadersContext(context.Background(), url, charset, headers)
+}
+
+func FetchDocumentWithHeadersContext(ctx context.Context, url, charset string, headers map[string]string) (*goquery.Document, error) {
+	decoded, err := FetchTextWithHeadersContext(ctx, url, charset, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -36,11 +49,19 @@ func FetchDocument(url, charset string) (*goquery.Document, error) {
 }
 
 func FetchText(url, charset string) (string, error) {
-	return FetchTextWithHeaders(url, charset, nil)
+	return FetchTextContext(context.Background(), url, charset)
+}
+
+func FetchTextContext(ctx context.Context, url, charset string) (string, error) {
+	return FetchTextWithHeadersContext(ctx, url, charset, nil)
 }
 
 func FetchTextWithHeaders(url, charset string, headers map[string]string) (string, error) {
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	return FetchTextWithHeadersContext(context.Background(), url, charset, headers)
+}
+
+func FetchTextWithHeadersContext(ctx context.Context, url, charset string, headers map[string]string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}

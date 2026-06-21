@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1620,6 +1621,18 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 				"lastChapter":".last",
 				"bookUrl":"a@href"
 			},
+			"ruleExplore":{
+				"bookList":".explore-book",
+				"name":".explore-name",
+				"author":".explore-author",
+				"coverUrl":"img@data-src",
+				"intro":".explore-intro",
+				"lastChapter":".explore-last",
+				"bookUrl":"a@data-url"
+			},
+			"ruleBookInfo":{
+				"tocUrl":".catalog@href"
+			},
 			"ruleToc":{
 				"chapterList":".chapter",
 				"chapterName":".title",
@@ -1644,15 +1657,58 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rule.SearchURL != "https://reader.example/search?q={{key}}" ||
+	if rule.SearchURL != "https://reader.example/search?q={keyword}" ||
 		rule.ExploreURL != "https://reader.example/top/{page}" ||
 		rule.BookListRule != ".book" ||
 		rule.BookNameRule != ".name" ||
+		rule.BookURLRule != "a|attr:href" ||
+		rule.ExploreBookListRule != ".explore-book" ||
+		rule.ExploreBookNameRule != ".explore-name" ||
+		rule.ExploreBookAuthorRule != ".explore-author" ||
+		rule.ExploreBookCoverRule != "img|attr:data-src" ||
+		rule.ExploreBookIntroRule != ".explore-intro" ||
+		rule.ExploreLatestChapterRule != ".explore-last" ||
+		rule.ExploreBookURLRule != "a|attr:data-url" ||
+		rule.TOCURLRule != ".catalog|attr:href" ||
 		rule.ChapterListRule != ".chapter" ||
+		rule.ChapterURLRule != "a|attr:href" ||
 		rule.ContentRule != "#content" ||
 		rule.Headers["User-Agent"] != "OpenReader Test" ||
 		rule.Headers["Referer"] != "https://reader.example" {
 		t.Fatalf("unexpected converted rules: %+v", rule)
+	}
+}
+
+func TestBookSourceCompatibilityRuleNormalization(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		upstream string
+		internal string
+		exported string
+	}{
+		{name: "attribute", upstream: "a.book@href", internal: "a.book|attr:href", exported: "a.book@href"},
+		{name: "data attribute", upstream: "img@data-src", internal: "img|attr:data-src", exported: "img@data-src"},
+		{name: "explicit text", upstream: ".name@text", internal: ".name|text", exported: ".name@text"},
+		{name: "explicit html", upstream: "#content@html", internal: "#content|html", exported: "#content@html"},
+		{name: "plain selector", upstream: ".book", internal: ".book", exported: ".book"},
+		{name: "xpath remains untouched", upstream: "//a/@href", internal: "//a/@href", exported: "//a/@href"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			internal := normalizeUpstreamSelectorRule(test.upstream)
+			if internal != test.internal {
+				t.Fatalf("normalize %q = %q, want %q", test.upstream, internal, test.internal)
+			}
+			if exported := exportUpstreamSelectorRule(internal); exported != test.exported {
+				t.Fatalf("export %q = %q, want %q", internal, exported, test.exported)
+			}
+		})
+	}
+
+	if got := normalizeUpstreamURLTemplate("https://example/search?q={{key}}&page={{page}}"); got != "https://example/search?q={keyword}&page={page}" {
+		t.Fatalf("normalize upstream URL = %q", got)
+	}
+	if got := exportUpstreamURLTemplate("https://example/search?q={keyword}&page={page}"); got != "https://example/search?q={{key}}&page={{page}}" {
+		t.Fatalf("export upstream URL = %q", got)
 	}
 }
 
@@ -1672,7 +1728,12 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			"bookSourceUrl":"https://upload-reader.example",
 			"bookSourceGroup":"上传分组",
 			"searchUrl":"https://upload-reader.example/search?q={{key}}",
+			"exploreUrl":"https://upload-reader.example/explore/{{page}}",
+			"headerMap":{"X-Source-Token":"upload-secret","Referer":"https://upload-reader.example/"},
 			"ruleSearch":{"bookList":".item","name":".name","bookUrl":"a@href"},
+			"ruleExplore":{"bookList":".explore-item","name":".explore-name","bookUrl":"a@data-url"},
+			"ruleBookInfo":{"tocUrl":".catalog@href"},
+			"ruleToc":{"chapterList":".chapter","chapterName":".chapter-name","chapterUrl":"a@href"},
 			"ruleContent":{"content":".content"}
 		}
 	]`))
@@ -1706,8 +1767,81 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rule.BookListRule != ".item" || rule.BookNameRule != ".name" || rule.ContentRule != ".content" {
+	if rule.BookListRule != ".item" || rule.BookNameRule != ".name" || rule.BookURLRule != "a|attr:href" ||
+		rule.ExploreURL != "https://upload-reader.example/explore/{page}" ||
+		rule.ExploreBookListRule != ".explore-item" ||
+		rule.ExploreBookNameRule != ".explore-name" ||
+		rule.ExploreBookURLRule != "a|attr:data-url" ||
+		rule.TOCURLRule != ".catalog|attr:href" ||
+		rule.ChapterListRule != ".chapter" ||
+		rule.ChapterNameRule != ".chapter-name" ||
+		rule.ChapterURLRule != "a|attr:href" ||
+		rule.ContentRule != ".content" ||
+		rule.Headers["X-Source-Token"] != "upload-secret" ||
+		rule.Headers["Referer"] != "https://upload-reader.example/" {
 		t.Fatalf("unexpected imported rules: %+v", rule)
+	}
+
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Header.Get("X-Source-Token") != "upload-secret" ||
+				request.Header.Get("Referer") != "https://upload-reader.example/" {
+				t.Fatalf("imported source headers were not applied: %v", request.Header)
+			}
+			body := ""
+			switch request.URL.Path {
+			case "/search":
+				if request.URL.Query().Get("q") != "请求头" {
+					t.Fatalf("upstream {{key}} placeholder was not normalized: %s", request.URL.String())
+				}
+				body = `<article class="item"><span class="name">请求头测试书</span><a href="/book/1">详情</a></article>`
+			case "/explore/2":
+				body = `<article class="explore-item"><span class="explore-name">独立探索规则书籍</span><a data-url="/book/2">详情</a></article>`
+			case "/book/2":
+				body = `<a class="catalog" href="/catalog/2">目录</a>`
+			case "/catalog/2":
+				body = `<article class="chapter"><span class="chapter-name">详情页解析目录</span><a href="/chapter/2">阅读</a></article>`
+			default:
+				t.Fatalf("unexpected imported source request: %s", request.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    request,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	testReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/sources/%d/test", source.ID), strings.NewReader(`{"keyword":"请求头"}`))
+	testReq.Header.Set("Content-Type", "application/json")
+	testReq.Header.Set("Authorization", token)
+	testW := httptest.NewRecorder()
+	router.ServeHTTP(testW, testReq)
+	if testW.Code != http.StatusOK || !strings.Contains(testW.Body.String(), `"请求头测试书"`) {
+		t.Fatalf("test imported source with headers: expected parsed result, got %d: %s", testW.Code, testW.Body.String())
+	}
+
+	exploreReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/explore/%d?page=2", source.ID), nil)
+	exploreReq.Header.Set("Authorization", token)
+	exploreW := httptest.NewRecorder()
+	router.ServeHTTP(exploreW, exploreReq)
+	if exploreW.Code != http.StatusOK ||
+		!strings.Contains(exploreW.Body.String(), `"独立探索规则书籍"`) ||
+		!strings.Contains(exploreW.Body.String(), `"https://upload-reader.example/book/2"`) {
+		t.Fatalf("explore imported source with independent rules: expected parsed result, got %d: %s", exploreW.Code, exploreW.Body.String())
+	}
+
+	tocReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/sources/%d/test-chapter", source.ID), strings.NewReader(`{"bookUrl":"https://upload-reader.example/book/2"}`))
+	tocReq.Header.Set("Content-Type", "application/json")
+	tocReq.Header.Set("Authorization", token)
+	tocW := httptest.NewRecorder()
+	router.ServeHTTP(tocW, tocReq)
+	if tocW.Code != http.StatusOK ||
+		!strings.Contains(tocW.Body.String(), `"详情页解析目录"`) ||
+		!strings.Contains(tocW.Body.String(), `"https://upload-reader.example/chapter/2"`) {
+		t.Fatalf("resolve imported ruleBookInfo.tocUrl: expected parsed catalog, got %d: %s", tocW.Code, tocW.Body.String())
 	}
 }
 
@@ -1759,15 +1893,21 @@ func TestBatchTestSourcesRespectsTimeout(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
 
+	requestCanceled := make(chan struct{}, 1)
 	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			time.Sleep(1200 * time.Millisecond)
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(`<html><body><div class="book">慢源</div></body></html>`)),
-				Header:     make(http.Header),
-				Request:    req,
-			}, nil
+			select {
+			case <-time.After(1200 * time.Millisecond):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`<html><body><div class="book">慢源</div></body></html>`)),
+					Header:     make(http.Header),
+					Request:    req,
+				}, nil
+			case <-req.Context().Done():
+				requestCanceled <- struct{}{}
+				return nil, req.Context().Err()
+			}
 		}),
 	})
 	defer restoreHTTPClient()
@@ -1784,6 +1924,7 @@ func TestBatchTestSourcesRespectsTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	started := time.Now()
 	req := httptest.NewRequest(http.MethodPost, "/api/sources/batch-test", strings.NewReader(`{"keyword":"测试","timeout":1000,"concurrent":3}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -1804,6 +1945,14 @@ func TestBatchTestSourcesRespectsTimeout(t *testing.T) {
 	}
 	if len(resp.Results) != 1 || resp.Results[0].OK || resp.Results[0].Message != "search timeout" {
 		t.Fatalf("expected timeout result, got %+v", resp.Results)
+	}
+	if elapsed := time.Since(started); elapsed >= 1150*time.Millisecond {
+		t.Fatalf("expected request context to stop slow source early, took %s", elapsed)
+	}
+	select {
+	case <-requestCanceled:
+	default:
+		t.Fatal("expected slow source HTTP request to receive context cancellation")
 	}
 }
 
@@ -2145,9 +2294,49 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 	token := authHeader(t, router)
 
 	sources := []models.BookSource{
-		{Name: "导出源一", BaseURL: "https://one.example", Charset: "utf-8", Enabled: true},
+		{
+			Name:      "导出源一",
+			BaseURL:   "https://one.example",
+			SearchURL: "https://one.example/legacy-search?q={keyword}",
+			Charset:   "gbk",
+			Enabled:   true,
+			Group:     "导出分组",
+		},
 		{Name: "导出源二", BaseURL: "https://two.example", Charset: "utf-8", Enabled: true},
 		{Name: "导出源三", BaseURL: "https://three.example", Charset: "utf-8", Enabled: false},
+	}
+	if err := sources[0].SetRules(models.BookSourceRule{
+		SearchURL:                "https://one.example/search?q={keyword}",
+		ExploreURL:               "https://one.example/explore/{page}",
+		BookListRule:             ".book",
+		BookNameRule:             ".name",
+		BookAuthorRule:           ".author",
+		BookCoverRule:            "img|attr:src",
+		BookIntroRule:            ".intro",
+		LatestChapterRule:        ".latest",
+		BookURLRule:              "a|attr:href",
+		ExploreBookListRule:      ".explore-card",
+		ExploreBookNameRule:      ".explore-title",
+		ExploreBookAuthorRule:    ".explore-author",
+		ExploreBookCoverRule:     "img|attr:data-src",
+		ExploreBookIntroRule:     ".explore-intro",
+		ExploreLatestChapterRule: ".explore-latest",
+		ExploreBookURLRule:       "a|attr:data-url",
+		ExplorePaginationRule:    ".explore-next|attr:href",
+		TOCURLRule:               ".catalog|attr:href",
+		ChapterListRule:          ".chapter",
+		ChapterNameRule:          ".title",
+		ChapterURLRule:           "a|attr:href",
+		ContentRule:              "#content",
+		PaginationRule:           ".next|attr:href",
+		Headers: map[string]string{
+			"Referer": "https://one.example/",
+		},
+		TextReplaceRules: []models.TextReplaceRule{
+			{Pattern: "广告", Replacement: ""},
+		},
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := server.db.Create(&sources).Error; err != nil {
 		t.Fatal(err)
@@ -2161,21 +2350,73 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("export selected sources: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
+	for _, internalField := range []string{`"id":`, `"createdAt":`, `"updatedAt":`, `"usedBookCount":`} {
+		if strings.Contains(w.Body.String(), internalField) {
+			t.Fatalf("export should not expose internal database field %s: %s", internalField, w.Body.String())
+		}
+	}
 
-	var exported []models.BookSource
+	var exported []exportedBookSource
 	if err := json.Unmarshal(w.Body.Bytes(), &exported); err != nil {
 		t.Fatalf("decode export response: %v", err)
 	}
 	if len(exported) != 2 {
 		t.Fatalf("expected 2 selected sources, got %+v", exported)
 	}
-	if exported[0].Name != "导出源一" || exported[1].Name != "导出源三" {
+	if exported[0].BookSourceName != "导出源一" || exported[1].BookSourceName != "导出源三" {
 		t.Fatalf("expected selected sources ordered by id, got %+v", exported)
 	}
 	for _, source := range exported {
-		if source.Name == "导出源二" {
+		if source.BookSourceName == "导出源二" {
 			t.Fatalf("unselected source should not be exported: %+v", exported)
 		}
+	}
+	first := exported[0]
+	if first.BookSourceURL != "https://one.example" ||
+		first.BookSourceGroup != "导出分组" ||
+		first.SearchURL != "https://one.example/search?q={{key}}" ||
+		first.ExploreURL != "https://one.example/explore/{{page}}" ||
+		first.Charset != "gbk" ||
+		first.RuleSearch.BookList != ".book" ||
+		first.RuleSearch.Name != ".name" ||
+		first.RuleSearch.BookURL != "a@href" ||
+		first.RuleSearch.CoverURL != "img@src" ||
+		first.RuleExplore.BookList != ".explore-card" ||
+		first.RuleExplore.Name != ".explore-title" ||
+		first.RuleExplore.CoverURL != "img@data-src" ||
+		first.RuleExplore.BookURL != "a@data-url" ||
+		first.RuleBookInfo.TOCURL != ".catalog@href" ||
+		first.RuleTOC.ChapterList != ".chapter" ||
+		first.RuleTOC.ChapterURL != "a@href" ||
+		first.RuleContent.Content != "#content" ||
+		!strings.Contains(first.Header, `"Referer":"https://one.example/"`) ||
+		!strings.Contains(first.Rules, `"paginationRule":".next|attr:href"`) ||
+		!strings.Contains(first.Rules, `"textReplaceRules"`) {
+		t.Fatalf("expected upstream-compatible fields plus lossless extensions, got %+v", first)
+	}
+
+	roundTripped, err := decodeBookSources(w.Body.Bytes())
+	if err != nil {
+		t.Fatalf("re-import exported sources: %v", err)
+	}
+	if len(roundTripped) != 2 {
+		t.Fatalf("expected two round-tripped sources, got %+v", roundTripped)
+	}
+	reimportedRule, err := roundTripped[0].ParsedRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundTripped[0].Name != sources[0].Name ||
+		roundTripped[0].BaseURL != sources[0].BaseURL ||
+		roundTripped[0].Group != sources[0].Group ||
+		roundTripped[0].Charset != sources[0].Charset ||
+		reimportedRule.PaginationRule != ".next|attr:href" ||
+		reimportedRule.ExploreBookListRule != ".explore-card" ||
+		reimportedRule.ExploreBookURLRule != "a|attr:data-url" ||
+		reimportedRule.ExplorePaginationRule != ".explore-next|attr:href" ||
+		len(reimportedRule.TextReplaceRules) != 1 ||
+		reimportedRule.Headers["Referer"] != "https://one.example/" {
+		t.Fatalf("export should round-trip without losing OpenReader rules: source=%+v rule=%+v", roundTripped[0], reimportedRule)
 	}
 }
 
@@ -2443,7 +2684,7 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	}
 }
 
-func TestCreateRemoteBookAcceptsCategory(t *testing.T) {
+func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
 
@@ -2466,8 +2707,12 @@ func TestCreateRemoteBookAcceptsCategory(t *testing.T) {
 	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
 		t.Fatal(err)
 	}
-	category := models.Category{UserID: user.ID, Name: "远程分组"}
-	if err := server.db.Create(&category).Error; err != nil {
+	categoryA := models.Category{UserID: user.ID, Name: "远程分组 A"}
+	categoryB := models.Category{UserID: user.ID, Name: "远程分组 B"}
+	if err := server.db.Create(&categoryA).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&categoryB).Error; err != nil {
 		t.Fatal(err)
 	}
 	source := models.BookSource{Name: "远程源", BaseURL: upstream, Charset: "utf-8", Enabled: true}
@@ -2482,7 +2727,7 @@ func TestCreateRemoteBookAcceptsCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := `{"title":"远程书","bookUrl":"` + upstream + `/book","sourceId":` + strconv.FormatUint(uint64(source.ID), 10) + `,"categoryId":` + strconv.FormatUint(uint64(category.ID), 10) + `}`
+	body := `{"title":"远程书","bookUrl":"` + upstream + `/book","sourceId":` + strconv.FormatUint(uint64(source.ID), 10) + `,"categoryIds":[` + strconv.FormatUint(uint64(categoryA.ID), 10) + `,` + strconv.FormatUint(uint64(categoryB.ID), 10) + `]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/books/remote", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -2492,12 +2737,18 @@ func TestCreateRemoteBookAcceptsCategory(t *testing.T) {
 		t.Fatalf("create remote book: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var book models.Book
+	var book struct {
+		models.Book
+		CategoryIDs []uint `json:"categoryIds"`
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &book); err != nil {
 		t.Fatal(err)
 	}
-	if book.CategoryID == nil || *book.CategoryID != category.ID {
-		t.Fatalf("expected category on remote book, got %+v", book)
+	if !reflect.DeepEqual(book.CategoryIDs, []uint{categoryA.ID, categoryB.ID}) {
+		t.Fatalf("expected both categories on remote book, got %+v", book.CategoryIDs)
+	}
+	if book.CategoryID == nil || *book.CategoryID != categoryA.ID {
+		t.Fatalf("expected first category as compatibility category, got %+v", book.Book)
 	}
 	if !book.CanUpdate {
 		t.Fatalf("expected remote book to enable update checks by default, got %+v", book)
@@ -2692,8 +2943,12 @@ func TestCreateRemoteBookReusesExistingURL(t *testing.T) {
 	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
 		t.Fatal(err)
 	}
-	category := models.Category{UserID: user.ID, Name: "新分组"}
-	if err := server.db.Create(&category).Error; err != nil {
+	categoryA := models.Category{UserID: user.ID, Name: "新分组 A"}
+	categoryB := models.Category{UserID: user.ID, Name: "新分组 B"}
+	if err := server.db.Create(&categoryA).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&categoryB).Error; err != nil {
 		t.Fatal(err)
 	}
 	source := models.BookSource{Name: "已有源", Enabled: true}
@@ -2705,7 +2960,7 @@ func TestCreateRemoteBookReusesExistingURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := `{"title":"已有书","bookUrl":"https://book.example/existing","sourceId":` + strconv.FormatUint(uint64(source.ID), 10) + `,"categoryId":` + strconv.FormatUint(uint64(category.ID), 10) + `}`
+	body := `{"title":"已有书","bookUrl":"https://book.example/existing","sourceId":` + strconv.FormatUint(uint64(source.ID), 10) + `,"categoryIds":[` + strconv.FormatUint(uint64(categoryA.ID), 10) + `,` + strconv.FormatUint(uint64(categoryB.ID), 10) + `]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/books/remote", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -2722,12 +2977,25 @@ func TestCreateRemoteBookReusesExistingURL(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected no duplicate books, got %d", count)
 	}
-	var updated models.Book
-	if err := server.db.First(&updated, book.ID).Error; err != nil {
+	var updated struct {
+		models.Book
+		CategoryIDs []uint `json:"categoryIds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.CategoryID == nil || *updated.CategoryID != category.ID {
-		t.Fatalf("expected existing book category updated, got %+v", updated)
+	if !reflect.DeepEqual(updated.CategoryIDs, []uint{categoryA.ID, categoryB.ID}) {
+		t.Fatalf("expected existing book categories updated, got %+v", updated.CategoryIDs)
+	}
+	if updated.CategoryID == nil || *updated.CategoryID != categoryA.ID {
+		t.Fatalf("expected first category as compatibility category, got %+v", updated.Book)
+	}
+	var categoryRows int64
+	if err := server.db.Model(&models.BookCategory{}).Where("user_id = ? AND book_id = ?", user.ID, book.ID).Count(&categoryRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if categoryRows != 2 {
+		t.Fatalf("expected two persisted category memberships, got %d", categoryRows)
 	}
 }
 
@@ -2821,6 +3089,81 @@ func TestUpdateBookmark(t *testing.T) {
 	}
 	if updated.Title != "新标题" || updated.Excerpt != "新摘录" || updated.Note != "新笔记" {
 		t.Fatalf("unexpected bookmark: %+v", updated)
+	}
+}
+
+func TestBatchCreateAndDeleteBookmarks(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "批量书签书"}
+	otherBook := models.Book{UserID: user.ID, Title: "其它书籍"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&otherBook).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[
+		{"chapterIndex":1,"offset":12,"percent":0.25,"title":"第一条","excerpt":"摘录一"},
+		{"chapterIndex":2,"offset":24,"percent":0.5,"note":"笔记二"}
+	]`
+	req := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/bookmarks/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("batch create bookmarks: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created []models.Bookmark
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if len(created) != 2 || created[0].Title != "第一条" || created[1].Title != "书签" {
+		t.Fatalf("unexpected created bookmarks: %+v", created)
+	}
+	for _, bookmark := range created {
+		if bookmark.UserID != user.ID || bookmark.BookID != book.ID || bookmark.ID == 0 {
+			t.Fatalf("batch bookmark was not scoped correctly: %+v", bookmark)
+		}
+	}
+
+	otherBookmark := models.Bookmark{UserID: user.ID, BookID: otherBook.ID, Title: "不能被跨书删除"}
+	if err := server.db.Create(&otherBookmark).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleteBody := fmt.Sprintf(`{"ids":[%d,%d,%d,%d]}`, created[0].ID, otherBookmark.ID, created[0].ID, 999999)
+	deleteReq := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/bookmarks/batch-delete", strings.NewReader(deleteBody))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("Authorization", token)
+	deleteW := httptest.NewRecorder()
+	router.ServeHTTP(deleteW, deleteReq)
+	if deleteW.Code != http.StatusOK {
+		t.Fatalf("batch delete bookmarks: expected 200, got %d: %s", deleteW.Code, deleteW.Body.String())
+	}
+	var deleted struct {
+		DeletedIDs []uint `json:"deletedIds"`
+	}
+	if err := json.Unmarshal(deleteW.Body.Bytes(), &deleted); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deleted.DeletedIDs, []uint{created[0].ID}) {
+		t.Fatalf("unexpected deleted bookmark ids: %+v", deleted.DeletedIDs)
+	}
+
+	var remaining []models.Bookmark
+	if err := server.db.Order("id asc").Find(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 2 || remaining[0].ID != created[1].ID || remaining[1].ID != otherBookmark.ID {
+		t.Fatalf("batch delete crossed scope or removed wrong rows: %+v", remaining)
 	}
 }
 
@@ -5059,6 +5402,96 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	}
 }
 
+func TestBatchUpsertAndDeleteReplaceRules(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	isRegex := true
+	existing := models.ReplaceRule{
+		UserID: user.ID, Name: "已有规则", Pattern: "旧匹配", Replacement: "旧替换",
+		Scope: "*", IsRegex: &isRegex, Enabled: true,
+	}
+	otherUserRule := models.ReplaceRule{
+		UserID: user.ID + 100, Name: "其它用户规则", Pattern: "不能删除",
+		Scope: "*", IsRegex: &isRegex, Enabled: true,
+	}
+	if err := server.db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&otherUserRule).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[
+		{"name":"已有规则","pattern":"新匹配","replacement":"新替换","scope":"目标书","isRegex":false,"enabled":false},
+		{"name":"新增规则","pattern":"广告","replacement":"","scope":"*","isRegex":true,"isEnabled":true},
+		{"name":"","pattern":"无名称"},
+		{"name":"无匹配","pattern":""}
+	]`
+	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("batch upsert replace rules: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var upserted struct {
+		Rules   []models.ReplaceRule `json:"rules"`
+		Created int                  `json:"created"`
+		Updated int                  `json:"updated"`
+		Skipped int                  `json:"skipped"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &upserted); err != nil {
+		t.Fatal(err)
+	}
+	if upserted.Created != 1 || upserted.Updated != 1 || upserted.Skipped != 2 || len(upserted.Rules) != 2 {
+		t.Fatalf("unexpected batch upsert summary: %+v", upserted)
+	}
+	if upserted.Rules[0].ID != existing.ID || upserted.Rules[0].Pattern != "新匹配" || upserted.Rules[0].Enabled {
+		t.Fatalf("expected existing rule to be updated in place, got %+v", upserted.Rules[0])
+	}
+
+	var ownRules []models.ReplaceRule
+	if err := server.db.Where("user_id = ?", user.ID).Order("id asc").Find(&ownRules).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(ownRules) != 2 || ownRules[0].ID != existing.ID || ownRules[1].Name != "新增规则" {
+		t.Fatalf("expected one updated and one created rule, got %+v", ownRules)
+	}
+
+	deleteBody := fmt.Sprintf(`{"ids":[%d,%d,%d,%d]}`, ownRules[0].ID, ownRules[1].ID, otherUserRule.ID, ownRules[0].ID)
+	deleteReq := httptest.NewRequest(http.MethodPost, "/api/replace-rules/batch-delete", strings.NewReader(deleteBody))
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("Authorization", token)
+	deleteW := httptest.NewRecorder()
+	router.ServeHTTP(deleteW, deleteReq)
+	if deleteW.Code != http.StatusOK {
+		t.Fatalf("batch delete replace rules: expected 200, got %d: %s", deleteW.Code, deleteW.Body.String())
+	}
+	var deleted struct {
+		DeletedIDs []uint `json:"deletedIds"`
+	}
+	if err := json.Unmarshal(deleteW.Body.Bytes(), &deleted); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(deleted.DeletedIDs, []uint{ownRules[0].ID, ownRules[1].ID}) {
+		t.Fatalf("unexpected deleted replace rule ids: %+v", deleted.DeletedIDs)
+	}
+
+	var remaining []models.ReplaceRule
+	if err := server.db.Find(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 || remaining[0].ID != otherUserRule.ID {
+		t.Fatalf("batch delete crossed user scope: %+v", remaining)
+	}
+}
+
 func TestCreateReplaceRuleRespectsEnabledFlag(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
@@ -5704,11 +6137,15 @@ func TestExploreBooksUsesExploreURL(t *testing.T) {
 
 	source := models.BookSource{Name: "探索源", BaseURL: "https://explore.example", Charset: "utf-8", Enabled: true}
 	if err := source.SetRules(models.BookSourceRule{
-		ExploreURL:     "https://explore.example/top",
-		BookListRule:   ".book",
-		BookNameRule:   ".title|text",
-		BookAuthorRule: ".author|text",
-		BookURLRule:    ".link|attr:href",
+		ExploreURL:            "https://explore.example/top",
+		BookListRule:          ".search-only",
+		BookNameRule:          ".search-title|text",
+		BookURLRule:           ".search-link|attr:href",
+		ExploreBookListRule:   ".book",
+		ExploreBookNameRule:   ".title|text",
+		ExploreBookAuthorRule: ".author|text",
+		ExploreBookURLRule:    ".link|attr:href",
+		ExplorePaginationRule: ".explore-next|attr:href",
 	}); err != nil {
 		t.Fatal(err)
 	}
