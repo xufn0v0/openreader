@@ -158,6 +158,197 @@ func TestRegisterAndLogin(t *testing.T) {
 	}
 }
 
+func TestSearchPaginationUsesPageForSingleSourceAndCursorForMultipleSources(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var requestedMu sync.Mutex
+	requested := make([]string, 0)
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			requestedMu.Lock()
+			requested = append(requested, request.URL.Path+"?"+request.URL.RawQuery)
+			requestedMu.Unlock()
+			sourceName := strings.TrimPrefix(request.URL.Path, "/")
+			page := request.URL.Query().Get("page")
+			if page == "" {
+				page = "1"
+			}
+			body := fmt.Sprintf(
+				`<article class="book"><a class="name" href="/book/%s/%s">%s 第%s页</a><span class="author">%s作者</span></article>`,
+				sourceName,
+				page,
+				sourceName,
+				page,
+				sourceName,
+			)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    request,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	sources := make([]models.BookSource, 0, 3)
+	for _, name := range []string{"source-a", "source-b", "source-c"} {
+		source := models.BookSource{Name: name, Enabled: true, Charset: "utf-8"}
+		if err := source.SetRules(models.BookSourceRule{
+			SearchURL:      "https://search.example/" + name + "?q={keyword}&page={page}",
+			BookListRule:   ".book",
+			BookNameRule:   ".name",
+			BookAuthorRule: ".author",
+			BookURLRule:    ".name|attr:href",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := server.db.Create(&source).Error; err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, source)
+	}
+
+	singleBody := fmt.Sprintf(
+		`{"keyword":"分页","sourceIds":[%d],"concurrentCount":1,"page":2,"lastIndex":-1,"searchSize":20}`,
+		sources[0].ID,
+	)
+	singleReq := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(singleBody))
+	singleReq.Header.Set("Content-Type", "application/json")
+	singleReq.Header.Set("Authorization", token)
+	singleW := httptest.NewRecorder()
+	router.ServeHTTP(singleW, singleReq)
+	if singleW.Code != http.StatusOK {
+		t.Fatalf("single source search: expected 200, got %d: %s", singleW.Code, singleW.Body.String())
+	}
+	var singleResp searchResponse
+	if err := json.Unmarshal(singleW.Body.Bytes(), &singleResp); err != nil {
+		t.Fatal(err)
+	}
+	if singleResp.Page != 2 || !singleResp.HasMore || singleResp.LastIndex != -1 ||
+		len(singleResp.List) != 1 || singleResp.List[0].Title != "source-a 第2页" {
+		t.Fatalf("unexpected single source response: %+v", singleResp)
+	}
+
+	requestedMu.Lock()
+	requested = requested[:0]
+	requestedMu.Unlock()
+	firstMultiBody := fmt.Sprintf(
+		`{"keyword":"游标","sourceIds":[%d,%d,%d],"concurrentCount":1,"page":1,"lastIndex":-1,"searchSize":1}`,
+		sources[1].ID,
+		sources[0].ID,
+		sources[2].ID,
+	)
+	firstMultiReq := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(firstMultiBody))
+	firstMultiReq.Header.Set("Content-Type", "application/json")
+	firstMultiReq.Header.Set("Authorization", token)
+	firstMultiW := httptest.NewRecorder()
+	router.ServeHTTP(firstMultiW, firstMultiReq)
+	if firstMultiW.Code != http.StatusOK {
+		t.Fatalf("first multi search: expected 200, got %d: %s", firstMultiW.Code, firstMultiW.Body.String())
+	}
+	var firstMultiResp searchResponse
+	if err := json.Unmarshal(firstMultiW.Body.Bytes(), &firstMultiResp); err != nil {
+		t.Fatal(err)
+	}
+	if firstMultiResp.LastIndex != 0 || !firstMultiResp.HasMore ||
+		len(firstMultiResp.List) != 1 || firstMultiResp.List[0].SourceID != sources[1].ID {
+		t.Fatalf("unexpected first multi response: %+v", firstMultiResp)
+	}
+
+	secondMultiBody := fmt.Sprintf(
+		`{"keyword":"游标","sourceIds":[%d,%d,%d],"concurrentCount":1,"page":2,"lastIndex":0,"searchSize":1}`,
+		sources[1].ID,
+		sources[0].ID,
+		sources[2].ID,
+	)
+	secondMultiReq := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(secondMultiBody))
+	secondMultiReq.Header.Set("Content-Type", "application/json")
+	secondMultiReq.Header.Set("Authorization", token)
+	secondMultiW := httptest.NewRecorder()
+	router.ServeHTTP(secondMultiW, secondMultiReq)
+	if secondMultiW.Code != http.StatusOK {
+		t.Fatalf("second multi search: expected 200, got %d: %s", secondMultiW.Code, secondMultiW.Body.String())
+	}
+	var secondMultiResp searchResponse
+	if err := json.Unmarshal(secondMultiW.Body.Bytes(), &secondMultiResp); err != nil {
+		t.Fatal(err)
+	}
+	if secondMultiResp.LastIndex != 1 || !secondMultiResp.HasMore ||
+		len(secondMultiResp.List) != 1 || secondMultiResp.List[0].SourceID != sources[0].ID {
+		t.Fatalf("unexpected second multi response: %+v", secondMultiResp)
+	}
+
+	requestedMu.Lock()
+	gotRequests := append([]string(nil), requested...)
+	requestedMu.Unlock()
+	if len(gotRequests) != 2 ||
+		!strings.HasPrefix(gotRequests[0], "/source-b?") ||
+		!strings.HasPrefix(gotRequests[1], "/source-a?") {
+		t.Fatalf("multi source cursor did not preserve requested source order: %v", gotRequests)
+	}
+}
+
+func TestSearchExecutesImportedUpstreamPostOptions(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	source := models.BookSource{Name: "上游 POST 源", Enabled: true, Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		SearchURL:    `https://post-search.example/search, {"method":"POST","body":{"keyword":"{keyword}","page":"{page}"},"headers":{"X-Page":"{page}"}}`,
+		BookListRule: ".book",
+		BookNameRule: ".name",
+		BookURLRule:  ".name|attr:href",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Method != http.MethodPost ||
+				request.Header.Get("Content-Type") != "application/json; charset=utf-8" ||
+				request.Header.Get("X-Page") != "2" {
+				t.Fatalf("unexpected POST search request: method=%s headers=%v", request.Method, request.Header)
+			}
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) != `{"keyword":"中文书","page":"2"}` {
+				t.Fatalf("unexpected POST search body: %s", body)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					`<article class="book"><a class="name" href="/book/2">POST 搜索结果</a></article>`,
+				)),
+				Header:  make(http.Header),
+				Request: request,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	body := fmt.Sprintf(
+		`{"keyword":"中文书","sourceIds":[%d],"page":2,"lastIndex":-1,"searchSize":20}`,
+		source.ID,
+	)
+	req := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"POST 搜索结果"`) ||
+		!strings.Contains(w.Body.String(), `"page":2`) {
+		t.Fatalf("POST source search: expected parsed second page, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUserReaderSettingsRoundTrip(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
@@ -1608,7 +1799,7 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			"bookSourceName":"上游源",
 			"bookSourceUrl":"https://reader.example",
 			"bookSourceGroup":"分组A",
-			"searchUrl":"https://reader.example/search?q={{key}}",
+			"searchUrl":"https://reader.example/search, {\"method\":\"POST\",\"body\":\"key={{key}}&page={{page}}\",\"headers\":{\"X-Page\":\"{{page}}\"}}",
 			"exploreUrl":"https://reader.example/top/{page}",
 			"headerMap":{"User-Agent":"OpenReader Test","Referer":"https://reader.example"},
 			"enabled":false,
@@ -1631,6 +1822,14 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 				"bookUrl":"a@data-url"
 			},
 			"ruleBookInfo":{
+				"name":"h1@text",
+				"author":".detail-author@text",
+				"coverUrl":"img.cover@data-src",
+				"intro":".detail-intro@text",
+				"kind":".detail-kind@text",
+				"lastChapter":".detail-last@text",
+				"updateTime":".detail-update@text",
+				"wordCount":".detail-words@text",
 				"tocUrl":".catalog@href"
 			},
 			"ruleToc":{
@@ -1657,7 +1856,7 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rule.SearchURL != "https://reader.example/search?q={keyword}" ||
+	if rule.SearchURL != `https://reader.example/search, {"method":"POST","body":"key={keyword}&page={page}","headers":{"X-Page":"{page}"}}` ||
 		rule.ExploreURL != "https://reader.example/top/{page}" ||
 		rule.BookListRule != ".book" ||
 		rule.BookNameRule != ".name" ||
@@ -1669,6 +1868,14 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 		rule.ExploreBookIntroRule != ".explore-intro" ||
 		rule.ExploreLatestChapterRule != ".explore-last" ||
 		rule.ExploreBookURLRule != "a|attr:data-url" ||
+		rule.BookInfoNameRule != "h1|text" ||
+		rule.BookInfoAuthorRule != ".detail-author|text" ||
+		rule.BookInfoCoverRule != "img.cover|attr:data-src" ||
+		rule.BookInfoIntroRule != ".detail-intro|text" ||
+		rule.BookInfoKindRule != ".detail-kind|text" ||
+		rule.BookInfoLatestChapterRule != ".detail-last|text" ||
+		rule.BookInfoUpdateTimeRule != ".detail-update|text" ||
+		rule.BookInfoWordCountRule != ".detail-words|text" ||
 		rule.TOCURLRule != ".catalog|attr:href" ||
 		rule.ChapterListRule != ".chapter" ||
 		rule.ChapterURLRule != "a|attr:href" ||
@@ -1676,6 +1883,10 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 		rule.Headers["User-Agent"] != "OpenReader Test" ||
 		rule.Headers["Referer"] != "https://reader.example" {
 		t.Fatalf("unexpected converted rules: %+v", rule)
+	}
+	if exported := exportUpstreamURLTemplate(rule.SearchURL); exported !=
+		`https://reader.example/search, {"method":"POST","body":"key={{key}}&page={{page}}","headers":{"X-Page":"{{page}}"}}` {
+		t.Fatalf("POST URL options were not preserved for upstream export: %s", exported)
 	}
 }
 
@@ -1732,9 +1943,9 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			"headerMap":{"X-Source-Token":"upload-secret","Referer":"https://upload-reader.example/"},
 			"ruleSearch":{"bookList":".item","name":".name","bookUrl":"a@href"},
 			"ruleExplore":{"bookList":".explore-item","name":".explore-name","bookUrl":"a@data-url"},
-			"ruleBookInfo":{"tocUrl":".catalog@href"},
-			"ruleToc":{"chapterList":".chapter","chapterName":".chapter-name","chapterUrl":"a@href"},
-			"ruleContent":{"content":".content"}
+			"ruleBookInfo":{"name":".detail-name","author":".detail-author","coverUrl":"img@data-src","intro":".detail-intro","tocUrl":".catalog@href"},
+			"ruleToc":{"chapterList":".chapter","chapterName":".chapter-name","chapterUrl":"a@href","nextTocUrl":".toc-next@href"},
+			"ruleContent":{"content":".content","nextContentUrl":".content-next@href"}
 		}
 	]`))
 	if err != nil {
@@ -1772,16 +1983,21 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 		rule.ExploreBookListRule != ".explore-item" ||
 		rule.ExploreBookNameRule != ".explore-name" ||
 		rule.ExploreBookURLRule != "a|attr:data-url" ||
+		rule.BookInfoNameRule != ".detail-name" ||
+		rule.BookInfoAuthorRule != ".detail-author" ||
+		rule.BookInfoCoverRule != "img|attr:data-src" ||
+		rule.BookInfoIntroRule != ".detail-intro" ||
 		rule.TOCURLRule != ".catalog|attr:href" ||
 		rule.ChapterListRule != ".chapter" ||
 		rule.ChapterNameRule != ".chapter-name" ||
 		rule.ChapterURLRule != "a|attr:href" ||
+		rule.NextTOCURLRule != ".toc-next|attr:href" ||
 		rule.ContentRule != ".content" ||
+		rule.NextContentURLRule != ".content-next|attr:href" ||
 		rule.Headers["X-Source-Token"] != "upload-secret" ||
 		rule.Headers["Referer"] != "https://upload-reader.example/" {
 		t.Fatalf("unexpected imported rules: %+v", rule)
 	}
-
 	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			if request.Header.Get("X-Source-Token") != "upload-secret" ||
@@ -1798,9 +2014,26 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			case "/explore/2":
 				body = `<article class="explore-item"><span class="explore-name">独立探索规则书籍</span><a data-url="/book/2">详情</a></article>`
 			case "/book/2":
-				body = `<a class="catalog" href="/catalog/2">目录</a>`
+				body = `
+					<h1 class="detail-name">详情页完整书名</h1>
+					<span class="detail-author">详情页作者</span>
+					<img data-src="/detail-cover.jpg">
+					<div class="detail-intro">详情页简介</div>
+					<a class="catalog" href="/catalog/2">目录</a>
+				`
 			case "/catalog/2":
-				body = `<article class="chapter"><span class="chapter-name">详情页解析目录</span><a href="/chapter/2">阅读</a></article>`
+				body = `
+					<article class="chapter"><span class="chapter-name">详情页解析目录</span><a href="/chapter/2">阅读</a></article>
+					<a class="toc-next" href="/catalog/3">下一页</a>
+				`
+			case "/catalog/3":
+				body = `<article class="chapter"><span class="chapter-name">分页目录第二章</span><a href="/chapter/3">阅读</a></article>`
+			case "/chapter/2":
+				if request.URL.Query().Get("page") == "2" {
+					body = `<main class="content">正文第二页</main>`
+				} else {
+					body = `<main class="content">正文第一页</main><a class="content-next" href="/chapter/2?page=2">下一页</a>`
+				}
 			default:
 				t.Fatalf("unexpected imported source request: %s", request.URL.String())
 			}
@@ -1840,8 +2073,42 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	router.ServeHTTP(tocW, tocReq)
 	if tocW.Code != http.StatusOK ||
 		!strings.Contains(tocW.Body.String(), `"详情页解析目录"`) ||
+		!strings.Contains(tocW.Body.String(), `"分页目录第二章"`) ||
 		!strings.Contains(tocW.Body.String(), `"https://upload-reader.example/chapter/2"`) {
 		t.Fatalf("resolve imported ruleBookInfo.tocUrl: expected parsed catalog, got %d: %s", tocW.Code, tocW.Body.String())
+	}
+
+	contentReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/sources/%d/test-content", source.ID), strings.NewReader(`{"chapterUrl":"https://upload-reader.example/chapter/2"}`))
+	contentReq.Header.Set("Content-Type", "application/json")
+	contentReq.Header.Set("Authorization", token)
+	contentW := httptest.NewRecorder()
+	router.ServeHTTP(contentW, contentReq)
+	if contentW.Code != http.StatusOK ||
+		!strings.Contains(contentW.Body.String(), `正文第一页\n正文第二页`) {
+		t.Fatalf("load imported paginated content: expected joined content, got %d: %s", contentW.Code, contentW.Body.String())
+	}
+
+	addReq := httptest.NewRequest(http.MethodPost, "/api/books/remote", strings.NewReader(fmt.Sprintf(
+		`{"title":"搜索结果书名","author":"搜索作者","bookUrl":"https://upload-reader.example/book/2","sourceId":%d}`,
+		source.ID,
+	)))
+	addReq.Header.Set("Content-Type", "application/json")
+	addReq.Header.Set("Authorization", token)
+	addW := httptest.NewRecorder()
+	router.ServeHTTP(addW, addReq)
+	if addW.Code != http.StatusCreated {
+		t.Fatalf("create imported upstream remote book: expected 201, got %d: %s", addW.Code, addW.Body.String())
+	}
+	var added models.Book
+	if err := json.Unmarshal(addW.Body.Bytes(), &added); err != nil {
+		t.Fatal(err)
+	}
+	if added.Title != "详情页完整书名" ||
+		added.Author != "详情页作者" ||
+		added.CoverURL != "https://upload-reader.example/detail-cover.jpg" ||
+		added.Intro != "详情页简介" ||
+		added.ChapterCount != 2 {
+		t.Fatalf("imported ruleBookInfo should enrich remote book: %+v", added)
 	}
 }
 
@@ -2306,29 +2573,39 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 		{Name: "导出源三", BaseURL: "https://three.example", Charset: "utf-8", Enabled: false},
 	}
 	if err := sources[0].SetRules(models.BookSourceRule{
-		SearchURL:                "https://one.example/search?q={keyword}",
-		ExploreURL:               "https://one.example/explore/{page}",
-		BookListRule:             ".book",
-		BookNameRule:             ".name",
-		BookAuthorRule:           ".author",
-		BookCoverRule:            "img|attr:src",
-		BookIntroRule:            ".intro",
-		LatestChapterRule:        ".latest",
-		BookURLRule:              "a|attr:href",
-		ExploreBookListRule:      ".explore-card",
-		ExploreBookNameRule:      ".explore-title",
-		ExploreBookAuthorRule:    ".explore-author",
-		ExploreBookCoverRule:     "img|attr:data-src",
-		ExploreBookIntroRule:     ".explore-intro",
-		ExploreLatestChapterRule: ".explore-latest",
-		ExploreBookURLRule:       "a|attr:data-url",
-		ExplorePaginationRule:    ".explore-next|attr:href",
-		TOCURLRule:               ".catalog|attr:href",
-		ChapterListRule:          ".chapter",
-		ChapterNameRule:          ".title",
-		ChapterURLRule:           "a|attr:href",
-		ContentRule:              "#content",
-		PaginationRule:           ".next|attr:href",
+		SearchURL:                 "https://one.example/search?q={keyword}",
+		ExploreURL:                "https://one.example/explore/{page}",
+		BookListRule:              ".book",
+		BookNameRule:              ".name",
+		BookAuthorRule:            ".author",
+		BookCoverRule:             "img|attr:src",
+		BookIntroRule:             ".intro",
+		LatestChapterRule:         ".latest",
+		BookURLRule:               "a|attr:href",
+		ExploreBookListRule:       ".explore-card",
+		ExploreBookNameRule:       ".explore-title",
+		ExploreBookAuthorRule:     ".explore-author",
+		ExploreBookCoverRule:      "img|attr:data-src",
+		ExploreBookIntroRule:      ".explore-intro",
+		ExploreLatestChapterRule:  ".explore-latest",
+		ExploreBookURLRule:        "a|attr:data-url",
+		ExplorePaginationRule:     ".explore-next|attr:href",
+		BookInfoNameRule:          ".detail-name",
+		BookInfoAuthorRule:        ".detail-author",
+		BookInfoCoverRule:         "img.detail-cover|attr:data-src",
+		BookInfoIntroRule:         ".detail-intro",
+		BookInfoKindRule:          ".detail-kind",
+		BookInfoLatestChapterRule: ".detail-latest",
+		BookInfoUpdateTimeRule:    ".detail-update",
+		BookInfoWordCountRule:     ".detail-words",
+		TOCURLRule:                ".catalog|attr:href",
+		ChapterListRule:           ".chapter",
+		ChapterNameRule:           ".title",
+		ChapterURLRule:            "a|attr:href",
+		NextTOCURLRule:            ".toc-next|attr:href",
+		ContentRule:               "#content",
+		NextContentURLRule:        ".content-next|attr:href",
+		PaginationRule:            ".next|attr:href",
 		Headers: map[string]string{
 			"Referer": "https://one.example/",
 		},
@@ -2385,10 +2662,20 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 		first.RuleExplore.Name != ".explore-title" ||
 		first.RuleExplore.CoverURL != "img@data-src" ||
 		first.RuleExplore.BookURL != "a@data-url" ||
+		first.RuleBookInfo.Name != ".detail-name" ||
+		first.RuleBookInfo.Author != ".detail-author" ||
+		first.RuleBookInfo.CoverURL != "img.detail-cover@data-src" ||
+		first.RuleBookInfo.Intro != ".detail-intro" ||
+		first.RuleBookInfo.Kind != ".detail-kind" ||
+		first.RuleBookInfo.LastChapter != ".detail-latest" ||
+		first.RuleBookInfo.UpdateTime != ".detail-update" ||
+		first.RuleBookInfo.WordCount != ".detail-words" ||
 		first.RuleBookInfo.TOCURL != ".catalog@href" ||
 		first.RuleTOC.ChapterList != ".chapter" ||
 		first.RuleTOC.ChapterURL != "a@href" ||
+		first.RuleTOC.NextTOCURL != ".toc-next@href" ||
 		first.RuleContent.Content != "#content" ||
+		first.RuleContent.NextContentURL != ".content-next@href" ||
 		!strings.Contains(first.Header, `"Referer":"https://one.example/"`) ||
 		!strings.Contains(first.Rules, `"paginationRule":".next|attr:href"`) ||
 		!strings.Contains(first.Rules, `"textReplaceRules"`) {
@@ -2414,6 +2701,11 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 		reimportedRule.ExploreBookListRule != ".explore-card" ||
 		reimportedRule.ExploreBookURLRule != "a|attr:data-url" ||
 		reimportedRule.ExplorePaginationRule != ".explore-next|attr:href" ||
+		reimportedRule.BookInfoNameRule != ".detail-name" ||
+		reimportedRule.BookInfoCoverRule != "img.detail-cover|attr:data-src" ||
+		reimportedRule.BookInfoLatestChapterRule != ".detail-latest" ||
+		reimportedRule.NextTOCURLRule != ".toc-next|attr:href" ||
+		reimportedRule.NextContentURLRule != ".content-next|attr:href" ||
 		len(reimportedRule.TextReplaceRules) != 1 ||
 		reimportedRule.Headers["Referer"] != "https://one.example/" {
 		t.Fatalf("export should round-trip without losing OpenReader rules: source=%+v rule=%+v", roundTripped[0], reimportedRule)
@@ -2490,6 +2782,10 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 				</body></html>`
 			case "/book-new":
 				body = `<html><body>
+					<h1 class="detail-name">换源详情书名</h1>
+					<span class="detail-author">换源详情作者</span>
+					<img class="detail-cover" src="/switch-cover.jpg">
+					<p class="detail-intro">换源详情简介</p>
 					<ul>
 						<li class="chapter"><a href="/c1">第一章</a></li>
 						<li class="chapter"><a href="/c2">第二章</a></li>
@@ -2526,16 +2822,20 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 		Enabled: true,
 	}
 	if err := source.SetRules(models.BookSourceRule{
-		SearchURL:         upstream + "/search?q={keyword}",
-		BookListRule:      ".book",
-		BookNameRule:      ".title|text",
-		BookAuthorRule:    ".author|text",
-		BookIntroRule:     ".intro|text",
-		LatestChapterRule: ".latest|text",
-		BookURLRule:       ".link|attr:href",
-		ChapterListRule:   ".chapter",
-		ChapterNameRule:   "a|text",
-		ChapterURLRule:    "a|attr:href",
+		SearchURL:          upstream + "/search?q={keyword}",
+		BookListRule:       ".book",
+		BookNameRule:       ".title|text",
+		BookAuthorRule:     ".author|text",
+		BookIntroRule:      ".intro|text",
+		LatestChapterRule:  ".latest|text",
+		BookURLRule:        ".link|attr:href",
+		BookInfoNameRule:   ".detail-name",
+		BookInfoAuthorRule: ".detail-author",
+		BookInfoCoverRule:  ".detail-cover|attr:src",
+		BookInfoIntroRule:  ".detail-intro",
+		ChapterListRule:    ".chapter",
+		ChapterNameRule:    "a|text",
+		ChapterURLRule:     "a|attr:href",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2679,7 +2979,13 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 	if err := server.db.First(&updated, book.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if updated.URL != upstream+"/book-new" || updated.ChapterCount != 2 || updated.LastChapter != "第二章" {
+	if updated.URL != upstream+"/book-new" ||
+		updated.Title != "换源详情书名" ||
+		updated.Author != "换源详情作者" ||
+		updated.CoverURL != upstream+"/switch-cover.jpg" ||
+		updated.Intro != "换源详情简介" ||
+		updated.ChapterCount != 2 ||
+		updated.LastChapter != "第二章" {
 		t.Fatalf("book was not switched to candidate URL: %+v", updated)
 	}
 }
@@ -2689,13 +2995,19 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 	token := authHeader(t, router)
 
 	upstream := "https://remote-book.test"
+	detailTitle := "详情远程书"
+	detailIntro := "详情简介"
 	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Body: io.NopCloser(strings.NewReader(`<html><body>
+				Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`<html><body>
+					<h1 class="detail-name">%s</h1>
+					<span class="detail-author">详情作者</span>
+					<img class="detail-cover" data-src="/cover-detail.jpg">
+					<p class="detail-intro">%s</p>
 					<li class="chapter"><a href="/c1">第一章</a></li>
-				</body></html>`)),
+				</body></html>`, detailTitle, detailIntro))),
 				Header:  make(http.Header),
 				Request: req,
 			}, nil
@@ -2717,9 +3029,13 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 	}
 	source := models.BookSource{Name: "远程源", BaseURL: upstream, Charset: "utf-8", Enabled: true}
 	if err := source.SetRules(models.BookSourceRule{
-		ChapterListRule: ".chapter",
-		ChapterNameRule: "a|text",
-		ChapterURLRule:  "a|attr:href",
+		BookInfoNameRule:   ".detail-name",
+		BookInfoAuthorRule: ".detail-author",
+		BookInfoCoverRule:  ".detail-cover|attr:data-src",
+		BookInfoIntroRule:  ".detail-intro",
+		ChapterListRule:    ".chapter",
+		ChapterNameRule:    "a|text",
+		ChapterURLRule:     "a|attr:href",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2752,6 +3068,29 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 	}
 	if !book.CanUpdate {
 		t.Fatalf("expected remote book to enable update checks by default, got %+v", book)
+	}
+	if book.Title != "详情远程书" ||
+		book.Author != "详情作者" ||
+		book.CoverURL != upstream+"/cover-detail.jpg" ||
+		book.Intro != "详情简介" {
+		t.Fatalf("expected detail page metadata to override search payload: %+v", book.Book)
+	}
+
+	detailTitle = "刷新后的详情书名"
+	detailIntro = "刷新后的详情简介"
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh", nil)
+	refreshReq.Header.Set("Authorization", token)
+	refreshW := httptest.NewRecorder()
+	router.ServeHTTP(refreshW, refreshReq)
+	if refreshW.Code != http.StatusOK {
+		t.Fatalf("refresh remote book: expected 200, got %d: %s", refreshW.Code, refreshW.Body.String())
+	}
+	var refreshed models.Book
+	if err := server.db.First(&refreshed, book.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Title != detailTitle || refreshed.Intro != detailIntro {
+		t.Fatalf("refresh should update detail page metadata: %+v", refreshed)
 	}
 }
 

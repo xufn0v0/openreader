@@ -257,16 +257,26 @@
             </el-collapse-item>
             <el-collapse-item title="目录" name="toc">
               <div class="rule-grid">
+                <el-input v-model="ruleForm.bookInfoNameRule" placeholder="详情书名 bookInfoNameRule" />
+                <el-input v-model="ruleForm.bookInfoAuthorRule" placeholder="详情作者 bookInfoAuthorRule" />
+                <el-input v-model="ruleForm.bookInfoCoverRule" placeholder="详情封面 bookInfoCoverRule" />
+                <el-input v-model="ruleForm.bookInfoIntroRule" placeholder="详情简介 bookInfoIntroRule" />
+                <el-input v-model="ruleForm.bookInfoKindRule" placeholder="详情分类 bookInfoKindRule" />
+                <el-input v-model="ruleForm.bookInfoLatestChapterRule" placeholder="详情最新章节 bookInfoLatestChapterRule" />
+                <el-input v-model="ruleForm.bookInfoUpdateTimeRule" placeholder="详情更新时间 bookInfoUpdateTimeRule" />
+                <el-input v-model="ruleForm.bookInfoWordCountRule" placeholder="详情字数 bookInfoWordCountRule" />
                 <el-input v-model="ruleForm.tocUrlRule" placeholder="目录地址 tocUrlRule" />
                 <el-input v-model="ruleForm.chapterListRule" placeholder="章节列表 chapterListRule" />
                 <el-input v-model="ruleForm.chapterNameRule" placeholder="章节名 chapterNameRule" />
                 <el-input v-model="ruleForm.chapterUrlRule" placeholder="章节地址 chapterUrlRule" />
+                <el-input v-model="ruleForm.nextTocUrlRule" placeholder="目录下一页 nextTocUrlRule（可选）" />
               </div>
             </el-collapse-item>
             <el-collapse-item title="正文" name="content">
               <div class="rule-grid">
                 <el-input v-model="ruleForm.contentUrlRule" placeholder="正文地址 contentUrlRule" />
                 <el-input v-model="ruleForm.contentRule" placeholder="正文内容 contentRule" />
+                <el-input v-model="ruleForm.nextContentUrlRule" placeholder="正文下一页 nextContentUrlRule（可选）" />
               </div>
             </el-collapse-item>
           </el-collapse>
@@ -408,12 +418,22 @@ const ruleKeys = [
   'exploreLatestChapterRule',
   'exploreBookUrlRule',
   'explorePaginationRule',
+  'bookInfoNameRule',
+  'bookInfoAuthorRule',
+  'bookInfoCoverRule',
+  'bookInfoIntroRule',
+  'bookInfoKindRule',
+  'bookInfoLatestChapterRule',
+  'bookInfoUpdateTimeRule',
+  'bookInfoWordCountRule',
   'tocUrlRule',
   'chapterListRule',
   'chapterNameRule',
   'chapterUrlRule',
+  'nextTocUrlRule',
   'contentUrlRule',
   'contentRule',
+  'nextContentUrlRule',
 ]
 const ruleForm = reactive(Object.fromEntries(ruleKeys.map(key => [key, ''])))
 const replaceRules = ref([])

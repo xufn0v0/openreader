@@ -90,6 +90,16 @@ type BookSourceRule struct {
 	ExploreBookURLRule       string `json:"exploreBookUrlRule,omitempty"`
 	ExplorePaginationRule    string `json:"explorePaginationRule,omitempty"`
 
+	// Book detail page metadata.
+	BookInfoNameRule          string `json:"bookInfoNameRule,omitempty"`
+	BookInfoAuthorRule        string `json:"bookInfoAuthorRule,omitempty"`
+	BookInfoCoverRule         string `json:"bookInfoCoverRule,omitempty"`
+	BookInfoIntroRule         string `json:"bookInfoIntroRule,omitempty"`
+	BookInfoKindRule          string `json:"bookInfoKindRule,omitempty"`
+	BookInfoLatestChapterRule string `json:"bookInfoLatestChapterRule,omitempty"`
+	BookInfoUpdateTimeRule    string `json:"bookInfoUpdateTimeRule,omitempty"`
+	BookInfoWordCountRule     string `json:"bookInfoWordCountRule,omitempty"`
+
 	// TOC/directory page URL template (typically derived from book URL).
 	TOCURLRule string `json:"tocUrlRule,omitempty"`
 
@@ -97,10 +107,12 @@ type BookSourceRule struct {
 	ChapterListRule string `json:"chapterListRule,omitempty"`
 	ChapterNameRule string `json:"chapterNameRule,omitempty"`
 	ChapterURLRule  string `json:"chapterUrlRule,omitempty"`
+	NextTOCURLRule  string `json:"nextTocUrlRule,omitempty"`
 
 	// Content page: URL template and content selector.
-	ContentURLRule string `json:"contentUrlRule,omitempty"`
-	ContentRule    string `json:"contentRule,omitempty"`
+	ContentURLRule     string `json:"contentUrlRule,omitempty"`
+	ContentRule        string `json:"contentRule,omitempty"`
+	NextContentURLRule string `json:"nextContentUrlRule,omitempty"`
 
 	// HTTP headers for requests made with this source.
 	Headers map[string]string `json:"headers,omitempty"`
