@@ -28,17 +28,27 @@ type UserSetting struct {
 }
 
 type BookSource struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
-	Name          string    `json:"name" gorm:"size:120;not null"`
-	BaseURL       string    `json:"baseUrl" gorm:"size:500"`
-	SearchURL     string    `json:"searchUrl" gorm:"size:500"`
-	Charset       string    `json:"charset" gorm:"size:40;default:utf-8"`
-	Rules         string    `json:"rules" gorm:"type:text"`
-	Enabled       bool      `json:"enabled"`
-	Group         string    `json:"group" gorm:"size:80"`
-	UsedBookCount int       `json:"usedBookCount" gorm:"-"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID             uint      `json:"id" gorm:"primaryKey"`
+	Name           string    `json:"name" gorm:"size:120;not null"`
+	BaseURL        string    `json:"baseUrl" gorm:"size:500"`
+	SearchURL      string    `json:"searchUrl" gorm:"size:500"`
+	BookURLPattern string    `json:"bookUrlPattern" gorm:"type:text"`
+	SourceType     int       `json:"bookSourceType" gorm:"default:0"`
+	Comment        string    `json:"bookSourceComment" gorm:"type:text"`
+	Charset        string    `json:"charset" gorm:"size:40;default:utf-8"`
+	ConcurrentRate string    `json:"concurrentRate" gorm:"size:80"`
+	CustomOrder    int       `json:"customOrder" gorm:"default:0"`
+	Rules          string    `json:"rules" gorm:"type:text"`
+	Enabled        bool      `json:"enabled"`
+	EnabledExplore *bool     `json:"enabledExplore" gorm:"not null;default:true"`
+	Group          string    `json:"group" gorm:"size:80"`
+	UsedBookCount  int       `json:"usedBookCount" gorm:"-"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+func (s BookSource) IsExploreEnabled() bool {
+	return s.EnabledExplore == nil || *s.EnabledExplore
 }
 
 // ParsedRules deserializes the Rules JSON into a BookSourceRule.
@@ -72,25 +82,32 @@ type BookSourceRule struct {
 	// Search result list: CSS selector for the container of each result item.
 	BookListRule string `json:"bookListRule,omitempty"`
 	// Per-item field selectors (relative to each result item).
-	BookNameRule      string `json:"bookNameRule,omitempty"`
-	BookAuthorRule    string `json:"bookAuthorRule,omitempty"`
-	BookCoverRule     string `json:"bookCoverRule,omitempty"`
-	BookIntroRule     string `json:"bookIntroRule,omitempty"`
-	LatestChapterRule string `json:"latestChapterRule,omitempty"`
-	BookURLRule       string `json:"bookUrlRule,omitempty"`
+	BookNameRule       string `json:"bookNameRule,omitempty"`
+	BookAuthorRule     string `json:"bookAuthorRule,omitempty"`
+	BookCoverRule      string `json:"bookCoverRule,omitempty"`
+	BookIntroRule      string `json:"bookIntroRule,omitempty"`
+	BookKindRule       string `json:"bookKindRule,omitempty"`
+	BookWordCountRule  string `json:"bookWordCountRule,omitempty"`
+	LatestChapterRule  string `json:"latestChapterRule,omitempty"`
+	BookUpdateTimeRule string `json:"bookUpdateTimeRule,omitempty"`
+	BookURLRule        string `json:"bookUrlRule,omitempty"`
 
 	// Explore result rules. When ExploreBookListRule is empty, search result
 	// rules are reused to match upstream BookSource fallback behavior.
-	ExploreBookListRule      string `json:"exploreBookListRule,omitempty"`
-	ExploreBookNameRule      string `json:"exploreBookNameRule,omitempty"`
-	ExploreBookAuthorRule    string `json:"exploreBookAuthorRule,omitempty"`
-	ExploreBookCoverRule     string `json:"exploreBookCoverRule,omitempty"`
-	ExploreBookIntroRule     string `json:"exploreBookIntroRule,omitempty"`
-	ExploreLatestChapterRule string `json:"exploreLatestChapterRule,omitempty"`
-	ExploreBookURLRule       string `json:"exploreBookUrlRule,omitempty"`
-	ExplorePaginationRule    string `json:"explorePaginationRule,omitempty"`
+	ExploreBookListRule       string `json:"exploreBookListRule,omitempty"`
+	ExploreBookNameRule       string `json:"exploreBookNameRule,omitempty"`
+	ExploreBookAuthorRule     string `json:"exploreBookAuthorRule,omitempty"`
+	ExploreBookCoverRule      string `json:"exploreBookCoverRule,omitempty"`
+	ExploreBookIntroRule      string `json:"exploreBookIntroRule,omitempty"`
+	ExploreBookKindRule       string `json:"exploreBookKindRule,omitempty"`
+	ExploreBookWordCountRule  string `json:"exploreBookWordCountRule,omitempty"`
+	ExploreLatestChapterRule  string `json:"exploreLatestChapterRule,omitempty"`
+	ExploreBookUpdateTimeRule string `json:"exploreBookUpdateTimeRule,omitempty"`
+	ExploreBookURLRule        string `json:"exploreBookUrlRule,omitempty"`
+	ExplorePaginationRule     string `json:"explorePaginationRule,omitempty"`
 
 	// Book detail page metadata.
+	BookInfoInitRule          string `json:"bookInfoInitRule,omitempty"`
 	BookInfoNameRule          string `json:"bookInfoNameRule,omitempty"`
 	BookInfoAuthorRule        string `json:"bookInfoAuthorRule,omitempty"`
 	BookInfoCoverRule         string `json:"bookInfoCoverRule,omitempty"`
@@ -99,20 +116,29 @@ type BookSourceRule struct {
 	BookInfoLatestChapterRule string `json:"bookInfoLatestChapterRule,omitempty"`
 	BookInfoUpdateTimeRule    string `json:"bookInfoUpdateTimeRule,omitempty"`
 	BookInfoWordCountRule     string `json:"bookInfoWordCountRule,omitempty"`
+	BookInfoCanRenameRule     string `json:"bookInfoCanRenameRule,omitempty"`
 
 	// TOC/directory page URL template (typically derived from book URL).
 	TOCURLRule string `json:"tocUrlRule,omitempty"`
 
 	// Chapter list selectors.
-	ChapterListRule string `json:"chapterListRule,omitempty"`
-	ChapterNameRule string `json:"chapterNameRule,omitempty"`
-	ChapterURLRule  string `json:"chapterUrlRule,omitempty"`
-	NextTOCURLRule  string `json:"nextTocUrlRule,omitempty"`
+	ChapterPreUpdateJSRule string `json:"chapterPreUpdateJsRule,omitempty"`
+	ChapterListRule        string `json:"chapterListRule,omitempty"`
+	ChapterNameRule        string `json:"chapterNameRule,omitempty"`
+	ChapterURLRule         string `json:"chapterUrlRule,omitempty"`
+	ChapterIsVolumeRule    string `json:"chapterIsVolumeRule,omitempty"`
+	ChapterIsVIPRule       string `json:"chapterIsVipRule,omitempty"`
+	ChapterUpdateTimeRule  string `json:"chapterUpdateTimeRule,omitempty"`
+	NextTOCURLRule         string `json:"nextTocUrlRule,omitempty"`
 
 	// Content page: URL template and content selector.
-	ContentURLRule     string `json:"contentUrlRule,omitempty"`
-	ContentRule        string `json:"contentRule,omitempty"`
-	NextContentURLRule string `json:"nextContentUrlRule,omitempty"`
+	ContentURLRule      string `json:"contentUrlRule,omitempty"`
+	ContentRule         string `json:"contentRule,omitempty"`
+	NextContentURLRule  string `json:"nextContentUrlRule,omitempty"`
+	ContentWebJSRule    string `json:"contentWebJsRule,omitempty"`
+	ContentSourceRegex  string `json:"contentSourceRegex,omitempty"`
+	ContentReplaceRegex string `json:"contentReplaceRegex,omitempty"`
+	ContentImageStyle   string `json:"contentImageStyle,omitempty"`
 
 	// HTTP headers for requests made with this source.
 	Headers map[string]string `json:"headers,omitempty"`
@@ -198,12 +224,15 @@ type Book struct {
 	ID             uint      `json:"id" gorm:"primaryKey"`
 	UserID         uint      `json:"userId" gorm:"index"`
 	SourceID       uint      `json:"sourceId" gorm:"index"`
+	Type           int       `json:"type" gorm:"default:0"`
 	CategoryID     *uint     `json:"categoryId,omitempty" gorm:"index"`
 	Title          string    `json:"title" gorm:"size:240;not null"`
 	Author         string    `json:"author" gorm:"size:160"`
 	CoverURL       string    `json:"coverUrl" gorm:"size:600"`
 	CustomCoverURL string    `json:"customCoverUrl" gorm:"size:600"`
 	Intro          string    `json:"intro" gorm:"type:text"`
+	Kind           string    `json:"kind" gorm:"size:400"`
+	WordCount      string    `json:"wordCount" gorm:"size:120"`
 	URL            string    `json:"url" gorm:"size:800;index"`
 	LibraryPath    string    `json:"libraryPath" gorm:"size:600"`
 	OriginalFile   string    `json:"originalFile" gorm:"size:600"`

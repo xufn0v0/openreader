@@ -1103,6 +1103,8 @@ func (s *Server) refreshBook(c *gin.Context) {
 		book.Author = firstNonBlank(remoteInfo.Author, book.Author)
 		book.CoverURL = firstNonBlank(remoteInfo.CoverURL, book.CoverURL)
 		book.Intro = firstNonBlank(remoteInfo.Intro, book.Intro)
+		book.Kind = firstNonBlank(remoteInfo.Kind, book.Kind)
+		book.WordCount = firstNonBlank(remoteInfo.WordCount, book.WordCount)
 		book.LastChapter = remoteChapters[len(remoteChapters)-1].Title
 		book.ChapterCount = len(remoteChapters)
 		return tx.Save(&book).Error
@@ -1495,9 +1497,12 @@ type remoteBookRequest struct {
 	Author      string `json:"author"`
 	CoverURL    string `json:"coverUrl"`
 	Intro       string `json:"intro"`
+	Kind        string `json:"kind"`
+	WordCount   string `json:"wordCount"`
 	BookURL     string `json:"bookUrl" binding:"required"`
 	SourceID    uint   `json:"sourceId" binding:"required"`
 	SourceName  string `json:"sourceName"`
+	Type        int    `json:"type"`
 	CategoryID  *uint  `json:"categoryId"`
 	CategoryIDs []uint `json:"categoryIds"`
 }
@@ -1557,10 +1562,13 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 	book := models.Book{
 		UserID:       userID,
 		SourceID:     req.SourceID,
+		Type:         source.SourceType,
 		Title:        firstNonBlank(remoteInfo.Title, req.Title),
 		Author:       firstNonBlank(remoteInfo.Author, req.Author),
 		CoverURL:     firstNonBlank(remoteInfo.CoverURL, req.CoverURL),
 		Intro:        firstNonBlank(remoteInfo.Intro, req.Intro),
+		Kind:         firstNonBlank(remoteInfo.Kind, req.Kind),
+		WordCount:    firstNonBlank(remoteInfo.WordCount, req.WordCount),
 		URL:          req.BookURL,
 		LastChapter:  chapters[len(chapters)-1].Title,
 		ChapterCount: len(chapters),
@@ -1599,12 +1607,14 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 }
 
 type changeSourceRequest struct {
-	SourceID uint   `json:"sourceId" binding:"required"`
-	BookURL  string `json:"bookUrl"`
-	Title    string `json:"title"`
-	Author   string `json:"author"`
-	CoverURL string `json:"coverUrl"`
-	Intro    string `json:"intro"`
+	SourceID  uint   `json:"sourceId" binding:"required"`
+	BookURL   string `json:"bookUrl"`
+	Title     string `json:"title"`
+	Author    string `json:"author"`
+	CoverURL  string `json:"coverUrl"`
+	Intro     string `json:"intro"`
+	Kind      string `json:"kind"`
+	WordCount string `json:"wordCount"`
 }
 
 type contentMatch struct {
@@ -1651,7 +1661,7 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 			return
 		}
 	}
-	if err := query.Order("id asc").Offset(offset).Limit(limit).Find(&sources).Error; err != nil {
+	if err := query.Order("custom_order asc, id asc").Offset(offset).Limit(limit).Find(&sources).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load sources"})
 		return
 	}
@@ -1664,12 +1674,16 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 		Author             string `json:"author"`
 		CoverURL           string `json:"coverUrl"`
 		Intro              string `json:"intro"`
+		Kind               string `json:"kind"`
+		WordCount          string `json:"wordCount"`
 		LatestChapterTitle string `json:"latestChapterTitle"`
 		BookURL            string `json:"bookUrl"`
 		Time               int64  `json:"time,omitempty"`
 		Current            bool   `json:"current"`
+		Type               int    `json:"type"`
 	}
 	type sourceCandidateBatch struct {
+		Index      int
 		Candidates []sourceCandidate
 		Failed     bool
 		Empty      bool
@@ -1687,9 +1701,12 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 				Author:             book.Author,
 				CoverURL:           book.CoverURL,
 				Intro:              book.Intro,
+				Kind:               book.Kind,
+				WordCount:          book.WordCount,
 				LatestChapterTitle: book.LastChapter,
 				BookURL:            book.URL,
 				Current:            true,
+				Type:               currentSource.SourceType,
 			})
 		}
 	}
@@ -1697,10 +1714,10 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
 	parentCtx := c.Request.Context()
-	for _, source := range sources {
+	for index, source := range sources {
 		source := source
 		wg.Add(1)
-		go func() {
+		go func(index int) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -1711,7 +1728,7 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 			cancel()
 			elapsed := time.Since(started).Milliseconds()
 			if err != nil {
-				channel <- sourceCandidateBatch{Failed: true}
+				channel <- sourceCandidateBatch{Index: index, Failed: true}
 				return
 			}
 			candidates := make([]sourceCandidate, 0)
@@ -1727,20 +1744,24 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 					Author:             item.Author,
 					CoverURL:           item.CoverURL,
 					Intro:              item.Intro,
+					Kind:               item.Kind,
+					WordCount:          item.WordCount,
 					LatestChapterTitle: item.LatestChapter,
 					BookURL:            item.BookURL,
 					Time:               elapsed,
 					Current:            source.ID == book.SourceID && item.BookURL == book.URL,
+					Type:               source.SourceType,
 				})
 				if len(candidates) >= 3 {
 					break
 				}
 			}
 			channel <- sourceCandidateBatch{
+				Index:      index,
 				Candidates: candidates,
 				Empty:      len(candidates) == 0,
 			}
-		}()
+		}(index)
 	}
 	go func() {
 		wg.Wait()
@@ -1749,7 +1770,11 @@ func (s *Server) listBookSourceCandidates(c *gin.Context) {
 	failedSources := 0
 	emptySources := 0
 	matchedSources := 0
+	batches := make([]sourceCandidateBatch, len(sources))
 	for batch := range channel {
+		batches[batch.Index] = batch
+	}
+	for _, batch := range batches {
 		if batch.Failed {
 			failedSources++
 			continue
@@ -1853,6 +1878,7 @@ func (s *Server) changeBookSource(c *gin.Context) {
 			}
 		}
 		book.SourceID = req.SourceID
+		book.Type = newSource.SourceType
 		book.URL = newBookURL
 		if title := firstNonBlank(remoteInfo.Title, req.Title); title != "" {
 			book.Title = title
@@ -1865,6 +1891,12 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		}
 		if intro := firstNonBlank(remoteInfo.Intro, req.Intro); intro != "" {
 			book.Intro = intro
+		}
+		if kind := firstNonBlank(remoteInfo.Kind, req.Kind); kind != "" {
+			book.Kind = kind
+		}
+		if wordCount := firstNonBlank(remoteInfo.WordCount, req.WordCount); wordCount != "" {
+			book.WordCount = wordCount
 		}
 		book.LastChapter = newChapters[len(newChapters)-1].Title
 		book.ChapterCount = len(newChapters)
