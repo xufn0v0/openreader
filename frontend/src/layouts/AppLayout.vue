@@ -314,10 +314,22 @@ const mobileNavigationStyle = computed(() => {
   const base = { '--mobile-nav-width': `${width}px` }
   if (!isMobileShell.value || !touchMoveX.value) return base
   if (!mobileNavigationVisible.value && touchMoveX.value > 0 && touchMoveX.value <= width) {
-    return { ...base, transform: `translateX(${touchMoveX.value - width}px)` }
+    const offset = touchMoveX.value - width
+    return {
+      ...base,
+      '--mobile-nav-drag-offset': `${offset}px`,
+      marginLeft: `${offset}px`,
+      transition: 'none'
+    }
   }
   if (mobileNavigationVisible.value && touchMoveX.value < 0 && touchMoveX.value >= -width) {
-    return { ...base, transform: `translateX(${touchMoveX.value}px)` }
+    const offset = touchMoveX.value
+    return {
+      ...base,
+      '--mobile-nav-drag-offset': `${offset}px`,
+      marginLeft: `${offset}px`,
+      transition: 'none'
+    }
   }
   return base
 })
@@ -1262,9 +1274,9 @@ function readError(err, fallback) {
   padding: 0;
   scrollbar-width: none;
   box-shadow: 12px 0 28px rgba(36, 32, 27, 0.08);
-  transform: translateX(calc(-1 * var(--mobile-nav-width, 72vw)));
-  transition: transform 0.3s;
-  will-change: transform;
+  margin-left: calc(-1 * var(--mobile-nav-width, 72vw));
+  transition: margin-left 0.3s;
+  will-change: margin-left;
 }
 
 .app-shell.mobile-shell .app-sidebar-scroll {
@@ -1422,6 +1434,7 @@ function readError(err, fallback) {
   align-items: center;
   justify-content: space-between;
   pointer-events: none;
+  transform: translateX(calc(-1 * var(--mobile-nav-drag-offset, 0px)));
 }
 
 .app-shell.mobile-shell .sidebar-bottom-icon {
@@ -1448,7 +1461,7 @@ function readError(err, fallback) {
 }
 
 .app-shell.mobile-shell.mobile-nav-open .app-sidebar {
-  transform: translateX(0);
+  margin-left: 0;
 }
 
 .app-shell.mobile-shell.mobile-nav-open .app-workspace {

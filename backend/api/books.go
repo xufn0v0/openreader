@@ -1083,24 +1083,28 @@ func (s *Server) refreshBook(c *gin.Context) {
 			if chapter, ok := existingByIndex[remoteChapter.Index]; ok {
 				chapter.Title = remoteChapter.Title
 				chapter.URL = remoteChapter.URL
+				chapter.IsVolume = remoteChapter.IsVolume
+				chapter.Tag = remoteChapter.Tag
 				if err := tx.Save(&chapter).Error; err != nil {
 					return err
 				}
 				continue
 			}
 			chapter := models.Chapter{
-				BookID: book.ID,
-				Index:  remoteChapter.Index,
-				Title:  remoteChapter.Title,
-				URL:    remoteChapter.URL,
+				BookID:   book.ID,
+				Index:    remoteChapter.Index,
+				Title:    remoteChapter.Title,
+				URL:      remoteChapter.URL,
+				IsVolume: remoteChapter.IsVolume,
+				Tag:      remoteChapter.Tag,
 			}
 			if err := tx.Create(&chapter).Error; err != nil {
 				return err
 			}
 			added++
 		}
-		book.Title = firstNonBlank(remoteInfo.Title, book.Title)
-		book.Author = firstNonBlank(remoteInfo.Author, book.Author)
+		book.Title = firstNonBlankCanRename(remoteInfo.Title, book.Title, remoteInfo.CanRename)
+		book.Author = firstNonBlankCanRename(remoteInfo.Author, book.Author, remoteInfo.CanRename)
 		book.CoverURL = firstNonBlank(remoteInfo.CoverURL, book.CoverURL)
 		book.Intro = firstNonBlank(remoteInfo.Intro, book.Intro)
 		book.Kind = firstNonBlank(remoteInfo.Kind, book.Kind)
@@ -1507,6 +1511,18 @@ type remoteBookRequest struct {
 	CategoryIDs []uint `json:"categoryIds"`
 }
 
+func firstNonBlankCanRename(remote string, current string, allowRename bool) string {
+	current = strings.TrimSpace(current)
+	remote = strings.TrimSpace(remote)
+	if current == "" {
+		return remote
+	}
+	if allowRename && remote != "" {
+		return remote
+	}
+	return current
+}
+
 func (s *Server) createRemoteBook(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 
@@ -1563,8 +1579,8 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 		UserID:       userID,
 		SourceID:     req.SourceID,
 		Type:         source.SourceType,
-		Title:        firstNonBlank(remoteInfo.Title, req.Title),
-		Author:       firstNonBlank(remoteInfo.Author, req.Author),
+		Title:        firstNonBlankCanRename(remoteInfo.Title, req.Title, remoteInfo.CanRename),
+		Author:       firstNonBlankCanRename(remoteInfo.Author, req.Author, remoteInfo.CanRename),
 		CoverURL:     firstNonBlank(remoteInfo.CoverURL, req.CoverURL),
 		Intro:        firstNonBlank(remoteInfo.Intro, req.Intro),
 		Kind:         firstNonBlank(remoteInfo.Kind, req.Kind),
@@ -1587,10 +1603,12 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 		}
 		for _, ch := range chapters {
 			chapter := models.Chapter{
-				BookID: book.ID,
-				Index:  ch.Index,
-				Title:  ch.Title,
-				URL:    ch.URL,
+				BookID:   book.ID,
+				Index:    ch.Index,
+				Title:    ch.Title,
+				URL:      ch.URL,
+				IsVolume: ch.IsVolume,
+				Tag:      ch.Tag,
 			}
 			if err := tx.Create(&chapter).Error; err != nil {
 				return err
@@ -1868,10 +1886,12 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		}
 		for _, ch := range newChapters {
 			chapter := models.Chapter{
-				BookID: bookID,
-				Index:  ch.Index,
-				Title:  ch.Title,
-				URL:    ch.URL,
+				BookID:   bookID,
+				Index:    ch.Index,
+				Title:    ch.Title,
+				URL:      ch.URL,
+				IsVolume: ch.IsVolume,
+				Tag:      ch.Tag,
 			}
 			if err := tx.Create(&chapter).Error; err != nil {
 				return err
@@ -1880,10 +1900,10 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		book.SourceID = req.SourceID
 		book.Type = newSource.SourceType
 		book.URL = newBookURL
-		if title := firstNonBlank(remoteInfo.Title, req.Title); title != "" {
+		if title := firstNonBlankCanRename(remoteInfo.Title, firstNonBlank(req.Title, book.Title), remoteInfo.CanRename); title != "" {
 			book.Title = title
 		}
-		if author := firstNonBlank(remoteInfo.Author, req.Author); author != "" {
+		if author := firstNonBlankCanRename(remoteInfo.Author, firstNonBlank(req.Author, book.Author), remoteInfo.CanRename); author != "" {
 			book.Author = author
 		}
 		if coverURL := firstNonBlank(remoteInfo.CoverURL, req.CoverURL); coverURL != "" {
@@ -1957,7 +1977,7 @@ func (s *Server) searchBookContent(c *gin.Context) {
 		return
 	}
 
-	keyword := strings.TrimSpace(c.Query("q"))
+	keyword := strings.TrimSpace(firstNonBlank(c.Query("q"), c.Query("keyword")))
 	if keyword == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
 		return
@@ -1976,12 +1996,13 @@ func (s *Server) searchBookContent(c *gin.Context) {
 		} else {
 			start = parseBoundedInt(c.Query("lastIndex"), -1, -1, len(chapters)) + 1
 		}
+		matchLimitQuery := firstNonBlank(c.Query("matchLimit"), c.Query("size"))
 		chapterLimit := parseBoundedInt(c.Query("chapterLimit"), 30, 1, 500)
-		matchLimit := parseBoundedInt(c.Query("matchLimit"), 80, 1, 200)
+		matchLimit := parseBoundedInt(matchLimitQuery, 80, 1, 200)
 		perChapterLimit := parseBoundedInt(c.Query("perChapterLimit"), 20, 1, 100)
 		if book.SourceID == 0 && (c.Query("localFull") == "1" || c.Query("localFull") == "true") {
 			chapterLimit = parseBoundedInt(c.Query("chapterLimit"), 160, 1, 2000)
-			matchLimit = parseBoundedInt(c.Query("matchLimit"), 5000, 1, 20000)
+			matchLimit = parseBoundedInt(matchLimitQuery, 5000, 1, 20000)
 			perChapterLimit = parseBoundedInt(c.Query("perChapterLimit"), 500, 1, 2000)
 		}
 		matches, lastIndex := s.collectContentMatches(book, chapters, keyword, start, chapterLimit, matchLimit, perChapterLimit)
@@ -2017,6 +2038,131 @@ func (s *Server) searchBookContent(c *gin.Context) {
 
 	matches, _ := s.collectContentMatches(book, chapters, keyword, 0, len(chapters), 200, 20)
 	c.JSON(http.StatusOK, matches)
+}
+
+type legacySearchBookContentRequest struct {
+	URL       string `json:"url"`
+	BookURL   string `json:"bookUrl"`
+	Keyword   string `json:"keyword"`
+	LastIndex *int   `json:"lastIndex"`
+	Size      *int   `json:"size"`
+}
+
+type legacyContentMatch struct {
+	ChapterID                uint    `json:"chapterId"`
+	ChapterIndex             int     `json:"chapterIndex"`
+	ChapterTitle             string  `json:"chapterTitle"`
+	ResultText               string  `json:"resultText"`
+	Query                    string  `json:"query"`
+	ResultCountWithinChapter int     `json:"resultCountWithinChapter"`
+	Offset                   int     `json:"offset"`
+	LineIndex                int     `json:"lineIndex"`
+	Percent                  float64 `json:"percent"`
+}
+
+func (s *Server) legacySearchBookContent(c *gin.Context) {
+	userID, _ := middleware.UserID(c)
+	req := legacySearchBookContentRequest{
+		URL:     c.Query("url"),
+		BookURL: c.Query("bookUrl"),
+		Keyword: c.Query("keyword"),
+	}
+	if lastIndexValue := strings.TrimSpace(c.Query("lastIndex")); lastIndexValue != "" {
+		lastIndex := parseBoundedInt(lastIndexValue, 0, -1, 1000000)
+		req.LastIndex = &lastIndex
+	}
+	if sizeValue := strings.TrimSpace(c.Query("size")); sizeValue != "" {
+		size := parseBoundedInt(sizeValue, 20, 1, 20000)
+		req.Size = &size
+	}
+	if c.Request.Method == http.MethodPost {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "请求格式不正确"})
+			return
+		}
+	}
+
+	bookURL := strings.TrimSpace(firstNonBlank(req.URL, req.BookURL))
+	if bookURL == "" {
+		c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "请输入书籍链接"})
+		return
+	}
+	keyword := strings.TrimSpace(req.Keyword)
+	if keyword == "" {
+		c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "请输入搜索关键词"})
+		return
+	}
+
+	var book models.Book
+	err := s.db.Where("user_id = ? AND url = ?", userID, bookURL).First(&book).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "请先加入书架"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "加载书籍失败"})
+		return
+	}
+
+	var chapters []models.Chapter
+	if err := s.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "加载目录失败"})
+		return
+	}
+
+	lastIndex := 0
+	if req.LastIndex != nil {
+		lastIndex = *req.LastIndex
+	}
+	if lastIndex >= len(chapters) {
+		c.JSON(http.StatusOK, gin.H{"isSuccess": false, "errorMsg": "没有更多了"})
+		return
+	}
+	size := 20
+	if req.Size != nil {
+		size = *req.Size
+	}
+	start := lastIndex + 1
+	if start >= len(chapters) {
+		c.JSON(http.StatusOK, gin.H{
+			"isSuccess": true,
+			"data": gin.H{
+				"list":      []legacyContentMatch{},
+				"lastIndex": start,
+				"hasMore":   false,
+				"total":     len(chapters),
+			},
+		})
+		return
+	}
+	matches, currentIndex := s.collectContentMatches(book, chapters, keyword, start, len(chapters)-start, max(size, 1), max(size, 1))
+	c.JSON(http.StatusOK, gin.H{
+		"isSuccess": true,
+		"data": gin.H{
+			"list":      legacyContentMatches(matches),
+			"lastIndex": currentIndex,
+			"hasMore":   currentIndex >= 0 && currentIndex < len(chapters)-1,
+			"total":     len(chapters),
+		},
+	})
+}
+
+func legacyContentMatches(matches []contentMatch) []legacyContentMatch {
+	result := make([]legacyContentMatch, 0, len(matches))
+	for _, match := range matches {
+		result = append(result, legacyContentMatch{
+			ChapterID:                match.ChapterID,
+			ChapterIndex:             match.ChapterIndex,
+			ChapterTitle:             match.ChapterTitle,
+			ResultText:               match.Excerpt,
+			Query:                    match.Query,
+			ResultCountWithinChapter: match.ResultCountWithinChapter,
+			Offset:                   match.Offset,
+			LineIndex:                match.LineIndex,
+			Percent:                  match.Percent,
+		})
+	}
+	return result
 }
 
 func (s *Server) collectContentMatches(book models.Book, chapters []models.Chapter, keyword string, start int, chapterLimit int, matchLimit int, perChapterLimit int) ([]contentMatch, int) {

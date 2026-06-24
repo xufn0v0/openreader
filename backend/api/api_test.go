@@ -180,7 +180,7 @@ func TestSearchPaginationUsesPageForSingleSourceAndCursorForMultipleSources(t *t
 				page = "1"
 			}
 			body := fmt.Sprintf(
-				`<article class="book"><a class="name" href="/book/%s/%s">%s 第%s页</a><span class="author">%s作者</span></article>`,
+				`<article class="book"><a class="name" href="/book/%s/%s">%s 第%s页</a><span class="author">%s作者</span><span class="updated">刚刚更新</span></article>`,
 				sourceName,
 				page,
 				sourceName,
@@ -201,11 +201,12 @@ func TestSearchPaginationUsesPageForSingleSourceAndCursorForMultipleSources(t *t
 	for _, name := range []string{"source-a", "source-b", "source-c"} {
 		source := models.BookSource{Name: name, Enabled: true, Charset: "utf-8"}
 		if err := source.SetRules(models.BookSourceRule{
-			SearchURL:      "https://search.example/" + name + "?q={keyword}&page={page}",
-			BookListRule:   ".book",
-			BookNameRule:   ".name",
-			BookAuthorRule: ".author",
-			BookURLRule:    ".name|attr:href",
+			SearchURL:          "https://search.example/" + name + "?q={keyword}&page={page}",
+			BookListRule:       ".book",
+			BookNameRule:       ".name",
+			BookAuthorRule:     ".author",
+			BookUpdateTimeRule: ".updated",
+			BookURLRule:        ".name|attr:href",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +233,8 @@ func TestSearchPaginationUsesPageForSingleSourceAndCursorForMultipleSources(t *t
 		t.Fatal(err)
 	}
 	if singleResp.Page != 2 || !singleResp.HasMore || singleResp.LastIndex != -1 ||
-		len(singleResp.List) != 1 || singleResp.List[0].Title != "source-a 第2页" {
+		len(singleResp.List) != 1 || singleResp.List[0].Title != "source-a 第2页" ||
+		singleResp.List[0].UpdateTime != "刚刚更新" {
 		t.Fatalf("unexpected single source response: %+v", singleResp)
 	}
 
@@ -2080,7 +2082,7 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			"headerMap":{"X-Source-Token":"upload-secret","Referer":"https://upload-reader.example/"},
 			"ruleSearch":{"bookList":".item","name":".name","bookUrl":"a@href"},
 			"ruleExplore":{"bookList":".explore-item","name":".explore-name","bookUrl":"a@data-url"},
-			"ruleBookInfo":{"name":".detail-name","author":".detail-author","coverUrl":"img@data-src","intro":".detail-intro","tocUrl":".catalog@href"},
+			"ruleBookInfo":{"name":".detail-name","author":".detail-author","coverUrl":"img@data-src","intro":".detail-intro","tocUrl":".catalog@href","canReName":".allow-rename"},
 			"ruleToc":{"chapterList":".chapter","chapterName":".chapter-name","chapterUrl":"a@href","nextTocUrl":".toc-next@href"},
 			"ruleContent":{"content":".content","nextContentUrl":".content-next@href"}
 		}
@@ -2124,6 +2126,7 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 		rule.BookInfoAuthorRule != ".detail-author" ||
 		rule.BookInfoCoverRule != "img|attr:data-src" ||
 		rule.BookInfoIntroRule != ".detail-intro" ||
+		rule.BookInfoCanRenameRule != ".allow-rename" ||
 		rule.TOCURLRule != ".catalog|attr:href" ||
 		rule.ChapterListRule != ".chapter" ||
 		rule.ChapterNameRule != ".chapter-name" ||
@@ -2152,6 +2155,7 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 				body = `<article class="explore-item"><span class="explore-name">独立探索规则书籍</span><a data-url="/book/2">详情</a></article>`
 			case "/book/2":
 				body = `
+					<span class="allow-rename">1</span>
 					<h1 class="detail-name">详情页完整书名</h1>
 					<span class="detail-author">详情页作者</span>
 					<img data-src="/detail-cover.jpg">
@@ -2999,6 +3003,7 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 				</body></html>`
 			case "/book-new":
 				body = `<html><body>
+					<span class="allow-rename">1</span>
 					<h1 class="detail-name">换源详情书名</h1>
 					<span class="detail-author">换源详情作者</span>
 					<img class="detail-cover" src="/switch-cover.jpg">
@@ -3051,6 +3056,7 @@ func TestSourceCandidatesAndChangeSourceUseCandidateURL(t *testing.T) {
 		BookWordCountRule:     ".word-count|text",
 		LatestChapterRule:     ".latest|text",
 		BookURLRule:           ".link|attr:href",
+		BookInfoCanRenameRule: ".allow-rename",
 		BookInfoNameRule:      ".detail-name",
 		BookInfoAuthorRule:    ".detail-author",
 		BookInfoCoverRule:     ".detail-cover|attr:src",
@@ -3238,19 +3244,39 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 	detailIntro := "详情简介"
 	detailKind := "科幻"
 	detailWordCount := "23456"
+	chapterTitle := "第一卷"
+	chapterVolume := "yes"
+	chapterVIP := "0"
+	chapterUpdated := "昨日"
 	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`<html><body>
-					<h1 class="detail-name">%s</h1>
-					<span class="detail-author">详情作者</span>
-					<img class="detail-cover" data-src="/cover-detail.jpg">
-					<p class="detail-intro">%s</p>
-					<span class="detail-kind">%s</span>
-					<span class="detail-word-count">%s</span>
-					<li class="chapter"><a href="/c1">第一章</a></li>
-				</body></html>`, detailTitle, detailIntro, detailKind, detailWordCount))),
+					<section class="recommend">
+						<h1 class="detail-name">推荐书</h1>
+						<span class="detail-author">推荐作者</span>
+						<img class="detail-cover" data-src="/wrong-cover.jpg">
+						<p class="detail-intro">推荐简介</p>
+						<span class="detail-kind">推荐分类</span>
+						<span class="detail-word-count">123</span>
+					</section>
+					<section class="detail-main">
+						<span class="allow-rename">1</span>
+						<h1 class="detail-name">%s</h1>
+						<span class="detail-author">详情作者</span>
+						<img class="detail-cover" data-src="/cover-detail.jpg">
+						<p class="detail-intro">%s</p>
+						<span class="detail-kind">%s</span>
+						<span class="detail-word-count">%s</span>
+						<li class="chapter">
+							<span class="chapter-title">%s</span>
+							<span class="chapter-volume">%s</span>
+							<span class="chapter-vip">%s</span>
+							<span class="chapter-updated">%s</span>
+						</li>
+					</section>
+				</body></html>`, detailTitle, detailIntro, detailKind, detailWordCount, chapterTitle, chapterVolume, chapterVIP, chapterUpdated))),
 				Header:  make(http.Header),
 				Request: req,
 			}, nil
@@ -3272,6 +3298,8 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 	}
 	source := models.BookSource{Name: "远程源", BaseURL: upstream, SourceType: 1, Charset: "utf-8", Enabled: true}
 	if err := source.SetRules(models.BookSourceRule{
+		BookInfoInitRule:      ".detail-main",
+		BookInfoCanRenameRule: ".allow-rename",
 		BookInfoNameRule:      ".detail-name",
 		BookInfoAuthorRule:    ".detail-author",
 		BookInfoCoverRule:     ".detail-cover|attr:data-src",
@@ -3279,8 +3307,11 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 		BookInfoKindRule:      ".detail-kind",
 		BookInfoWordCountRule: ".detail-word-count",
 		ChapterListRule:       ".chapter",
-		ChapterNameRule:       "a|text",
+		ChapterNameRule:       ".chapter-title",
 		ChapterURLRule:        "a|attr:href",
+		ChapterIsVolumeRule:   ".chapter-volume",
+		ChapterIsVIPRule:      ".chapter-vip",
+		ChapterUpdateTimeRule: ".chapter-updated",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3325,11 +3356,22 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 		book.WordCount != "2.3万字" {
 		t.Fatalf("expected detail page metadata to override search payload: %+v", book.Book)
 	}
+	var chapters []models.Chapter
+	if err := server.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 1 || !chapters[0].IsVolume || chapters[0].Title != "第一卷" || chapters[0].URL != "第一卷0" || chapters[0].Tag != "昨日" {
+		t.Fatalf("expected remote chapter flags to be persisted: %+v", chapters)
+	}
 
 	detailTitle = "刷新后的详情书名"
 	detailIntro = "刷新后的详情简介"
 	detailKind = "悬疑"
 	detailWordCount = "连载中"
+	chapterTitle = "收费章"
+	chapterVolume = "false"
+	chapterVIP = "yes"
+	chapterUpdated = "今日"
 	refreshReq := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh", nil)
 	refreshReq.Header.Set("Authorization", token)
 	refreshW := httptest.NewRecorder()
@@ -3346,6 +3388,97 @@ func TestCreateRemoteBookAcceptsMultipleCategories(t *testing.T) {
 		refreshed.Kind != detailKind ||
 		refreshed.WordCount != detailWordCount {
 		t.Fatalf("refresh should update detail page metadata: %+v", refreshed)
+	}
+	chapters = nil
+	if err := server.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 1 ||
+		chapters[0].IsVolume ||
+		chapters[0].Title != "🔒收费章" ||
+		chapters[0].URL != upstream+"/book" ||
+		chapters[0].Tag != "今日" {
+		t.Fatalf("refresh should update remote chapter flags: %+v", chapters)
+	}
+}
+
+func TestRemoteBookInfoPreservesNameWithoutCanRename(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	upstream := "https://no-rename.test"
+	detailTitle := "详情标题"
+	detailAuthor := "详情作者"
+	detailIntro := "详情简介"
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			responseBody := fmt.Sprintf(`<html><body>
+				<h1 class="detail-name">%s</h1>
+				<span class="detail-author">%s</span>
+				<p class="detail-intro">%s</p>
+				<div class="chapter"><span class="chapter-title">第一章</span><a href="/c1">阅读</a></div>
+			</body></html>`, detailTitle, detailAuthor, detailIntro)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(responseBody)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	source := models.BookSource{Name: "不可改名源", BaseURL: upstream, Charset: "utf-8", Enabled: true}
+	if err := source.SetRules(models.BookSourceRule{
+		BookInfoNameRule:   ".detail-name",
+		BookInfoAuthorRule: ".detail-author",
+		BookInfoIntroRule:  ".detail-intro",
+		ChapterListRule:    ".chapter",
+		ChapterNameRule:    ".chapter-title",
+		ChapterURLRule:     "a|attr:href",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"title":"搜索标题","author":"搜索作者","bookUrl":"` + upstream + `/book","sourceId":` + strconv.FormatUint(uint64(source.ID), 10) + `}`
+	req := httptest.NewRequest(http.MethodPost, "/api/books/remote", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create remote book: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var book models.Book
+	if err := json.Unmarshal(w.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+	if book.Title != "搜索标题" || book.Author != "搜索作者" || book.Intro != "详情简介" {
+		t.Fatalf("book info without canReName should preserve name/author only: %+v", book)
+	}
+
+	detailTitle = "刷新详情标题"
+	detailAuthor = "刷新详情作者"
+	detailIntro = "刷新详情简介"
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh", nil)
+	refreshReq.Header.Set("Authorization", token)
+	refreshW := httptest.NewRecorder()
+	router.ServeHTTP(refreshW, refreshReq)
+	if refreshW.Code != http.StatusOK {
+		t.Fatalf("refresh remote book: expected 200, got %d: %s", refreshW.Code, refreshW.Body.String())
+	}
+	var refreshed models.Book
+	if err := server.db.First(&refreshed, book.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.Title != "搜索标题" ||
+		refreshed.Author != "搜索作者" ||
+		refreshed.Intro != "刷新详情简介" {
+		t.Fatalf("refresh without canReName should preserve name/author only: %+v", refreshed)
 	}
 }
 
@@ -3370,6 +3503,7 @@ func TestRemoteBookKeepsAndExecutesSourceRequestOptions(t *testing.T) {
 			switch requestKey {
 			case "/book?id=11":
 				responseBody = `
+					<span class="allow-rename">1</span>
 					<h1 class="detail-title">请求选项书籍</h1>
 					<a class="catalog" href='/catalog, {"method":"POST","body":"book=11"}'>目录</a>
 				`
@@ -3384,7 +3518,7 @@ func TestRemoteBookKeepsAndExecutesSourceRequestOptions(t *testing.T) {
 				if request.Header.Get("X-Chapter") != "one" {
 					t.Fatalf("chapter request header option missing: %v", request.Header)
 				}
-				responseBody = `<main class="content">API 闭环正文</main>`
+				responseBody = `<main class="content">API 闭环正文 广告</main>`
 			default:
 				t.Fatalf("unexpected source request: %s", requestKey)
 			}
@@ -3405,13 +3539,15 @@ func TestRemoteBookKeepsAndExecutesSourceRequestOptions(t *testing.T) {
 		Enabled: true,
 	}
 	if err := source.SetRules(models.BookSourceRule{
-		BookInfoNameRule: ".detail-title",
-		TOCURLRule:       ".catalog|attr:href",
-		ChapterListRule:  ".chapter",
-		ChapterNameRule:  ".chapter-title",
-		ChapterURLRule:   "a|attr:href",
-		ContentRule:      ".content",
-		Headers:          map[string]string{"X-Source": "static"},
+		BookInfoNameRule:      ".detail-title",
+		BookInfoCanRenameRule: ".allow-rename",
+		TOCURLRule:            ".catalog|attr:href",
+		ChapterListRule:       ".chapter",
+		ChapterNameRule:       ".chapter-title",
+		ChapterURLRule:        "a|attr:href",
+		ContentRule:           ".content",
+		ContentReplaceRegex:   "##\\s*广告##",
+		Headers:               map[string]string{"X-Source": "static"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3455,7 +3591,9 @@ func TestRemoteBookKeepsAndExecutesSourceRequestOptions(t *testing.T) {
 	contentReq.Header.Set("Authorization", token)
 	contentW := httptest.NewRecorder()
 	router.ServeHTTP(contentW, contentReq)
-	if contentW.Code != http.StatusOK || !strings.Contains(contentW.Body.String(), "API 闭环正文") {
+	if contentW.Code != http.StatusOK ||
+		!strings.Contains(contentW.Body.String(), "API 闭环正文") ||
+		strings.Contains(contentW.Body.String(), "广告") {
 		t.Fatalf("load remote content with request options: expected content, got %d: %s", contentW.Code, contentW.Body.String())
 	}
 	if strings.Join(requests, ",") != "/book?id=11,/catalog?book=11,/content?chapter=1" {
@@ -4169,6 +4307,25 @@ func TestSearchBookContentPaged(t *testing.T) {
 	if len(second.List) != 2 || second.LastIndex != 2 || second.HasMore {
 		t.Fatalf("unexpected second page: %+v", second)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/search?keyword="+url.QueryEscape("目标")+"&paged=1&lastIndex=-1&chapterLimit=3&size=1", nil)
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("paged search keyword/size aliases: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var aliasResult struct {
+		List      []map[string]any `json:"list"`
+		LastIndex int              `json:"lastIndex"`
+		HasMore   bool             `json:"hasMore"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &aliasResult); err != nil {
+		t.Fatal(err)
+	}
+	if len(aliasResult.List) != 1 || aliasResult.LastIndex != 0 || !aliasResult.HasMore {
+		t.Fatalf("unexpected keyword/size alias result: %+v", aliasResult)
+	}
 }
 
 func TestSearchLocalBookContentKeepsRequestedPageSize(t *testing.T) {
@@ -4215,6 +4372,85 @@ func TestSearchLocalBookContentKeepsRequestedPageSize(t *testing.T) {
 	}
 	if len(result.List) != 2 || result.LastIndex != 1 || !result.HasMore {
 		t.Fatalf("local search ignored requested page size: %+v", result)
+	}
+}
+
+func TestLegacySearchBookContentByURL(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	book := models.Book{UserID: user.ID, Title: "上游正文搜索", URL: "https://book.example/legacy-search"}
+	if err := server.db.Create(&book).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i, text := range []string{"第一章目标", "第二章目标", "第三章目标"} {
+		cachePath := filepath.Join("legacy-content-search", fmt.Sprintf("chapter-%d.txt", i))
+		fullPath := filepath.Join(server.cfg.CacheDir, cachePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		chapter := models.Chapter{BookID: book.ID, Index: i, Title: fmt.Sprintf("第%d章", i+1), CachePath: cachePath}
+		if err := server.db.Create(&chapter).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body := `{"url":"https://book.example/legacy-search","keyword":"目标","lastIndex":-1,"size":1}`
+	req := httptest.NewRequest(http.MethodPost, "/api/reader3/searchBookContent", strings.NewReader(body))
+	req.Header.Set("Authorization", token)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("legacy search post: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var first struct {
+		IsSuccess bool `json:"isSuccess"`
+		Data      struct {
+			List      []map[string]any `json:"list"`
+			LastIndex int              `json:"lastIndex"`
+			HasMore   bool             `json:"hasMore"`
+			Total     int              `json:"total"`
+		} `json:"data"`
+		ErrorMsg string `json:"errorMsg"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if !first.IsSuccess || len(first.Data.List) != 1 || first.Data.LastIndex != 0 || !first.Data.HasMore || first.Data.Total != 3 {
+		t.Fatalf("unexpected legacy first result: %+v body=%s", first, w.Body.String())
+	}
+	if first.Data.List[0]["resultText"] == "" || !strings.Contains(fmt.Sprint(first.Data.List[0]["resultText"]), "目标") {
+		t.Fatalf("legacy result missing upstream resultText field: %+v", first.Data.List[0])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/reader3/searchBookContent?bookUrl="+url.QueryEscape("https://book.example/legacy-search")+"&keyword="+url.QueryEscape("目标")+"&lastIndex=0&size=2", nil)
+	req.Header.Set("Authorization", token)
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("legacy search get: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var second struct {
+		IsSuccess bool `json:"isSuccess"`
+		Data      struct {
+			List      []map[string]any `json:"list"`
+			LastIndex int              `json:"lastIndex"`
+			HasMore   bool             `json:"hasMore"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if !second.IsSuccess || len(second.Data.List) != 2 || second.Data.LastIndex != 2 || second.Data.HasMore {
+		t.Fatalf("unexpected legacy second result: %+v body=%s", second, w.Body.String())
 	}
 }
 
@@ -6265,7 +6501,7 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 							<link>https://rss.example/a</link>
 							<description>文章摘要</description>
 							<author>作者</author>
-							<enclosure url="https://rss.example/a.jpg" type="image/jpeg"></enclosure>
+							<enclosure url="/images/a.jpg" type="image/jpeg"></enclosure>
 							<pubDate>Mon, 02 Jan 2006 15:04:05 +0000</pubDate>
 						</item>
 					</channel></rss>`)),
@@ -6304,7 +6540,7 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 	if w3.Code != http.StatusOK || !strings.Contains(w3.Body.String(), "RSS 文章") || !strings.Contains(w3.Body.String(), "文章摘要") {
 		t.Fatalf("list rss articles: expected article, got %d: %s", w3.Code, w3.Body.String())
 	}
-	if !strings.Contains(w3.Body.String(), "https://rss.example/a.jpg") {
+	if !strings.Contains(w3.Body.String(), "https://rss.example/images/a.jpg") {
 		t.Fatalf("list rss articles: expected article image, got %d: %s", w3.Code, w3.Body.String())
 	}
 
@@ -6319,8 +6555,63 @@ func TestRSSSourceRefreshImportsArticles(t *testing.T) {
 	if err := server.db.Where("link = ?", "https://rss.example/a").First(&article).Error; err != nil {
 		t.Fatal(err)
 	}
-	if article.Image != "https://rss.example/a.jpg" {
+	if article.Image != "https://rss.example/images/a.jpg" {
 		t.Fatalf("expected rss article image to persist, got %+v", article)
+	}
+}
+
+func TestAtomSourceRefreshResolvesRelativeArticleImages(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?>
+					<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+						<entry>
+							<title>Atom 文章</title>
+							<link href="/posts/atom"></link>
+							<summary>Atom 摘要</summary>
+							<media:thumbnail url="../covers/atom.jpg"></media:thumbnail>
+							<updated>2026-06-24T08:00:00Z</updated>
+						</entry>
+					</feed>`)),
+				Header:  make(http.Header),
+				Request: req,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/rss/sources", strings.NewReader(`{"title":"Atom 源","url":"https://rss.example/feeds/atom.xml","enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create atom source: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var source models.RSSSource
+	if err := json.Unmarshal(w.Body.Bytes(), &source); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshReq := httptest.NewRequest(http.MethodPost, "/api/rss/sources/"+strconv.FormatUint(uint64(source.ID), 10)+"/refresh", nil)
+	refreshReq.Header.Set("Authorization", token)
+	refreshW := httptest.NewRecorder()
+	router.ServeHTTP(refreshW, refreshReq)
+	if refreshW.Code != http.StatusOK {
+		t.Fatalf("refresh atom source: expected 200, got %d: %s", refreshW.Code, refreshW.Body.String())
+	}
+
+	var article models.RSSArticle
+	if err := server.db.Where("source_id = ?", source.ID).First(&article).Error; err != nil {
+		t.Fatal(err)
+	}
+	if article.Link != "https://rss.example/posts/atom" || article.Image != "https://rss.example/covers/atom.jpg" {
+		t.Fatalf("atom relative URLs were not resolved: %+v", article)
 	}
 }
 
@@ -7014,7 +7305,7 @@ func TestExploreBooksUsesExploreURL(t *testing.T) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Body: io.NopCloser(strings.NewReader(`<html><body>
-					<div class="book"><a class="link" href="/book"><span class="title">探索书</span></a><span class="author">作者</span></div>
+					<div class="book"><a class="link" href="/book"><span class="title">探索书</span></a><span class="author">作者</span><span class="updated">今日更新</span></div>
 				</body></html>`)),
 				Header:  make(http.Header),
 				Request: req,
@@ -7025,15 +7316,16 @@ func TestExploreBooksUsesExploreURL(t *testing.T) {
 
 	source := models.BookSource{Name: "探索源", BaseURL: "https://explore.example", Charset: "utf-8", Enabled: true}
 	if err := source.SetRules(models.BookSourceRule{
-		ExploreURL:            "https://explore.example/top",
-		BookListRule:          ".search-only",
-		BookNameRule:          ".search-title|text",
-		BookURLRule:           ".search-link|attr:href",
-		ExploreBookListRule:   ".book",
-		ExploreBookNameRule:   ".title|text",
-		ExploreBookAuthorRule: ".author|text",
-		ExploreBookURLRule:    ".link|attr:href",
-		ExplorePaginationRule: ".explore-next|attr:href",
+		ExploreURL:                "https://explore.example/top",
+		BookListRule:              ".search-only",
+		BookNameRule:              ".search-title|text",
+		BookURLRule:               ".search-link|attr:href",
+		ExploreBookListRule:       ".book",
+		ExploreBookNameRule:       ".title|text",
+		ExploreBookAuthorRule:     ".author|text",
+		ExploreBookUpdateTimeRule: ".updated|text",
+		ExploreBookURLRule:        ".link|attr:href",
+		ExplorePaginationRule:     ".explore-next|attr:href",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -7053,7 +7345,10 @@ func TestExploreBooksUsesExploreURL(t *testing.T) {
 	req2.Header.Set("Authorization", token)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusOK || !strings.Contains(w2.Body.String(), "探索书") || !strings.Contains(w2.Body.String(), "https://explore.example/book") {
+	if w2.Code != http.StatusOK ||
+		!strings.Contains(w2.Body.String(), "探索书") ||
+		!strings.Contains(w2.Body.String(), "今日更新") ||
+		!strings.Contains(w2.Body.String(), "https://explore.example/book") {
 		t.Fatalf("explore books: expected result, got %d: %s", w2.Code, w2.Body.String())
 	}
 }

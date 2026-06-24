@@ -80,6 +80,67 @@ func TestParseTOCFollowsNextPagesWithoutLoopsOrDuplicates(t *testing.T) {
 	}
 }
 
+func TestParseTOCHonorsChapterFlagsAndFallbackURLs(t *testing.T) {
+	restore := SetHTTPClient(&http.Client{
+		Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			body := `
+				<div class="chapter">
+					<span class="title">第一卷</span>
+					<span class="volume">yes</span>
+				</div>
+				<div class="chapter">
+					<span class="title">收费章</span>
+					<a href="/vip">阅读</a>
+					<span class="vip">1</span>
+					<span class="updated">昨日</span>
+				</div>
+				<div class="chapter">
+					<span class="title">无链接章</span>
+					<span class="vip">0</span>
+					<span class="updated">今日</span>
+				</div>
+			`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    request,
+			}, nil
+		}),
+	})
+	defer restore()
+
+	source := models.BookSource{Name: "章节标记源", BaseURL: "https://source.example", Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		TOCURLRule:            "/catalog",
+		ChapterListRule:       ".chapter",
+		ChapterNameRule:       ".title",
+		ChapterURLRule:        "a|attr:href",
+		ChapterIsVolumeRule:   ".volume",
+		ChapterIsVIPRule:      ".vip",
+		ChapterUpdateTimeRule: ".updated",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	chapters, err := ParseTOC("https://source.example/book/1", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 3 {
+		t.Fatalf("expected 3 chapters, got %+v", chapters)
+	}
+	if !chapters[0].IsVolume || chapters[0].Title != "第一卷" || chapters[0].URL != "第一卷0" {
+		t.Fatalf("volume chapter should use title/index URL fallback: %+v", chapters[0])
+	}
+	if chapters[1].IsVolume || chapters[1].Title != "🔒收费章" || chapters[1].URL != "https://source.example/vip" || chapters[1].Tag != "昨日" {
+		t.Fatalf("vip chapter flags were not parsed: %+v", chapters[1])
+	}
+	if chapters[2].IsVolume || chapters[2].Title != "无链接章" || chapters[2].URL != "https://source.example/catalog" || chapters[2].Tag != "今日" {
+		t.Fatalf("normal chapter should fall back to toc page URL: %+v", chapters[2])
+	}
+}
+
 func TestNormalizeChapterOrderHonorsListPrefixSemantics(t *testing.T) {
 	raw := []RemoteChapter{
 		{Title: "第一章早期", URL: "/chapter/1"},
@@ -167,5 +228,72 @@ func TestFetchChapterContentFollowsNextPagesInOrder(t *testing.T) {
 	}
 	if len(requested) != 3 {
 		t.Fatalf("expected three content requests without loops, got %+v", requested)
+	}
+}
+
+func TestFetchChapterContentAppliesContentReplaceRegex(t *testing.T) {
+	restore := SetHTTPClient(&http.Client{
+		Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`<main class="content">第一段 广告
+第二段 广告</main>`)),
+				Header:  make(http.Header),
+				Request: request,
+			}, nil
+		}),
+	})
+	defer restore()
+
+	source := models.BookSource{Name: "正文替换源", BaseURL: "https://source.example", Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		ContentRule:         ".content",
+		ContentReplaceRegex: "##\\s*广告##",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := FetchChapterContent("https://source.example/chapter/1", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "第一段\n第二段" {
+		t.Fatalf("unexpected replaced content: %q", content)
+	}
+}
+
+func TestFetchChapterContentAppliesFullImageStyle(t *testing.T) {
+	restore := SetHTTPClient(&http.Client{
+		Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`
+					<main class="content">
+						<p>图文正文</p>
+						<img data-src="/images/full.jpg" alt="插图">
+					</main>
+				`)),
+				Header:  make(http.Header),
+				Request: request,
+			}, nil
+		}),
+	})
+	defer restore()
+
+	source := models.BookSource{Name: "正文图片样式源", BaseURL: "https://source.example", Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		ContentRule:       ".content|html",
+		ContentImageStyle: "FULL",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := FetchChapterContent("https://source.example/chapter/1", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "图文正文\n<img src=\"https://source.example/images/full.jpg\" alt=\"插图\" data-image-style=\"FULL\">"
+	if content != want {
+		t.Fatalf("unexpected image style content: %q, want %q", content, want)
 	}
 }

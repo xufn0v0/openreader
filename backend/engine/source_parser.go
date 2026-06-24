@@ -17,6 +17,8 @@ import (
 
 const maxSourcePaginationPages = 1000
 
+var sourceFalsePattern = regexp.MustCompile(`(?i)^\s*(false|no|not|0)\s*$`)
+
 // SearchResult represents a single book found through remote search.
 type SearchResult struct {
 	Title         string `json:"title"`
@@ -26,6 +28,7 @@ type SearchResult struct {
 	Kind          string `json:"kind"`
 	WordCount     string `json:"wordCount"`
 	LatestChapter string `json:"latestChapter"`
+	UpdateTime    string `json:"updateTime"`
 	BookURL       string `json:"bookUrl"`
 	SourceID      uint   `json:"sourceId"`
 	SourceName    string `json:"sourceName"`
@@ -49,6 +52,7 @@ type RemoteBookInfo struct {
 	LatestChapter string `json:"latestChapter"`
 	UpdateTime    string `json:"updateTime"`
 	WordCount     string `json:"wordCount"`
+	CanRename     bool   `json:"canRename"`
 }
 
 // ExploreResult represents one page of source discovery results.
@@ -61,9 +65,11 @@ type ExploreResult struct {
 
 // RemoteChapter represents a chapter parsed from a remote book source.
 type RemoteChapter struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
-	Index int    `json:"index"`
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+	Index    int    `json:"index"`
+	IsVolume bool   `json:"isVolume"`
+	Tag      string `json:"tag"`
 }
 
 func bookSourceRequestPolicy(source models.BookSource) SourceRequestPolicy {
@@ -268,6 +274,7 @@ func effectiveExploreRule(rule models.BookSourceRule) models.BookSourceRule {
 	exploreRule.BookKindRule = rule.ExploreBookKindRule
 	exploreRule.BookWordCountRule = rule.ExploreBookWordCountRule
 	exploreRule.LatestChapterRule = rule.ExploreLatestChapterRule
+	exploreRule.BookUpdateTimeRule = rule.ExploreBookUpdateTimeRule
 	exploreRule.BookURLRule = rule.ExploreBookURLRule
 	exploreRule.PaginationRule = rule.ExplorePaginationRule
 	return exploreRule
@@ -322,6 +329,7 @@ func parseBookResults(doc *goquery.Document, rule models.BookSourceRule, source 
 		result.Kind = strings.Join(Extract(sel, rule.BookKindRule), ",")
 		result.WordCount = formatSourceWordCount(firstMatch(sel, rule.BookWordCountRule))
 		result.LatestChapter = firstMatch(sel, rule.LatestChapterRule)
+		result.UpdateTime = firstMatch(sel, rule.BookUpdateTimeRule)
 		result.BookURL = resolveSourceURLTemplate(baseURL, firstMatch(sel, rule.BookURLRule))
 
 		if result.Title == "" || result.BookURL == "" {
@@ -352,6 +360,7 @@ func parseDirectBookResult(doc *goquery.Document, rule models.BookSourceRule, so
 		Kind:          info.Kind,
 		WordCount:     formatSourceWordCount(info.WordCount),
 		LatestChapter: info.LatestChapter,
+		UpdateTime:    info.UpdateTime,
 		BookURL:       bookURL,
 		SourceID:      source.ID,
 		SourceName:    source.Name,
@@ -418,16 +427,35 @@ func FetchBookInfoAndTOC(bookURL string, source models.BookSource) (RemoteBookIn
 }
 
 func parseRemoteBookInfo(doc *goquery.Document, rule models.BookSourceRule, baseURL string) RemoteBookInfo {
+	scope := bookInfoScope(doc, rule.BookInfoInitRule)
 	return RemoteBookInfo{
-		Title:         firstMatch(doc.Selection, rule.BookInfoNameRule),
-		Author:        firstMatch(doc.Selection, rule.BookInfoAuthorRule),
-		CoverURL:      resolveURL(baseURL, firstMatch(doc.Selection, rule.BookInfoCoverRule)),
-		Intro:         firstMatch(doc.Selection, rule.BookInfoIntroRule),
-		Kind:          firstMatch(doc.Selection, rule.BookInfoKindRule),
-		LatestChapter: firstMatch(doc.Selection, rule.BookInfoLatestChapterRule),
-		UpdateTime:    firstMatch(doc.Selection, rule.BookInfoUpdateTimeRule),
-		WordCount:     formatSourceWordCount(firstMatch(doc.Selection, rule.BookInfoWordCountRule)),
+		Title:         firstMatch(scope, rule.BookInfoNameRule),
+		Author:        firstMatch(scope, rule.BookInfoAuthorRule),
+		CoverURL:      resolveURL(baseURL, firstMatch(scope, rule.BookInfoCoverRule)),
+		Intro:         firstMatch(scope, rule.BookInfoIntroRule),
+		Kind:          firstMatch(scope, rule.BookInfoKindRule),
+		LatestChapter: firstMatch(scope, rule.BookInfoLatestChapterRule),
+		UpdateTime:    firstMatch(scope, rule.BookInfoUpdateTimeRule),
+		WordCount:     formatSourceWordCount(firstMatch(scope, rule.BookInfoWordCountRule)),
+		CanRename:     strings.TrimSpace(rule.BookInfoCanRenameRule) != "",
 	}
+}
+
+func bookInfoScope(doc *goquery.Document, initRule string) *goquery.Selection {
+	initRule = strings.TrimSpace(initRule)
+	if initRule == "" || strings.HasPrefix(initRule, "@") {
+		return doc.Selection
+	}
+	parts := strings.SplitN(initRule, "|", 2)
+	selector := strings.TrimSpace(parts[0])
+	if selector == "" {
+		return doc.Selection
+	}
+	scope := doc.Find(selector).First()
+	if scope.Length() == 0 {
+		return doc.Selection
+	}
+	return scope
 }
 
 func parseTOCWithRule(bookURL, sourceBaseURL string, rule models.BookSourceRule, charset string, policy SourceRequestPolicy, bookDoc *goquery.Document, preparedBookRequest *sourceRequest) ([]RemoteChapter, error) {
@@ -569,17 +597,38 @@ func parseChapterList(doc *goquery.Document, rule models.BookSourceRule, listRul
 	chapters := make([]RemoteChapter, 0, len(items))
 	for i, sel := range items {
 		title := firstMatch(sel, rule.ChapterNameRule)
+		isVolume := sourceRuleBool(firstMatch(sel, rule.ChapterIsVolumeRule))
 		chapterURL := resolveSourceURLTemplate(baseURL, firstMatch(sel, rule.ChapterURLRule))
+		if chapterURL == "" {
+			if isVolume {
+				chapterURL = title + strconv.Itoa(i)
+			} else {
+				chapterURL = baseURL
+			}
+		}
 		if title == "" || chapterURL == "" {
 			continue
 		}
+		if sourceRuleBool(firstMatch(sel, rule.ChapterIsVIPRule)) {
+			title = "🔒" + title
+		}
 		chapters = append(chapters, RemoteChapter{
-			Title: title,
-			URL:   chapterURL,
-			Index: i,
+			Title:    title,
+			URL:      chapterURL,
+			Index:    i,
+			IsVolume: isVolume,
+			Tag:      firstMatch(sel, rule.ChapterUpdateTimeRule),
 		})
 	}
 	return chapters
+}
+
+func sourceRuleBool(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "null" {
+		return false
+	}
+	return !sourceFalsePattern.MatchString(value)
 }
 
 func sourceListRule(rule string) (selector string, reverse bool) {
@@ -709,7 +758,7 @@ func FetchChapterContent(chapterURL string, source models.BookSource) (string, e
 	for len(queue) > 0 {
 		page := queue[0]
 		queue = queue[1:]
-		if text := extractChapterContent(page.doc, rule.ContentRule, page.request.URL); text != "" {
+		if text := extractChapterContent(page.doc, rule, page.request.URL); text != "" {
 			parts = append(parts, text)
 		}
 		for _, nextURL := range extractResolvedURLs(page.doc.Selection, rule.NextContentURLRule, page.request.URL) {
@@ -741,18 +790,64 @@ func FetchChapterContent(chapterURL string, source models.BookSource) (string, e
 	}
 
 	text := strings.Join(parts, "\n")
+	text = applyContentReplaceRegex(text, rule.ContentReplaceRegex)
 	text = ApplyTextReplacements(text, rule.TextReplaceRules)
 	return text, nil
 }
 
-func extractChapterContent(doc *goquery.Document, contentRule string, baseURL string) string {
+func applyContentReplaceRegex(text string, rule string) string {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return text
+	}
+	parts := strings.Split(rule, "##")
+	if len(parts) < 2 {
+		return text
+	}
+	result := text
+	selector := strings.TrimSpace(parts[0])
+	if selector != "" {
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(text))
+		if err != nil {
+			return text
+		}
+		result = strings.Join(Extract(doc.Selection, selector), "\n")
+	}
+	pattern := parts[1]
+	replacement := ""
+	if len(parts) > 2 {
+		replacement = parts[2]
+	}
+	if pattern == "" {
+		return result
+	}
+	replaceFirst := len(parts) > 3
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		if replaceFirst {
+			return strings.Replace(result, pattern, replacement, 1)
+		}
+		return strings.ReplaceAll(result, pattern, replacement)
+	}
+	if replaceFirst {
+		loc := compiled.FindStringIndex(result)
+		if loc == nil {
+			return ""
+		}
+		return result[:loc[0]] + compiled.ReplaceAllString(result[loc[0]:loc[1]], replacement) + result[loc[1]:]
+	}
+	return compiled.ReplaceAllString(result, replacement)
+}
+
+func extractChapterContent(doc *goquery.Document, rule models.BookSourceRule, baseURL string) string {
+	contentRule := rule.ContentRule
 	if contentRule == "" {
 		return strings.Join(Extract(doc.Selection, "body|text"), "\n")
 	}
 	values := Extract(doc.Selection, contentRule)
 	if ruleOperation(contentRule) == "html" {
 		for index := range values {
-			values[index] = normalizeChapterHTML(values[index], baseURL)
+			values[index] = normalizeChapterHTMLWithImageStyle(values[index], baseURL, rule.ContentImageStyle)
 		}
 	}
 	return strings.Join(values, "\n")
@@ -767,10 +862,15 @@ func ruleOperation(rule string) string {
 }
 
 func normalizeChapterHTML(fragment string, baseURL string) string {
+	return normalizeChapterHTMLWithImageStyle(fragment, baseURL, "")
+}
+
+func normalizeChapterHTMLWithImageStyle(fragment string, baseURL string, imageStyle string) string {
 	doc, err := html.Parse(strings.NewReader("<html><body>" + fragment + "</body></html>"))
 	if err != nil {
 		return strings.TrimSpace(fragment)
 	}
+	normalizedImageStyle := normalizeContentImageStyle(imageStyle)
 	lines := make([]string, 0)
 	var text strings.Builder
 	flushText := func() {
@@ -802,7 +902,12 @@ func normalizeChapterHTML(fragment string, baseURL string) string {
 				src = resolveURL(baseURL, src)
 				if isSafeChapterImageURL(src) {
 					alt := strings.TrimSpace(firstHTMLAttr(node, "alt", "title"))
-					lines = append(lines, `<img src="`+stdhtml.EscapeString(src)+`" alt="`+stdhtml.EscapeString(alt)+`">`)
+					imageTag := `<img src="` + stdhtml.EscapeString(src) + `" alt="` + stdhtml.EscapeString(alt) + `"`
+					if normalizedImageStyle != "" {
+						imageTag += ` data-image-style="` + stdhtml.EscapeString(normalizedImageStyle) + `"`
+					}
+					imageTag += `>`
+					lines = append(lines, imageTag)
 				}
 				return
 			}
@@ -824,6 +929,13 @@ func normalizeChapterHTML(fragment string, baseURL string) string {
 	walk(doc)
 	flushText()
 	return strings.Join(lines, "\n")
+}
+
+func normalizeContentImageStyle(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "FULL") {
+		return "FULL"
+	}
+	return ""
 }
 
 func firstHTMLAttr(node *html.Node, names ...string) string {
