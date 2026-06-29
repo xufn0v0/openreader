@@ -209,12 +209,14 @@ type RSSArticle struct {
 	Sort        string    `json:"sort" gorm:"size:160;index"`
 	Title       string    `json:"title" gorm:"size:240;not null"`
 	Link        string    `json:"link" gorm:"size:800;index"`
+	GUID        string    `json:"guid" gorm:"size:800;index"`
 	Author      string    `json:"author" gorm:"size:160"`
 	Image       string    `json:"image" gorm:"size:800"`
 	Summary     string    `json:"summary" gorm:"type:text"`
 	Content     string    `json:"content" gorm:"type:text"`
 	IsRead      bool      `json:"isRead"`
 	Favorite    bool      `json:"favorite"`
+	PubDate     string    `json:"pubDate" gorm:"type:text"`
 	PublishedAt time.Time `json:"publishedAt"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
