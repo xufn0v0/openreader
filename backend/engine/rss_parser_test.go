@@ -63,6 +63,9 @@ func TestSanitizeRSSHTMLRemovesActiveContentAndResolvesURLs(t *testing.T) {
 }
 
 func TestExtractRSSFirstImageMatchesUpstreamEmbeddedImageFallback(t *testing.T) {
+	if value := ExtractRSSFirstImageSource(`<p>摘要</p><img src="../covers/raw.jpg">`); value != "../covers/raw.jpg" {
+		t.Fatalf("raw first embedded image = %q", value)
+	}
 	value := ExtractRSSFirstImage(`
 		<p>摘要</p>
 		<img src="../covers/first.jpg">
@@ -109,6 +112,36 @@ func TestParseRSSRulePageResolvesNextRequestOptions(t *testing.T) {
 	}
 	if page.NextURL != `https://rss.example/list, {"method":"POST","body":"page=2"}` {
 		t.Fatalf("next request options were not preserved: %q", page.NextURL)
+	}
+}
+
+func TestParseRSSRulePageResolvesArticleLinksAgainstSourceURL(t *testing.T) {
+	page, err := ParseRSSRulePage(
+		`<article><a href="../post/1">文章</a><img src="../cover.jpg"></article><a class="next" href="../page/2">下一页</a>`,
+		"https://cdn.rss.example/categories/tech/page/1",
+		RSSRuleSet{
+			Articles:    "article",
+			Title:       "a",
+			Image:       "img@src",
+			Link:        "a@href",
+			LinkBaseURL: `https://rss.example/feeds/main.xml, {"headers":{"Referer":"https://rss.example/"}}`,
+		},
+		".next@href",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Articles) != 1 {
+		t.Fatalf("article count = %d", len(page.Articles))
+	}
+	if page.Articles[0].Link != "https://rss.example/post/1" {
+		t.Fatalf("article link = %q", page.Articles[0].Link)
+	}
+	if page.Articles[0].Image != "https://cdn.rss.example/categories/tech/cover.jpg" {
+		t.Fatalf("article image = %q", page.Articles[0].Image)
+	}
+	if page.NextURL != "https://cdn.rss.example/categories/tech/page/2" {
+		t.Fatalf("next page URL = %q", page.NextURL)
 	}
 }
 

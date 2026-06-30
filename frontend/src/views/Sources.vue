@@ -233,12 +233,22 @@
         </el-form-item>
         <el-form-item label="编码">
           <el-select v-model="sourceForm.charset">
+            <el-option label="自动检测" value="auto" />
             <el-option label="UTF-8" value="utf-8" />
             <el-option label="GBK" value="gbk" />
           </el-select>
         </el-form-item>
         <el-form-item label="并发率">
           <el-input v-model="sourceForm.concurrentRate" placeholder="例如 1000 或 3/1000" />
+        </el-form-item>
+        <el-form-item label="请求头 header">
+          <el-input v-model="sourceForm.header" type="textarea" :rows="2" placeholder="静态 JSON 会用于请求；JS header 仅无损保存" />
+        </el-form-item>
+        <el-form-item label="登录地址（兼容字段）">
+          <el-input v-model="sourceForm.loginUrl" />
+        </el-form-item>
+        <el-form-item label="登录检测 JS（兼容字段）">
+          <el-input v-model="sourceForm.loginCheckJs" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="sourceForm.customOrder" :step="1" />
@@ -432,7 +442,7 @@ const importPreviewSaving = ref(false)
 const showEditor = ref(false)
 const editingSourceId = ref(null)
 const savingSource = ref(false)
-const sourceForm = reactive({ name: '', group: '', baseUrl: '', searchUrl: '', bookUrlPattern: '', bookSourceType: 0, bookSourceComment: '', charset: 'utf-8', concurrentRate: '', customOrder: 0, rules: '', enabled: true, enabledExplore: true })
+const sourceForm = reactive({ name: '', group: '', baseUrl: '', searchUrl: '', bookUrlPattern: '', bookSourceType: 0, bookSourceComment: '', charset: 'utf-8', concurrentRate: '', header: '', loginUrl: '', loginCheckJs: '', customOrder: 0, lastUpdateTime: 0, weight: 0, respondTime: 180000, rules: '', enabled: true, enabledExplore: true })
 const ruleKeys = [
   'exploreUrl',
   'bookListRule',
@@ -684,7 +694,13 @@ function openEditor(source) {
     bookSourceComment: source?.bookSourceComment || '',
     charset: source?.charset || 'utf-8',
     concurrentRate: source?.concurrentRate || '',
+    header: source?.header || '',
+    loginUrl: source?.loginUrl || '',
+    loginCheckJs: source?.loginCheckJs || '',
     customOrder: Number(source?.customOrder) || 0,
+    lastUpdateTime: Number(source?.lastUpdateTime) || 0,
+    weight: Number(source?.weight) || 0,
+    respondTime: source?.respondTime == null ? 180000 : Number(source.respondTime),
     rules: source?.rules || '',
     enabled: source?.enabled ?? true,
     enabledExplore: source?.enabledExplore ?? true,

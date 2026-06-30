@@ -673,7 +673,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Edit, Rank, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
 import { cleanupInactiveUsers, createUser, deleteUsers, listUsers, resetUserPassword, updateUser } from '../api/admin'
-import { cacheBookContent, createBookmark, createBookmarks, deleteBookmark, deleteBookmarks, listBookmarks, listChapters, listTXTTocRules, previewLocalBook, refreshLocalBook, searchBookContent, updateBook, updateBookCategory, updateBookmark } from '../api/books'
+import { cacheBookContent, listChapters, listTXTTocRules, previewLocalBook, refreshLocalBook, updateBook, updateBookCategory } from '../api/books'
 import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
 import { createReplaceRule, deleteReplaceRule, deleteReplaceRules, listReplaceRules, testReplaceRule, updateReplaceRule, upsertReplaceRules } from '../api/replaceRules'
 import { listSources } from '../api/sources'
@@ -682,6 +682,8 @@ import { bookHasCategory, mergeShelfBook, useBookshelfStore } from '../stores/bo
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
+import { useBookBookmarks } from '../composables/useBookBookmarks'
+import { useBookContentSearch } from '../composables/useBookContentSearch'
 import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
@@ -729,18 +731,44 @@ const importDraft = reactive({ title: '', author: '', categoryIds: [], file: nul
 const tocRuleOptions = ref([])
 const tocRulesLoading = ref(false)
 const sourceRows = ref([])
-const contentKeyword = ref('')
-const contentResults = ref([])
-const contentSearching = ref(false)
-const contentSearched = ref(false)
-const contentLastIndex = ref(-1)
-const contentHasMore = ref(false)
-const contentTotal = ref(0)
+const contentSearchBook = computed(() => overlay.searchBook)
+const contentSearchBookId = computed(() => overlay.searchBook?.id)
+const {
+  keyword: contentKeyword,
+  results: contentResults,
+  loading: contentSearching,
+  searched: contentSearched,
+  hasMore: contentHasMore,
+  status: contentSearchStatus,
+  reset: resetCurrentBookContentSearch,
+  search: searchCurrentBookContent,
+  loadMore: loadMoreCurrentBookContent,
+  loadAll: searchAllCurrentBookContent,
+} = useBookContentSearch({
+  bookId: contentSearchBookId,
+  book: contentSearchBook,
+  chapters: [],
+  onError: error => ElMessage.error(readError(error, '搜索正文失败')),
+})
 const contentSearchBookKey = ref('')
-const bookmarkItems = ref([])
-const bookmarkLoading = ref(false)
+const bookmarkBookId = computed(() => overlay.bookmarkBook?.id)
+const {
+  items: bookmarkItems,
+  loading: bookmarkLoading,
+  mutating: bookmarkSaving,
+  load: loadBookmarkItems,
+  reset: resetBookmarkItems,
+  update: updateBookmarkData,
+  remove: removeBookmarkData,
+  removeMany: removeBookmarkRows,
+  importPayloads: importBookmarkPayloads,
+  handleUpdated: handleBookmarksUpdated,
+} = useBookBookmarks({
+  bookId: bookmarkBookId,
+  isActive: () => overlay.bookmarkVisible,
+  onLoadError: error => ElMessage.error(readError(error, '加载书签失败')),
+})
 const bookmarkEditorVisible = ref(false)
-const bookmarkSaving = ref(false)
 const editingBookmark = ref(null)
 const bookmarkDraft = reactive({ title: '', excerpt: '', note: '' })
 const backups = ref([])
@@ -770,7 +798,6 @@ const replaceRuleTestResult = ref(null)
 const manageKeyword = ref('')
 const windowWidth = ref(currentViewportWidth())
 let replaceRulesRefreshTimer
-let bookmarkRefreshTimer
 let usersRefreshTimer
 let sourceRowsRefreshTimer
 let groupSortable
@@ -842,12 +869,6 @@ function isShelfBook(book) {
   if (!bookUrl) return false
   return bookshelf.books.some(item => String(item.url || item.bookUrl || '').trim() === bookUrl)
 }
-const contentSearchStatus = computed(() => {
-  if (!contentSearched.value) return ''
-  const scanned = contentLastIndex.value >= 0 ? contentLastIndex.value + 1 : 0
-  if (!contentTotal.value) return `${contentResults.value.length} 条结果`
-  return `已搜索 ${Math.min(scanned, contentTotal.value)} / ${contentTotal.value} 章，${contentResults.value.length} 条结果`
-})
 const currentUserId = computed(() => userStore.profile?.id || null)
 
 onMounted(() => {
@@ -865,7 +886,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('openreader:users-updated', handleUsersUpdated)
   window.removeEventListener('openreader:sources-update', handleSourcesUpdated)
   clearReplaceRulesRefreshTimer()
-  clearBookmarkRefreshTimer()
   clearUsersRefreshTimer()
   clearSourceRowsRefreshTimer()
   destroyGroupSortable()
@@ -1063,11 +1083,7 @@ async function warmOverlayBooks(options = {}) {
 
 function resetContentSearchState() {
   contentKeyword.value = ''
-  contentResults.value = []
-  contentSearched.value = false
-  contentLastIndex.value = -1
-  contentHasMore.value = false
-  contentTotal.value = 0
+  resetCurrentBookContentSearch()
 }
 
 watch(
@@ -1077,29 +1093,16 @@ watch(
     const key = String(overlay.searchBook?.id || overlay.searchBook?.bookUrl || '')
     if (key && key !== contentSearchBookKey.value) {
       contentSearchBookKey.value = key
-      contentKeyword.value = ''
-      contentResults.value = []
-      contentSearched.value = false
-      contentLastIndex.value = -1
-      contentHasMore.value = false
-      contentTotal.value = 0
+      resetContentSearchState()
     }
   },
 )
-
-watch(contentKeyword, () => {
-  contentResults.value = []
-  contentSearched.value = false
-  contentLastIndex.value = -1
-  contentHasMore.value = false
-  contentTotal.value = 0
-})
 
 watch(
   () => overlay.bookmarkVisible,
   async (visible) => {
     if (!visible) {
-      bookmarkItems.value = []
+      resetBookmarkItems()
       return
     }
     await loadBookmarkItems()
@@ -1640,62 +1643,6 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
-async function searchCurrentBookContent() {
-  return runCurrentBookContentSearch({ append: false })
-}
-
-async function loadMoreCurrentBookContent() {
-  return runCurrentBookContentSearch({ append: true })
-}
-
-async function searchAllCurrentBookContent() {
-  return runCurrentBookContentSearch({ append: true, scanAll: true })
-}
-
-async function runCurrentBookContentSearch({ append = false, scanAll = false } = {}) {
-  const book = overlay.searchBook
-  const keyword = contentKeyword.value.trim()
-  if (!book?.id || !keyword) return
-  if (contentSearching.value) return
-  contentSearching.value = true
-  contentSearched.value = true
-  try {
-    let lastIndex = append ? contentLastIndex.value : -1
-    let nextResults = append ? [...contentResults.value] : []
-    const maxRounds = scanAll ? 80 : (append ? 1 : (Number(book.sourceId || 0) > 0 ? 4 : 1))
-    let previousLastIndex = lastIndex
-    for (let round = 0; round < maxRounds; round += 1) {
-      const { data } = await searchBookContent(book.id, keyword, {
-        paged: 1,
-        lastIndex,
-        scanUntilMatch: append ? 0 : 1,
-        ...contentSearchPagingParams(book),
-      })
-      const rows = Array.isArray(data) ? data : (data?.list || [])
-      nextResults = nextResults.concat(rows)
-      contentResults.value = nextResults
-      contentLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : -1
-      contentHasMore.value = Boolean(data?.hasMore)
-      contentTotal.value = Number(data?.total || 0)
-      lastIndex = contentLastIndex.value
-      if (!scanAll && (rows.length || !contentHasMore.value)) break
-      if (scanAll && (!contentHasMore.value || lastIndex <= previousLastIndex)) break
-      previousLastIndex = lastIndex
-    }
-  } catch (err) {
-    ElMessage.error(readError(err, '搜索正文失败'))
-  } finally {
-    contentSearching.value = false
-  }
-}
-
-function contentSearchPagingParams(book) {
-  if (Number(book?.sourceId || 0) > 0) {
-    return { chapterLimit: 10, scanLimit: 10, matchLimit: 120, perChapterLimit: 20 }
-  }
-  return { chapterLimit: 160, scanLimit: 480, matchLimit: 1000, perChapterLimit: 100, localFull: 1 }
-}
-
 function jumpToContentResult(result) {
   const book = overlay.searchBook
   if (!book?.id) return
@@ -1711,41 +1658,6 @@ function jumpToContentResult(result) {
       q: contentKeyword.value.trim() || undefined,
     },
   })
-}
-
-async function loadBookmarkItems() {
-  const book = overlay.bookmarkBook
-  if (!book?.id) return
-  bookmarkLoading.value = true
-  try {
-    const { data } = await listBookmarks(book.id)
-    bookmarkItems.value = data || []
-  } catch (err) {
-    ElMessage.error(readError(err, '加载书签失败'))
-  } finally {
-    bookmarkLoading.value = false
-  }
-}
-
-function handleBookmarksUpdated(event) {
-  if (!overlay.bookmarkVisible || !overlay.bookmarkBook?.id) return
-  const bookIds = event?.detail?.bookIds || []
-  if (bookIds.length && !bookIds.some(id => String(id) === String(overlay.bookmarkBook.id))) return
-  scheduleBookmarkRefresh()
-}
-
-function scheduleBookmarkRefresh() {
-  clearBookmarkRefreshTimer()
-  bookmarkRefreshTimer = window.setTimeout(async () => {
-    bookmarkRefreshTimer = undefined
-    await loadBookmarkItems()
-  }, 250)
-}
-
-function clearBookmarkRefreshTimer() {
-  if (!bookmarkRefreshTimer) return
-  window.clearTimeout(bookmarkRefreshTimer)
-  bookmarkRefreshTimer = undefined
 }
 
 function jumpToBookmark(bookmark) {
@@ -1775,28 +1687,22 @@ function openBookmarkEditor(bookmark) {
 
 async function saveBookmarkEdit() {
   if (!editingBookmark.value) return
-  bookmarkSaving.value = true
   try {
-    const { data } = await updateBookmark(editingBookmark.value.id, {
+    await updateBookmarkData(editingBookmark.value.id, {
       title: bookmarkDraft.title,
       excerpt: bookmarkDraft.excerpt,
       note: bookmarkDraft.note,
     })
-    const index = bookmarkItems.value.findIndex(item => item.id === data.id)
-    if (index >= 0) bookmarkItems.value[index] = data
     bookmarkEditorVisible.value = false
     ElMessage.success('书签已更新')
   } catch (err) {
     ElMessage.error(readError(err, '更新书签失败'))
-  } finally {
-    bookmarkSaving.value = false
   }
 }
 
 async function removeBookmarkItem(bookmark) {
   try {
-    await deleteBookmark(bookmark.id)
-    bookmarkItems.value = bookmarkItems.value.filter(item => item.id !== bookmark.id)
+    await removeBookmarkData(bookmark.id)
     ElMessage.success('书签已删除')
   } catch (err) {
     ElMessage.error(readError(err, '删除书签失败'))
@@ -1807,9 +1713,7 @@ async function removeBookmarkItems(rows) {
   if (!Array.isArray(rows) || !rows.length) return
   try {
     await ElMessageBox.confirm(`确认要删除所选择的 ${rows.length} 条书签吗？`, '批量删除书签', { type: 'warning' })
-    const { data } = await deleteBookmarks(overlay.bookmarkBook.id, rows.map(item => item.id))
-    const deleted = new Set(data?.deletedIds || [])
-    bookmarkItems.value = bookmarkItems.value.filter(item => !deleted.has(item.id))
+    await removeBookmarkRows(rows)
     ElMessage.success('书签已删除')
   } catch (err) {
     if (err === 'cancel' || err === 'close') return
@@ -1827,9 +1731,7 @@ async function importBookmarkItems(rows) {
   }
   try {
     await ElMessageBox.confirm(`确认要导入文件中的 ${payloads.length} 条书签到当前书籍吗？`, '导入书签', { type: 'info' })
-    const { data } = await createBookmarks(book.id, payloads)
-    const created = Array.isArray(data) ? data : []
-    bookmarkItems.value = [...created, ...bookmarkItems.value]
+    const created = await importBookmarkPayloads(payloads)
     ElMessage.success(`已导入 ${created.length} 条书签`)
   } catch (err) {
     if (err === 'cancel' || err === 'close') return

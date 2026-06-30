@@ -130,7 +130,7 @@ func TestListTXTTocRules(t *testing.T) {
 }
 
 func TestRegisterAndLogin(t *testing.T) {
-	router, _ := setupTestServer(t)
+	router, server := setupTestServer(t)
 
 	// register
 	body := `{"username":"alice","password":"secret123"}`
@@ -151,6 +151,41 @@ func TestRegisterAndLogin(t *testing.T) {
 	if registerResp.Token == "" {
 		t.Fatal("register: no token in response")
 	}
+	if registerResp.User.Role != "admin" {
+		t.Fatalf("first registered user role = %q, want admin", registerResp.User.Role)
+	}
+	var storedFirst models.User
+	if err := server.db.Where("username = ?", "alice").First(&storedFirst).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedFirst.Role != "admin" {
+		t.Fatalf("stored first user role = %q, want admin", storedFirst.Role)
+	}
+	adminReq := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	adminReq.Header.Set("Authorization", "Bearer "+registerResp.Token)
+	adminW := httptest.NewRecorder()
+	router.ServeHTTP(adminW, adminReq)
+	if adminW.Code != http.StatusOK {
+		t.Fatalf("first registered user should have admin access: %d %s", adminW.Code, adminW.Body.String())
+	}
+
+	secondBody := `{"username":"bob","password":"secret456"}`
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(secondBody))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondW := httptest.NewRecorder()
+	router.ServeHTTP(secondW, secondReq)
+	if secondW.Code != http.StatusOK {
+		t.Fatalf("register second user: expected 200, got %d: %s", secondW.Code, secondW.Body.String())
+	}
+	var secondResp struct {
+		User models.User `json:"user"`
+	}
+	if err := json.Unmarshal(secondW.Body.Bytes(), &secondResp); err != nil {
+		t.Fatal(err)
+	}
+	if secondResp.User.Role != "user" {
+		t.Fatalf("second registered user role = %q, want user", secondResp.User.Role)
+	}
 
 	// login
 	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(body))
@@ -160,6 +195,44 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	if w2.Code != http.StatusOK {
 		t.Fatalf("login: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestConcurrentRegistrationCreatesExactlyOneAdmin(t *testing.T) {
+	router, server := setupTestServer(t)
+
+	const registrations = 4
+	var wait sync.WaitGroup
+	wait.Add(registrations)
+	statuses := make([]int, registrations)
+	for index := 0; index < registrations; index++ {
+		go func(index int) {
+			defer wait.Done()
+			body := fmt.Sprintf(`{"username":"parallel%d","password":"secret%d"}`, index, index)
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			statuses[index] = w.Code
+		}(index)
+	}
+	wait.Wait()
+
+	for index, status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("parallel registration %d status = %d", index, status)
+		}
+	}
+	var adminCount int64
+	if err := server.db.Model(&models.User{}).Where("role = ?", "admin").Count(&adminCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	var userCount int64
+	if err := server.db.Model(&models.User{}).Count(&userCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if adminCount != 1 || userCount != registrations {
+		t.Fatalf("registered users=%d admins=%d, want %d/1", userCount, adminCount, registrations)
 	}
 }
 
@@ -1742,7 +1815,7 @@ func TestSourceManagement(t *testing.T) {
 	token := authHeader(t, router)
 
 	// create source
-	body := `{"name":"测试书源","baseUrl":"https://example.com","bookUrlPattern":"/book/\\d+$","bookSourceType":1,"bookSourceComment":"音频测试源","charset":"utf-8","concurrentRate":"3/1000","enabledExplore":false}`
+	body := `{"name":"测试书源","baseUrl":"https://example.com","bookUrlPattern":"/book/\\d+$","bookSourceType":1,"bookSourceComment":"音频测试源","charset":"utf-8","concurrentRate":"3/1000","header":"{\"X-Source\":\"yes\"}","loginUrl":"https://example.com/login","loginCheckJs":"check()","lastUpdateTime":1750000000000,"weight":6,"respondTime":4321,"enabledExplore":false}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sources", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -1770,6 +1843,11 @@ func TestSourceManagement(t *testing.T) {
 	}
 	if sources[0].ConcurrentRate != "3/1000" {
 		t.Fatalf("source concurrent rate was not persisted: %+v", sources[0])
+	}
+	if sources[0].Header != `{"X-Source":"yes"}` ||
+		sources[0].LoginURL != "https://example.com/login" || sources[0].LoginCheckJS != "check()" ||
+		sources[0].LastUpdateTime != 1750000000000 || sources[0].Weight != 6 || sources[0].RespondTime != 4321 {
+		t.Fatalf("source upstream metadata was not persisted: %+v", sources[0])
 	}
 	if sources[0].IsExploreEnabled() {
 		t.Fatalf("source enabledExplore=false was not persisted: %+v", sources[0])
@@ -1799,6 +1877,12 @@ func TestUpdateSourceCanClearOptionalFields(t *testing.T) {
 		SearchURL:      "https://example.com/search",
 		Charset:        "gbk",
 		ConcurrentRate: "1000",
+		Header:         `{"X-Source":"old"}`,
+		LoginURL:       "https://example.com/login",
+		LoginCheckJS:   "check()",
+		LastUpdateTime: 1750000000000,
+		Weight:         6,
+		RespondTime:    4321,
 		Group:          "旧分组",
 		Rules:          `{"searchUrl":"x"}`,
 		Enabled:        true,
@@ -1807,7 +1891,7 @@ func TestUpdateSourceCanClearOptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := `{"name":"待编辑","baseUrl":"","searchUrl":"","charset":"","concurrentRate":"","group":"","rules":"","enabled":false}`
+	body := `{"name":"待编辑","baseUrl":"","searchUrl":"","charset":"","concurrentRate":"","header":"","loginUrl":"","loginCheckJs":"","lastUpdateTime":0,"weight":0,"respondTime":0,"group":"","rules":"","enabled":false}`
 	req := httptest.NewRequest(http.MethodPut, "/api/sources/"+strconv.FormatUint(uint64(source.ID), 10), strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
@@ -1821,7 +1905,10 @@ func TestUpdateSourceCanClearOptionalFields(t *testing.T) {
 	if err := server.db.First(&updated, source.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if updated.BaseURL != "" || updated.SearchURL != "" || updated.ConcurrentRate != "" || updated.Group != "" || updated.Rules != "" || updated.Charset != "utf-8" || updated.Enabled {
+	if updated.BaseURL != "" || updated.SearchURL != "" || updated.ConcurrentRate != "" || updated.Header != "" ||
+		updated.LoginURL != "" || updated.LoginCheckJS != "" || updated.LastUpdateTime != 0 ||
+		updated.Weight != 0 || updated.RespondTime != 0 || updated.Group != "" ||
+		updated.Rules != "" || updated.Charset != "utf-8" || updated.Enabled {
 		t.Fatalf("source optional fields were not cleared: %+v", updated)
 	}
 }
@@ -1887,6 +1974,9 @@ func TestDecodeBookSourcesEnabledDefaults(t *testing.T) {
 	if !sources[0].Enabled || !sources[0].IsExploreEnabled() {
 		t.Fatalf("expected missing enable flags to default true: %+v", sources[0])
 	}
+	if sources[0].RespondTime != 180000 {
+		t.Fatalf("expected missing respondTime to use upstream default: %+v", sources[0])
+	}
 	if sources[1].Enabled || sources[1].IsExploreEnabled() {
 		t.Fatalf("expected explicit false flags to be preserved: %+v", sources[1])
 	}
@@ -1902,7 +1992,12 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			"exploreUrl":"https://reader.example/top/{page}",
 			"headerMap":{"User-Agent":"OpenReader Test","Referer":"https://reader.example"},
 			"concurrentRate":"2/1000",
+			"loginUrl":"https://reader.example/login",
+			"loginCheckJs":"return source.isLogin()",
 			"customOrder":37,
+			"lastUpdateTime":1710000000000,
+			"weight":12,
+			"respondTime":3456,
 			"bookUrlPattern":"/detail/\\d+$",
 			"bookSourceType":1,
 			"bookSourceComment":"上游注释",
@@ -1972,7 +2067,12 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	source := sources[0]
 	if source.Name != "上游源" || source.BaseURL != "https://reader.example" || source.Group != "分组A" ||
 		source.BookURLPattern != `/detail/\d+$` || source.SourceType != 1 || source.Comment != "上游注释" ||
-		source.ConcurrentRate != "2/1000" || source.CustomOrder != 37 || source.Enabled || source.IsExploreEnabled() {
+		source.Charset != "auto" ||
+		source.ConcurrentRate != "2/1000" || !strings.Contains(source.Header, `"Referer":"https://reader.example"`) ||
+		source.LoginURL != "https://reader.example/login" ||
+		source.LoginCheckJS != "return source.isLogin()" || source.CustomOrder != 37 ||
+		source.LastUpdateTime != 1710000000000 || source.Weight != 12 || source.RespondTime != 3456 ||
+		source.Enabled || source.IsExploreEnabled() {
 		t.Fatalf("unexpected upstream source mapping: %+v", source)
 	}
 	rule, err := source.ParsedRules()
@@ -2029,6 +2129,34 @@ func TestDecodeBookSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	}
 }
 
+func TestBookSourceParsedRulesMergesRawStaticHeader(t *testing.T) {
+	source := models.BookSource{
+		Header: `{"X-Base":"raw","X-Override":"raw"}`,
+		Rules:  `{"headers":{"x-override":"rule","X-Rule":"yes"}}`,
+	}
+	rule, err := source.ParsedRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rule.Headers["X-Base"] != "raw" || rule.Headers["x-override"] != "rule" || rule.Headers["X-Rule"] != "yes" {
+		t.Fatalf("merged source headers = %+v", rule.Headers)
+	}
+	for name := range rule.Headers {
+		if name == "X-Override" {
+			t.Fatalf("case-insensitive overridden raw header remained: %+v", rule.Headers)
+		}
+	}
+
+	source.Header = "@js:return {'X-Dynamic':'yes'}"
+	rule, err = source.ParsedRules()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rule.Headers) != 2 || rule.Headers["X-Base"] != "" {
+		t.Fatalf("dynamic raw header should be preserved but not executed: %+v", rule.Headers)
+	}
+}
+
 func TestBookSourceCompatibilityRuleNormalization(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -2080,6 +2208,11 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 			"searchUrl":"https://upload-reader.example/search?q={{key}}",
 			"exploreUrl":"https://upload-reader.example/explore/{{page}}",
 			"headerMap":{"X-Source-Token":"upload-secret","Referer":"https://upload-reader.example/"},
+			"loginUrl":"https://upload-reader.example/login",
+			"loginCheckJs":"checkLogin()",
+			"lastUpdateTime":1720000000000,
+			"weight":8,
+			"respondTime":9876,
 			"ruleSearch":{"bookList":".item","name":".name","bookUrl":"a@href"},
 			"ruleExplore":{"bookList":".explore-item","name":".explore-name","bookUrl":"a@data-url"},
 			"ruleBookInfo":{"name":".detail-name","author":".detail-author","coverUrl":"img@data-src","intro":".detail-intro","tocUrl":".catalog@href","canReName":".allow-rename"},
@@ -2110,7 +2243,10 @@ func TestImportSourcesAcceptsUpstreamReaderFields(t *testing.T) {
 	if err := server.db.Where("name = ?", "上传上游源").First(&source).Error; err != nil {
 		t.Fatal(err)
 	}
-	if source.BaseURL != "https://upload-reader.example" || source.Group != "上传分组" {
+	if source.BaseURL != "https://upload-reader.example" || source.Group != "上传分组" ||
+		!strings.Contains(source.Header, `"X-Source-Token":"upload-secret"`) ||
+		source.LoginURL != "https://upload-reader.example/login" || source.LoginCheckJS != "checkLogin()" ||
+		source.LastUpdateTime != 1720000000000 || source.Weight != 8 || source.RespondTime != 9876 {
 		t.Fatalf("unexpected imported source: %+v", source)
 	}
 	rule, err := source.ParsedRules()
@@ -2708,7 +2844,13 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 			SearchURL:      "https://one.example/legacy-search?q={keyword}",
 			Charset:        "gbk",
 			ConcurrentRate: "2/1000",
+			Header:         "@js:return source.loginHeader()",
+			LoginURL:       "https://one.example/login",
+			LoginCheckJS:   "checkLogin()",
 			CustomOrder:    37,
+			LastUpdateTime: 1730000000000,
+			Weight:         15,
+			RespondTime:    2468,
 			BookURLPattern: `/detail/\d+$`,
 			SourceType:     1,
 			Comment:        "导出注释",
@@ -2824,7 +2966,13 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 		first.ExploreURL != "https://one.example/explore/{{page}}" ||
 		first.Charset != "gbk" ||
 		first.ConcurrentRate != "2/1000" ||
+		first.Header != "@js:return source.loginHeader()" ||
+		first.LoginURL != "https://one.example/login" ||
+		first.LoginCheckJS != "checkLogin()" ||
 		first.CustomOrder != 37 ||
+		first.LastUpdateTime != 1730000000000 ||
+		first.Weight != 15 ||
+		first.RespondTime != 2468 ||
 		first.BookURLPattern != `/detail/\d+$` ||
 		first.BookSourceType != 1 ||
 		first.BookSourceComment != "导出注释" ||
@@ -2867,7 +3015,6 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 		first.RuleContent.SourceRegex != "source-(.*)" ||
 		first.RuleContent.ReplaceRegex != "replace##with" ||
 		first.RuleContent.ImageStyle != "FULL" ||
-		!strings.Contains(first.Header, `"Referer":"https://one.example/"`) ||
 		!strings.Contains(first.Rules, `"paginationRule":".next|attr:href"`) ||
 		!strings.Contains(first.Rules, `"textReplaceRules"`) {
 		t.Fatalf("expected upstream-compatible fields plus lossless extensions, got %+v", first)
@@ -2895,7 +3042,13 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 		reimported.BaseURL != sources[0].BaseURL ||
 		reimported.Group != sources[0].Group ||
 		reimported.Charset != sources[0].Charset ||
+		reimported.Header != sources[0].Header ||
+		reimported.LoginURL != sources[0].LoginURL ||
+		reimported.LoginCheckJS != sources[0].LoginCheckJS ||
 		reimported.CustomOrder != sources[0].CustomOrder ||
+		reimported.LastUpdateTime != sources[0].LastUpdateTime ||
+		reimported.Weight != sources[0].Weight ||
+		reimported.RespondTime != sources[0].RespondTime ||
 		reimported.BookURLPattern != sources[0].BookURLPattern ||
 		reimported.SourceType != sources[0].SourceType ||
 		reimported.Comment != sources[0].Comment ||
@@ -2943,7 +3096,7 @@ func TestRemoteSourceImportUpdatesExistingByName(t *testing.T) {
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(`[{"name":"同名源","baseUrl":"https://new.example","charset":"gbk","enabled":false}]`)),
+				Body:       io.NopCloser(strings.NewReader(`[{"name":"同名源","baseUrl":"https://new.example","charset":"gbk","header":"@js:return dynamicHeaders()","loginUrl":"https://new.example/login","loginCheckJs":"check()","lastUpdateTime":1740000000000,"weight":9,"respondTime":1357,"enabled":false}]`)),
 				Header:     make(http.Header),
 				Request:    req,
 			}, nil
@@ -2971,7 +3124,11 @@ func TestRemoteSourceImportUpdatesExistingByName(t *testing.T) {
 	if err := server.db.First(&updated, existing.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if updated.BaseURL != "https://new.example" || updated.Charset != "gbk" || updated.Enabled {
+	if updated.BaseURL != "https://new.example" || updated.Charset != "gbk" ||
+		updated.Header != "@js:return dynamicHeaders()" ||
+		updated.LoginURL != "https://new.example/login" || updated.LoginCheckJS != "check()" ||
+		updated.LastUpdateTime != 1740000000000 || updated.Weight != 9 || updated.RespondTime != 1357 ||
+		updated.Enabled {
 		t.Fatalf("source was not updated correctly: %+v", updated)
 	}
 }
@@ -6243,7 +6400,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rssFile.Write([]byte(`[{"sourceName":"OpenReader RSS","sourceUrl":"https://rss.example/openreader.xml","sourceIcon":"https://rss.example/icon.png","sourceGroup":"资讯","sourceComment":"恢复注释","customOrder":7,"concurrentRate":"3/1000","headerMap":{"X-Restore":"yes"},"loginUrl":"https://rss.example/login","loginCheckJs":"check()","singleUrl":false,"articleStyle":2,"sortUrl":"综合::https://rss.example/openreader-sort.xml","ruleArticles":"article","ruleTitle":"title","rulePubDate":"date","ruleImage":"img","ruleLink":"a@href","ruleContent":"content","style":"body{}","enableJs":false,"loadWithBaseUrl":false,"enabled":false}]`)); err != nil {
+	if _, err := rssFile.Write([]byte(`[{"sourceName":"OpenReader RSS","sourceUrl":"https://rss.example/openreader.xml","sourceIcon":"https://rss.example/icon.png","sourceGroup":"资讯","sourceComment":"恢复注释","customOrder":7,"concurrentRate":"3/1000","headerMap":{"X-Restore":"yes"},"loginUrl":"https://rss.example/login","loginCheckJs":"check()","articleStyle":2,"sortUrl":"综合::https://rss.example/openreader-sort.xml","ruleArticles":"article","ruleTitle":"title","rulePubDate":"date","ruleImage":"img","ruleLink":"a@href","ruleContent":"content","style":"body{}","enableJs":false,"loadWithBaseUrl":false,"enabled":false}]`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := zipWriter.Close(); err != nil {
@@ -6610,6 +6767,50 @@ func TestFetchRSSArticlesSupportsRDFRootItems(t *testing.T) {
 	}
 }
 
+func TestFetchRSSArticlesHonorsSingleURLBeforeSortURL(t *testing.T) {
+	requestedPaths := make([]string, 0, 2)
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requestedPaths = append(requestedPaths, req.URL.Path)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`<rss><channel><item>
+					<title>地址验证</title>
+					<link>/article</link>
+				</item></channel></rss>`)),
+				Header:  make(http.Header),
+				Request: req,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	source := models.RSSSource{
+		URL:       "https://rss.example/feed.xml",
+		SortURL:   "分类::https://rss.example/category.xml",
+		SingleURL: true,
+	}
+	if _, err := fetchRSSArticles(source); err != nil {
+		t.Fatal(err)
+	}
+	source.SingleURL = false
+	if _, err := fetchRSSArticles(source); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(requestedPaths, ",") != "/feed.xml,/category.xml" {
+		t.Fatalf("singleUrl request paths = %v", requestedPaths)
+	}
+
+	singleOptions := rssSourceSortOptions(models.RSSSource{
+		URL:       "https://rss.example/feed.xml",
+		SortURL:   "分类 A::/a&&分类 B::/b",
+		SingleURL: true,
+	})
+	if len(singleOptions) != 1 || singleOptions[0].URL != "https://rss.example/feed.xml" || singleOptions[0].Name != "" {
+		t.Fatalf("singleUrl sort options = %+v", singleOptions)
+	}
+}
+
 func TestRSSRefreshUsesGUIDWithinSortWithoutDuplicatingArticles(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -6731,6 +6932,7 @@ func TestRSSSourceRefreshUsesEmbeddedArticleImagesAsFallback(t *testing.T) {
 							<item>
 								<title>摘要首图</title>
 								<link>https://rss.example/posts/summary</link>
+								<pubDate>应被后置 time 覆盖</pubDate>
 								<time>刚刚</time>
 								<description><![CDATA[<p>摘要</p><img src="../covers/summary.jpg"><img src="/covers/later.jpg">]]></description>
 								<content:encoded><![CDATA[<img src="/covers/content-ignored.jpg">]]></content:encoded>
@@ -6738,6 +6940,7 @@ func TestRSSSourceRefreshUsesEmbeddedArticleImagesAsFallback(t *testing.T) {
 							<item>
 								<title>正文首图</title>
 								<link>https://rss.example/posts/content</link>
+								<time>应被后置 pubDate 覆盖</time>
 								<pubDate>Sun, 29 Jun 2026 09:00:00 +0800</pubDate>
 								<description>无图摘要</description>
 								<content:encoded><![CDATA[<p>正文</p><img src="/covers/content.jpg">]]></content:encoded>
@@ -6815,6 +7018,82 @@ func TestRSSSourceRefreshUsesEmbeddedArticleImagesAsFallback(t *testing.T) {
 	router.ServeHTTP(listW, listReq)
 	if listW.Code != http.StatusOK || !strings.Contains(listW.Body.String(), `"pubDate":"刚刚"`) {
 		t.Fatalf("rss list did not expose the original date: %d %s", listW.Code, listW.Body.String())
+	}
+}
+
+func TestDecodeRSSDocumentPreservesUpstreamImageEventOrder(t *testing.T) {
+	parsed, err := decodeRSSDocument(`<?xml version="1.0" encoding="UTF-8"?>
+		<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+			<channel>
+				<item>
+					<title>后置 enclosure</title>
+					<description><![CDATA[<img src="/description-a.jpg">]]></description>
+					<media:thumbnail url="/thumbnail-a.jpg"></media:thumbnail>
+					<enclosure url="/enclosure-a.jpg" type="image/jpeg"></enclosure>
+				</item>
+				<item>
+					<title>后置 thumbnail</title>
+					<enclosure url="/enclosure-b.jpg" type="image/jpeg"></enclosure>
+					<description><![CDATA[<img src="/description-b.jpg">]]></description>
+					<media:thumbnail url="/thumbnail-b.jpg"></media:thumbnail>
+					<content:encoded><![CDATA[<img src="/content-b.jpg">]]></content:encoded>
+				</item>
+				<item>
+					<title>摘要兜底</title>
+					<description><![CDATA[<img src="/description-c.jpg">]]></description>
+					<content:encoded><![CDATA[<img src="/content-c.jpg">]]></content:encoded>
+				</item>
+				<item>
+					<title>正文兜底</title>
+					<description>没有图片</description>
+					<content:encoded><![CDATA[<img src="/content-d.jpg">]]></content:encoded>
+				</item>
+				<item>
+					<title>media content 扩展</title>
+					<description><![CDATA[<img src="/description-e.jpg">]]></description>
+					<media:content url="/media-e.jpg" type="image/jpeg"></media:content>
+				</item>
+				<item>
+					<title>无类型 enclosure</title>
+					<description><![CDATA[<img src="/description-f.jpg">]]></description>
+					<enclosure url="/untyped-f.jpg"></enclosure>
+				</item>
+			</channel>
+		</rss>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Items) != 6 {
+		t.Fatalf("decoded item count = %d", len(parsed.Items))
+	}
+	want := []string{"/enclosure-a.jpg", "/thumbnail-b.jpg", "/description-c.jpg", "/content-d.jpg", "/description-e.jpg", "/description-f.jpg"}
+	for index, item := range parsed.Items {
+		if item.Image != want[index] || !item.imageSelected {
+			t.Fatalf("item %q image = %q (selected=%v), want %q", item.Title, item.Image, item.imageSelected, want[index])
+		}
+	}
+	if image := resolveRSSItemImage("https://rss.example/feed.xml", parsed.Items[4]); image != "https://rss.example/media-e.jpg" {
+		t.Fatalf("media:content extension image = %q", image)
+	}
+}
+
+func TestDecodeRSSDocumentPreservesUpstreamDateEventOrder(t *testing.T) {
+	parsed, err := decodeRSSDocument(`<rss><channel>
+		<item><title>后置 time</title><pubDate>正式日期</pubDate><time>  刚刚  </time></item>
+		<item><title>后置 pubDate</title><time>昨天</time><pubDate>  Sun, 29 Jun 2026 09:00:00 +0800  </pubDate></item>
+		<item><title>后置空 time</title><pubDate>旧日期</pubDate><time></time></item>
+	</channel></rss>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Items) != 3 {
+		t.Fatalf("decoded item count = %d", len(parsed.Items))
+	}
+	want := []string{"  刚刚  ", "Sun, 29 Jun 2026 09:00:00 +0800", ""}
+	for index, item := range parsed.Items {
+		if item.Date != want[index] {
+			t.Fatalf("item %q date = %q, want %q", item.Title, item.Date, want[index])
+		}
 	}
 }
 
@@ -6921,6 +7200,7 @@ func TestRSSRuleSourceRefreshesListAndLoadsContentLazily(t *testing.T) {
 	payload := `{
 		"title":"规则 RSS",
 		"url":"https://rss.example/feed",
+		"singleUrl":false,
 		"sortUrl":"全部::/all&&新闻::/news",
 		"headerMap":{"X-Feed-Token":"secret"},
 		"ruleArticles":"//article[@class='entry']",
@@ -7186,6 +7466,50 @@ func TestFetchRSSRuleArticlesFollowsNextLinksWithoutLoops(t *testing.T) {
 	}
 }
 
+func TestFetchRSSRuleArticlesUsesSourceURLForRelativeArticleLinks(t *testing.T) {
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.URL.String() != "https://cdn.rss.example/categories/tech/page.html" {
+				t.Fatalf("unexpected RSS category request: %s", request.URL)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(
+					`<article><a href="../post/1">文章</a><img src="../cover.jpg"></article>`,
+				)),
+				Header:  make(http.Header),
+				Request: request,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	source := models.RSSSource{
+		URL:          "https://rss.example/feeds/main.xml",
+		RuleArticles: "article",
+		RuleTitle:    "a",
+		RuleImage:    "img@src",
+		RuleLink:     "a@href",
+	}
+	articles, pages, err := fetchRSSArticlesContext(
+		context.Background(),
+		source,
+		"https://cdn.rss.example/categories/tech/page.html",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages != 1 || len(articles) != 1 {
+		t.Fatalf("pages=%d articles=%+v", pages, articles)
+	}
+	if articles[0].Link != "https://rss.example/post/1" {
+		t.Fatalf("article link = %q", articles[0].Link)
+	}
+	if articles[0].Image != "https://cdn.rss.example/categories/cover.jpg" {
+		t.Fatalf("article image = %q", articles[0].Image)
+	}
+}
+
 func TestCreateRSSSourceRespectsEnabledFlag(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
@@ -7204,6 +7528,9 @@ func TestCreateRSSSourceRespectsEnabledFlag(t *testing.T) {
 	}
 	if source.Enabled {
 		t.Fatalf("expected rss source to remain disabled: %+v", source)
+	}
+	if !source.SingleURL {
+		t.Fatalf("new RSS source should keep upstream editor default singleUrl=true: %+v", source)
 	}
 }
 

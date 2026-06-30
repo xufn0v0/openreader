@@ -18,6 +18,7 @@ type RSSRuleSet struct {
 	Description string
 	Image       string
 	Link        string
+	LinkBaseURL string
 }
 
 type RSSRuleArticle struct {
@@ -55,6 +56,10 @@ func ParseRSSRulePage(body string, baseURL string, rules RSSRuleSet, nextPageRul
 	if selector == "" {
 		return RSSRulePage{}, nil
 	}
+	linkBaseURL := strings.TrimSpace(rules.LinkBaseURL)
+	if linkBaseURL == "" {
+		linkBaseURL = baseURL
+	}
 	articles := make([]RSSRuleArticle, 0)
 	document.Find(selector).Each(func(_ int, item *goquery.Selection) {
 		article := RSSRuleArticle{
@@ -62,7 +67,7 @@ func ParseRSSRulePage(body string, baseURL string, rules RSSRuleSet, nextPageRul
 			PubDate:     rssRuleValue(item, rules.PubDate, false),
 			Description: rssRuleValue(item, rules.Description, true),
 			Image:       resolveRSSURL(baseURL, rssRuleValue(item, rules.Image, false)),
-			Link:        resolveRSSRequestURL(baseURL, rssRuleValue(item, rules.Link, false)),
+			Link:        resolveRSSRequestURL(linkBaseURL, rssRuleValue(item, rules.Link, false)),
 		}
 		article.Title = strings.TrimSpace(article.Title)
 		if article.Title != "" {
@@ -136,6 +141,10 @@ func SanitizeRSSHTML(value string, baseURL string) string {
 }
 
 func ExtractRSSFirstImage(value string, baseURL string) string {
+	return resolveRSSURL(baseURL, ExtractRSSFirstImageSource(value))
+}
+
+func ExtractRSSFirstImageSource(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
@@ -149,7 +158,7 @@ func ExtractRSSFirstImage(value string, baseURL string) string {
 		return ""
 	}
 	src, _ := image.Attr("src")
-	return resolveRSSURL(baseURL, src)
+	return strings.TrimSpace(src)
 }
 
 func rssRuleValue(scope *goquery.Selection, rule string, preferHTML bool) string {
