@@ -291,8 +291,10 @@ import { useBookSourceCandidates } from '../composables/useBookSourceCandidates'
 import { useReaderChapterCache } from '../composables/useReaderChapterCache'
 import { useReaderProgressPersistence } from '../composables/useReaderProgressPersistence'
 import { useReaderSelection } from '../composables/useReaderSelection'
+import { useReaderShelf } from '../composables/useReaderShelf'
+import { useReaderToc } from '../composables/useReaderToc'
 import { useReaderTTS } from '../composables/useReaderTTS'
-import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
+import { useReaderViewportProgress } from '../composables/useReaderViewportProgress'
 import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
 import { normalizeImportedBookmarks } from '../utils/bookmark'
 import { chapterCacheBookKey, clearBookBrowserChapterCache, isValidChapterContentResponse, loadBrowserChapterContent } from '../utils/bookChapterCache'
@@ -300,10 +302,46 @@ import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
 import { epubTocRuleOptions, isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
-import { readerRouteQueryFromBook, savedBookChapterPercent } from '../utils/readerRoute'
+import {
+  didReaderTouchMove,
+  isReaderTouchTap,
+  MOBILE_READER_TAP_MOVE_TOLERANCE,
+  normalizedReaderWheelDelta,
+  readerTapPointAction,
+  readerTapZoneAction,
+  shouldHandleReaderHorizontalSwipe,
+  shouldPreventReaderTouchMove,
+} from '../utils/readerInteraction'
+import {
+  clampReaderPercent,
+  readerBookProgress,
+  readerBookSeekTarget,
+  readerFlipPageLayout,
+  readerScrollBehaviorForDuration,
+  readerScrollStep,
+  readerVerticalPageLayout,
+} from '../utils/readerPagination'
+import {
+  readerChapterBoundaryScrollTop,
+  readerParagraphAtPosition,
+  READER_CHAPTER_END_OFFSET,
+  restoredReaderContinuousScrollTop,
+  restoredReaderFlipPage,
+  restoredReaderSingleChapterScrollTop,
+} from '../utils/readerPosition'
+import { savedBookChapterPercent } from '../utils/readerRoute'
 import { parseReaderContentBlocks } from '../utils/readerContent'
-import { readerProgressBaseUpdatedAt } from '../utils/readerProgressPersistence'
-import { restoredReaderScrollTop } from '../utils/readerScrollAnchor'
+import {
+  adjacentReaderChapterIndex,
+  nearbyReaderChapterIndexes,
+  readerChapterWindowExtension,
+  readerChapterWindowIndexes,
+  readerChapterWindowPrunePlan,
+} from '../utils/readerChapterWindow'
+import {
+  readerProgressBaseUpdatedAt,
+  readerProgressPayload,
+} from '../utils/readerProgressPersistence'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { invalidateReaderDataCache as invalidateReaderCache, readerDataCacheKey as scopedReaderDataCacheKey, writeReaderDataCache as writeReaderCache } from '../utils/readerDataCache'
 import { createMultiBookChapterMemoryCache } from '../utils/multiBookChapterMemoryCache'
@@ -356,11 +394,9 @@ const shellEl = ref(null)
 const currentIndex = ref(Number(route.query.chapter || 0))
 const page = ref(0)
 const pageCount = ref(1)
-const showTocDrawer = ref(false)
 const showSettingsDrawer = ref(false)
 const showBookmarkDrawer = ref(false)
 const showSearchDrawer = ref(false)
-const showShelfDrawer = ref(false)
 const showSourceDrawer = ref(false)
 const showMobileMoreDrawer = ref(false)
 const showCacheDrawer = ref(false)
@@ -400,12 +436,27 @@ const {
   onSuccess: (_data, source) => ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`),
   onError: error => ElMessage.error(readError(error, '换源失败')),
 })
-const shelfLoading = ref(false)
-const shelfPanelRef = ref(null)
-const tocPanelRef = ref(null)
-const tocLocateKey = ref(0)
-const tocReverse = ref(false)
-const tocRefreshing = ref(false)
+const {
+  visible: showShelfDrawer,
+  loading: shelfLoading,
+  panelRef: shelfPanelRef,
+  books: filteredShelfBooks,
+  open: openShelfPanel,
+  locateCurrentBook: locateReaderShelfCurrentBook,
+  select: changeBookFromShelf,
+  refresh: refreshReaderShelf,
+} = useReaderShelf({
+  bookshelf,
+  reader,
+  currentBookId: bookId,
+  currentChapterCount: () => chapters.value.length,
+  router,
+  beforeOpen: () => {
+    mobileChromeVisible.value = false
+  },
+  saveProgress: () => saveCurrentProgress({ force: true }),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
 const {
   keyword: contentSearch,
   results: bookSearchResults,
@@ -433,8 +484,6 @@ const sliderLineHeight = ref(2.12)
 const pageHeight = ref(600)
 const pageWidth = ref(600)
 const windowWidth = ref(currentViewportWidth())
-const MOBILE_TAP_MOVE_TOLERANCE = 14
-
 let chapterLoadingTimer
 let restoringPosition = false
 const chapterContentCache = createMultiBookChapterMemoryCache(3)
@@ -450,10 +499,6 @@ const fontOptions = readerFontOptions
 const SHOW_PREV_CHAPTER_SIZE = 1
 const SHOW_NEXT_CHAPTER_SIZE = 2
 
-const filteredShelfBooks = computed(() => {
-  const books = Array.isArray(bookshelf.books) ? bookshelf.books : []
-  return sortByShelfOrder(books, reader.progressByBook)
-})
 const currentSourceName = computed(() => {
   if (!book.value?.sourceId) return '本地书籍'
   return sourceGroupOptions.value.find(source => Number(source.id) === Number(book.value.sourceId))?.name || '当前来源'
@@ -462,6 +507,32 @@ const isRemoteBook = computed(() => Number(book.value?.sourceId || 0) > 0)
 const isTextLocalBook = computed(() => checkTextLocalBook(book.value))
 const isEPUBLocalBook = computed(() => checkEPUBLocalBook(book.value))
 const canChangeLocalTocRule = computed(() => isTextLocalBook.value || isEPUBLocalBook.value)
+const {
+  visible: showTocDrawer,
+  panelRef: tocPanelRef,
+  locateKey: tocLocateKey,
+  reverse: tocReverse,
+  refreshing: tocRefreshing,
+  open: openTocDrawer,
+  locateCurrentChapter: locateTocCurrentChapter,
+  toggleReverse: toggleTocReverse,
+  scrollTop: scrollTocTop,
+  scrollBottom: scrollTocBottom,
+  jump: jumpFromToc,
+  refresh: refreshTocDrawer,
+  runRefreshing: runTocRefreshing,
+} = useReaderToc({
+  chapters,
+  isRemoteBook,
+  beforeOpen: () => {
+    mobileChromeVisible.value = false
+  },
+  refreshCachedChapters: computeBrowserCachedChapters,
+  syncCurrentChapter: updateCurrentChapterFromScroll,
+  goChapter,
+  refreshRemoteCatalog: refreshReaderBookCatalog,
+  refreshLocalCatalog: loadChapters,
+})
 const {
   cachedChapters: browserCachedChapters,
   caching: isCachingContent,
@@ -499,6 +570,34 @@ const isContinuousScrollRead = computed(() => reader.mode === 'scroll' || reader
 const displayedChapterBlocks = computed(() => {
   if (isContinuousScrollRead.value && chapterBlocks.value.length) return chapterBlocks.value
   return [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
+})
+const {
+  activeChapterElement,
+  captureReaderScrollAnchor,
+  currentChapterPercent,
+  currentChapterPosition,
+  currentOffset,
+  currentVisibleParagraph,
+  restoreReaderScrollAnchor,
+  visibleChapterProgressSnapshot,
+} = useReaderViewportProgress({
+  contentEl,
+  contentBody,
+  chapterBlocks,
+  displayedChapterBlocks,
+  chapters,
+  currentIndex,
+  chapter,
+  content,
+  chapterTextLength,
+  progressVersion,
+  page,
+  pageCount,
+  isContinuousScrollRead,
+  getMode: () => reader.mode,
+  makeChapterBlock,
+  chapterBlockTextLength,
+  nextFrame,
 })
 
 const fontStack = computed(() => {
@@ -551,8 +650,11 @@ const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
 const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
 const shelfDrawerSize = computed(() => isMobileReader.value ? '88%' : 'min(900px, calc(100vw - 80px))')
 const bookProgress = computed(() => {
-  const total = Math.max(chapters.value.length, 1)
-  return Math.min(1, Math.max(0, (currentIndex.value + currentChapterPercent()) / total))
+  return readerBookProgress({
+    chapterIndex: currentIndex.value,
+    chapterPercent: currentChapterPercent(),
+    totalChapters: chapters.value.length,
+  })
 })
 const bookProgressLabel = computed(() => `${Math.round(bookProgress.value * 100)}%`)
 const mobileBookSliderValue = computed(() => {
@@ -566,7 +668,6 @@ const desktopChapterSliderValue = computed(() => {
 })
 const desktopChapterProgressLabel = computed(() => `${Math.round(desktopChapterSliderValue.value / 10)}%`)
 const mobileChromeVisible = ref(false)
-const CHAPTER_END_OFFSET = -1
 const NEARBY_PRELOAD_RADIUS = 2
 
 const isOverlayOpen = computed(() => (
@@ -1002,13 +1103,13 @@ async function computeShowChapterList(options = {}) {
     return
   }
   const anchorIndex = Number.isInteger(options.anchorIndex) ? options.anchorIndex : currentIndex.value
-  const startIndex = reader.mode === 'scroll2'
-    ? Math.max(0, anchorIndex - SHOW_PREV_CHAPTER_SIZE)
-    : anchorIndex
-  const endIndex = isContinuousScrollRead.value
-    ? Math.min(chapters.value.length - 1, anchorIndex + SHOW_NEXT_CHAPTER_SIZE)
-    : anchorIndex
-  const indexes = Array.from({ length: endIndex - startIndex + 1 }, (_, offset) => startIndex + offset)
+  const indexes = readerChapterWindowIndexes({
+    mode: reader.mode,
+    anchorIndex,
+    totalChapters: chapters.value.length,
+    previousSize: SHOW_PREV_CHAPTER_SIZE,
+    nextSize: isContinuousScrollRead.value ? SHOW_NEXT_CHAPTER_SIZE : 0,
+  })
   const rows = await Promise.all(indexes.map(async index => {
     try {
       const data = await loadChapterContent(index)
@@ -1028,9 +1129,12 @@ async function computeShowChapterList(options = {}) {
 
 async function appendNextShowChapter() {
   if (!isContinuousScrollRead.value || !chapterBlocks.value.length) return
-  const lastIndex = chapterBlocks.value[chapterBlocks.value.length - 1].index
-  const nextIndex = lastIndex + 1
-  if (nextIndex >= chapters.value.length) return
+  const nextIndex = adjacentReaderChapterIndex({
+    blocks: chapterBlocks.value,
+    direction: 'next',
+    totalChapters: chapters.value.length,
+  })
+  if (nextIndex === null) return
   if (chapterBlocks.value.some(block => block.index === nextIndex)) return
   const data = await loadChapterContent(nextIndex)
   chapterBlocks.value = [
@@ -1041,9 +1145,12 @@ async function appendNextShowChapter() {
 
 async function prependPreviousShowChapter() {
   if (reader.mode !== 'scroll2' || !chapterBlocks.value.length || !contentEl.value) return
-  const firstIndex = chapterBlocks.value[0].index
-  const previousIndex = firstIndex - 1
-  if (previousIndex < 0) return
+  const previousIndex = adjacentReaderChapterIndex({
+    blocks: chapterBlocks.value,
+    direction: 'previous',
+    totalChapters: chapters.value.length,
+  })
+  if (previousIndex === null) return
   if (chapterBlocks.value.some(block => block.index === previousIndex)) return
   const beforeHeight = contentEl.value.scrollHeight
   const beforeTop = contentEl.value.scrollTop
@@ -1080,12 +1187,11 @@ async function loadChapterContent(index, options = {}) {
 
 function preloadNearbyChapters(index) {
   if (!book.value || !chapters.value.length) return
-  const targets = []
-  for (let distance = 1; distance <= NEARBY_PRELOAD_RADIUS; distance += 1) {
-    targets.push(index + distance, index - distance)
-  }
-  targets
-    .filter(target => target >= 0 && target < chapters.value.length)
+  nearbyReaderChapterIndexes({
+    chapterIndex: index,
+    totalChapters: chapters.value.length,
+    radius: NEARBY_PRELOAD_RADIUS,
+  })
     .forEach(target => {
       if (getChapterContentFromMemory(target)) return
       loadChapterContent(target).catch(() => {})
@@ -1114,11 +1220,11 @@ async function restoreReadingPosition(offset = 0, options = {}) {
   updateFlipLayout()
   const chapterOffset = Number(offset || 0)
   if (reader.mode === 'flip') {
-    page.value = chapterOffset === CHAPTER_END_OFFSET
-      ? Math.max(0, pageCount.value - 1)
-      : (hasRestorePercent
-          ? Math.round(Math.max(0, Math.min(1, restorePercent)) * Math.max(0, pageCount.value - 1))
-          : Math.min(Math.max(chapterOffset, 0), pageCount.value - 1))
+    page.value = restoredReaderFlipPage({
+      offset: chapterOffset,
+      percent: hasRestorePercent ? restorePercent : null,
+      pageCount: pageCount.value,
+    })
     return
   }
   if (!contentEl.value) return
@@ -1131,14 +1237,12 @@ async function restoreReadingPosition(offset = 0, options = {}) {
   }
   const applyScroll = () => {
     if (!contentEl.value) return
-    if (chapterOffset === CHAPTER_END_OFFSET) {
-      contentEl.value.scrollTop = Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
-    } else if (hasRestorePercent) {
-      const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
-      contentEl.value.scrollTop = Math.round(Math.max(0, Math.min(1, restorePercent)) * bottom)
-    } else {
-      contentEl.value.scrollTop = Math.max(chapterOffset, 0)
-    }
+    contentEl.value.scrollTop = restoredReaderSingleChapterScrollTop({
+      offset: chapterOffset,
+      percent: hasRestorePercent ? restorePercent : null,
+      scrollHeight: contentEl.value.scrollHeight,
+      clientHeight: contentEl.value.clientHeight,
+    })
   }
   applyScroll()
   await nextFrame()
@@ -1149,13 +1253,15 @@ function restoreScroll2ChapterPosition(chapterOffset, restorePercent = null) {
   const el = contentEl.value
   const activeChapter = contentBody.value?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`)
   if (!el || !activeChapter) return
-  if (chapterOffset === CHAPTER_END_OFFSET) {
-    el.scrollTop = Math.max(0, activeChapter.offsetTop + activeChapter.offsetHeight - el.clientHeight)
-    return
-  }
-  if (Number.isFinite(restorePercent)) {
-    const room = Math.max(activeChapter.offsetHeight - el.clientHeight, 0)
-    el.scrollTop = Math.max(0, activeChapter.offsetTop + Math.round(Math.max(0, Math.min(1, restorePercent)) * room))
+  const scrollTop = restoredReaderContinuousScrollTop({
+    offset: chapterOffset,
+    percent: restorePercent,
+    chapterTop: activeChapter.offsetTop,
+    chapterHeight: activeChapter.offsetHeight,
+    clientHeight: el.clientHeight,
+  })
+  if (scrollTop !== null) {
+    el.scrollTop = scrollTop
     return
   }
   if (chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) return
@@ -1174,8 +1280,7 @@ function restoreByChapterPosition(position) {
 function paragraphByChapterPosition(chapterEl, position) {
   if (!chapterEl || !Number.isFinite(position) || position <= 0) return null
   const nodes = [...chapterEl.querySelectorAll('h1[data-pos], [data-reader-block][data-pos]')]
-  if (!nodes.length) return null
-  return [...nodes].reverse().find(node => Number(node.dataset.pos) <= position) || nodes[0]
+  return readerParagraphAtPosition(nodes, position)
 }
 
 function nextFrame() {
@@ -1265,7 +1370,11 @@ async function goChapter(index, offset = 0) {
 
 function jumpWithinCurrentChapter(offset = 0) {
   if (reader.mode === 'flip') {
-    page.value = offset === CHAPTER_END_OFFSET ? Math.max(0, pageCount.value - 1) : 0
+    page.value = restoredReaderFlipPage({
+      offset: Number(offset) === READER_CHAPTER_END_OFFSET ? READER_CHAPTER_END_OFFSET : 0,
+      percent: null,
+      pageCount: pageCount.value,
+    })
     progressVersion.value += 1
     saveCurrentProgress()
     return
@@ -1273,9 +1382,12 @@ function jumpWithinCurrentChapter(offset = 0) {
   if (jumpToLoadedChapter(currentIndex.value, offset)) return
   if (!contentEl.value) return
   contentEl.value.scrollTo({
-    top: offset === CHAPTER_END_OFFSET
-      ? Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
-      : 0,
+    top: restoredReaderSingleChapterScrollTop({
+      offset: Number(offset) === READER_CHAPTER_END_OFFSET ? READER_CHAPTER_END_OFFSET : 0,
+      percent: null,
+      scrollHeight: contentEl.value.scrollHeight,
+      clientHeight: contentEl.value.clientHeight,
+    }),
     behavior: readerScrollBehavior(),
   })
   progressVersion.value += 1
@@ -1291,9 +1403,14 @@ function jumpToLoadedChapter(index, offset = 0) {
   currentIndex.value = targetIndex
   chapter.value = chapters.value[targetIndex] || (block?.id ? { id: block.id, title: block.title, index: targetIndex } : chapter.value)
   content.value = block?.content || content.value
-  if (offset === CHAPTER_END_OFFSET) {
+  if (Number(offset) === READER_CHAPTER_END_OFFSET) {
     contentEl.value.scrollTo({
-      top: Math.max(0, chapterEl.offsetTop + chapterEl.offsetHeight - contentEl.value.clientHeight),
+      top: readerChapterBoundaryScrollTop({
+        chapterTop: chapterEl.offsetTop,
+        chapterHeight: chapterEl.offsetHeight,
+        clientHeight: contentEl.value.clientHeight,
+        end: true,
+      }),
       behavior: readerScrollBehavior(),
     })
   } else if (offset > 0) {
@@ -1302,13 +1419,23 @@ function jumpToLoadedChapter(index, offset = 0) {
       jumpToParagraph(target, { save: false, flash: false })
     } else {
       contentEl.value.scrollTo({
-        top: Math.max(0, chapterEl.offsetTop),
+        top: readerChapterBoundaryScrollTop({
+          chapterTop: chapterEl.offsetTop,
+          chapterHeight: chapterEl.offsetHeight,
+          clientHeight: contentEl.value.clientHeight,
+          end: false,
+        }),
         behavior: readerScrollBehavior(),
       })
     }
   } else {
     contentEl.value.scrollTo({
-      top: Math.max(0, chapterEl.offsetTop),
+      top: readerChapterBoundaryScrollTop({
+        chapterTop: chapterEl.offsetTop,
+        chapterHeight: chapterEl.offsetHeight,
+        clientHeight: contentEl.value.clientHeight,
+        end: false,
+      }),
       behavior: readerScrollBehavior(),
     })
   }
@@ -1317,80 +1444,32 @@ function jumpToLoadedChapter(index, offset = 0) {
   return true
 }
 
-async function jumpFromToc(index) {
-  showTocDrawer.value = false
-  await goChapter(index)
-}
-
-function locateTocCurrentChapter() {
-  updateCurrentChapterFromScroll()
-  tocLocateKey.value += 1
-  nextTick(() => tocPanelRef.value?.locateCurrentChapter?.())
-}
-
-function openTocDrawer() {
-  mobileChromeVisible.value = false
-  computeBrowserCachedChapters()
-  showTocDrawer.value = true
-  window.setTimeout(locateTocCurrentChapter, 0)
-  window.setTimeout(locateTocCurrentChapter, 180)
-}
-
-function toggleTocReverse() {
-  tocReverse.value = !tocReverse.value
-  locateTocCurrentChapter()
-}
-
-function scrollTocTop() {
-  tocPanelRef.value?.scrollToTop?.()
-}
-
-function scrollTocBottom() {
-  tocPanelRef.value?.scrollToBottom?.()
-}
-
-async function refreshTocDrawer() {
-  tocRefreshing.value = true
-  try {
-    if (isRemoteBook.value) {
-      await refreshReaderBookCatalog()
-    } else {
-      await loadChapters()
-    }
-    await computeBrowserCachedChapters()
-    locateTocCurrentChapter()
-  } finally {
-    tocRefreshing.value = false
-  }
-}
-
 async function changeReaderLocalTocRule() {
   if (!book.value || !canChangeLocalTocRule.value) return
   const tocRule = await chooseReaderLocalTocRule()
   if (tocRule === null) return
-  tocRefreshing.value = true
   try {
-    const { data } = await refreshLocalBook(book.value.id, { tocRule })
-    await invalidateReaderDataCache({ chapters: true, book: true })
-    await resetReaderChapterCaches({ clearBrowser: true })
-    const updated = data?.book || data
-    if (updated?.id) {
-      book.value = mergeLoadedBook(updated)
-      bookshelf.upsertBook(book.value)
-      if (overlay.bookInfoBook?.id === updated.id) overlay.bookInfoBook = book.value
-      await writeReaderDataCache({ bookData: book.value })
-    }
-    await loadChapters()
-    const nextIndex = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
-    await loadChapter(nextIndex, 0, { refresh: true, saveAfterLoad: true })
-    await computeBrowserCachedChapters()
-    locateTocCurrentChapter()
-    toastMsg.value = `目录规则已更新，共 ${data?.chapterCount || chapters.value.length} 章`
-    setTimeout(() => { toastMsg.value = '' }, 1600)
+    await runTocRefreshing(async () => {
+      const { data } = await refreshLocalBook(book.value.id, { tocRule })
+      await invalidateReaderDataCache({ chapters: true, book: true })
+      await resetReaderChapterCaches({ clearBrowser: true })
+      const updated = data?.book || data
+      if (updated?.id) {
+        book.value = mergeLoadedBook(updated)
+        bookshelf.upsertBook(book.value)
+        if (overlay.bookInfoBook?.id === updated.id) overlay.bookInfoBook = book.value
+        await writeReaderDataCache({ bookData: book.value })
+      }
+      await loadChapters()
+      const nextIndex = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
+      await loadChapter(nextIndex, 0, { refresh: true, saveAfterLoad: true })
+      await computeBrowserCachedChapters()
+      locateTocCurrentChapter()
+      toastMsg.value = `目录规则已更新，共 ${data?.chapterCount || chapters.value.length} 章`
+      setTimeout(() => { toastMsg.value = '' }, 1600)
+    })
   } catch (err) {
     ElMessage.error(readError(err, '更新目录规则失败'))
-  } finally {
-    tocRefreshing.value = false
   }
 }
 
@@ -1449,63 +1528,6 @@ async function goShelf() {
   saveCurrentProgress({ force: true, background: true })
   await router.push({ name: 'home' })
 }
-async function openShelfPanel() {
-  mobileChromeVisible.value = false
-  showShelfDrawer.value = true
-  if (bookshelf.books.length) {
-    window.setTimeout(locateReaderShelfCurrentBook, 0)
-    return
-  }
-  shelfLoading.value = true
-  try {
-    await bookshelf.ensureBooksLoaded({ all: true })
-    locateReaderShelfCurrentBook()
-  } catch (err) {
-    ElMessage.error(readError(err, '加载书架失败'))
-  } finally {
-    shelfLoading.value = false
-  }
-}
-
-function locateReaderShelfCurrentBook(attempt = 0) {
-  nextTick(() => {
-    const panel = shelfPanelRef.value
-    if (panel?.locateCurrentBook) {
-      panel.locateCurrentBook()
-      return
-    }
-    if (attempt < 20 && showShelfDrawer.value && filteredShelfBooks.value.length) {
-      window.setTimeout(() => locateReaderShelfCurrentBook(attempt + 1), 50)
-    }
-  })
-}
-
-async function changeBookFromShelf(item) {
-  showShelfDrawer.value = false
-  if (item.id === bookId.value) return
-  await saveCurrentProgress({ force: true })
-  await router.push({ name: 'reader', params: { id: item.id }, query: readerRouteQueryForBook(item) })
-}
-
-function readerRouteQueryForBook(item) {
-  return readerRouteQueryFromBook(item, shelfItemProgress(item), item?.chapterCount || chapters.value.length)
-}
-
-function shelfItemProgress(item) {
-  return newestBookProgress(item, reader.progressByBook)
-}
-
-async function refreshReaderShelf() {
-  shelfLoading.value = true
-  try {
-    await bookshelf.loadBooks({ force: true, all: true })
-  } catch (err) {
-    ElMessage.error(readError(err, '刷新书架失败'))
-  } finally {
-    shelfLoading.value = false
-  }
-}
-
 function openReaderBookInfo() {
   if (!book.value) return
   const hasRemoteSource = isRemoteBook.value
@@ -1788,7 +1810,7 @@ async function previousPage() {
       return
     }
   }
-  if (currentIndex.value > 0) await goChapter(currentIndex.value - 1, CHAPTER_END_OFFSET)
+  if (currentIndex.value > 0) await goChapter(currentIndex.value - 1, READER_CHAPTER_END_OFFSET)
 }
 
 async function nextPage() {
@@ -1812,19 +1834,16 @@ async function nextPage() {
 
 function scrollStep() {
   const viewportHeight = contentEl.value?.clientHeight || window.innerHeight || readableViewportSize().height
-  return Math.max(1, Math.floor(viewportHeight - scrollOffset()))
-}
-
-function scrollOffset() {
-  const fontSize = Number(reader.fontSize || 18)
-  return (
-    fontSize * Number(reader.lineHeight || 1.8) * 2 +
-    fontSize * Number(reader.paragraphSpace || 0) * 2
-  )
+  return readerScrollStep({
+    viewportHeight,
+    fontSize: reader.fontSize,
+    lineHeight: reader.lineHeight,
+    paragraphSpace: reader.paragraphSpace,
+  })
 }
 
 function readerScrollBehavior() {
-  return reader.animateDuration > 0 ? 'smooth' : 'auto'
+  return readerScrollBehaviorForDuration(reader.animateDuration)
 }
 
 function handleDesktopProgressInput(event) {
@@ -1850,18 +1869,9 @@ async function handleMobileBookProgressChange(event) {
 }
 
 async function seekBookProgress(percent) {
-  const total = Math.max(chapters.value.length, 1)
-  const value = Math.max(0, Math.min(1, Number(percent) || 0))
-  let targetIndex = 0
-  let chapterPercent = 0
-  if (value >= 1) {
-    targetIndex = total - 1
-    chapterPercent = 1
-  } else {
-    const raw = value * total
-    targetIndex = Math.max(0, Math.min(total - 1, Math.floor(raw)))
-    chapterPercent = Math.max(0, Math.min(1, raw - targetIndex))
-  }
+  const target = readerBookSeekTarget(percent, chapters.value.length)
+  const targetIndex = target.chapterIndex
+  const chapterPercent = target.chapterPercent
   if (targetIndex === currentIndex.value) {
     seekCurrentChapterPercent(chapterPercent, { save: true })
     return
@@ -1874,7 +1884,7 @@ async function seekBookProgress(percent) {
 }
 
 function seekCurrentChapterPercent(percent, options = {}) {
-  const value = Math.max(0, Math.min(1, Number(percent) || 0))
+  const value = clampReaderPercent(percent)
   if (reader.mode === 'flip') {
     page.value = Math.round(value * Math.max(0, pageCount.value - 1))
     progressVersion.value += 1
@@ -1903,38 +1913,15 @@ function seekCurrentChapterPercent(percent, options = {}) {
 
 function handleTapZone(zone) {
   if (isOverlayOpen.value) return
-  if (zone === 'center') {
-    toggleMobileReaderChrome()
-    return
-  }
-
-  if (autoReading.value) {
-    toggleMobileReaderChrome()
-    return
-  }
-
-  if (reader.clickMethod === 'next') {
-    mobileChromeVisible.value = false
-    nextPage()
-    return
-  }
-
-  if (reader.clickMethod === 'none') {
-    toggleMobileReaderChrome()
-    return
-  }
-
-  if (reader.mode === 'flip') {
-    if (zone === 'left') previousPage()
-    if (zone === 'right') nextPage()
-    return
-  }
-
-  if (zone === 'upper') {
-    previousPage()
-    return
-  }
-  if (zone === 'lower') nextPage()
+  applyReaderTapAction(readerTapZoneAction({
+    zone,
+    clickMethod: reader.clickMethod,
+    mode: reader.mode,
+    autoReading: autoReading.value,
+  }), {
+    mobile: true,
+    hideChrome: reader.clickMethod === 'next',
+  })
 }
 
 function handleReaderContentClick(event) {
@@ -1973,10 +1960,10 @@ function handleReaderTouchMove(event) {
   const moveX = touch.clientX - readerTouchStart.x
   const moveY = touch.clientY - readerTouchStart.y
   readerTouchMove = { x: moveX, y: moveY }
-  if (Math.hypot(moveX, moveY) > MOBILE_TAP_MOVE_TOLERANCE) {
+  if (didReaderTouchMove(readerTouchMove, MOBILE_READER_TAP_MOVE_TOLERANCE)) {
     readerTouchMoved = true
   }
-  if (reader.mode === 'flip' && Math.abs(moveX) > 12 && Math.abs(moveX) > Math.abs(moveY) + 8) {
+  if (shouldPreventReaderTouchMove({ mode: reader.mode, moveX, moveY })) {
     event.preventDefault()
     event.stopPropagation()
   }
@@ -1993,11 +1980,18 @@ function handleReaderTouchEnd(event) {
     return
   }
   const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
-  const moveDistance = Math.hypot(Number(readerTouchMove.x || 0), Number(readerTouchMove.y || 0))
-  const isTap = moveDistance <= MOBILE_TAP_MOVE_TOLERANCE && elapsed < 650 && Boolean(touch)
+  const isTap = isReaderTouchTap({
+    move: readerTouchMove,
+    elapsed,
+    hasTouch: touch,
+    tolerance: MOBILE_READER_TAP_MOVE_TOLERANCE,
+  })
   if (touch) suppressContentClick(360)
   if (isTap) handledTouchTapAt = Date.now()
-  if (readerTouchMoved && !isOverlayOpen.value && shouldHandleHorizontalSwipe()) {
+  if (readerTouchMoved && !isOverlayOpen.value && shouldHandleReaderHorizontalSwipe({
+    mode: reader.mode,
+    move: readerTouchMove,
+  })) {
     if (readerTouchMove.x > 0) previousPage()
     else nextPage()
   } else if (!readerTouchMoved && !isOverlayOpen.value && pageEl.value) {
@@ -2017,13 +2011,6 @@ function handleReaderTouchEnd(event) {
   readerTouchMove = { x: 0, y: 0 }
 }
 
-function shouldHandleHorizontalSwipe() {
-  if (reader.mode !== 'flip') return false
-  const moveX = Number(readerTouchMove.x || 0)
-  const moveY = Number(readerTouchMove.y || 0)
-  return Math.abs(moveX) >= 42 && Math.abs(moveX) > Math.abs(moveY) * 1.2
-}
-
 function handleTapPoint(point) {
   if (isOverlayOpen.value || !point?.rect) return
   if (scheduleSelectedTextOperation(0)) {
@@ -2034,43 +2021,16 @@ function handleTapPoint(point) {
   const viewportHeight = window.innerHeight || point.rect.height
   const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
   const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
-  const midX = viewportWidth / 2
-  const midY = viewportHeight / 2
-  const centerWidthRatio = 0.2
-  const centerHeightRatio = 0.2
-  const inMenuZone = Math.abs(pointX - midX) <= viewportWidth * centerWidthRatio
-    && Math.abs(pointY - midY) <= viewportHeight * centerHeightRatio
-
-  if (inMenuZone) {
-    toggleReaderChrome()
-    return
-  }
-
-  if (autoReading.value) {
-    toggleMobileReaderChrome()
-    return
-  }
-
-  if (reader.clickMethod === 'next') {
-    mobileChromeVisible.value = false
-    nextPage()
-    return
-  }
-
-  if (reader.clickMethod === 'none') {
-    toggleReaderChrome()
-    return
-  }
-
-  mobileChromeVisible.value = false
-  if (reader.mode === 'flip') {
-    if (pointX > midX) nextPage()
-    else previousPage()
-    return
-  }
-
-  if (pointY > midY) nextPage()
-  else previousPage()
+  applyReaderTapAction(readerTapPointAction({
+    mobile: true,
+    pointX,
+    pointY,
+    viewportWidth,
+    viewportHeight,
+    clickMethod: reader.clickMethod,
+    mode: reader.mode,
+    autoReading: autoReading.value,
+  }), { mobile: true, hideChrome: true })
 }
 
 function handleDesktopTapPoint(point) {
@@ -2083,22 +2043,28 @@ function handleDesktopTapPoint(point) {
   const viewportHeight = window.innerHeight || point.rect.height
   const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
   const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
-  const midX = viewportWidth / 2
-  const midY = viewportHeight / 2
-  const inCenter = Math.abs(pointX - midX) <= viewportWidth * 0.2
-    && Math.abs(pointY - midY) <= viewportHeight * 0.2
-  if (inCenter || reader.clickMethod === 'none') return
-  if (reader.clickMethod === 'next') {
-    nextPage()
+  applyReaderTapAction(readerTapPointAction({
+    mobile: false,
+    pointX,
+    pointY,
+    viewportWidth,
+    viewportHeight,
+    clickMethod: reader.clickMethod,
+    mode: reader.mode,
+    autoReading: autoReading.value,
+  }))
+}
+
+function applyReaderTapAction(action, options = {}) {
+  if (!action) return
+  if (action === 'toggle-chrome') {
+    if (options.mobile) toggleMobileReaderChrome()
+    else toggleReaderChrome()
     return
   }
-  if (reader.mode === 'flip') {
-    if (pointX > midX) nextPage()
-    else previousPage()
-    return
-  }
-  if (pointY > midY) nextPage()
-  else previousPage()
+  if (options.hideChrome) mobileChromeVisible.value = false
+  if (action === 'next') nextPage()
+  if (action === 'previous') previousPage()
 }
 
 function handleReaderWheel(event) {
@@ -2108,7 +2074,14 @@ function handleReaderWheel(event) {
   if (!shellEl.value?.contains(event.target)) return
   const target = event.target
   if (target?.closest?.('a, input, textarea, select, .el-drawer, .el-dialog')) return
-  const delta = normalizedWheelDelta(event)
+  const delta = normalizedReaderWheelDelta({
+    deltaX: event.deltaX,
+    deltaY: event.deltaY,
+    deltaMode: event.deltaMode,
+    fontSize: reader.fontSize,
+    lineHeight: reader.lineHeight,
+    pageHeight: contentEl.value?.clientHeight || window.innerHeight || 800,
+  })
   if (Math.abs(delta) < 4) return
   if (isScrollRead.value) {
     if (!contentEl.value) return
@@ -2125,18 +2098,6 @@ function handleReaderWheel(event) {
   } else {
     previousPage()
   }
-}
-
-function normalizedWheelDelta(event) {
-  const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
-  if (event.deltaMode === 1) {
-    const lineHeight = Number(reader.fontSize || 18) * Number(reader.lineHeight || 1.8)
-    return rawDelta * Math.max(12, lineHeight)
-  }
-  if (event.deltaMode === 2) {
-    return rawDelta * (contentEl.value?.clientHeight || window.innerHeight || 800)
-  }
-  return rawDelta
 }
 
 function scrollReaderByWheel(delta) {
@@ -2177,17 +2138,28 @@ function updateFlipLayout() {
   if (!contentEl.value || !contentBody.value) return
   const viewport = readableViewportSize()
   if (reader.mode === 'flip') {
-    pageWidth.value = viewport.width
-    pageHeight.value = viewport.height
-    pageCount.value = Math.max(1, Math.ceil(contentBody.value.scrollWidth / pageWidth.value))
-    page.value = Math.min(page.value, pageCount.value - 1)
+    const layout = readerFlipPageLayout({
+      viewportWidth: viewport.width,
+      viewportHeight: viewport.height,
+      scrollWidth: contentBody.value.scrollWidth,
+      currentPage: page.value,
+    })
+    pageWidth.value = layout.pageWidth
+    pageHeight.value = layout.pageHeight
+    pageCount.value = layout.pageCount
+    page.value = layout.page
     return
   }
   if (reader.mode === 'page') {
-    pageHeight.value = scrollStep()
-    const scrollBottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 1)
-    pageCount.value = Math.max(1, Math.ceil(contentEl.value.scrollHeight / pageHeight.value))
-    page.value = Math.max(0, Math.min(pageCount.value - 1, Math.round((contentEl.value.scrollTop / scrollBottom) * Math.max(pageCount.value - 1, 0))))
+    const layout = readerVerticalPageLayout({
+      scrollHeight: contentEl.value.scrollHeight,
+      clientHeight: contentEl.value.clientHeight,
+      scrollTop: contentEl.value.scrollTop,
+      pageHeight: scrollStep(),
+    })
+    pageHeight.value = layout.pageHeight
+    pageCount.value = layout.pageCount
+    page.value = layout.page
     return
   }
   // 滚动模式
@@ -2287,150 +2259,6 @@ function onScroll() {
   scheduleProgressSave(500)
 }
 
-function currentChapterPercent() {
-  progressVersion.value
-  if (reader.mode === 'flip') {
-    return pageCount.value <= 1 ? 0 : page.value / (pageCount.value - 1)
-  }
-  const snapshot = visibleChapterProgressSnapshot()
-  if (snapshot) return snapshot.chapterPercent
-  const el = contentEl.value
-  if (!el) return 0
-  const textLength = Math.max(chapterTextLength.value, 1)
-  const position = currentChapterPosition()
-  if (position > 0 || isContinuousScrollRead.value) return Math.max(0, Math.min(1, position / textLength))
-  const bottom = Math.max(el.scrollHeight - el.clientHeight, 1)
-  const scrollTop = Number(el.scrollTop || 0)
-  if (scrollTop > 0) return scrollTop / bottom
-  return position / textLength
-}
-
-function currentOffset() {
-  if (reader.mode === 'flip') {
-    return Math.max(0, Math.floor(page.value || 0))
-  }
-  const snapshot = visibleChapterProgressSnapshot()
-  if (snapshot) return snapshot.offset
-  return currentChapterPosition()
-}
-
-function currentChapterPosition() {
-  const snapshot = visibleChapterProgressSnapshot()
-  if (snapshot) return snapshot.offset
-  const el = contentEl.value
-  if (!el) return 0
-  const activeChapter = activeChapterElement()
-  const heading = activeChapter?.querySelector('h1') || contentBody.value?.querySelector('h1')
-  const viewport = el.getBoundingClientRect()
-  const headingRect = heading?.getBoundingClientRect()
-  if (headingRect && headingRect.bottom >= viewport.top && headingRect.top <= viewport.bottom) return 0
-  const paragraph = currentVisibleParagraph()
-  const paragraphPos = Number(paragraph?.dataset?.pos)
-  if (Number.isFinite(paragraphPos)) {
-    const rect = paragraph.getBoundingClientRect()
-    const anchorY = viewport.top + Math.min(viewport.height * 0.32, 180)
-    const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (anchorY - rect.top) / rect.height)) : 0
-    const extra = Math.round((paragraph.textContent?.length || 0) * ratio)
-    return Math.max(0, Math.round(paragraphPos + extra))
-  }
-  const bottom = Math.max(el.scrollHeight - el.clientHeight, 1)
-  const textLength = Math.max(chapterTextLength.value, 1)
-  const scrollPercent = Math.max(0, Math.min(1, Number(el.scrollTop || 0) / bottom))
-  if (scrollPercent > 0) return Math.round(scrollPercent * textLength)
-  return 0
-}
-
-function visibleChapterProgressSnapshot() {
-  if (!contentEl.value || !contentBody.value) return null
-  const paragraph = currentVisibleParagraph()
-  if (!paragraph) return null
-  const chapterEl = paragraph.closest?.('.chapter-content')
-  const chapterIndex = Number(chapterEl?.dataset?.index)
-  if (!Number.isInteger(chapterIndex)) return null
-  const block = displayedChapterBlocks.value.find(item => item.index === chapterIndex)
-    || chapterBlocks.value.find(item => item.index === chapterIndex)
-    || (chapterIndex === currentIndex.value ? makeChapterBlock(currentIndex.value, chapter.value, content.value) : null)
-  const paragraphPos = Number(paragraph.dataset?.pos)
-  const offset = Number.isFinite(paragraphPos)
-    ? visibleParagraphOffset(paragraph, paragraphPos)
-    : 0
-  const textLength = Math.max(chapterBlockTextLength(block), 1)
-  return {
-    chapterIndex,
-    chapter: chapters.value[chapterIndex] || (block?.id ? { id: block.id, title: block.title, index: chapterIndex } : null),
-    offset,
-    chapterPercent: Math.max(0, Math.min(1, offset / textLength)),
-  }
-}
-
-function visibleParagraphOffset(paragraph, paragraphPos) {
-  const viewport = contentEl.value?.getBoundingClientRect()
-  if (!viewport) return Math.max(0, Math.round(paragraphPos))
-  const rect = paragraph.getBoundingClientRect()
-  const anchorY = viewport.top + Math.min(viewport.height * 0.32, 180)
-  const ratio = rect.height > 0 ? Math.max(0, Math.min(1, (anchorY - rect.top) / rect.height)) : 0
-  const extra = Math.round((paragraph.textContent?.length || 0) * ratio)
-  return Math.max(0, Math.round(paragraphPos + extra))
-}
-
-function currentVisibleParagraph() {
-  const viewport = contentEl.value?.getBoundingClientRect()
-  const paragraphs = [...(contentBody.value?.querySelectorAll('[data-reader-block]') || [])]
-  if (!viewport || !paragraphs.length) return null
-  const visibleTop = viewport.top + 8
-  const visibleBottom = viewport.bottom - 8
-  const visibleLeft = viewport.left + 8
-  const visibleRight = viewport.right - 8
-  const anchorY = viewport.top + Math.min(viewport.height * 0.32, 180)
-  const visible = paragraphs
-    .map(node => ({ node, rect: node.getBoundingClientRect() }))
-    .filter(({ rect }) => rect.bottom >= visibleTop && rect.top <= visibleBottom && rect.right >= visibleLeft && rect.left <= visibleRight)
-  if (!visible.length) return null
-  const anchored = visible.find(({ rect }) => rect.top <= anchorY && rect.bottom >= anchorY)
-  if (anchored) return anchored.node
-  return visible.sort((a, b) => Math.abs(a.rect.top - anchorY) - Math.abs(b.rect.top - anchorY))[0]?.node || null
-}
-
-function captureReaderScrollAnchor() {
-  if (!isContinuousScrollRead.value || !contentEl.value) return null
-  const paragraph = currentVisibleParagraph()
-  const chapterEl = paragraph?.closest?.('.chapter-content')
-  const chapterIndex = Number(chapterEl?.dataset?.index)
-  const paragraphPos = Number(paragraph?.dataset?.pos)
-  if (!paragraph || !Number.isInteger(chapterIndex) || !Number.isFinite(paragraphPos)) return null
-  const viewport = contentEl.value.getBoundingClientRect()
-  return {
-    chapterIndex,
-    paragraphPos,
-    viewportOffset: paragraph.getBoundingClientRect().top - viewport.top,
-  }
-}
-
-async function restoreReaderScrollAnchor(anchor) {
-  if (!anchor || !contentEl.value || !contentBody.value) return
-  await nextTick()
-  await nextFrame()
-  const chapterEl = contentBody.value.querySelector(`.chapter-content[data-index="${anchor.chapterIndex}"]`)
-  const paragraph = chapterEl?.querySelector(`[data-reader-block][data-pos="${anchor.paragraphPos}"]`)
-  if (!paragraph || !contentEl.value) return
-  const viewport = contentEl.value.getBoundingClientRect()
-  const currentOffset = paragraph.getBoundingClientRect().top - viewport.top
-  const maxScroll = Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
-  contentEl.value.scrollTop = restoredReaderScrollTop({
-    scrollTop: contentEl.value.scrollTop,
-    previousOffset: anchor.viewportOffset,
-    currentOffset,
-    maxScroll,
-  })
-}
-
-function activeChapterElement() {
-  const paragraph = currentVisibleParagraph()
-  const chapterEl = paragraph?.closest?.('.chapter-content')
-  if (chapterEl) return chapterEl
-  return contentBody.value?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`) || null
-}
-
 function updateCurrentChapterFromScroll() {
   if (!isContinuousScrollRead.value) return
   const snapshot = visibleChapterProgressSnapshot()
@@ -2446,13 +2274,17 @@ function updateCurrentChapterFromScroll() {
 function maybeExtendShowChapters() {
   if (!isContinuousScrollRead.value || extendingShowChapters || !contentEl.value) return
   const el = contentEl.value
-  const nearBottom = el.scrollTop + el.clientHeight > el.scrollHeight - el.clientHeight * 2
-  const nearTop = reader.mode === 'scroll2' && el.scrollTop < el.clientHeight
-  if (!nearTop && !nearBottom) return
+  const extension = readerChapterWindowExtension({
+    mode: reader.mode,
+    scrollTop: el.scrollTop,
+    clientHeight: el.clientHeight,
+    scrollHeight: el.scrollHeight,
+  })
+  if (!extension.previous && !extension.next) return
   extendingShowChapters = true
   Promise.all([
-    nearTop ? prependPreviousShowChapter() : Promise.resolve(),
-    nearBottom ? appendNextShowChapter() : Promise.resolve(),
+    extension.previous ? prependPreviousShowChapter() : Promise.resolve(),
+    extension.next ? appendNextShowChapter() : Promise.resolve(),
   ])
     .catch(() => {})
     .finally(() => {
@@ -2462,18 +2294,22 @@ function maybeExtendShowChapters() {
 
 function pruneScroll2ChapterWindow() {
   if (reader.mode !== 'scroll2' || !contentEl.value || !chapterBlocks.value.length) return
-  const minIndex = Math.max(0, currentIndex.value - SHOW_PREV_CHAPTER_SIZE)
-  const maxIndex = Math.min(chapters.value.length - 1, currentIndex.value + SHOW_NEXT_CHAPTER_SIZE)
   const currentBlocks = chapterBlocks.value
-  if (currentBlocks.every(block => block.index >= minIndex && block.index <= maxIndex)) return
-  const removedBeforeHeight = currentBlocks
-    .filter(block => block.index < minIndex)
-    .reduce((sum, block) => {
-      const element = contentBody.value?.querySelector(`.chapter-content[data-index="${block.index}"]`)
+  const plan = readerChapterWindowPrunePlan({
+    blocks: currentBlocks,
+    currentIndex: currentIndex.value,
+    totalChapters: chapters.value.length,
+    previousSize: SHOW_PREV_CHAPTER_SIZE,
+    nextSize: SHOW_NEXT_CHAPTER_SIZE,
+  })
+  if (!plan.changed) return
+  const removedBeforeHeight = plan.removedBeforeIndexes
+    .reduce((sum, index) => {
+      const element = contentBody.value?.querySelector(`.chapter-content[data-index="${index}"]`)
       return sum + (element?.getBoundingClientRect?.().height || 0)
     }, 0)
   const beforeTop = contentEl.value.scrollTop
-  chapterBlocks.value = currentBlocks.filter(block => block.index >= minIndex && block.index <= maxIndex)
+  chapterBlocks.value = plan.blocks
   if (removedBeforeHeight > 0) {
     nextTick(() => {
       if (!contentEl.value) return
@@ -2550,19 +2386,15 @@ async function createBookmarkFromSelectedText(text) {
 
 function currentProgressPayload() {
   const snapshot = visibleChapterProgressSnapshot()
-  const progressChapter = snapshot?.chapter || chapter.value
-  const progressChapterIndex = Number.isInteger(snapshot?.chapterIndex) ? snapshot.chapterIndex : currentIndex.value
-  const progressChapterPercent = snapshot ? snapshot.chapterPercent : currentChapterPercent()
-  const progressTotal = Math.max(chapters.value.length, 1)
-  return {
+  return readerProgressPayload({
     bookId: bookId.value,
-    chapterId: progressChapter?.id,
-    chapterIndex: progressChapterIndex,
-    offset: snapshot ? snapshot.offset : currentOffset(),
-    percent: Math.min(1, Math.max(0, (progressChapterIndex + progressChapterPercent) / progressTotal)),
-    chapterPercent: progressChapterPercent,
-    chapterTitle: progressChapter?.title || '',
-  }
+    visibleSnapshot: snapshot,
+    currentChapter: chapter.value,
+    currentChapterIndex: currentIndex.value,
+    currentOffset: snapshot ? 0 : currentOffset(),
+    currentChapterPercent: snapshot ? 0 : currentChapterPercent(),
+    totalChapters: chapters.value.length,
+  })
 }
 
 function applyLocalProgressSnapshot(payload = currentProgressPayload(), options = {}) {
@@ -2886,7 +2718,7 @@ useKeyboard({
   onArrowLeft: () => {
     mobileChromeVisible.value = false
     if (reader.mode === 'flip') previousPage()
-    else if (currentIndex.value > 0) goChapter(currentIndex.value - 1, CHAPTER_END_OFFSET)
+    else if (currentIndex.value > 0) goChapter(currentIndex.value - 1, READER_CHAPTER_END_OFFSET)
   },
   onArrowRight: () => {
     mobileChromeVisible.value = false
