@@ -255,7 +255,7 @@
 </template>
 
 <script setup>
-import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api/client'
@@ -284,19 +284,27 @@ import { useReaderStore, themePresets } from '../stores/reader'
 import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
 import { useAutoReading } from '../composables/useAutoReading'
+import { useReaderAppearanceAssets } from '../composables/useReaderAppearanceAssets'
 import { useBookBookmarks } from '../composables/useBookBookmarks'
 import { useBookContentSearch } from '../composables/useBookContentSearch'
 import { useBookSourceChange } from '../composables/useBookSourceChange'
 import { useBookSourceCandidates } from '../composables/useBookSourceCandidates'
 import { useReaderChapterCache } from '../composables/useReaderChapterCache'
 import { useReaderProgressPersistence } from '../composables/useReaderProgressPersistence'
+import { useReaderProgressControls } from '../composables/useReaderProgressControls'
+import { useReaderBookmarkActions } from '../composables/useReaderBookmarkActions'
+import { useReaderNavigation } from '../composables/useReaderNavigation'
+import { useReaderMode } from '../composables/useReaderMode'
+import { useReaderRouteSync } from '../composables/useReaderRouteSync'
 import { useReaderSelection } from '../composables/useReaderSelection'
+import { useReaderSearchNavigation } from '../composables/useReaderSearchNavigation'
 import { useReaderShelf } from '../composables/useReaderShelf'
 import { useReaderToc } from '../composables/useReaderToc'
+import { useReaderToast } from '../composables/useReaderToast'
 import { useReaderTTS } from '../composables/useReaderTTS'
+import { useReaderTypographySync } from '../composables/useReaderTypographySync'
 import { useReaderViewportProgress } from '../composables/useReaderViewportProgress'
 import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
-import { normalizeImportedBookmarks } from '../utils/bookmark'
 import { chapterCacheBookKey, clearBookBrowserChapterCache, isValidChapterContentResponse, loadBrowserChapterContent } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
@@ -313,23 +321,18 @@ import {
   shouldPreventReaderTouchMove,
 } from '../utils/readerInteraction'
 import {
-  clampReaderPercent,
-  readerBookProgress,
-  readerBookSeekTarget,
   readerFlipPageLayout,
   readerScrollBehaviorForDuration,
   readerScrollStep,
   readerVerticalPageLayout,
 } from '../utils/readerPagination'
 import {
-  readerChapterBoundaryScrollTop,
-  readerParagraphAtPosition,
   READER_CHAPTER_END_OFFSET,
   restoredReaderContinuousScrollTop,
   restoredReaderFlipPage,
   restoredReaderSingleChapterScrollTop,
 } from '../utils/readerPosition'
-import { savedBookChapterPercent } from '../utils/readerRoute'
+import { parseReaderRoutePercent, savedBookChapterPercent } from '../utils/readerRoute'
 import { parseReaderContentBlocks } from '../utils/readerContent'
 import {
   adjacentReaderChapterIndex,
@@ -354,6 +357,21 @@ const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const categoryName = createBookCategoryNameResolver(() => bookshelf.categories)
 const bookId = computed(() => Number(route.params.id))
+const {
+  clearBgImage,
+  clearFontFile,
+  pickBgImage,
+  pickFontFile,
+  setTheme,
+  toggleNight,
+} = useReaderAppearanceAssets({
+  reader,
+  upload: uploadAsset,
+  removeAsset: deleteAsset,
+  syncFonts: syncReaderFontFaces,
+  onSuccess: message => ElMessage.success(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
 
 const book = ref(null)
 const chapters = ref([])
@@ -371,6 +389,50 @@ const {
 } = useBookBookmarks({
   bookId,
   onLoadError: error => ElMessage.error(readError(error, '加载书签失败')),
+})
+const {
+  draft: bookmarkDraft,
+  editorVisible: showBookmarkEditor,
+  noteText,
+  noteVisible: showNoteDialog,
+  createCurrent: createBookmark,
+  createFromSelectedText: createBookmarkFromSelectedText,
+  importRows: importBookmarks,
+  jump: jumpToBookmark,
+  openEditor: openBookmarkEditor,
+  openNote: openNoteDialog,
+  removeMany: removeBookmarks,
+  removeOne: removeBookmark,
+  saveEdit: saveBookmarkEdit,
+  saveNote,
+} = useReaderBookmarkActions({
+  chapter,
+  currentIndex,
+  getOffset: () => currentOffset(),
+  getPercent: () => currentChapterPercent(),
+  getExcerpt: currentVisibleExcerpt,
+  create: addBookmark,
+  update: updateBookmarkData,
+  remove: removeBookmarkData,
+  removeMany: removeBookmarkRows,
+  importPayloads: importBookmarkPayloads,
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  closeDrawer: () => {
+    showBookmarkDrawer.value = false
+  },
+  reloadCurrent: ({ offset, percent }) => loadChapter(
+    currentIndex.value,
+    offset,
+    { restorePercent: percent, saveAfterLoad: true },
+  ),
+  navigate: query => router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query,
+  }),
+  onToast: message => showReaderToast(message),
+  onSuccess: message => ElMessage.success(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
 const content = ref('')
 const chapterBlocks = ref([])
@@ -400,10 +462,7 @@ const showSearchDrawer = ref(false)
 const showSourceDrawer = ref(false)
 const showMobileMoreDrawer = ref(false)
 const showCacheDrawer = ref(false)
-const showNoteDialog = ref(false)
-const showBookmarkEditor = ref(false)
 const showClickZoneOverlay = ref(false)
-const mobileBookSliderDraft = ref(null)
 const sourceGroupOptions = ref([])
 const {
   candidates: sourceCandidates,
@@ -474,10 +533,10 @@ const {
   chapters,
   onError: error => ElMessage.error(readError(error, '搜索正文失败')),
 })
-const noteText = ref('')
-const editingBookmark = ref(null)
-const bookmarkDraft = reactive({ title: '', excerpt: '', note: '' })
-const toastMsg = ref('')
+const {
+  message: toastMsg,
+  show: showReaderToast,
+} = useReaderToast()
 const progressVersion = ref(0)
 const customBg = ref('')
 const sliderLineHeight = ref(2.12)
@@ -529,7 +588,7 @@ const {
   },
   refreshCachedChapters: computeBrowserCachedChapters,
   syncCurrentChapter: updateCurrentChapterFromScroll,
-  goChapter,
+  goChapter: (...args) => goChapter(...args),
   refreshRemoteCatalog: refreshReaderBookCatalog,
   refreshLocalCatalog: loadChapters,
 })
@@ -551,7 +610,7 @@ const {
   isRemoteBook,
   afterCache: loadChapters,
   onClearMemory: () => chapterContentCache.clearBook(currentChapterCacheBookKey()),
-  notify: showChapterCacheMessage,
+  notify: message => showReaderToast(message, 1600),
   onNoTargets: () => ElMessage.error('不需要缓存'),
   onError: error => ElMessage.error(readError(error, '缓存章节失败')),
 })
@@ -598,6 +657,108 @@ const {
   makeChapterBlock,
   chapterBlockTextLength,
   nextFrame,
+})
+const {
+  jumpToFirstSearchMatch,
+  jumpToLine,
+  jumpToMatch: jumpToSearchMatch,
+  jumpToParagraph,
+  jumpToResult: jumpToBookSearchResult,
+  jumpToRouteLine,
+} = useReaderSearchNavigation({
+  keyword: contentSearch,
+  contentEl,
+  contentBody,
+  currentIndex,
+  chapterBlocks,
+  chapters,
+  chapter,
+  content,
+  page,
+  pageCount,
+  pageWidth,
+  getMode: () => reader.mode,
+  getRouteQuery: () => route.query,
+  closeDrawer: () => {
+    showSearchDrawer.value = false
+  },
+  navigate: query => router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query,
+  }),
+  loadChapter: (index, loadOptions) => loadChapter(index, 0, loadOptions),
+  flashParagraph,
+  saveProgress: () => saveCurrentProgress(),
+})
+const {
+  goChapter,
+  jumpToLoadedChapter,
+  jumpWithinCurrentChapter,
+  nextPage,
+  paragraphByChapterPosition,
+  previousPage,
+  scrollToBottom,
+  scrollToTop,
+} = useReaderNavigation({
+  contentEl,
+  contentBody,
+  chapterBlocks,
+  chapters,
+  currentIndex,
+  chapter,
+  content,
+  page,
+  pageCount,
+  progressVersion,
+  isContinuousScrollRead,
+  isVerticalRead,
+  getMode: () => reader.mode,
+  getAnimateDuration: () => reader.animateDuration,
+  scrollStep,
+  scrollBehavior: readerScrollBehavior,
+  jumpToParagraph,
+  closeToc: () => {
+    showTocDrawer.value = false
+  },
+  navigate: query => router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query,
+  }),
+  saveProgress: () => saveCurrentProgress(),
+  scheduleProgressSave: delay => scheduleProgressSave(delay),
+})
+const {
+  bookProgress,
+  bookProgressLabel,
+  desktopChapterProgressLabel,
+  desktopChapterSliderValue,
+  mobileBookProgressLabel,
+  mobileBookSliderValue,
+  handleDesktopProgressChange,
+  handleDesktopProgressInput,
+  handleMobileBookProgressChange,
+  handleMobileBookProgressInput,
+} = useReaderProgressControls({
+  contentEl,
+  contentBody,
+  chapters,
+  currentIndex,
+  page,
+  pageCount,
+  progressVersion,
+  isContinuousScrollRead,
+  getMode: () => reader.mode,
+  getCurrentChapterPercent: currentChapterPercent,
+  navigate: query => router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query,
+  }),
+  applyLocalProgress: () => applyLocalProgressSnapshot(),
+  saveProgress: () => saveCurrentProgress(),
+  scheduleProgressSave: delay => scheduleProgressSave(delay),
 })
 
 const fontStack = computed(() => {
@@ -649,24 +810,25 @@ const isMobileReader = computed(() => shouldUseMiniInterface(reader.pageMode, wi
 const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
 const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
 const shelfDrawerSize = computed(() => isMobileReader.value ? '88%' : 'min(900px, calc(100vw - 80px))')
-const bookProgress = computed(() => {
-  return readerBookProgress({
-    chapterIndex: currentIndex.value,
-    chapterPercent: currentChapterPercent(),
-    totalChapters: chapters.value.length,
-  })
+const {
+  change: onModeChange,
+} = useReaderMode({
+  reader,
+  isMobileReader,
+  isContinuousScrollRead,
+  page,
+  chapterLoading,
+  chapterBlocks,
+  currentIndex,
+  chapter,
+  content,
+  getCurrentOffset: currentOffset,
+  computeChapterWindow: computeShowChapterList,
+  makeChapterBlock,
+  updateLayout: updateFlipLayout,
+  restorePosition: restoreReadingPosition,
+  saveProgress: () => saveCurrentProgress(),
 })
-const bookProgressLabel = computed(() => `${Math.round(bookProgress.value * 100)}%`)
-const mobileBookSliderValue = computed(() => {
-  if (mobileBookSliderDraft.value !== null) return mobileBookSliderDraft.value
-  return Math.round(bookProgress.value * 1000)
-})
-const mobileBookProgressLabel = computed(() => `${Math.round(Number(mobileBookSliderValue.value || 0) / 10)}%`)
-const desktopChapterSliderValue = computed(() => {
-  progressVersion.value
-  return Math.round(Math.max(0, Math.min(1, currentChapterPercent())) * 1000)
-})
-const desktopChapterProgressLabel = computed(() => `${Math.round(desktopChapterSliderValue.value / 10)}%`)
 const mobileChromeVisible = ref(false)
 const NEARBY_PRELOAD_RADIUS = 2
 
@@ -703,7 +865,7 @@ const {
   scrollBehavior: readerScrollBehavior,
   advancePage: advanceAutoReadingPage,
   onProgress: recordAutoReadingProgress,
-  onNotify: showAutoReadingMessage,
+  onNotify: message => showReaderToast(message, 1200),
 })
 
 const {
@@ -743,12 +905,39 @@ const {
   currentIndex,
   chapters,
   goChapter,
-  notify: showTTSMessage,
+  notify: showReaderToast,
 })
 
-function onModeChange(mode) {
-  reader.setMode(mode)
-}
+useReaderRouteSync({
+  bookId,
+  currentIndex,
+  positionQuery: () => [route.query.chapter, route.query.offset, route.query.percent],
+  searchQuery: () => [route.query.line, route.query.match, route.query.q],
+  loadBook: () => loadReaderBook(),
+  loadChapter: (index, offset, options) => loadChapter(index, offset, options),
+  jumpToRouteLine,
+  onBookLoadStart: () => {
+    chapterLoadError.value = ''
+  },
+  onBookLoadError: error => {
+    chapterLoadError.value = readError(error, '章节加载失败')
+    chapterLoading.value = false
+  },
+})
+
+useReaderTypographySync({
+  reader,
+  progressVersion,
+  getCurrentOffset: currentOffset,
+  getCurrentPercent: currentChapterPercent,
+  setRestoring: value => {
+    restoringPosition = value
+  },
+  updateLayout: updateFlipLayout,
+  restorePosition: restoreReadingPosition,
+  scheduleProgressSave,
+  syncFonts: syncReaderFontFaces,
+})
 
 onMounted(async () => {
   reader.normalizeSettings()
@@ -789,74 +978,6 @@ onBeforeUnmount(() => {
 onBeforeRouteLeave(() => {
   saveCurrentProgress({ force: true, background: true })
 })
-
-watch(bookId, async () => {
-  chapterLoadError.value = ''
-  try {
-    await loadReaderBook()
-  } catch (err) {
-    chapterLoadError.value = readError(err, '章节加载失败')
-    chapterLoading.value = false
-  }
-})
-
-watch(() => [route.query.chapter, route.query.offset, route.query.percent], async ([q, offset, percent]) => {
-  const idx = Number(q || 0)
-  const nextOffset = Number(offset || 0)
-  const restorePercent = parseRoutePercent(percent)
-  if (idx !== currentIndex.value || offset !== undefined || restorePercent !== null) {
-    await loadChapter(idx, nextOffset, { restorePercent, saveAfterLoad: idx !== currentIndex.value || offset !== undefined || restorePercent !== null })
-  }
-  await jumpToRouteLine()
-})
-
-watch(() => [route.query.line, route.query.match, route.query.q], async () => {
-  await jumpToRouteLine()
-})
-
-watch(() => reader.mode, async () => {
-  const offset = currentOffset()
-  page.value = 0
-  if (isContinuousScrollRead.value) {
-    chapterLoading.value = true
-    try {
-      await computeShowChapterList()
-    } finally {
-      chapterLoading.value = false
-    }
-  } else {
-    chapterBlocks.value = [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
-  }
-  await nextTick()
-  updateFlipLayout()
-  await restoreReadingPosition(offset, { saveAfterLoad: false })
-  saveCurrentProgress()
-})
-
-watch(isMobileReader, (mobile) => {
-  if (!mobile && reader.mode === 'flip') {
-    reader.setMode('page')
-  }
-}, { immediate: true })
-
-watch(() => [reader.fontFamily, reader.chineseFont, reader.fontSize, reader.fontWeight, reader.lineHeight, reader.paragraphSpace, reader.columnWidth], async () => {
-  const offset = currentOffset()
-  const restorePercent = currentChapterPercent()
-  restoringPosition = true
-  try {
-    await nextTick()
-    updateFlipLayout()
-    await restoreReadingPosition(offset, { restorePercent, saveAfterLoad: false })
-  } finally {
-    restoringPosition = false
-  }
-  progressVersion.value += 1
-  scheduleProgressSave(300)
-})
-
-watch(() => reader.customFontsMap, (customFontsMap) => {
-  syncReaderFontFaces(customFontsMap)
-}, { deep: true })
 
 function makeParagraphs(value, heading = '') {
   return parseReaderContentBlocks(value, heading, formatChineseText)
@@ -936,7 +1057,7 @@ async function loadReaderBook() {
   const initialOffset = hasRouteOffset
     ? Number(route.query.offset || 0)
     : (shouldUseSavedPosition ? Number(saved?.offset || 0) : 0)
-  const routePercent = resumeFromProgress ? null : parseRoutePercent(route.query.percent)
+  const routePercent = resumeFromProgress ? null : parseReaderRoutePercent(route.query.percent)
   const savedPercent = shouldUseSavedPosition ? savedBookChapterPercent(saved, chapters.value.length) : null
   await loadChapter(currentIndex.value, initialOffset, {
     restorePercent: routePercent ?? (hasRouteOffset ? null : savedPercent),
@@ -1277,12 +1398,6 @@ function restoreByChapterPosition(position) {
   return true
 }
 
-function paragraphByChapterPosition(chapterEl, position) {
-  if (!chapterEl || !Number.isFinite(position) || position <= 0) return null
-  const nodes = [...chapterEl.querySelectorAll('h1[data-pos], [data-reader-block][data-pos]')]
-  return readerParagraphAtPosition(nodes, position)
-}
-
 function nextFrame() {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
 }
@@ -1296,152 +1411,6 @@ async function handleReplaceRulesUpdated() {
   } catch (err) {
     ElMessage.error(readError(err, '刷新当前章节失败'))
   }
-}
-
-function setTheme(theme) { reader.setTheme(theme) }
-
-async function pickBgImage(data) {
-  const file = data.raw || data.file
-  if (!file) return
-  try {
-    const { data: result } = await uploadAsset({ file, type: 'background' })
-    if (!result?.url) throw new Error('上传结果缺少背景图地址')
-    reader.addCustomBgImage(result.url)
-    ElMessage.success('阅读背景图已上传')
-  } catch (err) {
-    ElMessage.error(readError(err, '上传背景图失败'))
-  }
-}
-
-async function clearBgImage(image) {
-  if (!image) return
-  try {
-    await deleteAsset(image)
-    reader.removeCustomBgImage(image)
-    ElMessage.success('已删除阅读背景图')
-  } catch (err) {
-    ElMessage.error(readError(err, '删除阅读背景图失败'))
-  }
-}
-
-async function pickFontFile({ file, font }) {
-  const rawFile = file?.raw || file?.file || file
-  if (!rawFile || !font?.value) return
-  try {
-    const { data } = await uploadAsset({ file: rawFile, type: 'font' })
-    if (!data?.url) throw new Error('上传结果缺少字体地址')
-    reader.setCustomFont(font.value, data.url)
-    reader.setFontFamily(font.value)
-    syncReaderFontFaces(reader.customFontsMap)
-    ElMessage.success(`已上传${font.label}字体`)
-  } catch (err) {
-    ElMessage.error(readError(err, '上传字体失败'))
-  }
-}
-
-async function clearFontFile(font) {
-  const url = reader.customFontsMap?.[font?.value]
-  if (!url || !font?.value) return
-  try {
-    await deleteAsset(url)
-    reader.clearCustomFont(font.value)
-    syncReaderFontFaces(reader.customFontsMap)
-    ElMessage.success(`已恢复默认${font.label}字体`)
-  } catch (err) {
-    ElMessage.error(readError(err, '恢复默认字体失败'))
-  }
-}
-
-async function goChapter(index, offset = 0) {
-  const targetIndex = Math.max(0, Math.min(Number(index), Math.max(chapters.value.length - 1, 0)))
-  if (targetIndex === currentIndex.value) {
-    showTocDrawer.value = false
-    jumpWithinCurrentChapter(offset)
-    return
-  }
-  if (isContinuousScrollRead.value && jumpToLoadedChapter(targetIndex, offset)) {
-    showTocDrawer.value = false
-    return
-  }
-  const query = { chapter: targetIndex }
-  if (offset) query.offset = offset
-  await router.replace({ name: 'reader', params: { id: bookId.value }, query })
-}
-
-function jumpWithinCurrentChapter(offset = 0) {
-  if (reader.mode === 'flip') {
-    page.value = restoredReaderFlipPage({
-      offset: Number(offset) === READER_CHAPTER_END_OFFSET ? READER_CHAPTER_END_OFFSET : 0,
-      percent: null,
-      pageCount: pageCount.value,
-    })
-    progressVersion.value += 1
-    saveCurrentProgress()
-    return
-  }
-  if (jumpToLoadedChapter(currentIndex.value, offset)) return
-  if (!contentEl.value) return
-  contentEl.value.scrollTo({
-    top: restoredReaderSingleChapterScrollTop({
-      offset: Number(offset) === READER_CHAPTER_END_OFFSET ? READER_CHAPTER_END_OFFSET : 0,
-      percent: null,
-      scrollHeight: contentEl.value.scrollHeight,
-      clientHeight: contentEl.value.clientHeight,
-    }),
-    behavior: readerScrollBehavior(),
-  })
-  progressVersion.value += 1
-  saveCurrentProgress()
-}
-
-function jumpToLoadedChapter(index, offset = 0) {
-  if (!contentEl.value || !contentBody.value) return false
-  const targetIndex = Math.max(0, Math.min(Number(index), Math.max(chapters.value.length - 1, 0)))
-  const chapterEl = contentBody.value.querySelector(`.chapter-content[data-index="${targetIndex}"]`)
-  if (!chapterEl) return false
-  const block = chapterBlocks.value.find(item => item.index === targetIndex)
-  currentIndex.value = targetIndex
-  chapter.value = chapters.value[targetIndex] || (block?.id ? { id: block.id, title: block.title, index: targetIndex } : chapter.value)
-  content.value = block?.content || content.value
-  if (Number(offset) === READER_CHAPTER_END_OFFSET) {
-    contentEl.value.scrollTo({
-      top: readerChapterBoundaryScrollTop({
-        chapterTop: chapterEl.offsetTop,
-        chapterHeight: chapterEl.offsetHeight,
-        clientHeight: contentEl.value.clientHeight,
-        end: true,
-      }),
-      behavior: readerScrollBehavior(),
-    })
-  } else if (offset > 0) {
-    const target = paragraphByChapterPosition(chapterEl, offset)
-    if (target) {
-      jumpToParagraph(target, { save: false, flash: false })
-    } else {
-      contentEl.value.scrollTo({
-        top: readerChapterBoundaryScrollTop({
-          chapterTop: chapterEl.offsetTop,
-          chapterHeight: chapterEl.offsetHeight,
-          clientHeight: contentEl.value.clientHeight,
-          end: false,
-        }),
-        behavior: readerScrollBehavior(),
-      })
-    }
-  } else {
-    contentEl.value.scrollTo({
-      top: readerChapterBoundaryScrollTop({
-        chapterTop: chapterEl.offsetTop,
-        chapterHeight: chapterEl.offsetHeight,
-        clientHeight: contentEl.value.clientHeight,
-        end: false,
-      }),
-      behavior: readerScrollBehavior(),
-    })
-  }
-  progressVersion.value += 1
-  scheduleProgressSave(Math.max(300, reader.animateDuration + 80))
-  return true
 }
 
 async function changeReaderLocalTocRule() {
@@ -1465,8 +1434,7 @@ async function changeReaderLocalTocRule() {
       await loadChapter(nextIndex, 0, { refresh: true, saveAfterLoad: true })
       await computeBrowserCachedChapters()
       locateTocCurrentChapter()
-      toastMsg.value = `目录规则已更新，共 ${data?.chapterCount || chapters.value.length} 章`
-      setTimeout(() => { toastMsg.value = '' }, 1600)
+      showReaderToast(`目录规则已更新，共 ${data?.chapterCount || chapters.value.length} 章`)
     })
   } catch (err) {
     ElMessage.error(readError(err, '更新目录规则失败'))
@@ -1615,8 +1583,7 @@ async function refreshReaderBookCatalog() {
     await loadChapters()
     await loadChapter(currentIndex.value, restoreOffset, { restorePercent, refresh: true })
     overlay.bookInfoBook = book.value
-    toastMsg.value = '目录已刷新'
-    setTimeout(() => { toastMsg.value = '' }, 1400)
+    showReaderToast('目录已刷新', 1400)
   } catch (err) {
     ElMessage.error(readError(err, '刷新目录失败'))
   }
@@ -1733,15 +1700,9 @@ function openContentSearch() {
   })
 }
 
-function openNoteDialog() {
-  noteText.value = ''
-  showNoteDialog.value = true
-}
-
 async function reloadChapter() {
   await loadChapter(currentIndex.value, currentOffset(), { refresh: true })
-  toastMsg.value = '章节已重新载入'
-  setTimeout(() => { toastMsg.value = '' }, 1600)
+  showReaderToast('章节已重新载入')
 }
 
 async function clearCurrentBookCache() {
@@ -1750,8 +1711,7 @@ async function clearCurrentBookCache() {
     const data = await bookshelf.batchClearCache([bookId.value])
     const localCleared = await clearCurrentBookBrowserCache()
     await loadChapters()
-    toastMsg.value = `已清理服务器 ${data.cleared || 0} 章，本地 ${localCleared} 章`
-    setTimeout(() => { toastMsg.value = '' }, 1600)
+    showReaderToast(`已清理服务器 ${data.cleared || 0} 章，本地 ${localCleared} 章`)
   } catch (err) {
     ElMessage.error(readError(err, '清理缓存失败'))
   }
@@ -1769,69 +1729,6 @@ function recordAutoReadingProgress() {
   saveCurrentProgress()
 }
 
-function showAutoReadingMessage(message) {
-  toastMsg.value = message
-  setTimeout(() => {
-    if (toastMsg.value === message) toastMsg.value = ''
-  }, 1200)
-}
-
-function showTTSMessage(message, duration = 0) {
-  toastMsg.value = message
-  if (duration <= 0) return
-  setTimeout(() => {
-    if (toastMsg.value === message) toastMsg.value = ''
-  }, duration)
-}
-
-function showChapterCacheMessage(message) {
-  toastMsg.value = message
-  setTimeout(() => {
-    if (toastMsg.value === message) toastMsg.value = ''
-  }, 1600)
-}
-
-function toggleNight() {
-  reader.setTheme(reader.theme === 'dark' || reader.theme === 'black' ? 'parchment' : 'dark')
-}
-
-async function previousPage() {
-  if (reader.mode === 'flip' && page.value > 0) {
-    page.value -= 1
-    progressVersion.value += 1
-    saveCurrentProgress()
-    return
-  }
-  if (isVerticalRead.value && contentEl.value) {
-    const el = contentEl.value
-    if (el.scrollTop > 8) {
-      el.scrollBy({ top: -scrollStep(), behavior: readerScrollBehavior() })
-      scheduleProgressSave(reader.animateDuration + 60)
-      return
-    }
-  }
-  if (currentIndex.value > 0) await goChapter(currentIndex.value - 1, READER_CHAPTER_END_OFFSET)
-}
-
-async function nextPage() {
-  if (reader.mode === 'flip' && page.value < pageCount.value - 1) {
-    page.value += 1
-    progressVersion.value += 1
-    saveCurrentProgress()
-    return
-  }
-  if (isVerticalRead.value && contentEl.value) {
-    const el = contentEl.value
-    const bottom = el.scrollHeight - el.clientHeight
-    if (el.scrollTop < bottom - 8) {
-      el.scrollBy({ top: scrollStep(), behavior: readerScrollBehavior() })
-      scheduleProgressSave(reader.animateDuration + 60)
-      return
-    }
-  }
-  if (currentIndex.value < chapters.value.length - 1) await goChapter(currentIndex.value + 1)
-}
-
 function scrollStep() {
   const viewportHeight = contentEl.value?.clientHeight || window.innerHeight || readableViewportSize().height
   return readerScrollStep({
@@ -1844,71 +1741,6 @@ function scrollStep() {
 
 function readerScrollBehavior() {
   return readerScrollBehaviorForDuration(reader.animateDuration)
-}
-
-function handleDesktopProgressInput(event) {
-  seekCurrentChapterPercent(Number(event.target.value || 0) / 1000, { save: false })
-}
-
-function handleDesktopProgressChange(event) {
-  seekCurrentChapterPercent(Number(event.target.value || 0) / 1000, { save: true })
-}
-
-function handleMobileBookProgressInput(event) {
-  mobileBookSliderDraft.value = Number(event.target.value || 0)
-}
-
-async function handleMobileBookProgressChange(event) {
-  const value = Number(event.target.value || 0)
-  mobileBookSliderDraft.value = value
-  try {
-    await seekBookProgress(value / 1000)
-  } finally {
-    mobileBookSliderDraft.value = null
-  }
-}
-
-async function seekBookProgress(percent) {
-  const target = readerBookSeekTarget(percent, chapters.value.length)
-  const targetIndex = target.chapterIndex
-  const chapterPercent = target.chapterPercent
-  if (targetIndex === currentIndex.value) {
-    seekCurrentChapterPercent(chapterPercent, { save: true })
-    return
-  }
-  await router.replace({
-    name: 'reader',
-    params: { id: bookId.value },
-    query: { chapter: targetIndex, percent: chapterPercent },
-  })
-}
-
-function seekCurrentChapterPercent(percent, options = {}) {
-  const value = clampReaderPercent(percent)
-  if (reader.mode === 'flip') {
-    page.value = Math.round(value * Math.max(0, pageCount.value - 1))
-    progressVersion.value += 1
-    if (options.save !== false) saveCurrentProgress()
-    return
-  }
-  if (!contentEl.value) return
-  if (isContinuousScrollRead.value) {
-    const chapterEl = contentBody.value?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`)
-    if (chapterEl) {
-      const room = Math.max(chapterEl.offsetHeight - contentEl.value.clientHeight, 0)
-      contentEl.value.scrollTop = Math.max(0, chapterEl.offsetTop + Math.round(value * room))
-    }
-  } else {
-    const bottom = Math.max(contentEl.value.scrollHeight - contentEl.value.clientHeight, 0)
-    contentEl.value.scrollTop = Math.round(value * bottom)
-  }
-  progressVersion.value += 1
-  applyLocalProgressSnapshot()
-  if (options.save === false) {
-    scheduleProgressSave(500)
-  } else {
-    saveCurrentProgress()
-  }
 }
 
 function handleTapZone(zone) {
@@ -2369,21 +2201,6 @@ async function createReplaceRuleFromSelectedText(text) {
   ElMessage.success('过滤规则已添加')
 }
 
-async function createBookmarkFromSelectedText(text) {
-  if (!chapter.value) return
-  const cleanText = String(text || '').trim()
-  await addBookmark({
-    chapterId: chapter.value.id,
-    chapterIndex: currentIndex.value,
-    offset: currentOffset(),
-    percent: currentChapterPercent(),
-    title: chapter.value.title,
-    excerpt: cleanText.slice(0, 500),
-  })
-  toastMsg.value = '书签已创建'
-  setTimeout(() => { toastMsg.value = '' }, 1600)
-}
-
 function currentProgressPayload() {
   const snapshot = visibleChapterProgressSnapshot()
   return readerProgressPayload({
@@ -2439,276 +2256,12 @@ function progressUpdatedAtMs(progress) {
   return Number.isFinite(time) ? time : 0
 }
 
-async function createBookmark() {
-  if (!chapter.value) return
-  const excerpt = currentVisibleExcerpt()
-  await addBookmark({
-    chapterId: chapter.value.id, chapterIndex: currentIndex.value,
-    offset: currentOffset(), percent: currentChapterPercent(),
-    title: chapter.value.title, excerpt,
-  })
-  toastMsg.value = '书签已创建'
-  setTimeout(() => { toastMsg.value = '' }, 1600)
-}
-
-async function saveNote() {
-  if (!chapter.value) return
-  const note = noteText.value.trim()
-  if (!note) return
-  const excerpt = currentVisibleExcerpt()
-  await addBookmark({
-    chapterId: chapter.value.id, chapterIndex: currentIndex.value,
-    offset: currentOffset(), percent: currentChapterPercent(),
-    title: chapter.value.title, excerpt, note,
-  })
-  showNoteDialog.value = false
-  toastMsg.value = '笔记已保存'
-  setTimeout(() => { toastMsg.value = '' }, 1600)
-}
-
-async function removeBookmark(bookmark) {
-  await removeBookmarkData(bookmark.id)
-}
-
-async function removeBookmarks(rows) {
-  if (!Array.isArray(rows) || !rows.length) return
-  try {
-    await ElMessageBox.confirm(`确认要删除所选择的 ${rows.length} 条书签吗？`, '批量删除书签', { type: 'warning' })
-    await removeBookmarkRows(rows)
-    ElMessage.success('书签已删除')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '批量删除书签失败'))
-  }
-}
-
-async function importBookmarks(rows) {
-  const payloads = normalizeImportedBookmarks(rows)
-  if (!payloads.length) {
-    ElMessage.error('书签文件没有可导入内容')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(`确认要导入文件中的 ${payloads.length} 条书签到当前书籍吗？`, '导入书签', { type: 'info' })
-    const created = await importBookmarkPayloads(payloads)
-    ElMessage.success(`已导入 ${created.length} 条书签`)
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '导入书签失败'))
-  }
-}
-
-function openBookmarkEditor(bookmark) {
-  editingBookmark.value = bookmark
-  Object.assign(bookmarkDraft, {
-    title: bookmark.title || '',
-    excerpt: bookmark.excerpt || '',
-    note: bookmark.note || '',
-  })
-  showBookmarkEditor.value = true
-}
-
-async function saveBookmarkEdit() {
-  if (!editingBookmark.value) return
-  try {
-    await updateBookmarkData(editingBookmark.value.id, {
-      title: bookmarkDraft.title,
-      excerpt: bookmarkDraft.excerpt,
-      note: bookmarkDraft.note,
-    })
-    showBookmarkEditor.value = false
-    toastMsg.value = '书签已更新'
-    setTimeout(() => { toastMsg.value = '' }, 1600)
-  } catch (err) {
-    ElMessage.error(readError(err, '更新书签失败'))
-  }
-}
-
-async function jumpToBookmark(bookmark) {
-  showBookmarkDrawer.value = false
-  const query = bookmarkReaderQuery(bookmark)
-  if (bookmark.chapterIndex === currentIndex.value) {
-    await loadChapter(currentIndex.value, Number(query.offset || 0), { restorePercent: parseRoutePercent(query.percent), saveAfterLoad: true })
-    return
-  }
-  await router.replace({ name: 'reader', params: { id: bookId.value }, query })
-}
-
-function bookmarkReaderQuery(bookmark) {
-  return {
-    chapter: bookmark.chapterIndex,
-    offset: bookmark.offset || 0,
-    percent: Number.isFinite(Number(bookmark.percent)) ? Number(bookmark.percent) : undefined,
-  }
-}
-
-function parseRoutePercent(value) {
-  if (value === undefined || value === null || value === '') return null
-  const percent = Number(value)
-  return Number.isFinite(percent) ? Math.max(0, Math.min(1, percent)) : null
-}
-
-async function jumpToBookSearchResult(result) {
-  showSearchDrawer.value = false
-  const targetIndex = Number(result.chapterIndex || 0)
-  const restorePercent = Number.isFinite(Number(result.percent)) ? Number(result.percent) : null
-  if (targetIndex === currentIndex.value) {
-    await loadChapter(targetIndex, 0, { restorePercent, saveAfterLoad: true })
-  } else {
-    await router.replace({ name: 'reader', params: { id: bookId.value }, query: { chapter: targetIndex, percent: restorePercent ?? undefined } })
-    await loadChapter(targetIndex, 0, { restorePercent, saveAfterLoad: true })
-  }
-  await nextTick()
-  if (jumpToSearchMatch(result)) {
-    return
-  }
-  if (Number.isInteger(result.lineIndex)) {
-    jumpToLine(result.lineIndex)
-  } else {
-    jumpToFirstSearchMatch()
-  }
-}
-
-function jumpToFirstSearchMatch() {
-  const keyword = contentSearch.value.trim().toLowerCase()
-  if (!keyword || !contentBody.value) return
-  const scope = contentBody.value.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`) || contentBody.value
-  const paragraphList = [...scope.querySelectorAll('p')]
-  const index = paragraphList.findIndex(item => item.textContent.toLowerCase().includes(keyword))
-  if (index >= 0) jumpToLine(index)
-}
-
-function jumpToSearchMatch(result) {
-  const keyword = String(result?.query || contentSearch.value || route.query.q || '').trim()
-  if (!keyword || !contentBody.value) return false
-  const targetIndex = Number.isInteger(result?.resultCountWithinChapter)
-    ? result.resultCountWithinChapter
-    : Number(result?.resultCountWithinChapter ?? route.query.match ?? 0)
-  const expectedIndex = Number.isFinite(targetIndex) ? Math.max(0, Math.floor(targetIndex)) : 0
-  const scope = contentBody.value.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`) || contentBody.value
-  const paragraphs = [...scope.querySelectorAll('p')]
-  let matchCount = 0
-  for (let index = 0; index < paragraphs.length; index += 1) {
-    const text = paragraphs[index].textContent || ''
-    const exactMatches = countTextMatches(text, keyword)
-    if (matchCount + exactMatches > expectedIndex) {
-      jumpToParagraph(paragraphs[index])
-      return true
-    }
-    matchCount += exactMatches
-  }
-  const normalizedKeyword = normalizeSearchText(keyword)
-  if (!normalizedKeyword) return false
-  matchCount = 0
-  for (let index = 0; index < paragraphs.length; index += 1) {
-    const text = normalizeSearchText(paragraphs[index].textContent || '')
-    const matches = countTextMatches(text, normalizedKeyword)
-    if (matchCount + matches > expectedIndex) {
-      jumpToParagraph(paragraphs[index])
-      return true
-    }
-    matchCount += matches
-  }
-  return false
-}
-
-function countTextMatches(text, keyword) {
-  const haystack = String(text || '').toLowerCase()
-  const needle = String(keyword || '').toLowerCase()
-  if (!haystack || !needle) return 0
-  let count = 0
-  for (let offset = 0; offset < haystack.length;) {
-    const position = haystack.indexOf(needle, offset)
-    if (position < 0) break
-    count += 1
-    offset = position + Math.max(needle.length, 1)
-  }
-  return count
-}
-
-function normalizeSearchText(value) {
-  return String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
-}
-
-function jumpToLine(index) {
-  const scope = contentBody.value?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`) || contentBody.value
-  const lineEl = scope?.querySelectorAll('p')?.[index]
-  if (!lineEl) return
-  jumpToParagraph(lineEl)
-}
-
-function jumpToParagraph(lineEl, options = {}) {
-  if (!lineEl) return
-  showSearchDrawer.value = false
-  const chapterEl = lineEl.closest?.('.chapter-content')
-  const chapterIndex = Number(chapterEl?.dataset?.index)
-  if (Number.isInteger(chapterIndex) && chapterIndex !== currentIndex.value) {
-    currentIndex.value = chapterIndex
-    const block = chapterBlocks.value.find(item => item.index === chapterIndex)
-    chapter.value = chapters.value[chapterIndex] || (block?.id ? { id: block.id, title: block.title, index: chapterIndex } : chapter.value)
-    content.value = block?.content || content.value
-  }
-  if (reader.mode === 'flip') {
-    page.value = Math.min(pageCount.value - 1, Math.floor(lineEl.offsetLeft / Math.max(pageWidth.value, 1)))
-  } else if (contentEl.value) {
-    contentEl.value.scrollTop = Math.max(0, lineEl.offsetTop - 80)
-  }
-  if (options.flash !== false) flashParagraph(lineEl)
-  if (options.save !== false) saveCurrentProgress()
-}
-
-async function jumpToRouteLine() {
-  if (route.query.q !== undefined && route.query.match !== undefined) {
-    await nextTick()
-    if (jumpToSearchMatch({
-      query: route.query.q,
-      resultCountWithinChapter: Number(route.query.match),
-      lineIndex: Number(route.query.line),
-    })) {
-      return
-    }
-  }
-  if (route.query.line === undefined) return
-  const index = Number(route.query.line)
-  if (!Number.isFinite(index)) return
-  await nextTick()
-  jumpToLine(Math.max(0, Math.floor(index)))
-}
-
 function flashParagraph(lineEl) {
   lineEl.classList.remove('reader-search-active')
   requestAnimationFrame(() => {
     lineEl.classList.add('reader-search-active')
     window.setTimeout(() => lineEl.classList.remove('reader-search-active'), 1800)
   })
-}
-
-function scrollToTop() {
-  if (reader.mode === 'flip') {
-    page.value = 0
-    progressVersion.value += 1
-    saveCurrentProgress()
-    return
-  }
-  if (contentEl.value) {
-    contentEl.value.scrollTop = 0
-    progressVersion.value += 1
-    saveCurrentProgress()
-  }
-}
-
-function scrollToBottom() {
-  if (reader.mode === 'flip') {
-    page.value = Math.max(0, pageCount.value - 1)
-    progressVersion.value += 1
-    saveCurrentProgress()
-    return
-  }
-  if (contentEl.value) {
-    contentEl.value.scrollTop = Math.max(0, contentEl.value.scrollHeight - contentEl.value.clientHeight)
-    progressVersion.value += 1
-    saveCurrentProgress()
-  }
 }
 
 // ---- Keyboard ----
