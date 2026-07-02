@@ -255,7 +255,7 @@
 </template>
 
 <script setup>
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api/client'
@@ -285,66 +285,51 @@ import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
 import { useAutoReading } from '../composables/useAutoReading'
 import { useReaderAppearanceAssets } from '../composables/useReaderAppearanceAssets'
+import { useReaderBookLoad } from '../composables/useReaderBookLoad'
 import { useBookBookmarks } from '../composables/useBookBookmarks'
 import { useBookContentSearch } from '../composables/useBookContentSearch'
 import { useBookSourceChange } from '../composables/useBookSourceChange'
 import { useBookSourceCandidates } from '../composables/useBookSourceCandidates'
 import { useReaderChapterCache } from '../composables/useReaderChapterCache'
+import { useReaderChapterContent } from '../composables/useReaderChapterContent'
+import { useReaderChapterLoader } from '../composables/useReaderChapterLoader'
+import { useReaderChapterWindow } from '../composables/useReaderChapterWindow'
+import { useReaderExternalUpdates } from '../composables/useReaderExternalUpdates'
+import { useReaderLayout } from '../composables/useReaderLayout'
+import { useReaderLocalProgress } from '../composables/useReaderLocalProgress'
 import { useReaderProgressPersistence } from '../composables/useReaderProgressPersistence'
 import { useReaderProgressControls } from '../composables/useReaderProgressControls'
 import { useReaderBookmarkActions } from '../composables/useReaderBookmarkActions'
 import { useReaderNavigation } from '../composables/useReaderNavigation'
 import { useReaderMode } from '../composables/useReaderMode'
+import { useReaderPageLifecycle } from '../composables/useReaderPageLifecycle'
+import { useReaderPositionRestore } from '../composables/useReaderPositionRestore'
+import { useReaderPointer } from '../composables/useReaderPointer'
 import { useReaderRouteSync } from '../composables/useReaderRouteSync'
+import { useReaderScrollSync } from '../composables/useReaderScrollSync'
+import { useReaderSelectedTextActions } from '../composables/useReaderSelectedTextActions'
 import { useReaderSelection } from '../composables/useReaderSelection'
 import { useReaderSearchNavigation } from '../composables/useReaderSearchNavigation'
 import { useReaderShelf } from '../composables/useReaderShelf'
 import { useReaderToc } from '../composables/useReaderToc'
 import { useReaderToast } from '../composables/useReaderToast'
+import { useReaderTools } from '../composables/useReaderTools'
 import { useReaderTTS } from '../composables/useReaderTTS'
 import { useReaderTypographySync } from '../composables/useReaderTypographySync'
 import { useReaderViewportProgress } from '../composables/useReaderViewportProgress'
+import { useReaderWheel } from '../composables/useReaderWheel'
 import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
-import { chapterCacheBookKey, clearBookBrowserChapterCache, isValidChapterContentResponse, loadBrowserChapterContent } from '../utils/bookChapterCache'
+import { clearBookBrowserChapterCache } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { simplized, traditionalized } from '../utils/chinese'
 import { epubTocRuleOptions, isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import {
-  didReaderTouchMove,
-  isReaderTouchTap,
-  MOBILE_READER_TAP_MOVE_TOLERANCE,
-  normalizedReaderWheelDelta,
-  readerTapPointAction,
-  readerTapZoneAction,
-  shouldHandleReaderHorizontalSwipe,
-  shouldPreventReaderTouchMove,
-} from '../utils/readerInteraction'
-import {
-  readerFlipPageLayout,
   readerScrollBehaviorForDuration,
   readerScrollStep,
-  readerVerticalPageLayout,
 } from '../utils/readerPagination'
-import {
-  READER_CHAPTER_END_OFFSET,
-  restoredReaderContinuousScrollTop,
-  restoredReaderFlipPage,
-  restoredReaderSingleChapterScrollTop,
-} from '../utils/readerPosition'
-import { parseReaderRoutePercent, savedBookChapterPercent } from '../utils/readerRoute'
+import { READER_CHAPTER_END_OFFSET } from '../utils/readerPosition'
 import { parseReaderContentBlocks } from '../utils/readerContent'
-import {
-  adjacentReaderChapterIndex,
-  nearbyReaderChapterIndexes,
-  readerChapterWindowExtension,
-  readerChapterWindowIndexes,
-  readerChapterWindowPrunePlan,
-} from '../utils/readerChapterWindow'
-import {
-  readerProgressBaseUpdatedAt,
-  readerProgressPayload,
-} from '../utils/readerProgressPersistence'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { invalidateReaderDataCache as invalidateReaderCache, readerDataCacheKey as scopedReaderDataCacheKey, writeReaderDataCache as writeReaderCache } from '../utils/readerDataCache'
 import { createMultiBookChapterMemoryCache } from '../utils/multiBookChapterMemoryCache'
@@ -434,6 +419,19 @@ const {
   onSuccess: message => ElMessage.success(message),
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
+const {
+  operate: operateSelectedText,
+} = useReaderSelectedTextActions({
+  getBook: () => book.value,
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  prompt: (...args) => ElMessageBox.prompt(...args),
+  createBookmark: createBookmarkFromSelectedText,
+  createReplaceRule,
+  dispatchRulesUpdated: () => {
+    window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
+  },
+  onSuccess: message => ElMessage.success(message),
+})
 const content = ref('')
 const chapterBlocks = ref([])
 const chapterLoading = ref(true)
@@ -451,6 +449,7 @@ const {
   onOperate: operateSelectedText,
   onError: error => ElMessage.error(readError(error, '处理选中文字失败')),
 })
+const handleReaderSelectionEnd = () => scheduleSelectedTextOperation(180)
 const pageEl = ref(null)
 const shellEl = ref(null)
 const currentIndex = ref(Number(route.query.chapter || 0))
@@ -543,20 +542,13 @@ const sliderLineHeight = ref(2.12)
 const pageHeight = ref(600)
 const pageWidth = ref(600)
 const windowWidth = ref(currentViewportWidth())
-let chapterLoadingTimer
-let restoringPosition = false
+const restoringPosition = ref(false)
 const chapterContentCache = createMultiBookChapterMemoryCache(3)
-let readerTouchStart = null
-let readerTouchMoved = false
-let readerTouchMove = { x: 0, y: 0 }
-let handledTouchTapAt = 0
-let lastLocalProgressKey = ''
-let lastWheelPageAt = 0
-let extendingShowChapters = false
 
 const fontOptions = readerFontOptions
 const SHOW_PREV_CHAPTER_SIZE = 1
 const SHOW_NEXT_CHAPTER_SIZE = 2
+const NEARBY_PRELOAD_RADIUS = 2
 
 const currentSourceName = computed(() => {
   if (!book.value?.sourceId) return '本地书籍'
@@ -609,10 +601,23 @@ const {
   currentIndex,
   isRemoteBook,
   afterCache: loadChapters,
-  onClearMemory: () => chapterContentCache.clearBook(currentChapterCacheBookKey()),
+  onClearMemory: () => clearChapterContentMemory(),
   notify: message => showReaderToast(message, 1600),
   onNoTargets: () => ElMessage.error('不需要缓存'),
   onError: error => ElMessage.error(readError(error, '缓存章节失败')),
+})
+const {
+  clear: clearChapterContentMemory,
+  get: getChapterContentFromMemory,
+  load: loadChapterContent,
+  preload: preloadNearbyChapters,
+} = useReaderChapterContent({
+  book,
+  bookId,
+  chapters,
+  memoryCache: chapterContentCache,
+  markCached: markBrowserChapterCached,
+  preloadRadius: NEARBY_PRELOAD_RADIUS,
 })
 
 const chapterParagraphs = computed(() => {
@@ -657,6 +662,63 @@ const {
   makeChapterBlock,
   chapterBlockTextLength,
   nextFrame,
+})
+const {
+  apply: applyLocalProgressSnapshot,
+  currentPayload: currentProgressPayload,
+  serverBaseUpdatedAt: progressServerBaseUpdatedAt,
+  upsert: upsertReaderBookProgress,
+} = useReaderLocalProgress({
+  reader,
+  bookshelf,
+  bookId,
+  book,
+  chapter,
+  chapters,
+  currentIndex,
+  getVisibleSnapshot: visibleChapterProgressSnapshot,
+  getCurrentOffset: currentOffset,
+  getCurrentPercent: currentChapterPercent,
+  mergeBook: mergeShelfBook,
+})
+const {
+  compute: computeShowChapterList,
+  maybeExtend: maybeExtendShowChapters,
+  syncCurrentChapter: updateCurrentChapterFromScroll,
+} = useReaderChapterWindow({
+  reader,
+  contentEl,
+  contentBody,
+  chapters,
+  currentIndex,
+  chapter,
+  content,
+  chapterBlocks,
+  isContinuousScrollRead,
+  loadContent: loadChapterContent,
+  makeChapterBlock,
+  captureScrollAnchor: captureReaderScrollAnchor,
+  restoreScrollAnchor: restoreReaderScrollAnchor,
+  visibleProgressSnapshot: visibleChapterProgressSnapshot,
+  nextFrame,
+  previousSize: SHOW_PREV_CHAPTER_SIZE,
+  nextSize: SHOW_NEXT_CHAPTER_SIZE,
+})
+const {
+  readableViewportSize,
+  resize: handleResize,
+  update: updateFlipLayout,
+} = useReaderLayout({
+  reader,
+  contentEl,
+  contentBody,
+  page,
+  pageCount,
+  pageWidth,
+  pageHeight,
+  windowWidth,
+  getScrollStep: scrollStep,
+  getViewportWidth: currentViewportWidth,
 })
 const {
   jumpToFirstSearchMatch,
@@ -728,6 +790,21 @@ const {
   }),
   saveProgress: () => saveCurrentProgress(),
   scheduleProgressSave: delay => scheduleProgressSave(delay),
+})
+const {
+  restore: restoreReadingPosition,
+} = useReaderPositionRestore({
+  reader,
+  contentEl,
+  contentBody,
+  currentIndex,
+  page,
+  pageCount,
+  isContinuousScrollRead,
+  paragraphByChapterPosition,
+  jumpToParagraph,
+  updateLayout: updateFlipLayout,
+  nextFrame,
 })
 const {
   bookProgress,
@@ -830,7 +907,6 @@ const {
   saveProgress: () => saveCurrentProgress(),
 })
 const mobileChromeVisible = ref(false)
-const NEARBY_PRELOAD_RADIUS = 2
 
 const isOverlayOpen = computed(() => (
   showTocDrawer.value ||
@@ -844,6 +920,17 @@ const isOverlayOpen = computed(() => (
   showNoteDialog.value ||
   showBookmarkEditor.value
 ))
+const {
+  handle: handleReaderWheel,
+} = useReaderWheel({
+  reader,
+  shellEl,
+  contentEl,
+  isOverlayOpen,
+  isScrollRead,
+  nextPage,
+  previousPage,
+})
 
 const {
   active: autoReading,
@@ -867,6 +954,26 @@ const {
   onProgress: recordAutoReadingProgress,
   onNotify: message => showReaderToast(message, 1200),
 })
+const {
+  handleContentClick: handleReaderContentClick,
+  handleTapZone,
+  handleTouchEnd: handleReaderTouchEnd,
+  handleTouchMove: handleReaderTouchMove,
+  handleTouchStart: handleReaderTouchStart,
+} = useReaderPointer({
+  reader,
+  pageEl,
+  isMobileReader,
+  isOverlayOpen,
+  autoReading,
+  mobileChromeVisible,
+  scheduleSelectedTextOperation,
+  suppressContentClick,
+  consumeSuppressedContentClick,
+  nextPage,
+  previousPage,
+  toggleChrome: toggleReaderChrome,
+})
 
 const {
   cancelScheduled: cancelProgressSave,
@@ -888,6 +995,101 @@ const {
 })
 
 const {
+  clearLoadingTimer: clearChapterLoadingTimer,
+  load: loadChapter,
+} = useReaderChapterLoader({
+  chapters,
+  currentIndex,
+  mobileChromeVisible,
+  restoringPosition,
+  chapterLoaded,
+  chapterLoadError,
+  chapterLoading,
+  chapter,
+  content,
+  page,
+  chapterBlocks,
+  progressVersion,
+  isContinuousScrollRead,
+  cancelProgressSave,
+  getMemoryContent: getChapterContentFromMemory,
+  loadContent: loadChapterContent,
+  makeChapterBlock,
+  updateLayout: updateFlipLayout,
+  restorePosition: restoreReadingPosition,
+  preloadNearby: preloadNearbyChapters,
+  saveProgress: saveCurrentProgress,
+  markProgressSaved,
+  getCurrentProgress: currentProgressPayload,
+  computeChapterWindow: computeShowChapterList,
+  formatError: error => readError(error, '章节加载失败，请检查书源或网络后重试'),
+  nextFrame,
+})
+const {
+  handle: onScroll,
+} = useReaderScrollSync({
+  isVerticalRead,
+  restoringPosition,
+  chapterLoading,
+  progressVersion,
+  syncCurrentChapter: updateCurrentChapterFromScroll,
+  maybeExtendChapterWindow: maybeExtendShowChapters,
+  updateLayout: updateFlipLayout,
+  applyLocalProgress: applyLocalProgressSnapshot,
+  scheduleProgressSave,
+})
+const {
+  load: loadReaderBook,
+} = useReaderBookLoad({
+  reader,
+  bookshelf,
+  bookId,
+  book,
+  chapters,
+  currentIndex,
+  bookmarks,
+  getRouteQuery: () => route.query,
+  cancelProgressSave,
+  loadBookmarks,
+  loadCachedBook: targetBookId => cacheFirstRequest(
+    () => api.get(`/books/${targetBookId}`),
+    readerDataCacheKey(`book:${targetBookId}`),
+    { validate: data => Boolean(data?.id) },
+  ),
+  loadCachedChapters: targetBookId => cacheFirstRequest(
+    () => api.get(`/books/${targetBookId}/chapters`),
+    readerDataCacheKey(`chapters:${targetBookId}`),
+    { validate: data => Array.isArray(data) },
+  ),
+  refreshBook: targetBookId => networkFirstRequest(
+    () => api.get(`/books/${targetBookId}`),
+    readerDataCacheKey(`book:${targetBookId}`),
+    { validate: data => Boolean(data?.id) },
+  ),
+  refreshChapters: targetBookId => networkFirstRequest(
+    () => api.get(`/books/${targetBookId}/chapters`),
+    readerDataCacheKey(`chapters:${targetBookId}`),
+    { validate: data => Array.isArray(data) },
+  ),
+  mergeLoadedBook,
+  mergeBookProgress: (loadedBook, progress) => mergeShelfBook(
+    loadedBook,
+    { id: loadedBook.id, progress },
+  ),
+  resetSourceCandidates,
+  loadChapter,
+  progressKey: progressSaveKey,
+  getCurrentProgress: currentProgressPayload,
+  navigate: query => router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query,
+  }),
+  markProgressSaved,
+  jumpToRouteLine,
+})
+
+const {
   tts,
   voices: ttsVoices,
   sleepMinutes: ttsSleepMinutes,
@@ -906,6 +1108,36 @@ const {
   chapters,
   goChapter,
   notify: showReaderToast,
+})
+const {
+  handleDesktopToolAction,
+  handleMobileChromeAction,
+  handleMobileToolAction,
+} = useReaderTools({
+  currentIndex,
+  mobileChromeVisible,
+  mobileMoreVisible: showMobileMoreDrawer,
+  goChapter,
+  toggleChrome: toggleReaderChrome,
+  actions: {
+    home: goShelf,
+    shelf: openShelfPanel,
+    source: goSourcePanel,
+    toc: openTocDrawer,
+    settings: openSettingsDrawer,
+    bookmarks: openBookmarkDrawer,
+    search: openContentSearch,
+    info: openReaderBookInfo,
+    note: openNoteDialog,
+    cache: openCacheDrawer,
+    'clear-cache': clearCurrentBookCache,
+    reload: reloadChapter,
+    'auto-read': toggleAutoReading,
+    tts: toggleTTS,
+    night: toggleNight,
+    top: scrollToTop,
+    bottom: scrollToBottom,
+  },
 })
 
 useReaderRouteSync({
@@ -931,7 +1163,7 @@ useReaderTypographySync({
   getCurrentOffset: currentOffset,
   getCurrentPercent: currentChapterPercent,
   setRestoring: value => {
-    restoringPosition = value
+    restoringPosition.value = value
   },
   updateLayout: updateFlipLayout,
   restorePosition: restoreReadingPosition,
@@ -939,40 +1171,60 @@ useReaderTypographySync({
   syncFonts: syncReaderFontFaces,
 })
 
-onMounted(async () => {
-  reader.normalizeSettings()
-  syncReaderFontFaces(reader.customFontsMap)
-  try {
-    await loadReaderBook()
-  } catch (err) {
-    chapterLoadError.value = readError(err, '章节加载失败')
-    chapterLoading.value = false
-  }
-  window.addEventListener('resize', handleResize)
-  window.addEventListener('wheel', handleReaderWheel, { passive: false })
-  window.addEventListener('pagehide', handleReaderPageHide)
-  document.addEventListener('visibilitychange', handleReaderVisibilityChange)
-  window.addEventListener('openreader:progress-updated', handleProgressUpdated)
-  window.addEventListener('openreader:reader-book-data-updated', handleReaderBookDataUpdated)
-  window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
-  window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
-  customBg.value = reader.customBgColor
-  sliderLineHeight.value = reader.lineHeight
+const {
+  handleBookDataUpdated: handleReaderBookDataUpdated,
+  handleProgressUpdated,
+  handleReplaceRulesUpdated,
+} = useReaderExternalUpdates({
+  bookId,
+  book,
+  chapter,
+  chapters,
+  currentIndex,
+  isRestoring: () => restoringPosition.value,
+  isProgressSaveBusy,
+  progressKey: progressSaveKey,
+  getCurrentProgress: currentProgressPayload,
+  cancelProgressSave,
+  navigate: query => router.replace({
+    name: 'reader',
+    params: { id: bookId.value },
+    query,
+  }),
+  loadChapter,
+  markProgressSaved,
+  getCurrentOffset: currentOffset,
+  getCurrentPercent: currentChapterPercent,
+  clearChapterCache: () => clearChapterContentMemory(),
+  resetCachedChapters: resetBrowserCachedChapters,
+  resetContentSearch: resetContentSearchState,
+  refreshCachedChapters: computeBrowserCachedChapters,
+  onReplaceSuccess: () => ElMessage.success('已按最新替换规则刷新当前章节'),
+  onReplaceError: error => ElMessage.error(readError(error, '刷新当前章节失败')),
 })
 
-onBeforeUnmount(() => {
-  cancelProgressSave()
-  clearTimeout(chapterLoadingTimer)
-  stopAutoReading()
-  saveCurrentProgress({ force: true, background: true })
-  window.removeEventListener('resize', handleResize)
-  window.removeEventListener('wheel', handleReaderWheel)
-  window.removeEventListener('pagehide', handleReaderPageHide)
-  document.removeEventListener('visibilitychange', handleReaderVisibilityChange)
-  window.removeEventListener('openreader:progress-updated', handleProgressUpdated)
-  window.removeEventListener('openreader:reader-book-data-updated', handleReaderBookDataUpdated)
-  window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
-  window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
+useReaderPageLifecycle({
+  reader,
+  customBg,
+  sliderLineHeight,
+  syncFonts: syncReaderFontFaces,
+  loadBook: loadReaderBook,
+  onBookLoadError: error => {
+    chapterLoadError.value = readError(error, '章节加载失败')
+    chapterLoading.value = false
+  },
+  cancelProgressSave,
+  clearChapterLoadingTimer,
+  stopAutoReading,
+  saveProgress: saveCurrentProgress,
+  onResize: handleResize,
+  onWheel: handleReaderWheel,
+  onPageHide: handleReaderPageHide,
+  onVisibilityChange: handleReaderVisibilityChange,
+  onProgressUpdated: handleProgressUpdated,
+  onBookDataUpdated: handleReaderBookDataUpdated,
+  onReplaceRulesUpdated: handleReplaceRulesUpdated,
+  onBookmarksUpdated: handleBookmarksUpdated,
 })
 
 onBeforeRouteLeave(() => {
@@ -1013,133 +1265,11 @@ function chapterBlockTextLength(block) {
   return Number(last.endPos || last.pos || 0)
 }
 
-async function loadReaderBook() {
-  cancelProgressSave()
-  const targetBookId = bookId.value
-  const bookmarksRequest = loadBookmarks(targetBookId).catch(() => [])
-  const progressRequest = reader.loadProgress(targetBookId, { preferLocal: true }).catch(() => null)
-  const cachedProgress = reader.cachedProgress(targetBookId)
-  const [bookRes, chRes] = await Promise.all([
-    cacheFirstRequest(
-      () => api.get(`/books/${targetBookId}`),
-      readerDataCacheKey(`book:${targetBookId}`),
-      { validate: data => Boolean(data?.id) },
-    ),
-    cacheFirstRequest(
-      () => api.get(`/books/${targetBookId}/chapters`),
-      readerDataCacheKey(`chapters:${targetBookId}`),
-      { validate: data => Array.isArray(data) },
-    ),
-  ])
-  if (bookId.value !== targetBookId) return
-  const saved = cachedProgress?.bookId ? cachedProgress : await progressRequest
-  if (bookId.value !== targetBookId) return
-  book.value = mergeLoadedBook(bookRes.data)
-  chapters.value = chRes.data
-  if (book.value?.progress?.bookId) {
-    reader.applyServerProgress(book.value.progress)
-    bookshelf.applyBookProgress(book.value.progress)
-  }
-  if (saved?.bookId) {
-    book.value = mergeShelfBook(book.value, { id: book.value.id, progress: saved })
-  }
-  resetSourceCandidates()
-  if (saved?.bookId) bookshelf.applyBookProgress(saved)
-  const resumeFromProgress = route.query.resume === '1'
-  const hasExplicitChapter = route.query.chapter !== undefined
-  const shouldUseSavedPosition = resumeFromProgress || !hasExplicitChapter
-  if (shouldUseSavedPosition && saved?.chapterIndex !== undefined) {
-    currentIndex.value = saved.chapterIndex
-  } else {
-    currentIndex.value = Number(route.query.chapter || 0)
-  }
-  const hasRouteOffset = !resumeFromProgress && route.query.offset !== undefined
-  const initialOffset = hasRouteOffset
-    ? Number(route.query.offset || 0)
-    : (shouldUseSavedPosition ? Number(saved?.offset || 0) : 0)
-  const routePercent = resumeFromProgress ? null : parseReaderRoutePercent(route.query.percent)
-  const savedPercent = shouldUseSavedPosition ? savedBookChapterPercent(saved, chapters.value.length) : null
-  await loadChapter(currentIndex.value, initialOffset, {
-    restorePercent: routePercent ?? (hasRouteOffset ? null : savedPercent),
-    saveAfterLoad: false,
-  })
-  const initialProgressKey = progressSaveKey(currentProgressPayload())
-  progressRequest.then(serverSaved => {
-    reconcileInitialServerProgress(serverSaved, {
-      baseline: saved,
-      baselineKey: initialProgressKey,
-      resumeFromProgress,
-      hasRouteOffset,
-      routePercent,
-    }).catch(() => {})
-  })
-  if (bookRes.fromCache || chRes.fromCache) {
-    refreshReaderBookCaches({ book: Boolean(bookRes.fromCache), chapters: Boolean(chRes.fromCache) }).catch(() => {})
-  }
-  bookmarksRequest.then(data => {
-    if (bookId.value === targetBookId) bookmarks.value = data
-  }).catch(() => {})
-  await jumpToRouteLine()
-}
-
-async function reconcileInitialServerProgress(serverSaved, options = {}) {
-  if (!serverSaved?.bookId || Number(serverSaved.bookId) !== Number(bookId.value)) return
-  const canFollowServer = options.resumeFromProgress || route.query.chapter === undefined
-  if (!canFollowServer || options.hasRouteOffset || options.routePercent !== null) return
-  if (options.baseline?.bookId && progressUpdatedAtMs(serverSaved) <= progressUpdatedAtMs(options.baseline)) return
-  if (progressSaveKey(currentProgressPayload()) !== options.baselineKey) return
-  const targetIndex = Math.max(0, Math.min(Number(serverSaved.chapterIndex || 0), Math.max(chapters.value.length - 1, 0)))
-  const targetOffset = Math.max(0, Math.floor(Number(serverSaved.offset || 0)))
-  const restorePercent = Number.isFinite(Number(serverSaved.chapterPercent))
-    ? Math.max(0, Math.min(1, Number(serverSaved.chapterPercent)))
-    : savedBookChapterPercent(serverSaved, chapters.value.length)
-  await router.replace({
-    name: 'reader',
-    params: { id: bookId.value },
-    query: {
-      resume: '1',
-      chapter: targetIndex,
-      ...(targetOffset ? { offset: targetOffset } : {}),
-      ...(restorePercent !== null ? { percent: Number(restorePercent.toFixed(6)) } : {}),
-    },
-  })
-  await loadChapter(targetIndex, targetOffset, {
-    restorePercent,
-    saveAfterLoad: false,
-  })
-  markProgressSaved(currentProgressPayload())
-}
-
 function mergeLoadedBook(incoming) {
   if (!incoming?.id) return incoming
   const current = bookshelf.books.find(item => Number(item.id) === Number(incoming.id)) ||
     (Number(book.value?.id) === Number(incoming.id) ? book.value : null)
   return mergeShelfBook(current, incoming)
-}
-
-async function refreshReaderBookCaches(options = {}) {
-  const targetBookId = bookId.value
-  const requests = []
-  if (options.book) {
-    requests.push(networkFirstRequest(
-      () => api.get(`/books/${targetBookId}`),
-      readerDataCacheKey(`book:${targetBookId}`),
-      { validate: data => Boolean(data?.id) },
-    ).then(res => ({ key: 'book', data: res.data })))
-  }
-  if (options.chapters) {
-    requests.push(networkFirstRequest(
-      () => api.get(`/books/${targetBookId}/chapters`),
-      readerDataCacheKey(`chapters:${targetBookId}`),
-      { validate: data => Array.isArray(data) },
-    ).then(res => ({ key: 'chapters', data: res.data })))
-  }
-  const rows = await Promise.all(requests)
-  if (bookId.value !== targetBookId) return
-  rows.forEach(row => {
-    if (row.key === 'book' && row.data?.id) book.value = mergeLoadedBook(row.data)
-    if (row.key === 'chapters' && Array.isArray(row.data)) chapters.value = row.data
-  })
 }
 
 function readerDataCacheKey(key) {
@@ -1160,7 +1290,7 @@ async function writeReaderDataCache(options = {}) {
 async function resetReaderChapterCaches(options = {}) {
   const targetBook = options.book || book.value
   const targetBookId = targetBook?.id || bookId.value
-  chapterContentCache.clearBook(currentChapterCacheBookKey(targetBook, targetBookId))
+  clearChapterContentMemory(targetBook, targetBookId)
   resetBrowserCachedChapters()
   if (!options.clearBrowser) return 0
   try {
@@ -1170,247 +1300,8 @@ async function resetReaderChapterCaches(options = {}) {
   }
 }
 
-async function loadChapter(index, offset = 0, options = {}) {
-  currentIndex.value = Math.max(0, Math.min(index, Math.max(chapters.value.length - 1, 0)))
-  mobileChromeVisible.value = false
-  restoringPosition = true
-  chapterLoaded.value = false
-  chapterLoadError.value = ''
-  cancelProgressSave()
-  clearTimeout(chapterLoadingTimer)
-  const cachedBeforeLoad = !options.refresh && getChapterContentFromMemory(currentIndex.value)
-  chapterLoading.value = !cachedBeforeLoad
-  if (cachedBeforeLoad) {
-    chapterLoadingTimer = null
-  } else {
-    chapterLoadingTimer = setTimeout(() => {
-      chapterLoading.value = true
-    }, 120)
-  }
-  try {
-    const data = await loadChapterContent(currentIndex.value, { refresh: Boolean(options.refresh) })
-    chapter.value = data.chapter
-    content.value = data.content || ''
-    page.value = 0
-    chapterBlocks.value = [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
-    chapterLoading.value = false
-    await nextTick()
-    updateFlipLayout()
-    await restoreReadingPosition(offset, options)
-    progressVersion.value += 1
-    preloadNearbyChapters(currentIndex.value)
-    if (options.saveAfterLoad) {
-      await saveCurrentProgress({ force: true })
-    } else {
-      markProgressSaved(currentProgressPayload())
-    }
-    chapterLoaded.value = true
-    if (isContinuousScrollRead.value) {
-      computeShowChapterList({ anchorIndex: currentIndex.value }).catch(() => {})
-    }
-  } catch (err) {
-    chapterLoadError.value = readError(err, '章节加载失败，请检查书源或网络后重试')
-  } finally {
-    clearTimeout(chapterLoadingTimer)
-    await nextFrame()
-    restoringPosition = false
-    chapterLoading.value = false
-  }
-}
-
-async function computeShowChapterList(options = {}) {
-  if (!chapters.value.length) {
-    chapterBlocks.value = []
-    return
-  }
-  const anchorIndex = Number.isInteger(options.anchorIndex) ? options.anchorIndex : currentIndex.value
-  const indexes = readerChapterWindowIndexes({
-    mode: reader.mode,
-    anchorIndex,
-    totalChapters: chapters.value.length,
-    previousSize: SHOW_PREV_CHAPTER_SIZE,
-    nextSize: isContinuousScrollRead.value ? SHOW_NEXT_CHAPTER_SIZE : 0,
-  })
-  const rows = await Promise.all(indexes.map(async index => {
-    try {
-      const data = await loadChapterContent(index)
-      return makeChapterBlock(index, data.chapter || chapters.value[index], data.content || '')
-    } catch {
-      return null
-    }
-  }))
-  if (currentIndex.value !== anchorIndex) return
-  const blocks = rows.filter(Boolean)
-  if (blocks.some(block => block.index === anchorIndex)) {
-    const scrollAnchor = captureReaderScrollAnchor()
-    chapterBlocks.value = blocks
-    await restoreReaderScrollAnchor(scrollAnchor)
-  }
-}
-
-async function appendNextShowChapter() {
-  if (!isContinuousScrollRead.value || !chapterBlocks.value.length) return
-  const nextIndex = adjacentReaderChapterIndex({
-    blocks: chapterBlocks.value,
-    direction: 'next',
-    totalChapters: chapters.value.length,
-  })
-  if (nextIndex === null) return
-  if (chapterBlocks.value.some(block => block.index === nextIndex)) return
-  const data = await loadChapterContent(nextIndex)
-  chapterBlocks.value = [
-    ...chapterBlocks.value,
-    makeChapterBlock(nextIndex, data.chapter || chapters.value[nextIndex], data.content || ''),
-  ]
-}
-
-async function prependPreviousShowChapter() {
-  if (reader.mode !== 'scroll2' || !chapterBlocks.value.length || !contentEl.value) return
-  const previousIndex = adjacentReaderChapterIndex({
-    blocks: chapterBlocks.value,
-    direction: 'previous',
-    totalChapters: chapters.value.length,
-  })
-  if (previousIndex === null) return
-  if (chapterBlocks.value.some(block => block.index === previousIndex)) return
-  const beforeHeight = contentEl.value.scrollHeight
-  const beforeTop = contentEl.value.scrollTop
-  const data = await loadChapterContent(previousIndex)
-  chapterBlocks.value = [
-    makeChapterBlock(previousIndex, data.chapter || chapters.value[previousIndex], data.content || ''),
-    ...chapterBlocks.value,
-  ]
-  await nextTick()
-  await nextFrame()
-  const heightDelta = Math.max(0, contentEl.value.scrollHeight - beforeHeight)
-  contentEl.value.scrollTop = beforeTop + heightDelta
-}
-
-async function loadChapterContent(index, options = {}) {
-  const targetBook = { ...(book.value || {}) }
-  const targetBookId = bookId.value
-  const cacheBookKey = currentChapterCacheBookKey(targetBook, targetBookId)
-  if (!options.refresh) {
-    const cached = getChapterContentFromMemory(index, cacheBookKey)
-    if (cached) return cached
-  }
-  const data = await loadBrowserChapterContent(targetBook, targetBookId, index, { refresh: Boolean(options.refresh) })
-  addChapterContentToMemory(index, data, cacheBookKey)
-  if (
-    isValidChapterContentResponse(data)
-    && Number(bookId.value) === Number(targetBookId)
-    && currentChapterCacheBookKey() === cacheBookKey
-  ) {
-    markBrowserChapterCached(index)
-  }
-  return data
-}
-
-function preloadNearbyChapters(index) {
-  if (!book.value || !chapters.value.length) return
-  nearbyReaderChapterIndexes({
-    chapterIndex: index,
-    totalChapters: chapters.value.length,
-    radius: NEARBY_PRELOAD_RADIUS,
-  })
-    .forEach(target => {
-      if (getChapterContentFromMemory(target)) return
-      loadChapterContent(target).catch(() => {})
-    })
-}
-
-function getChapterContentFromMemory(index, cacheBookKey = currentChapterCacheBookKey()) {
-  const cached = chapterContentCache.get(cacheBookKey, index)
-  return isValidChapterContentResponse(cached) ? cached : null
-}
-
-function addChapterContentToMemory(index, data, cacheBookKey = currentChapterCacheBookKey()) {
-  if (!isValidChapterContentResponse(data)) return
-  chapterContentCache.set(cacheBookKey, index, data)
-}
-
-function currentChapterCacheBookKey(targetBook = book.value, fallbackBookId = bookId.value) {
-  return chapterCacheBookKey(targetBook, fallbackBookId)
-}
-
-async function restoreReadingPosition(offset = 0, options = {}) {
-  const restorePercent = Number(options.restorePercent)
-  const hasRestorePercent = Number.isFinite(restorePercent)
-  await nextTick()
-  await nextFrame()
-  updateFlipLayout()
-  const chapterOffset = Number(offset || 0)
-  if (reader.mode === 'flip') {
-    page.value = restoredReaderFlipPage({
-      offset: chapterOffset,
-      percent: hasRestorePercent ? restorePercent : null,
-      pageCount: pageCount.value,
-    })
-    return
-  }
-  if (!contentEl.value) return
-  if (isContinuousScrollRead.value) {
-    restoreScroll2ChapterPosition(chapterOffset, hasRestorePercent ? restorePercent : null)
-    return
-  }
-  if (!hasRestorePercent && chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) {
-    return
-  }
-  const applyScroll = () => {
-    if (!contentEl.value) return
-    contentEl.value.scrollTop = restoredReaderSingleChapterScrollTop({
-      offset: chapterOffset,
-      percent: hasRestorePercent ? restorePercent : null,
-      scrollHeight: contentEl.value.scrollHeight,
-      clientHeight: contentEl.value.clientHeight,
-    })
-  }
-  applyScroll()
-  await nextFrame()
-  applyScroll()
-}
-
-function restoreScroll2ChapterPosition(chapterOffset, restorePercent = null) {
-  const el = contentEl.value
-  const activeChapter = contentBody.value?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`)
-  if (!el || !activeChapter) return
-  const scrollTop = restoredReaderContinuousScrollTop({
-    offset: chapterOffset,
-    percent: restorePercent,
-    chapterTop: activeChapter.offsetTop,
-    chapterHeight: activeChapter.offsetHeight,
-    clientHeight: el.clientHeight,
-  })
-  if (scrollTop !== null) {
-    el.scrollTop = scrollTop
-    return
-  }
-  if (chapterOffset > 0 && restoreByChapterPosition(chapterOffset)) return
-  el.scrollTop = Math.max(0, activeChapter.offsetTop)
-}
-
-function restoreByChapterPosition(position) {
-  if (!contentBody.value || !Number.isFinite(position) || position <= 0) return false
-  const activeChapter = contentBody.value.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`) || contentBody.value
-  const target = paragraphByChapterPosition(activeChapter, position)
-  if (!target) return false
-  jumpToParagraph(target, { save: false, flash: false })
-  return true
-}
-
 function nextFrame() {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
-}
-
-async function handleReplaceRulesUpdated() {
-  if (!book.value?.id || !chapter.value) return
-  const restorePercent = currentChapterPercent()
-  try {
-    await loadChapter(currentIndex.value, currentOffset(), { restorePercent, refresh: true })
-    ElMessage.success('已按最新替换规则刷新当前章节')
-  } catch (err) {
-    ElMessage.error(readError(err, '刷新当前章节失败'))
-  }
 }
 
 async function changeReaderLocalTocRule() {
@@ -1610,67 +1501,6 @@ function openBookmarkDrawer() {
   showBookmarkDrawer.value = true
 }
 
-function runMobileAction(action) {
-  showMobileMoreDrawer.value = false
-  mobileChromeVisible.value = false
-  action?.()
-}
-
-function handleMobileToolAction(action) {
-  runMobileAction(readerToolAction(action))
-}
-
-function handleMobileChromeAction(action) {
-  if (action === 'previous') {
-    goChapter(currentIndex.value - 1)
-    return
-  }
-  if (action === 'next') {
-    goChapter(currentIndex.value + 1)
-    return
-  }
-  if (action === 'toggle') {
-    toggleReaderChrome()
-    return
-  }
-  if (action === 'more') {
-    openMobileTool(() => { showMobileMoreDrawer.value = true })
-    return
-  }
-  openMobileTool(readerToolAction(action))
-}
-
-function handleDesktopToolAction(action) {
-  readerToolAction(action)?.()
-}
-
-function readerToolAction(action) {
-  return {
-    home: goShelf,
-    shelf: openShelfPanel,
-    source: goSourcePanel,
-    toc: openTocDrawer,
-    settings: openSettingsDrawer,
-    bookmarks: openBookmarkDrawer,
-    search: openContentSearch,
-    info: openReaderBookInfo,
-    note: openNoteDialog,
-    cache: openCacheDrawer,
-    'clear-cache': clearCurrentBookCache,
-    reload: reloadChapter,
-    'auto-read': toggleAutoReading,
-    tts: toggleTTS,
-    night: toggleNight,
-    top: scrollToTop,
-    bottom: scrollToBottom,
-  }[action]
-}
-
-function openMobileTool(action) {
-  mobileChromeVisible.value = false
-  action?.()
-}
-
 function openReplaceRules() {
   showSettingsDrawer.value = false
   overlay.openReplaceRules()
@@ -1743,212 +1573,6 @@ function readerScrollBehavior() {
   return readerScrollBehaviorForDuration(reader.animateDuration)
 }
 
-function handleTapZone(zone) {
-  if (isOverlayOpen.value) return
-  applyReaderTapAction(readerTapZoneAction({
-    zone,
-    clickMethod: reader.clickMethod,
-    mode: reader.mode,
-    autoReading: autoReading.value,
-  }), {
-    mobile: true,
-    hideChrome: reader.clickMethod === 'next',
-  })
-}
-
-function handleReaderContentClick(event) {
-  if (isOverlayOpen.value || !pageEl.value) return
-  if (Date.now() - handledTouchTapAt < 450) return
-  if (consumeSuppressedContentClick()) return
-  if (event.defaultPrevented || event.button !== 0) return
-  const target = event.target
-  if (target?.closest?.('button, a, input, textarea, select, [role="button"]')) return
-  const rect = pageEl.value.getBoundingClientRect()
-  const point = {
-    rect,
-    relX: event.clientX - rect.left,
-    relY: event.clientY - rect.top,
-    clientX: event.clientX,
-    clientY: event.clientY,
-  }
-  if (isMobileReader.value) {
-    handleTapPoint(point)
-  } else {
-    handleDesktopTapPoint(point)
-  }
-}
-
-function handleReaderTouchStart(event) {
-  if (!isMobileReader.value || event.touches?.length !== 1) return
-  const touch = event.touches[0]
-  readerTouchStart = { x: touch.clientX, y: touch.clientY, at: Date.now() }
-  readerTouchMoved = false
-  readerTouchMove = { x: 0, y: 0 }
-}
-
-function handleReaderTouchMove(event) {
-  if (!isMobileReader.value || !readerTouchStart || event.touches?.length !== 1) return
-  const touch = event.touches[0]
-  const moveX = touch.clientX - readerTouchStart.x
-  const moveY = touch.clientY - readerTouchStart.y
-  readerTouchMove = { x: moveX, y: moveY }
-  if (didReaderTouchMove(readerTouchMove, MOBILE_READER_TAP_MOVE_TOLERANCE)) {
-    readerTouchMoved = true
-  }
-  if (shouldPreventReaderTouchMove({ mode: reader.mode, moveX, moveY })) {
-    event.preventDefault()
-    event.stopPropagation()
-  }
-}
-
-function handleReaderTouchEnd(event) {
-  if (!isMobileReader.value) return
-  const touch = event.changedTouches?.[0]
-  if (scheduleSelectedTextOperation(200)) {
-    suppressContentClick()
-    readerTouchStart = null
-    readerTouchMoved = false
-    readerTouchMove = { x: 0, y: 0 }
-    return
-  }
-  const elapsed = readerTouchStart ? Date.now() - readerTouchStart.at : 0
-  const isTap = isReaderTouchTap({
-    move: readerTouchMove,
-    elapsed,
-    hasTouch: touch,
-    tolerance: MOBILE_READER_TAP_MOVE_TOLERANCE,
-  })
-  if (touch) suppressContentClick(360)
-  if (isTap) handledTouchTapAt = Date.now()
-  if (readerTouchMoved && !isOverlayOpen.value && shouldHandleReaderHorizontalSwipe({
-    mode: reader.mode,
-    move: readerTouchMove,
-  })) {
-    if (readerTouchMove.x > 0) previousPage()
-    else nextPage()
-  } else if (!readerTouchMoved && !isOverlayOpen.value && pageEl.value) {
-    if (touch) {
-      const rect = pageEl.value.getBoundingClientRect()
-      handleTapPoint({
-        rect,
-        relX: touch.clientX - rect.left,
-        relY: touch.clientY - rect.top,
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-      })
-    }
-  }
-  readerTouchStart = null
-  readerTouchMoved = false
-  readerTouchMove = { x: 0, y: 0 }
-}
-
-function handleTapPoint(point) {
-  if (isOverlayOpen.value || !point?.rect) return
-  if (scheduleSelectedTextOperation(0)) {
-    suppressContentClick()
-    return
-  }
-  const viewportWidth = window.innerWidth || point.rect.width
-  const viewportHeight = window.innerHeight || point.rect.height
-  const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
-  const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
-  applyReaderTapAction(readerTapPointAction({
-    mobile: true,
-    pointX,
-    pointY,
-    viewportWidth,
-    viewportHeight,
-    clickMethod: reader.clickMethod,
-    mode: reader.mode,
-    autoReading: autoReading.value,
-  }), { mobile: true, hideChrome: true })
-}
-
-function handleDesktopTapPoint(point) {
-  if (isOverlayOpen.value || !point?.rect) return
-  if (scheduleSelectedTextOperation(0)) {
-    suppressContentClick()
-    return
-  }
-  const viewportWidth = window.innerWidth || point.rect.width
-  const viewportHeight = window.innerHeight || point.rect.height
-  const pointX = Number.isFinite(point.clientX) ? point.clientX : point.relX
-  const pointY = Number.isFinite(point.clientY) ? point.clientY : point.relY
-  applyReaderTapAction(readerTapPointAction({
-    mobile: false,
-    pointX,
-    pointY,
-    viewportWidth,
-    viewportHeight,
-    clickMethod: reader.clickMethod,
-    mode: reader.mode,
-    autoReading: autoReading.value,
-  }))
-}
-
-function applyReaderTapAction(action, options = {}) {
-  if (!action) return
-  if (action === 'toggle-chrome') {
-    if (options.mobile) toggleMobileReaderChrome()
-    else toggleReaderChrome()
-    return
-  }
-  if (options.hideChrome) mobileChromeVisible.value = false
-  if (action === 'next') nextPage()
-  if (action === 'previous') previousPage()
-}
-
-function handleReaderWheel(event) {
-  if (event._openReaderWheelHandled) return
-  event._openReaderWheelHandled = true
-  if (isOverlayOpen.value) return
-  if (!shellEl.value?.contains(event.target)) return
-  const target = event.target
-  if (target?.closest?.('a, input, textarea, select, .el-drawer, .el-dialog')) return
-  const delta = normalizedReaderWheelDelta({
-    deltaX: event.deltaX,
-    deltaY: event.deltaY,
-    deltaMode: event.deltaMode,
-    fontSize: reader.fontSize,
-    lineHeight: reader.lineHeight,
-    pageHeight: contentEl.value?.clientHeight || window.innerHeight || 800,
-  })
-  if (Math.abs(delta) < 4) return
-  if (isScrollRead.value) {
-    if (!contentEl.value) return
-    event.preventDefault()
-    scrollReaderByWheel(delta)
-    return
-  }
-  event.preventDefault()
-  const now = Date.now()
-  if (now - lastWheelPageAt < Math.max(140, reader.animateDuration + 40)) return
-  lastWheelPageAt = now
-  if (delta > 0) {
-    nextPage()
-  } else {
-    previousPage()
-  }
-}
-
-function scrollReaderByWheel(delta) {
-  const el = contentEl.value
-  if (!el) return
-  const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
-  const atTop = el.scrollTop <= 2
-  const atBottom = el.scrollTop >= bottom - 2
-  if (delta < 0 && atTop) {
-    previousPage()
-    return
-  }
-  if (delta > 0 && atBottom) {
-    nextPage()
-    return
-  }
-  el.scrollTop = Math.max(0, Math.min(bottom, el.scrollTop + delta))
-}
-
 function toggleReaderChrome() {
   if (isMobileReader.value) {
     mobileChromeVisible.value = !mobileChromeVisible.value
@@ -1962,62 +1586,6 @@ function toggleReaderChrome() {
   showSettingsDrawer.value = false
 }
 
-function toggleMobileReaderChrome() {
-  if (isMobileReader.value) toggleReaderChrome()
-}
-
-function updateFlipLayout() {
-  if (!contentEl.value || !contentBody.value) return
-  const viewport = readableViewportSize()
-  if (reader.mode === 'flip') {
-    const layout = readerFlipPageLayout({
-      viewportWidth: viewport.width,
-      viewportHeight: viewport.height,
-      scrollWidth: contentBody.value.scrollWidth,
-      currentPage: page.value,
-    })
-    pageWidth.value = layout.pageWidth
-    pageHeight.value = layout.pageHeight
-    pageCount.value = layout.pageCount
-    page.value = layout.page
-    return
-  }
-  if (reader.mode === 'page') {
-    const layout = readerVerticalPageLayout({
-      scrollHeight: contentEl.value.scrollHeight,
-      clientHeight: contentEl.value.clientHeight,
-      scrollTop: contentEl.value.scrollTop,
-      pageHeight: scrollStep(),
-    })
-    pageHeight.value = layout.pageHeight
-    pageCount.value = layout.pageCount
-    page.value = layout.page
-    return
-  }
-  // 滚动模式
-  pageCount.value = 1
-  page.value = 0
-}
-
-function readableViewportSize() {
-  const el = contentEl.value
-  if (!el) {
-    return { width: window.innerWidth, height: window.innerHeight }
-  }
-  const style = window.getComputedStyle(el)
-  const horizontalPadding = parseFloat(style.paddingLeft || '0') + parseFloat(style.paddingRight || '0')
-  const verticalPadding = parseFloat(style.paddingTop || '0') + parseFloat(style.paddingBottom || '0')
-  return {
-    width: Math.max(1, el.clientWidth - horizontalPadding),
-    height: Math.max(1, el.clientHeight - verticalPadding),
-  }
-}
-
-function handleResize() {
-  windowWidth.value = currentViewportWidth()
-  updateFlipLayout()
-}
-
 function handleReaderPageHide() {
   saveCurrentProgress({ force: true, background: true })
 }
@@ -2026,234 +1594,11 @@ function handleReaderVisibilityChange() {
   if (document.hidden) saveCurrentProgress({ force: true, background: true })
 }
 
-async function handleProgressUpdated(event) {
-  const progress = event?.detail?.progress
-  if (!progress?.bookId || Number(progress.bookId) !== Number(bookId.value)) return
-  if (!chapter.value || restoringPosition || isProgressSaveBusy()) return
-  const localKey = progressSaveKey(currentProgressPayload())
-  const remoteKey = progressSaveKey({
-    bookId: progress.bookId,
-    chapterId: progress.chapterId,
-    chapterIndex: progress.chapterIndex,
-    offset: progress.offset,
-    percent: progress.percent,
-    chapterPercent: progress.chapterPercent,
-  })
-  if (!remoteKey || remoteKey === localKey) return
-  const targetIndex = Math.max(0, Math.min(Number(progress.chapterIndex || 0), Math.max(chapters.value.length - 1, 0)))
-  const targetOffset = Math.max(0, Math.floor(Number(progress.offset || 0)))
-  const restorePercent = Number.isFinite(Number(progress.chapterPercent))
-    ? Math.max(0, Math.min(1, Number(progress.chapterPercent)))
-    : null
-  cancelProgressSave()
-  try {
-    await router.replace({
-      name: 'reader',
-      params: { id: bookId.value },
-      query: {
-        chapter: targetIndex,
-        ...(targetOffset ? { offset: targetOffset } : {}),
-        ...(restorePercent !== null ? { percent: Number(restorePercent.toFixed(6)) } : {}),
-      },
-    })
-    await loadChapter(targetIndex, targetOffset, { restorePercent, saveAfterLoad: false })
-    markProgressSaved(currentProgressPayload())
-  } catch {
-    // If the chapter cannot be applied immediately, the stored progress will be used on the next open.
-  }
-}
-
-async function handleReaderBookDataUpdated(event) {
-  const detail = event?.detail || {}
-  if (!detail.bookId || Number(detail.bookId) !== Number(bookId.value)) return
-  if (detail.book?.id) book.value = detail.book
-  if (!Array.isArray(detail.chapters)) return
-  const restoreOffset = currentOffset()
-  const restorePercent = currentChapterPercent()
-  const targetIndex = Math.max(0, Math.min(currentIndex.value, Math.max(detail.chapters.length - 1, 0)))
-  chapters.value = detail.chapters
-  currentIndex.value = targetIndex
-  chapterContentCache.clearBook(currentChapterCacheBookKey())
-  resetBrowserCachedChapters()
-  resetContentSearchState()
-  await computeBrowserCachedChapters()
-  await loadChapter(targetIndex, restoreOffset, { restorePercent, refresh: true, saveAfterLoad: false })
-}
-
-function onScroll() {
-  if (!isVerticalRead.value) return
-  if (restoringPosition || chapterLoading.value) return
-  updateCurrentChapterFromScroll()
-  maybeExtendShowChapters()
-  updateFlipLayout()
-  progressVersion.value += 1
-  applyLocalProgressSnapshot()
-  scheduleProgressSave(500)
-}
-
-function updateCurrentChapterFromScroll() {
-  if (!isContinuousScrollRead.value) return
-  const snapshot = visibleChapterProgressSnapshot()
-  const nextIndex = Number(snapshot?.chapterIndex)
-  if (!Number.isInteger(nextIndex) || nextIndex === currentIndex.value) return
-  const block = chapterBlocks.value.find(item => item.index === nextIndex)
-  currentIndex.value = nextIndex
-  chapter.value = snapshot?.chapter || chapters.value[nextIndex] || (block?.id ? { id: block.id, title: block.title, index: nextIndex } : chapter.value)
-  content.value = block?.content || content.value
-  pruneScroll2ChapterWindow()
-}
-
-function maybeExtendShowChapters() {
-  if (!isContinuousScrollRead.value || extendingShowChapters || !contentEl.value) return
-  const el = contentEl.value
-  const extension = readerChapterWindowExtension({
-    mode: reader.mode,
-    scrollTop: el.scrollTop,
-    clientHeight: el.clientHeight,
-    scrollHeight: el.scrollHeight,
-  })
-  if (!extension.previous && !extension.next) return
-  extendingShowChapters = true
-  Promise.all([
-    extension.previous ? prependPreviousShowChapter() : Promise.resolve(),
-    extension.next ? appendNextShowChapter() : Promise.resolve(),
-  ])
-    .catch(() => {})
-    .finally(() => {
-      extendingShowChapters = false
-    })
-}
-
-function pruneScroll2ChapterWindow() {
-  if (reader.mode !== 'scroll2' || !contentEl.value || !chapterBlocks.value.length) return
-  const currentBlocks = chapterBlocks.value
-  const plan = readerChapterWindowPrunePlan({
-    blocks: currentBlocks,
-    currentIndex: currentIndex.value,
-    totalChapters: chapters.value.length,
-    previousSize: SHOW_PREV_CHAPTER_SIZE,
-    nextSize: SHOW_NEXT_CHAPTER_SIZE,
-  })
-  if (!plan.changed) return
-  const removedBeforeHeight = plan.removedBeforeIndexes
-    .reduce((sum, index) => {
-      const element = contentBody.value?.querySelector(`.chapter-content[data-index="${index}"]`)
-      return sum + (element?.getBoundingClientRect?.().height || 0)
-    }, 0)
-  const beforeTop = contentEl.value.scrollTop
-  chapterBlocks.value = plan.blocks
-  if (removedBeforeHeight > 0) {
-    nextTick(() => {
-      if (!contentEl.value) return
-      contentEl.value.scrollTop = Math.max(0, beforeTop - removedBeforeHeight)
-    })
-  }
-}
-
 function currentVisibleExcerpt() {
   const paragraph = currentVisibleParagraph()
   const text = paragraph?.textContent?.replace(/\s+/g, ' ').trim()
   if (text) return text.slice(0, 140)
   return lines.value.slice(0, 2).join(' ').slice(0, 140)
-}
-
-function handleReaderSelectionEnd() {
-  scheduleSelectedTextOperation(180)
-}
-
-async function operateSelectedText(text) {
-  const action = await ElMessageBox.confirm('请选择对选中文字执行的操作。', '选择文字', {
-    confirmButtonText: '添加过滤规则',
-    cancelButtonText: '添加书签',
-    distinguishCancelAndClose: true,
-    closeOnClickModal: false,
-    closeOnPressEscape: false,
-    type: 'info',
-  }).catch(result => result)
-  if (action === 'close') return
-  if (action === 'cancel') {
-    await createBookmarkFromSelectedText(text)
-    return
-  }
-  await createReplaceRuleFromSelectedText(text)
-}
-
-async function createReplaceRuleFromSelectedText(text) {
-  const prompt = await ElMessageBox.prompt('替换为留空时表示直接过滤该文字。', '添加过滤规则', {
-    confirmButtonText: '保存',
-    cancelButtonText: '取消',
-    inputValue: '',
-    inputPlaceholder: '替换为',
-  }).catch(() => null)
-  if (!prompt) return
-  const cleanText = String(text || '').trim()
-  if (!cleanText) return
-  const name = cleanText.length > 24 ? `${cleanText.slice(0, 24)}...` : cleanText
-  await createReplaceRule({
-    name,
-    pattern: cleanText,
-    replacement: String(prompt.value || ''),
-    scope: `${book.value?.title || ''};${book.value?.url || ''}`,
-    isRegex: false,
-    enabled: true,
-  })
-  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
-  ElMessage.success('过滤规则已添加')
-}
-
-function currentProgressPayload() {
-  const snapshot = visibleChapterProgressSnapshot()
-  return readerProgressPayload({
-    bookId: bookId.value,
-    visibleSnapshot: snapshot,
-    currentChapter: chapter.value,
-    currentChapterIndex: currentIndex.value,
-    currentOffset: snapshot ? 0 : currentOffset(),
-    currentChapterPercent: snapshot ? 0 : currentChapterPercent(),
-    totalChapters: chapters.value.length,
-  })
-}
-
-function applyLocalProgressSnapshot(payload = currentProgressPayload(), options = {}) {
-  if (!payload?.bookId || !chapter.value) return
-  const nextPayload = {
-    ...payload,
-    baseUpdatedAt: payload.baseUpdatedAt || progressServerBaseUpdatedAt(payload.bookId),
-  }
-  const key = progressSaveKey(nextPayload)
-  if (key === lastLocalProgressKey && !options.force) return
-  lastLocalProgressKey = key
-  reader.applyProgress({
-    ...nextPayload,
-    mode: reader.mode,
-    updatedAt: new Date().toISOString(),
-    pendingSync: true,
-  })
-  upsertReaderBookProgress(reader.progressByBook[nextPayload.bookId])
-}
-
-function upsertReaderBookProgress(progress, options = {}) {
-  if (!progress?.bookId) return
-  if (book.value?.id && Number(book.value.id) === Number(progress.bookId)) {
-    const nextBook = mergeShelfBook(book.value, {
-      id: book.value.id,
-      progress,
-      shelfOrderAt: progress.updatedAt,
-    })
-    book.value = nextBook
-    bookshelf.upsertBook(nextBook)
-    return
-  }
-  bookshelf.applyBookProgress(progress, options)
-}
-
-function progressServerBaseUpdatedAt(targetBookId = bookId.value) {
-  return readerProgressBaseUpdatedAt(reader.progressByBook[targetBookId])
-}
-
-function progressUpdatedAtMs(progress) {
-  const time = Date.parse(progress?.updatedAt || '')
-  return Number.isFinite(time) ? time : 0
 }
 
 function flashParagraph(lineEl) {
