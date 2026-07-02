@@ -667,15 +667,15 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Sortable from 'sortablejs'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Edit, Rank, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
-import { cleanupInactiveUsers, createUser, deleteUsers, listUsers, resetUserPassword, updateUser } from '../api/admin'
+import * as adminApi from '../api/admin'
 import { cacheBookContent, listChapters, listTXTTocRules, previewLocalBook, refreshLocalBook, updateBook, updateBookCategory } from '../api/books'
-import { downloadBackup, listBackups, restoreLegadoBackup, triggerBackup } from '../api/backup'
-import { createReplaceRule, deleteReplaceRule, deleteReplaceRules, listReplaceRules, testReplaceRule, updateReplaceRule, upsertReplaceRules } from '../api/replaceRules'
+import * as backupApi from '../api/backup'
+import * as replaceRulesApi from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
 import { bookHasCategory, mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
@@ -684,13 +684,17 @@ import { useReaderStore } from '../stores/reader'
 import { useUserStore } from '../stores/user'
 import { useBookBookmarks } from '../composables/useBookBookmarks'
 import { useBookContentSearch } from '../composables/useBookContentSearch'
+import { useOverlayUserManagement } from '../composables/useOverlayUserManagement'
+import { useOverlayReplaceRules } from '../composables/useOverlayReplaceRules'
+import { useOverlayBackups } from '../composables/useOverlayBackups'
+import { useOverlayBookmarkActions } from '../composables/useOverlayBookmarkActions'
+import { useOverlayBookImport } from '../composables/useOverlayBookImport'
 import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
-import { normalizeImportedBookmarks } from '../utils/bookmark'
 import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
-import { epubTocRuleOptions, isEPUBLocalPath, isTextLocalPath } from '../utils/localBookToc'
+import { epubTocRuleOptions } from '../utils/localBookToc'
 import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { applyRestoreResult } from '../utils/restoreSync'
@@ -720,16 +724,36 @@ const updatingBookId = ref(null)
 const editingBookSaving = ref(false)
 const selectedCategoryIds = ref([])
 const settingCategorySaving = ref(false)
-const importingBook = ref(false)
-const previewingImport = ref(false)
-const importPreview = ref(null)
 const visibilitySavingId = ref(null)
 const groupOrderDraftIds = ref([])
 const groupOrderSaving = ref(false)
 const groupManageTableRef = ref(null)
-const importDraft = reactive({ title: '', author: '', categoryIds: [], file: null, tocRule: '' })
-const tocRuleOptions = ref([])
-const tocRulesLoading = ref(false)
+const {
+  importing: importingBook,
+  previewing: previewingImport,
+  previewData: importPreview,
+  draft: importDraft,
+  tocRuleOptions,
+  tocRulesLoading,
+  isText: importIsText,
+  isEPUB: importIsEPUB,
+  supportsTocRule: importSupportsTocRule,
+  open: loadImportCategories,
+  pickFile: pickImportFile,
+  preview: previewImportFile,
+  importBook: importLocalBook,
+} = useOverlayBookImport({
+  visible: computed(() => overlay.importBookVisible),
+  loadCategories: () => warmOverlayCategories(),
+  listTocRules: () => listTXTTocRules(),
+  previewBook: (...args) => previewLocalBook(...args),
+  importBook: payload => bookshelf.importTXT(payload),
+  close: () => {
+    overlay.importBookVisible = false
+  },
+  onSuccess: message => ElMessage.success(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
 const sourceRows = ref([])
 const contentSearchBook = computed(() => overlay.searchBook)
 const contentSearchBookId = computed(() => overlay.searchBook?.id)
@@ -768,44 +792,127 @@ const {
   isActive: () => overlay.bookmarkVisible,
   onLoadError: error => ElMessage.error(readError(error, '加载书签失败')),
 })
-const bookmarkEditorVisible = ref(false)
-const editingBookmark = ref(null)
-const bookmarkDraft = reactive({ title: '', excerpt: '', note: '' })
-const backups = ref([])
-const backupLoading = ref(false)
-const backupListLoading = ref(false)
-const restoreLoading = ref(false)
-const users = ref([])
-const usersLoading = ref(false)
-const cleanupLoading = ref(false)
-const deletingUsers = ref(false)
-const creatingUser = ref(false)
-const userCreateDialog = ref(false)
-const selectedUserIds = ref([])
-const userDraft = reactive({ username: '', password: '', role: 'user', canEditSources: true, canAccessStore: true })
-const replaceRules = ref([])
-const replaceRulesLoading = ref(false)
-const replaceRuleImporting = ref(false)
-const selectedReplaceRuleIds = ref([])
-const replaceRuleFileInput = ref(null)
-const replaceRuleDialog = ref(false)
-const replaceRuleSaving = ref(false)
-const replaceRuleTesting = ref(false)
-const editingReplaceRuleId = ref(null)
-const replaceRuleDraft = ref({ name: '', pattern: '', replacement: '', scope: '*', isRegex: false, enabled: true })
-const replaceRuleTestText = ref('广告123\n正文内容')
-const replaceRuleTestResult = ref(null)
+const {
+  editorVisible: bookmarkEditorVisible,
+  draft: bookmarkDraft,
+  jump: jumpToBookmark,
+  openEditor: openBookmarkEditor,
+  saveEdit: saveBookmarkEdit,
+  removeOne: removeBookmarkItem,
+  removeMany: removeBookmarkItems,
+  importRows: importBookmarkItems,
+} = useOverlayBookmarkActions({
+  getBook: () => overlay.bookmarkBook,
+  closePanel: () => {
+    overlay.bookmarkVisible = false
+  },
+  navigate: routeLocation => router.push(routeLocation),
+  update: updateBookmarkData,
+  remove: removeBookmarkData,
+  removeMany: removeBookmarkRows,
+  importPayloads: importBookmarkPayloads,
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  onSuccess: message => ElMessage.success(message),
+  onInvalidImport: message => ElMessage.error(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  backups,
+  backupLoading,
+  listLoading: backupListLoading,
+  restoreLoading,
+  load: loadBackups,
+  run: runBackup,
+  download: downloadBackupFile,
+  restore: restoreBackup,
+} = useOverlayBackups({
+  ...backupApi,
+  restoreBackup: backupApi.restoreLegadoBackup,
+  applyRestoreResult,
+  saveBlob: downloadBlob,
+  createFormData: () => new FormData(),
+  onSuccess: message => ElMessage.success(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  users,
+  usersLoading,
+  cleanupLoading,
+  deletingUsers,
+  creatingUser,
+  createDialogVisible: userCreateDialog,
+  selectedUserIds,
+  draft: userDraft,
+  load: loadUsers,
+  handleUpdated: handleUsersUpdated,
+  clearRefresh: clearUsersRefreshTimer,
+  isDeletable: isUserDeletable,
+  changeSelection: onUserSelectionChange,
+  toggleSelection: toggleUserSelection,
+  openCreateDialog: openCreateUserDialog,
+  create: createManagedUser,
+  resetPassword,
+  removeSelected: deleteSelectedUsers,
+  updatePermission: updateUserPermission,
+  cleanupInactive,
+} = useOverlayUserManagement({
+  userStore,
+  getCurrentUserId: () => userStore.profile?.id || null,
+  isActive: () => overlay.userManageVisible,
+  ...adminApi,
+  prompt: (...args) => ElMessageBox.prompt(...args),
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  onSuccess: message => ElMessage.success(message),
+  onWarning: message => ElMessage.warning(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  rules: replaceRules,
+  loading: replaceRulesLoading,
+  importing: replaceRuleImporting,
+  selectedIds: selectedReplaceRuleIds,
+  fileInput: replaceRuleFileInput,
+  dialogVisible: replaceRuleDialog,
+  saving: replaceRuleSaving,
+  testing: replaceRuleTesting,
+  editingId: editingReplaceRuleId,
+  draft: replaceRuleDraft,
+  testText: replaceRuleTestText,
+  testResult: replaceRuleTestResult,
+  load: loadReplaceRules,
+  handleUpdated: handleReplaceRulesUpdated,
+  clearRefresh: clearReplaceRulesRefreshTimer,
+  changeSelection: onReplaceRuleSelectionChange,
+  toggleSelection: toggleReplaceRuleSelection,
+  triggerImport: triggerReplaceRuleImport,
+  importFile: importReplaceRuleFile,
+  normalize: normalizeReplaceRule,
+  openEditor: openReplaceRuleEditor,
+  save: saveReplaceRule,
+  toggle: toggleReplaceRule,
+  runTest: runReplaceRuleTest,
+  remove: removeReplaceRule,
+  removeSelected: deleteSelectedReplaceRules,
+} = useOverlayReplaceRules({
+  isActive: () => overlay.replaceRulesVisible,
+  ...replaceRulesApi,
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  notifyUpdated: () => {
+    window.dispatchEvent(new CustomEvent(
+      'openreader:replace-rules-updated',
+      { detail: { local: true } },
+    ))
+  },
+  onSuccess: message => ElMessage.success(message),
+  onWarning: message => ElMessage.warning(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
 const manageKeyword = ref('')
 const windowWidth = ref(currentViewportWidth())
-let replaceRulesRefreshTimer
-let usersRefreshTimer
 let sourceRowsRefreshTimer
 let groupSortable
 
 const isMobileOverlay = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
-const importIsText = computed(() => isTextLocalPath(importDraft.file?.name))
-const importIsEPUB = computed(() => isEPUBLocalPath(importDraft.file?.name))
-const importSupportsTocRule = computed(() => importIsText.value || importIsEPUB.value)
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
 const wideDrawerSize = computed(() => isMobileOverlay.value ? '88%' : '82%')
 const narrowDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -869,8 +976,6 @@ function isShelfBook(book) {
   if (!bookUrl) return false
   return bookshelf.books.some(item => String(item.url || item.bookUrl || '').trim() === bookUrl)
 }
-const currentUserId = computed(() => userStore.profile?.id || null)
-
 onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
@@ -894,97 +999,6 @@ onBeforeUnmount(() => {
 function updateWindowWidth() {
   windowWidth.value = currentViewportWidth()
 }
-
-async function loadImportCategories() {
-  try {
-    await warmOverlayCategories()
-  } catch (err) {
-    ElMessage.error(readError(err, '加载分组失败'))
-  }
-}
-
-async function loadTXTTocRuleOptions() {
-  if (tocRuleOptions.value.length || tocRulesLoading.value) return
-  tocRulesLoading.value = true
-  try {
-    const { data } = await listTXTTocRules()
-    tocRuleOptions.value = Array.isArray(data) ? data.filter(rule => rule?.enable !== false && rule?.rule) : []
-  } catch (err) {
-    ElMessage.error(readError(err, '加载目录规则失败'))
-  } finally {
-    tocRulesLoading.value = false
-  }
-}
-
-function pickImportFile(data) {
-  importDraft.file = data.raw || null
-  importDraft.title = ''
-  importDraft.author = ''
-  importPreview.value = null
-  if (importIsEPUB.value) importDraft.tocRule = 'spin+toc'
-  else if (!importIsText.value) importDraft.tocRule = ''
-  if (importDraft.file) previewImportFile()
-}
-
-async function previewImportFile() {
-  if (!importDraft.file) return
-  previewingImport.value = true
-  try {
-    const { data } = await previewLocalBook(importDraft.file, {
-      title: importDraft.title,
-      author: importDraft.author,
-      tocRule: importSupportsTocRule.value ? importDraft.tocRule : '',
-    })
-    importPreview.value = data
-    if (!importDraft.title && data.title) importDraft.title = data.title
-    if (!importDraft.author && data.author) importDraft.author = data.author
-  } catch (err) {
-    importPreview.value = null
-    ElMessage.error(readError(err, '解析书籍失败'))
-  } finally {
-    previewingImport.value = false
-  }
-}
-
-async function importLocalBook() {
-  if (!importDraft.file || !importPreview.value) return
-  importingBook.value = true
-  try {
-    const book = await bookshelf.importTXT({
-      file: importDraft.file,
-      title: importDraft.title,
-      author: importDraft.author,
-      categoryIds: importDraft.categoryIds,
-      tocRule: importSupportsTocRule.value ? importDraft.tocRule : '',
-    })
-    ElMessage.success(`已导入《${book.title}》，共 ${book.chapterCount || 0} 章`)
-    Object.assign(importDraft, { title: '', author: '', categoryIds: [], file: null, tocRule: '' })
-    importPreview.value = null
-    overlay.importBookVisible = false
-  } catch (err) {
-    ElMessage.error(readError(err, '导入失败'))
-  } finally {
-    importingBook.value = false
-  }
-}
-
-watch(
-  () => [importIsText.value, importIsEPUB.value],
-  ([text, epub]) => {
-    if (text) loadTXTTocRuleOptions()
-    else if (epub) importDraft.tocRule = 'spin+toc'
-    else importDraft.tocRule = ''
-  },
-)
-
-watch(
-  () => overlay.importBookVisible,
-  (visible) => {
-    if (visible) return
-    Object.assign(importDraft, { title: '', author: '', categoryIds: [], file: null, tocRule: '' })
-    importPreview.value = null
-  },
-)
 
 watch(
   () => overlay.bookManageVisible || overlay.bookGroupVisible,
@@ -1660,85 +1674,6 @@ function jumpToContentResult(result) {
   })
 }
 
-function jumpToBookmark(bookmark) {
-  const book = overlay.bookmarkBook
-  if (!book?.id) return
-  overlay.bookmarkVisible = false
-  router.push({
-    name: 'reader',
-    params: { id: book.id },
-    query: {
-      chapter: bookmark.chapterIndex,
-      offset: bookmark.offset || 0,
-      percent: Number.isFinite(Number(bookmark.percent)) ? Number(bookmark.percent) : undefined,
-    },
-  })
-}
-
-function openBookmarkEditor(bookmark) {
-  editingBookmark.value = bookmark
-  Object.assign(bookmarkDraft, {
-    title: bookmark.title || '',
-    excerpt: bookmark.excerpt || '',
-    note: bookmark.note || '',
-  })
-  bookmarkEditorVisible.value = true
-}
-
-async function saveBookmarkEdit() {
-  if (!editingBookmark.value) return
-  try {
-    await updateBookmarkData(editingBookmark.value.id, {
-      title: bookmarkDraft.title,
-      excerpt: bookmarkDraft.excerpt,
-      note: bookmarkDraft.note,
-    })
-    bookmarkEditorVisible.value = false
-    ElMessage.success('书签已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新书签失败'))
-  }
-}
-
-async function removeBookmarkItem(bookmark) {
-  try {
-    await removeBookmarkData(bookmark.id)
-    ElMessage.success('书签已删除')
-  } catch (err) {
-    ElMessage.error(readError(err, '删除书签失败'))
-  }
-}
-
-async function removeBookmarkItems(rows) {
-  if (!Array.isArray(rows) || !rows.length) return
-  try {
-    await ElMessageBox.confirm(`确认要删除所选择的 ${rows.length} 条书签吗？`, '批量删除书签', { type: 'warning' })
-    await removeBookmarkRows(rows)
-    ElMessage.success('书签已删除')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '批量删除书签失败'))
-  }
-}
-
-async function importBookmarkItems(rows) {
-  const book = overlay.bookmarkBook
-  if (!book?.id) return
-  const payloads = normalizeImportedBookmarks(rows)
-  if (!payloads.length) {
-    ElMessage.error('书签文件没有可导入内容')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(`确认要导入文件中的 ${payloads.length} 条书签到当前书籍吗？`, '导入书签', { type: 'info' })
-    const created = await importBookmarkPayloads(payloads)
-    ElMessage.success(`已导入 ${created.length} 条书签`)
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '导入书签失败'))
-  }
-}
-
 function formatSize(bytes) {
   if (!bytes) return '0 B'
   if (bytes < 1024) return `${bytes} B`
@@ -1753,442 +1688,6 @@ function formatDate(value) {
 
 function joinPath(base, name) {
   return [base, name].filter(Boolean).join('/')
-}
-
-async function runBackup() {
-  backupLoading.value = true
-  try {
-    const { data } = await triggerBackup()
-    ElMessage.success(`备份已保存到 WebDAV：${data.name || data.path || 'backup.zip'}`)
-    await loadBackups()
-  } catch (err) {
-    ElMessage.error(readError(err, '保存备份失败'))
-  } finally {
-    backupLoading.value = false
-  }
-}
-
-async function loadBackups() {
-  backupListLoading.value = true
-  try {
-    const { data } = await listBackups()
-    backups.value = data || []
-  } catch (err) {
-    ElMessage.error(readError(err, '加载备份列表失败'))
-  } finally {
-    backupListLoading.value = false
-  }
-}
-
-async function downloadBackupFile(row) {
-  try {
-    const resp = await downloadBackup(row.name)
-    downloadBlob(resp.data, row.name)
-  } catch (err) {
-    ElMessage.error(readError(err, '下载备份失败'))
-  }
-}
-
-async function restoreBackup(data) {
-  const file = data.raw
-  if (!file) return
-  restoreLoading.value = true
-  try {
-    const form = new FormData()
-    form.append('file', file)
-    const { data: result } = await restoreLegadoBackup(form)
-    ElMessage.success(`恢复完成：书源 ${result.sources || 0}，书籍 ${result.books || 0}，进度 ${result.progress || 0}`)
-    await applyRestoreResult(result)
-  } catch (err) {
-    ElMessage.error(readError(err, '恢复备份失败'))
-  } finally {
-    restoreLoading.value = false
-  }
-}
-
-async function loadUsers() {
-  usersLoading.value = true
-  try {
-    if (!userStore.profile) await userStore.loadMe()
-    const { data } = await listUsers()
-    users.value = data || []
-    selectedUserIds.value = selectedUserIds.value.filter(id => users.value.some(user => user.id === id && isUserDeletable(user)))
-  } catch (err) {
-    ElMessage.error(readError(err, '加载用户失败'))
-  } finally {
-    usersLoading.value = false
-  }
-}
-
-function handleUsersUpdated() {
-  if (!overlay.userManageVisible) return
-  scheduleUsersRefresh()
-}
-
-function scheduleUsersRefresh() {
-  clearUsersRefreshTimer()
-  usersRefreshTimer = window.setTimeout(async () => {
-    usersRefreshTimer = undefined
-    await loadUsers()
-  }, 250)
-}
-
-function clearUsersRefreshTimer() {
-  if (!usersRefreshTimer) return
-  window.clearTimeout(usersRefreshTimer)
-  usersRefreshTimer = undefined
-}
-
-function isUserDeletable(user) {
-  return user.role !== 'admin' && user.id !== currentUserId.value
-}
-
-function onUserSelectionChange(rows) {
-  selectedUserIds.value = rows.filter(isUserDeletable).map(user => user.id)
-}
-
-function toggleUserSelection(id, checked) {
-  const user = users.value.find(item => item.id === id)
-  if (!user || !isUserDeletable(user)) return
-  if (checked) {
-    if (!selectedUserIds.value.includes(id)) selectedUserIds.value.push(id)
-    return
-  }
-  selectedUserIds.value = selectedUserIds.value.filter(item => item !== id)
-}
-
-function openCreateUserDialog() {
-  Object.assign(userDraft, {
-    username: '',
-    password: '',
-    role: 'user',
-    canEditSources: true,
-    canAccessStore: true,
-  })
-  userCreateDialog.value = true
-}
-
-async function createManagedUser() {
-  const username = userDraft.username.trim()
-  if (username.length < 3 || userDraft.password.length < 6) {
-    ElMessage.warning('用户名至少 3 位，密码至少 6 位')
-    return
-  }
-  creatingUser.value = true
-  try {
-    await createUser({
-      username,
-      password: userDraft.password,
-      role: userDraft.role,
-      canEditSources: userDraft.canEditSources,
-      canAccessStore: userDraft.canAccessStore,
-    })
-    ElMessage.success('新增用户成功')
-    userCreateDialog.value = false
-    await loadUsers()
-  } catch (err) {
-    ElMessage.error(readError(err, '新增用户失败'))
-  } finally {
-    creatingUser.value = false
-  }
-}
-
-async function resetPassword(row) {
-  try {
-    const res = await ElMessageBox.prompt('', `重置 ${row.username} 的密码`, {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      inputType: 'password',
-      inputValidator(value) {
-        if (!value || value.length < 6) return '密码至少 6 位'
-        return true
-      },
-    })
-    await resetUserPassword(row.id, { password: res.value })
-    ElMessage.success('重置密码成功')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '重置密码失败'))
-  }
-}
-
-async function deleteSelectedUsers() {
-  const ids = [...selectedUserIds.value]
-  if (!ids.length) {
-    ElMessage.warning('请选择需要删除的用户')
-    return
-  }
-  deletingUsers.value = true
-  try {
-    await ElMessageBox.confirm(`确认要删除所选择的 ${ids.length} 个用户吗？该用户空间内的书架、进度、书签和设置也会删除。`, '批量删除用户', { type: 'warning' })
-    const { data } = await deleteUsers(ids)
-    selectedUserIds.value = []
-    ElMessage.success(`删除用户成功：${data.deleted || ids.length} 个`)
-    await loadUsers()
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '删除用户失败'))
-  } finally {
-    deletingUsers.value = false
-  }
-}
-
-async function updateUserPermission(row) {
-  try {
-    await updateUser(row.id, {
-      canEditSources: row.canEditSources,
-      canAccessStore: row.canAccessStore,
-      bookLimit: row.bookLimit,
-      sourceLimit: row.sourceLimit,
-    })
-    ElMessage.success('用户权限已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新用户失败'))
-    await loadUsers()
-  }
-}
-
-async function cleanupInactive() {
-  cleanupLoading.value = true
-  try {
-    await ElMessageBox.confirm('确定清理不活跃用户吗？', '清理用户', { type: 'warning' })
-    await cleanupInactiveUsers()
-    ElMessage.success('清理完成')
-    await loadUsers()
-  } catch (err) {
-    if (err !== 'cancel' && err !== 'close') ElMessage.error(readError(err, '清理用户失败'))
-  } finally {
-    cleanupLoading.value = false
-  }
-}
-
-async function loadReplaceRules() {
-  replaceRulesLoading.value = true
-  try {
-    const { data } = await listReplaceRules()
-    replaceRules.value = Array.isArray(data) ? data.map(normalizeReplaceRule) : []
-    selectedReplaceRuleIds.value = selectedReplaceRuleIds.value.filter(id => replaceRules.value.some(rule => rule.id === id))
-  } catch (err) {
-    ElMessage.error(readError(err, '加载替换规则失败'))
-  } finally {
-    replaceRulesLoading.value = false
-  }
-}
-
-function handleReplaceRulesUpdated(event) {
-  if (event?.detail?.local || !overlay.replaceRulesVisible) return
-  scheduleReplaceRulesRefresh()
-}
-
-function scheduleReplaceRulesRefresh() {
-  clearReplaceRulesRefreshTimer()
-  replaceRulesRefreshTimer = window.setTimeout(async () => {
-    replaceRulesRefreshTimer = undefined
-    await loadReplaceRules()
-  }, 250)
-}
-
-function clearReplaceRulesRefreshTimer() {
-  if (!replaceRulesRefreshTimer) return
-  window.clearTimeout(replaceRulesRefreshTimer)
-  replaceRulesRefreshTimer = undefined
-}
-
-function onReplaceRuleSelectionChange(rows) {
-  selectedReplaceRuleIds.value = rows.map(row => row.id)
-}
-
-function toggleReplaceRuleSelection(id, checked) {
-  if (checked) {
-    if (!selectedReplaceRuleIds.value.includes(id)) selectedReplaceRuleIds.value.push(id)
-    return
-  }
-  selectedReplaceRuleIds.value = selectedReplaceRuleIds.value.filter(item => item !== id)
-}
-
-function triggerReplaceRuleImport() {
-  replaceRuleFileInput.value?.click()
-}
-
-async function importReplaceRuleFile(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (!file) return
-  replaceRuleImporting.value = true
-  try {
-    const text = await file.text()
-    const parsed = JSON.parse(text)
-    const ruleList = normalizeReplaceRuleImport(parsed)
-    if (!ruleList.length) {
-      ElMessage.warning('替换规则文件中没有可导入的规则')
-      return
-    }
-    await ElMessageBox.confirm(`确认要导入文件中的 ${ruleList.length} 条替换规则吗？`, '导入替换规则', { type: 'warning' })
-    const { data } = await upsertReplaceRules(ruleList)
-    ElMessage.success(`导入替换规则成功：新增 ${data?.created || 0}，更新 ${data?.updated || 0}` + (data?.skipped ? `，跳过 ${data.skipped}` : ''))
-    await loadReplaceRules()
-    notifyReplaceRulesUpdated()
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '导入替换规则失败'))
-  } finally {
-    replaceRuleImporting.value = false
-  }
-}
-
-function normalizeReplaceRuleImport(input) {
-  const rows = Array.isArray(input) ? input : Array.isArray(input?.rules) ? input.rules : []
-  return rows
-    .map((rule, index) => ({
-      name: String(rule.name || rule.title || `导入规则 ${index + 1}`).trim(),
-      pattern: String(rule.pattern || rule.regex || rule.match || '').trim(),
-      replacement: String(rule.replacement ?? rule.replace ?? ''),
-      scope: String(rule.scope || '*').trim() || '*',
-      isRegex: rule.isRegex === true,
-      enabled: rule.enabled === false || rule.isEnabled === false ? false : true,
-    }))
-    .filter(rule => rule.pattern)
-}
-
-function normalizeReplaceRule(rule = {}) {
-  rule = rule || {}
-  return {
-    ...rule,
-    scope: String(rule.scope || '*').trim() || '*',
-    isRegex: rule.isRegex == null ? true : rule.isRegex === true,
-    enabled: rule.enabled === false || rule.isEnabled === false ? false : true,
-  }
-}
-
-function openReplaceRuleEditor(rule = null) {
-  if (!rule) {
-    editingReplaceRuleId.value = null
-    replaceRuleDraft.value = { name: '', pattern: '', replacement: '', scope: '*', isRegex: false, enabled: true }
-    replaceRuleTestResult.value = null
-    replaceRuleDialog.value = true
-    return
-  }
-  const normalized = normalizeReplaceRule(rule)
-  editingReplaceRuleId.value = normalized.id || null
-  replaceRuleDraft.value = {
-    name: normalized.name || '',
-    pattern: normalized.pattern || '',
-    replacement: normalized.replacement || '',
-    scope: normalized.scope || '*',
-    isRegex: normalized.isRegex,
-    enabled: normalized.enabled,
-  }
-  replaceRuleTestResult.value = null
-  replaceRuleDialog.value = true
-}
-
-async function saveReplaceRule() {
-  if (!replaceRuleDraft.value.pattern.trim()) {
-    ElMessage.warning('匹配规则不能为空')
-    return
-  }
-  replaceRuleSaving.value = true
-  try {
-    const payload = normalizeReplaceRule({
-      ...replaceRuleDraft.value,
-      pattern: replaceRuleDraft.value.pattern.trim(),
-      scope: replaceRuleDraft.value.scope,
-    })
-    if (editingReplaceRuleId.value) {
-      await updateReplaceRule(editingReplaceRuleId.value, payload)
-      ElMessage.success('替换规则已更新')
-    } else {
-      await createReplaceRule(payload)
-      ElMessage.success('替换规则已创建')
-    }
-    replaceRuleDialog.value = false
-    await loadReplaceRules()
-    notifyReplaceRulesUpdated()
-  } catch (err) {
-    ElMessage.error(readError(err, '保存替换规则失败'))
-  } finally {
-    replaceRuleSaving.value = false
-  }
-}
-
-async function toggleReplaceRule(rule, enabled) {
-  const normalized = normalizeReplaceRule({ ...rule, enabled })
-  try {
-    await updateReplaceRule(normalized.id, {
-      name: normalized.name,
-      pattern: normalized.pattern,
-      replacement: normalized.replacement,
-      scope: normalized.scope,
-      isRegex: normalized.isRegex,
-      enabled: normalized.enabled,
-    })
-    rule.enabled = normalized.enabled
-    rule.isEnabled = normalized.enabled
-    ElMessage.success(normalized.enabled ? '规则已启用' : '规则已停用')
-    notifyReplaceRulesUpdated()
-  } catch (err) {
-    ElMessage.error(readError(err, '更新替换规则失败'))
-    await loadReplaceRules()
-  }
-}
-
-async function runReplaceRuleTest() {
-  if (!replaceRuleDraft.value.pattern.trim() || !replaceRuleTestText.value) {
-    ElMessage.warning('请输入匹配规则和测试文本')
-    return
-  }
-  replaceRuleTesting.value = true
-  try {
-    const { data } = await testReplaceRule({
-      pattern: replaceRuleDraft.value.pattern,
-      replacement: replaceRuleDraft.value.replacement,
-      isRegex: replaceRuleDraft.value.isRegex,
-      text: replaceRuleTestText.value,
-    })
-    replaceRuleTestResult.value = data
-  } catch (err) {
-    ElMessage.error(readError(err, '测试替换规则失败'))
-  } finally {
-    replaceRuleTesting.value = false
-  }
-}
-
-async function removeReplaceRule(rule) {
-  try {
-    await ElMessageBox.confirm(`确定删除替换规则“${rule.name || rule.pattern}”吗？`, '删除替换规则', { type: 'warning' })
-    await deleteReplaceRule(rule.id)
-    replaceRules.value = replaceRules.value.filter(item => item.id !== rule.id)
-    selectedReplaceRuleIds.value = selectedReplaceRuleIds.value.filter(id => id !== rule.id)
-    ElMessage.success('替换规则已删除')
-    notifyReplaceRulesUpdated()
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '删除替换规则失败'))
-  }
-}
-
-async function deleteSelectedReplaceRules() {
-  const ids = [...selectedReplaceRuleIds.value]
-  if (!ids.length) {
-    ElMessage.warning('请选择需要删除的替换规则')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(`确认要删除所选择的 ${ids.length} 条替换规则吗？`, '批量删除替换规则', { type: 'warning' })
-    const { data } = await deleteReplaceRules(ids)
-    const deletedIds = Array.isArray(data?.deletedIds) ? data.deletedIds : []
-    replaceRules.value = replaceRules.value.filter(rule => !deletedIds.includes(rule.id))
-    selectedReplaceRuleIds.value = []
-    ElMessage.success('删除替换规则成功')
-    notifyReplaceRulesUpdated()
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '删除替换规则失败'))
-  }
-}
-
-function notifyReplaceRulesUpdated() {
-  window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated', { detail: { local: true } }))
 }
 
 async function createCategory() {

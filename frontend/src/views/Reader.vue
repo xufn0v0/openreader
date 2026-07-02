@@ -255,7 +255,7 @@
 </template>
 
 <script setup>
-import { computed, h, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api/client'
@@ -281,11 +281,12 @@ import ReaderTocPanel from '../components/reader/ReaderTocPanel.vue'
 import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore, themePresets } from '../stores/reader'
-import { useKeyboard } from '../composables/useKeyboard'
 import { useGesture } from '../composables/useGesture'
-import { useAutoReading } from '../composables/useAutoReading'
 import { useReaderAppearanceAssets } from '../composables/useReaderAppearanceAssets'
+import { useReaderAutoReading } from '../composables/useReaderAutoReading'
 import { useReaderBookLoad } from '../composables/useReaderBookLoad'
+import { useReaderBookState } from '../composables/useReaderBookState'
+import { useReaderCatalogActions } from '../composables/useReaderCatalogActions'
 import { useBookBookmarks } from '../composables/useBookBookmarks'
 import { useBookContentSearch } from '../composables/useBookContentSearch'
 import { useBookSourceChange } from '../composables/useBookSourceChange'
@@ -293,9 +294,14 @@ import { useBookSourceCandidates } from '../composables/useBookSourceCandidates'
 import { useReaderChapterCache } from '../composables/useReaderChapterCache'
 import { useReaderChapterContent } from '../composables/useReaderChapterContent'
 import { useReaderChapterLoader } from '../composables/useReaderChapterLoader'
+import { useReaderChapterMaintenance } from '../composables/useReaderChapterMaintenance'
+import { useReaderChapterPresentation } from '../composables/useReaderChapterPresentation'
 import { useReaderChapterWindow } from '../composables/useReaderChapterWindow'
+import { useReaderChrome } from '../composables/useReaderChrome'
 import { useReaderExternalUpdates } from '../composables/useReaderExternalUpdates'
 import { useReaderLayout } from '../composables/useReaderLayout'
+import { useReaderKeyboard } from '../composables/useReaderKeyboard'
+import { useReaderLocalTocRulePicker } from '../composables/useReaderLocalTocRulePicker'
 import { useReaderLocalProgress } from '../composables/useReaderLocalProgress'
 import { useReaderProgressPersistence } from '../composables/useReaderProgressPersistence'
 import { useReaderProgressControls } from '../composables/useReaderProgressControls'
@@ -303,6 +309,7 @@ import { useReaderBookmarkActions } from '../composables/useReaderBookmarkAction
 import { useReaderNavigation } from '../composables/useReaderNavigation'
 import { useReaderMode } from '../composables/useReaderMode'
 import { useReaderPageLifecycle } from '../composables/useReaderPageLifecycle'
+import { useReaderPanels } from '../composables/useReaderPanels'
 import { useReaderPositionRestore } from '../composables/useReaderPositionRestore'
 import { useReaderPointer } from '../composables/useReaderPointer'
 import { useReaderRouteSync } from '../composables/useReaderRouteSync'
@@ -321,17 +328,13 @@ import { useReaderWheel } from '../composables/useReaderWheel'
 import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
 import { clearBookBrowserChapterCache } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
-import { simplized, traditionalized } from '../utils/chinese'
-import { epubTocRuleOptions, isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
+import { isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import {
   readerScrollBehaviorForDuration,
   readerScrollStep,
 } from '../utils/readerPagination'
-import { READER_CHAPTER_END_OFFSET } from '../utils/readerPosition'
-import { parseReaderContentBlocks } from '../utils/readerContent'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
-import { invalidateReaderDataCache as invalidateReaderCache, readerDataCacheKey as scopedReaderDataCacheKey, writeReaderDataCache as writeReaderCache } from '../utils/readerDataCache'
 import { createMultiBookChapterMemoryCache } from '../utils/multiBookChapterMemoryCache'
 import { sourceCandidateSourceName } from '../utils/sourceCandidate'
 
@@ -361,6 +364,17 @@ const {
 const book = ref(null)
 const chapters = ref([])
 const chapter = ref(null)
+const {
+  cacheKey: readerDataCacheKey,
+  invalidate: invalidateReaderDataCache,
+  mergeLoadedBook,
+  write: writeReaderDataCache,
+} = useReaderBookState({
+  book,
+  bookId,
+  bookshelf,
+  mergeBook: mergeShelfBook,
+})
 const {
   items: bookmarks,
   mutating: savingBookmark,
@@ -490,7 +504,7 @@ const {
 } = useBookSourceChange({
   book,
   bookId,
-  onChanged: applyReaderSourceChange,
+  onChanged: (...args) => applyReaderSourceChange(...args),
   onSuccess: (_data, source) => ElMessage.success(`已切换到 ${sourceCandidateSourceName(source)}`),
   onError: error => ElMessage.error(readError(error, '换源失败')),
 })
@@ -581,8 +595,8 @@ const {
   refreshCachedChapters: computeBrowserCachedChapters,
   syncCurrentChapter: updateCurrentChapterFromScroll,
   goChapter: (...args) => goChapter(...args),
-  refreshRemoteCatalog: refreshReaderBookCatalog,
-  refreshLocalCatalog: loadChapters,
+  refreshRemoteCatalog: (...args) => refreshReaderBookCatalog(...args),
+  refreshLocalCatalog: (...args) => loadChapters(...args),
 })
 const {
   cachedChapters: browserCachedChapters,
@@ -600,7 +614,7 @@ const {
   chapters,
   currentIndex,
   isRemoteBook,
-  afterCache: loadChapters,
+  afterCache: (...args) => loadChapters(...args),
   onClearMemory: () => clearChapterContentMemory(),
   notify: message => showReaderToast(message, 1600),
   onNoTargets: () => ElMessage.error('不需要缓存'),
@@ -618,6 +632,96 @@ const {
   memoryCache: chapterContentCache,
   markCached: markBrowserChapterCached,
   preloadRadius: NEARBY_PRELOAD_RADIUS,
+})
+const {
+  clearCurrentBookCache,
+  loadChapters,
+  reloadChapter,
+  resetCaches: resetReaderChapterCaches,
+} = useReaderChapterMaintenance({
+  book,
+  bookId,
+  chapters,
+  currentIndex,
+  isRemoteBook,
+  fetchChapters: async targetBookId => {
+    const { data } = await api.get(`/books/${targetBookId}/chapters`)
+    return data
+  },
+  writeDataCache: writeReaderDataCache,
+  clearMemory: clearChapterContentMemory,
+  resetBrowserState: resetBrowserCachedChapters,
+  clearBrowserCache: clearBookBrowserChapterCache,
+  loadChapter: (...args) => loadChapter(...args),
+  getCurrentOffset: () => currentOffset(),
+  clearServerCache: ids => bookshelf.batchClearCache(ids),
+  clearCurrentBrowserCache: clearCurrentBookBrowserCache,
+  notify: message => showReaderToast(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  choose: chooseReaderLocalTocRule,
+} = useReaderLocalTocRulePicker({
+  book,
+  isEPUBLocalBook,
+  prompt: (...args) => ElMessageBox.prompt(...args),
+  confirm: (...args) => ElMessageBox.confirm(...args),
+})
+const {
+  applySourceChange: applyReaderSourceChange,
+  changeLocalTocRule: changeReaderLocalTocRule,
+  refreshRemoteCatalog: refreshReaderBookCatalog,
+} = useReaderCatalogActions({
+  book,
+  bookId,
+  chapters,
+  currentIndex,
+  canChangeLocalTocRule,
+  chooseLocalTocRule: chooseReaderLocalTocRule,
+  runTocRefreshing,
+  refreshLocalBook: async (...args) => {
+    const { data } = await refreshLocalBook(...args)
+    return data
+  },
+  refreshRemoteBook: async (...args) => {
+    const { data } = await refreshBook(...args)
+    return data
+  },
+  invalidateDataCache: invalidateReaderDataCache,
+  resetChapterCaches: resetReaderChapterCaches,
+  mergeLoadedBook,
+  upsertBook: row => bookshelf.upsertBook(row),
+  getOverlayBook: () => overlay.bookInfoBook,
+  setOverlayBook: row => {
+    overlay.bookInfoBook = row
+  },
+  writeDataCache: writeReaderDataCache,
+  loadChapters,
+  loadChapter: (...args) => loadChapter(...args),
+  refreshBrowserCachedChapters: computeBrowserCachedChapters,
+  locateCurrentTocChapter: locateTocCurrentChapter,
+  getCurrentOffset: () => currentOffset(),
+  getCurrentChapterPercent: () => currentChapterPercent(),
+  fetchChapters: async targetBookId => {
+    const { data } = await api.get(`/books/${targetBookId}/chapters`)
+    return data
+  },
+  resetContentSearch: resetContentSearchState,
+  refreshSourceCandidates,
+  closeSourceDrawer: () => {
+    showSourceDrawer.value = false
+  },
+  notify: (...args) => showReaderToast(...args),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  chapterBlockTextLength,
+  displayChapterTitle,
+  makeChapterBlock,
+  makeParagraphs,
+} = useReaderChapterPresentation({
+  reader,
+  chapters,
 })
 
 const chapterParagraphs = computed(() => {
@@ -907,6 +1011,15 @@ const {
   saveProgress: () => saveCurrentProgress(),
 })
 const mobileChromeVisible = ref(false)
+const {
+  toggle: toggleReaderChrome,
+} = useReaderChrome({
+  isMobileReader,
+  mobileChromeVisible,
+  tocVisible: showTocDrawer,
+  settingsVisible: showSettingsDrawer,
+  openToc: openTocDrawer,
+})
 
 const isOverlayOpen = computed(() => (
   showTocDrawer.value ||
@@ -936,23 +1049,21 @@ const {
   active: autoReading,
   stop: stopAutoReading,
   toggle: toggleAutoReading,
-} = useAutoReading({
+} = useReaderAutoReading({
+  reader,
   contentEl,
   contentBody,
   isVerticalRead,
-  shouldPause: () => isOverlayOpen.value || mobileChromeVisible.value,
-  settings: () => ({
-    method: reader.autoReadingMethod,
-    pixel: reader.autoReadingPixel,
-    interval: reader.autoReadingLineTime,
-    fontSize: reader.fontSize,
-    lineHeight: reader.lineHeight,
-  }),
+  isOverlayOpen,
+  mobileChromeVisible,
+  currentIndex,
+  page,
+  progressVersion,
   currentVisibleParagraph,
   scrollBehavior: readerScrollBehavior,
-  advancePage: advanceAutoReadingPage,
-  onProgress: recordAutoReadingProgress,
-  onNotify: message => showReaderToast(message, 1200),
+  nextPage,
+  saveProgress: () => saveCurrentProgress(),
+  notify: showReaderToast,
 })
 const {
   handleContentClick: handleReaderContentClick,
@@ -992,6 +1103,53 @@ const {
   getMode: () => reader.mode,
   getStoredProgress: targetBookId => reader.progressByBook[targetBookId],
   ensureClientId: () => reader.ensureClientId(),
+})
+const {
+  goBookDetail,
+  goShelf,
+  openBookInfo: openReaderBookInfo,
+  openBookmarks: openBookmarkDrawer,
+  openCache: openCacheDrawer,
+  openContentSearch,
+  openReplaceRules,
+  openSettings: openSettingsDrawer,
+  openSource: goSourcePanel,
+  showClickZone,
+} = useReaderPanels({
+  book,
+  bookId,
+  isRemoteBook,
+  bookProgress,
+  bookProgressLabel,
+  mobileChromeVisible,
+  mobileMoreVisible: showMobileMoreDrawer,
+  settingsVisible: showSettingsDrawer,
+  bookmarkVisible: showBookmarkDrawer,
+  searchVisible: showSearchDrawer,
+  sourceVisible: showSourceDrawer,
+  cacheVisible: showCacheDrawer,
+  clickZoneVisible: showClickZoneOverlay,
+  customBg,
+  sliderLineHeight,
+  getCustomBgColor: () => reader.customBgColor,
+  getLineHeight: () => reader.lineHeight,
+  refreshBrowserCachedChapters: computeBrowserCachedChapters,
+  saveProgress: saveCurrentProgress,
+  navigate: routeLocation => router.push(routeLocation),
+  defer: nextTick,
+  focusContentSearch: () => {
+    const input = document.querySelector('.content-search-row input')
+    input?.focus()
+  },
+  closeBookInfo: () => overlay.closeBookInfo(),
+  openBookInfoOverlay: (...args) => overlay.openBookInfo(...args),
+  openReplaceRulesOverlay: () => overlay.openReplaceRules(),
+  openToc: openTocDrawer,
+  ensureCategoriesLoaded: () => bookshelf.ensureCategoriesLoaded(),
+  openBookGroup: (...args) => overlay.openBookGroup(...args),
+  getCategoryName: row => categoryName(row),
+  refreshCatalog: refreshReaderBookCatalog,
+  clearCache: clearCurrentBookCache,
 })
 
 const {
@@ -1231,332 +1389,8 @@ onBeforeRouteLeave(() => {
   saveCurrentProgress({ force: true, background: true })
 })
 
-function makeParagraphs(value, heading = '') {
-  return parseReaderContentBlocks(value, heading, formatChineseText)
-}
-
-function formatChineseText(text) {
-  if (!text) return ''
-  return reader.chineseFont === '繁体' ? traditionalized(String(text)) : simplized(String(text))
-}
-
-function displayChapterTitle(title) {
-  return formatChineseText(title || '')
-}
-
-function makeChapterBlock(index, chapterRow, text) {
-  const fallback = chapters.value[index] || {}
-  const title = chapterRow?.title || fallback.title || `第 ${index + 1} 章`
-  const paragraphs = makeParagraphs(text, title)
-  return {
-    index,
-    id: chapterRow?.id || fallback.id,
-    title: displayChapterTitle(title),
-    content: String(text || ''),
-    paragraphs,
-    imageUrls: paragraphs.filter(item => item.type === 'image').map(item => item.src),
-  }
-}
-
-function chapterBlockTextLength(block) {
-  const paragraphs = Array.isArray(block?.paragraphs) ? block.paragraphs : []
-  if (!paragraphs.length) return 0
-  const last = paragraphs[paragraphs.length - 1]
-  return Number(last.endPos || last.pos || 0)
-}
-
-function mergeLoadedBook(incoming) {
-  if (!incoming?.id) return incoming
-  const current = bookshelf.books.find(item => Number(item.id) === Number(incoming.id)) ||
-    (Number(book.value?.id) === Number(incoming.id) ? book.value : null)
-  return mergeShelfBook(current, incoming)
-}
-
-function readerDataCacheKey(key) {
-  const [type, targetBookId] = String(key || '').split(':')
-  return scopedReaderDataCacheKey(targetBookId || bookId.value, type || key)
-}
-
-async function invalidateReaderDataCache(options = {}) {
-  const targetBookId = options.bookId || bookId.value
-  await invalidateReaderCache(targetBookId, options)
-}
-
-async function writeReaderDataCache(options = {}) {
-  const targetBookId = options.bookId || bookId.value
-  await writeReaderCache(targetBookId, options)
-}
-
-async function resetReaderChapterCaches(options = {}) {
-  const targetBook = options.book || book.value
-  const targetBookId = targetBook?.id || bookId.value
-  clearChapterContentMemory(targetBook, targetBookId)
-  resetBrowserCachedChapters()
-  if (!options.clearBrowser) return 0
-  try {
-    return await clearBookBrowserChapterCache(targetBook, targetBookId)
-  } catch {
-    return 0
-  }
-}
-
 function nextFrame() {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
-}
-
-async function changeReaderLocalTocRule() {
-  if (!book.value || !canChangeLocalTocRule.value) return
-  const tocRule = await chooseReaderLocalTocRule()
-  if (tocRule === null) return
-  try {
-    await runTocRefreshing(async () => {
-      const { data } = await refreshLocalBook(book.value.id, { tocRule })
-      await invalidateReaderDataCache({ chapters: true, book: true })
-      await resetReaderChapterCaches({ clearBrowser: true })
-      const updated = data?.book || data
-      if (updated?.id) {
-        book.value = mergeLoadedBook(updated)
-        bookshelf.upsertBook(book.value)
-        if (overlay.bookInfoBook?.id === updated.id) overlay.bookInfoBook = book.value
-        await writeReaderDataCache({ bookData: book.value })
-      }
-      await loadChapters()
-      const nextIndex = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
-      await loadChapter(nextIndex, 0, { refresh: true, saveAfterLoad: true })
-      await computeBrowserCachedChapters()
-      locateTocCurrentChapter()
-      showReaderToast(`目录规则已更新，共 ${data?.chapterCount || chapters.value.length} 章`)
-    })
-  } catch (err) {
-    ElMessage.error(readError(err, '更新目录规则失败'))
-  }
-}
-
-async function chooseReaderLocalTocRule() {
-  if (!isEPUBLocalBook.value) {
-    const result = await ElMessageBox.prompt('填写 TXT 目录行正则，留空则使用默认目录规则。', '修改目录规则', {
-      confirmButtonText: '刷新目录',
-      cancelButtonText: '取消',
-      inputType: 'textarea',
-      inputValue: book.value?.tocRule || '',
-      inputPlaceholder: '^第.+章.*$',
-    }).catch(() => null)
-    return result ? (result.value || '') : null
-  }
-  const selected = ref(book.value?.tocRule || 'spin+toc')
-  const selector = h('select', {
-    value: selected.value,
-    style: 'width:100%;min-height:38px;padding:0 10px;border:1px solid var(--el-border-color);border-radius:4px;background:var(--el-bg-color);color:var(--el-text-color-primary)',
-    onChange: event => { selected.value = event.target.value },
-  }, epubTocRuleOptions.map(rule => h('option', { value: rule.value }, rule.label)))
-  const confirmed = await ElMessageBox.confirm(selector, '修改 EPUB 目录规则', {
-    confirmButtonText: '刷新目录',
-    cancelButtonText: '取消',
-  }).catch(() => false)
-  return confirmed ? selected.value : null
-}
-
-function openSettingsDrawer() {
-  mobileChromeVisible.value = false
-  customBg.value = reader.customBgColor
-  sliderLineHeight.value = reader.lineHeight
-  showSettingsDrawer.value = true
-}
-
-function showClickZone() {
-  showSettingsDrawer.value = false
-  showMobileMoreDrawer.value = false
-  mobileChromeVisible.value = false
-  showClickZoneOverlay.value = true
-}
-
-function openCacheDrawer() {
-  if (!isRemoteBook.value) return
-  mobileChromeVisible.value = false
-  computeBrowserCachedChapters()
-  showCacheDrawer.value = true
-}
-
-async function goBookDetail() {
-  saveCurrentProgress({ force: true, background: true })
-  await router.push({ name: 'book-detail', params: { id: bookId.value } })
-}
-
-async function goShelf() {
-  mobileChromeVisible.value = false
-  saveCurrentProgress({ force: true, background: true })
-  await router.push({ name: 'home' })
-}
-function openReaderBookInfo() {
-  if (!book.value) return
-  const hasRemoteSource = isRemoteBook.value
-  const actions = [
-    { label: '目录', plain: true, handler: openInfoToc },
-    { label: '书签', plain: true, handler: openInfoBookmarks },
-    { label: '搜正文', plain: true, handler: openInfoSearch },
-    hasRemoteSource ? { label: '书源', plain: true, handler: openInfoSources } : null,
-    { label: '分组', plain: true, handler: openInfoGroup },
-    hasRemoteSource ? { label: '刷新目录', plain: true, handler: refreshReaderBookCatalog } : null,
-    hasRemoteSource ? { label: '缓存章节', plain: true, handler: openCacheDrawer } : null,
-    hasRemoteSource ? { label: '清缓存', plain: true, handler: clearCurrentBookCache } : null,
-    { label: '设置', plain: true, handler: openInfoSettings },
-    { label: '完整详情', type: 'primary', handler: () => { overlay.closeBookInfo(); goBookDetail() } },
-  ].filter(Boolean)
-  overlay.openBookInfo(book.value, {
-    statusLabel: `阅读中 · ${bookProgressLabel.value}`,
-    statusType: 'success',
-    progress: bookProgress.value,
-    actions,
-  })
-}
-
-function closeInfoAndMobileChrome() {
-  overlay.closeBookInfo()
-  mobileChromeVisible.value = false
-}
-
-function openInfoToc() {
-  closeInfoAndMobileChrome()
-  openTocDrawer()
-}
-
-function openInfoBookmarks() {
-  closeInfoAndMobileChrome()
-  openBookmarkDrawer()
-}
-
-function openInfoSearch() {
-  closeInfoAndMobileChrome()
-  openContentSearch()
-}
-
-function openInfoSources() {
-  if (!isRemoteBook.value) return
-  closeInfoAndMobileChrome()
-  showSourceDrawer.value = true
-}
-
-function openInfoSettings() {
-  closeInfoAndMobileChrome()
-  openSettingsDrawer()
-}
-
-async function openInfoGroup() {
-  if (!book.value) return
-  closeInfoAndMobileChrome()
-  try {
-    await bookshelf.ensureCategoriesLoaded()
-  } catch {
-    // 分组弹层仍可打开，失败提示由保存时处理。
-  }
-  overlay.openBookGroup('set', book.value, {
-    categoryName: categoryName(book.value),
-    progress: bookProgress.value,
-    statusLabel: `阅读中 · ${bookProgressLabel.value}`,
-    statusType: 'success',
-  })
-}
-
-async function refreshReaderBookCatalog() {
-  if (!book.value?.id || Number(book.value.sourceId || 0) <= 0) return
-  try {
-    const restoreOffset = currentOffset()
-    const restorePercent = currentChapterPercent()
-    const { data } = await refreshBook(book.value.id)
-    await invalidateReaderDataCache({ book: true, chapters: true })
-    await resetReaderChapterCaches({ clearBrowser: true })
-    const updated = data?.book || data
-    if (updated?.id) {
-      book.value = mergeLoadedBook(updated)
-      bookshelf.upsertBook(book.value)
-      await writeReaderDataCache({ bookData: book.value })
-    }
-    await loadChapters()
-    await loadChapter(currentIndex.value, restoreOffset, { restorePercent, refresh: true })
-    overlay.bookInfoBook = book.value
-    showReaderToast('目录已刷新', 1400)
-  } catch (err) {
-    ElMessage.error(readError(err, '刷新目录失败'))
-  }
-}
-
-async function loadChapters() {
-  const targetBookId = bookId.value
-  const { data } = await api.get(`/books/${targetBookId}/chapters`)
-  if (bookId.value !== targetBookId) return chapters.value
-  chapters.value = Array.isArray(data) ? data : []
-  currentIndex.value = Math.max(0, Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0)))
-  await writeReaderDataCache({ bookId: targetBookId, chaptersData: chapters.value })
-  return chapters.value
-}
-
-function goSourcePanel() {
-  if (!isRemoteBook.value) return
-  mobileChromeVisible.value = false
-  showSourceDrawer.value = true
-}
-
-function openBookmarkDrawer() {
-  mobileChromeVisible.value = false
-  showBookmarkDrawer.value = true
-}
-
-function openReplaceRules() {
-  showSettingsDrawer.value = false
-  overlay.openReplaceRules()
-}
-
-async function applyReaderSourceChange({ book: updatedBook, previousBook }) {
-  await invalidateReaderDataCache({ book: true, chapters: true })
-  await resetReaderChapterCaches({ clearBrowser: true, book: previousBook })
-  book.value = mergeLoadedBook(updatedBook)
-  bookshelf.upsertBook(book.value)
-  const chRes = await api.get(`/books/${bookId.value}/chapters`)
-  chapters.value = Array.isArray(chRes.data) ? chRes.data : []
-  await writeReaderDataCache({ bookData: book.value, chaptersData: chapters.value })
-  currentIndex.value = Math.min(currentIndex.value, Math.max(chapters.value.length - 1, 0))
-  await loadChapter(currentIndex.value, 0)
-  resetContentSearchState()
-  await refreshSourceCandidates()
-  showSourceDrawer.value = false
-}
-
-function openContentSearch() {
-  mobileChromeVisible.value = false
-  showSearchDrawer.value = true
-  nextTick(() => {
-    const input = document.querySelector('.content-search-row input')
-    input?.focus()
-  })
-}
-
-async function reloadChapter() {
-  await loadChapter(currentIndex.value, currentOffset(), { refresh: true })
-  showReaderToast('章节已重新载入')
-}
-
-async function clearCurrentBookCache() {
-  if (!isRemoteBook.value) return
-  try {
-    const data = await bookshelf.batchClearCache([bookId.value])
-    const localCleared = await clearCurrentBookBrowserCache()
-    await loadChapters()
-    showReaderToast(`已清理服务器 ${data.cleared || 0} 章，本地 ${localCleared} 章`)
-  } catch (err) {
-    ElMessage.error(readError(err, '清理缓存失败'))
-  }
-}
-
-async function advanceAutoReadingPage() {
-  const beforeChapter = currentIndex.value
-  const beforePage = page.value
-  await nextPage()
-  return beforeChapter !== currentIndex.value || beforePage !== page.value
-}
-
-function recordAutoReadingProgress() {
-  progressVersion.value += 1
-  saveCurrentProgress()
 }
 
 function scrollStep() {
@@ -1571,19 +1405,6 @@ function scrollStep() {
 
 function readerScrollBehavior() {
   return readerScrollBehaviorForDuration(reader.animateDuration)
-}
-
-function toggleReaderChrome() {
-  if (isMobileReader.value) {
-    mobileChromeVisible.value = !mobileChromeVisible.value
-    return
-  }
-  if (showTocDrawer.value) {
-    showTocDrawer.value = false
-  } else {
-    openTocDrawer()
-  }
-  showSettingsDrawer.value = false
 }
 
 function handleReaderPageHide() {
@@ -1609,39 +1430,20 @@ function flashParagraph(lineEl) {
   })
 }
 
-// ---- Keyboard ----
-useKeyboard({
-  onPageUp: () => previousPage(),
-  onPageDown: () => nextPage(),
-  onArrowLeft: () => {
-    mobileChromeVisible.value = false
-    if (reader.mode === 'flip') previousPage()
-    else if (currentIndex.value > 0) goChapter(currentIndex.value - 1, READER_CHAPTER_END_OFFSET)
-  },
-  onArrowRight: () => {
-    mobileChromeVisible.value = false
-    if (reader.mode === 'flip') nextPage()
-    else if (currentIndex.value < chapters.value.length - 1) goChapter(currentIndex.value + 1)
-  },
-  onArrowUp: () => {
-    mobileChromeVisible.value = false
-    if (reader.mode === 'page' || isScrollRead.value) previousPage()
-  },
-  onArrowDown: () => {
-    mobileChromeVisible.value = false
-    if (reader.mode === 'page' || isScrollRead.value) nextPage()
-  },
-  onHome: () => scrollToTop(),
-  onEnd: () => scrollToBottom(),
-  onSpace: () => nextPage(),
-  onEscape: () => {
-    if (showTocDrawer.value || showSettingsDrawer.value) {
-      showTocDrawer.value = false; showSettingsDrawer.value = false
-    } else {
-      mobileChromeVisible.value = false
-      goShelf()
-    }
-  },
+useReaderKeyboard({
+  reader,
+  currentIndex,
+  chapters,
+  isScrollRead,
+  mobileChromeVisible,
+  tocVisible: showTocDrawer,
+  settingsVisible: showSettingsDrawer,
+  previousPage,
+  nextPage,
+  goChapter,
+  scrollToTop,
+  scrollToBottom,
+  goShelf,
 })
 
 useGesture(pageEl, {
