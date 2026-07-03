@@ -475,92 +475,11 @@
     </section>
   </el-drawer>
 
-  <el-drawer
-    v-model="overlay.userManageVisible"
-    title="用户管理"
+  <OverlayUserManagement
     :direction="wideDrawerDirection"
     :size="wideDrawerSize"
-    class="global-user-drawer"
-    @open="loadUsers"
-  >
-    <section class="user-overlay">
-      <header class="file-overlay-head">
-        <div>
-          <strong>用户空间</strong>
-          <span>管理员可调整书源、书仓权限和用户限制</span>
-        </div>
-        <div class="file-actions">
-          <el-button size="small" type="primary" :icon="Edit" @click="openCreateUserDialog">新增</el-button>
-          <el-button size="small" :icon="Refresh" :loading="usersLoading" @click="loadUsers">刷新</el-button>
-          <el-button size="small" :icon="Delete" :loading="cleanupLoading" @click="cleanupInactive">清理不活跃用户</el-button>
-        </div>
-      </header>
-      <el-table :data="users" stripe v-loading="usersLoading" class="desktop-user-table" @selection-change="onUserSelectionChange">
-        <el-table-column type="selection" width="44" :selectable="isUserDeletable" />
-        <el-table-column prop="username" label="用户名" min-width="140" />
-        <el-table-column prop="role" label="角色" width="90" />
-        <el-table-column prop="bookCount" label="书籍" width="80" />
-        <el-table-column prop="sourceCount" label="全局书源" width="100" />
-        <el-table-column label="权限" min-width="300">
-          <template #default="{ row }">
-            <div class="permission-row">
-              <el-switch v-model="row.canEditSources" size="small" active-text="书源" @change="updateUserPermission(row)" />
-              <el-switch v-model="row.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(row)" />
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="110" fixed="right">
-          <template #default="{ row }">
-            <el-button text @click="resetPassword(row)">重置密码</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-if="users.length" v-loading="usersLoading" class="mobile-user-list">
-        <article v-for="user in users" :key="user.id" class="mobile-user-card">
-          <header>
-            <el-checkbox :disabled="!isUserDeletable(user)" :model-value="selectedUserIds.includes(user.id)" @change="toggleUserSelection(user.id, $event)" />
-            <div>
-              <strong>{{ user.username }}</strong>
-              <span>{{ user.role }} · 书籍 {{ user.bookCount || 0 }} · 全局书源 {{ user.sourceCount || 0 }}</span>
-            </div>
-          </header>
-          <div class="permission-row">
-            <el-switch v-model="user.canEditSources" size="small" active-text="书源" @change="updateUserPermission(user)" />
-            <el-switch v-model="user.canAccessStore" size="small" active-text="书仓" @change="updateUserPermission(user)" />
-            <el-button size="small" text @click="resetPassword(user)">重置密码</el-button>
-          </div>
-        </article>
-      </div>
-      <footer v-if="users.length" class="user-manage-footer">
-        <span class="check-tip">已选择 {{ selectedUserIds.length }} 个</span>
-        <el-button size="small" type="danger" :disabled="!selectedUserIds.length" :loading="deletingUsers" @click="deleteSelectedUsers">批量删除</el-button>
-      </footer>
-      <el-empty v-if="!usersLoading && !users.length" description="暂无用户，或当前账号无管理员权限" />
-    </section>
-  </el-drawer>
-
-  <el-dialog v-model="userCreateDialog" title="新增用户" width="420px" :fullscreen="isMobileOverlay">
-    <el-form label-position="top">
-      <el-form-item label="用户名"><el-input v-model="userDraft.username" autocomplete="on" /></el-form-item>
-      <el-form-item label="密码"><el-input v-model="userDraft.password" type="password" show-password autocomplete="new-password" /></el-form-item>
-      <el-form-item label="角色">
-        <el-select v-model="userDraft.role">
-          <el-option label="普通用户" value="user" />
-          <el-option label="管理员" value="admin" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="权限">
-        <div class="permission-row">
-          <el-switch v-model="userDraft.canEditSources" active-text="书源" />
-          <el-switch v-model="userDraft.canAccessStore" active-text="书仓" />
-        </div>
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="userCreateDialog = false">取消</el-button>
-      <el-button type="primary" :loading="creatingUser" @click="createManagedUser">保存</el-button>
-    </template>
-  </el-dialog>
+    :is-mobile="isMobileOverlay"
+  />
 
   <el-drawer
     v-model="overlay.replaceRulesVisible"
@@ -672,27 +591,27 @@ import Sortable from 'sortablejs'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Delete, Edit, Rank, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
-import * as adminApi from '../api/admin'
 import { cacheBookContent, listChapters, listTXTTocRules, previewLocalBook, refreshLocalBook, updateBook, updateBookCategory } from '../api/books'
 import * as backupApi from '../api/backup'
 import * as replaceRulesApi from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
-import { bookHasCategory, mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
+import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
-import { useUserStore } from '../stores/user'
 import { useBookBookmarks } from '../composables/useBookBookmarks'
 import { useBookContentSearch } from '../composables/useBookContentSearch'
-import { useOverlayUserManagement } from '../composables/useOverlayUserManagement'
 import { useOverlayReplaceRules } from '../composables/useOverlayReplaceRules'
 import { useOverlayBackups } from '../composables/useOverlayBackups'
 import { useOverlayBookmarkActions } from '../composables/useOverlayBookmarkActions'
 import { useOverlayBookImport } from '../composables/useOverlayBookImport'
+import { useOverlayBookGroups } from '../composables/useOverlayBookGroups'
+import { useOverlayBookInfo } from '../composables/useOverlayBookInfo'
+import { useOverlayBookManagement } from '../composables/useOverlayBookManagement'
 import { bookCoverUrl, hasBookCover } from '../utils/bookCover'
 import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBrowserCachedChapters, listBookBrowserCachedChapters } from '../utils/bookChapterCache'
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
-import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
+import { createBookCategoryNameResolver } from '../utils/bookCategory'
 import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { epubTocRuleOptions } from '../utils/localBookToc'
 import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
@@ -700,6 +619,7 @@ import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsiv
 import { applyRestoreResult } from '../utils/restoreSync'
 import BookEditDialog from './BookEditDialog.vue'
 import BookInfoDialog from './BookInfoDialog.vue'
+import OverlayUserManagement from './overlays/OverlayUserManagement.vue'
 import RSSManager from './RSSManager.vue'
 import WebDAVBrowser from './WebDAVBrowser.vue'
 import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
@@ -711,23 +631,8 @@ const router = useRouter()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
-const userStore = useUserStore()
 const categoryName = createBookCategoryNameResolver(() => bookshelf.categories)
 
-const selectedBookIds = ref([])
-const batchBusy = ref(false)
-const cachingBookId = ref(null)
-const localCacheCounts = ref({})
-const refreshingBookId = ref(null)
-const coverUploadingBookId = ref(null)
-const updatingBookId = ref(null)
-const editingBookSaving = ref(false)
-const selectedCategoryIds = ref([])
-const settingCategorySaving = ref(false)
-const visibilitySavingId = ref(null)
-const groupOrderDraftIds = ref([])
-const groupOrderSaving = ref(false)
-const groupManageTableRef = ref(null)
 const {
   importing: importingBook,
   previewing: previewingImport,
@@ -835,38 +740,6 @@ const {
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
 const {
-  users,
-  usersLoading,
-  cleanupLoading,
-  deletingUsers,
-  creatingUser,
-  createDialogVisible: userCreateDialog,
-  selectedUserIds,
-  draft: userDraft,
-  load: loadUsers,
-  handleUpdated: handleUsersUpdated,
-  clearRefresh: clearUsersRefreshTimer,
-  isDeletable: isUserDeletable,
-  changeSelection: onUserSelectionChange,
-  toggleSelection: toggleUserSelection,
-  openCreateDialog: openCreateUserDialog,
-  create: createManagedUser,
-  resetPassword,
-  removeSelected: deleteSelectedUsers,
-  updatePermission: updateUserPermission,
-  cleanupInactive,
-} = useOverlayUserManagement({
-  userStore,
-  getCurrentUserId: () => userStore.profile?.id || null,
-  isActive: () => overlay.userManageVisible,
-  ...adminApi,
-  prompt: (...args) => ElMessageBox.prompt(...args),
-  confirm: (...args) => ElMessageBox.confirm(...args),
-  onSuccess: message => ElMessage.success(message),
-  onWarning: message => ElMessage.warning(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
-const {
   rules: replaceRules,
   loading: replaceRulesLoading,
   importing: replaceRuleImporting,
@@ -910,7 +783,6 @@ const {
 const manageKeyword = ref('')
 const windowWidth = ref(currentViewportWidth())
 let sourceRowsRefreshTimer
-let groupSortable
 
 const isMobileOverlay = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const wideDrawerDirection = computed(() => isMobileOverlay.value ? 'btt' : 'rtl')
@@ -933,33 +805,131 @@ const bookInfoBrowserCacheCount = computed(() => (
 ))
 const bookInfoInShelf = computed(() => isShelfBook(overlay.bookInfoBook))
 const sourceStatusLabel = computed(() => overlay.bookInfoBook?.sourceId ? '远程书籍' : '本地书籍')
-const groupSetRows = computed(() => (
-  bookshelf.categories.map(category => ({
-    ...category,
-    id: String(category.id),
-    description: `${groupBookCount(category)} 本`,
-  }))
-))
-const groupManageRows = computed(() => {
-  const categoryById = new Map(bookshelf.categories.map(category => [String(category.id), category]))
-  const rows = []
-  for (const id of groupOrderDraftIds.value) {
-    const category = categoryById.get(String(id))
-    if (category) rows.push(category)
-  }
-  for (const category of bookshelf.categories) {
-    if (!groupOrderDraftIds.value.includes(String(category.id))) rows.push(category)
-  }
-  return rows
-})
-const isGroupOrderDirty = computed(() => (
-  groupManageRows.value.map(category => String(category.id)).join(',') !== bookshelf.categories.map(category => String(category.id)).join(',')
-))
 const managedBooks = computed(() => sortByShelfOrder(bookshelf.books, reader.progressByBook))
 const filteredManagedBooks = computed(() => {
   const value = normalizeLocalBookSearch(manageKeyword.value)
   if (!value) return managedBooks.value
   return managedBooks.value.filter(book => manageBookSearchText(book).includes(value))
+})
+const {
+  refreshingBookId,
+  coverUploadingBookId,
+  updatingBookId,
+  editingBookSaving,
+  refreshManagedBrowserCacheCounts,
+  refreshBookInfoBrowserCacheCount,
+  invalidateBookReaderCaches,
+  refreshBookChaptersCache,
+  mergedShelfBook,
+  applyUpdatedBookToOverlay,
+  localCacheCount,
+  serverCacheCount,
+  updateServerCacheCount,
+  saveEditedBook,
+  refreshLocalBookInfo,
+  uploadBookInfoCover,
+  toggleBookCanUpdate,
+} = useOverlayBookInfo({
+  overlay,
+  bookshelf,
+  getManagedBooks: () => managedBooks.value,
+  countBrowserCachedChapters: countBooksBrowserCachedChapters,
+  listBrowserCachedChapters: listBookBrowserCachedChapters,
+  clearBrowserChapterCache: clearBookBrowserChapterCache,
+  invalidateReaderData: invalidateReaderDataCache,
+  listChapters,
+  writeReaderData: writeReaderDataCache,
+  refreshLocalBook,
+  uploadAsset,
+  updateBook,
+  mergeBook: mergeShelfBook,
+  emitBookInfoUpdated: book => {
+    window.dispatchEvent(new CustomEvent('openreader:book-info-updated', {
+      detail: { book },
+    }))
+  },
+  emitReaderBookDataUpdated: detail => {
+    window.dispatchEvent(new CustomEvent(
+      'openreader:reader-book-data-updated',
+      { detail },
+    ))
+  },
+  onSuccess: message => ElMessage.success(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  selectedBookIds,
+  batchBusy,
+  cachingBookId,
+  onManageSelectionChange,
+  toggleManagedBook,
+  selectAllManagedBooks,
+  clearManagedSelection,
+  batchAddCategory,
+  batchRemoveCategory,
+  batchDeleteBooks,
+  handleBatchMoreCommand,
+  cacheBook,
+  exportBook,
+} = useOverlayBookManagement({
+  bookshelf,
+  getManagedBooks: () => managedBooks.value,
+  getFilteredManagedBooks: () => filteredManagedBooks.value,
+  getBookProgress: bookProgress,
+  cacheBookContent,
+  listChapters,
+  cacheBrowserChapters: cacheBookChaptersToBrowser,
+  clearBrowserChapterCache: clearBookBrowserChapterCache,
+  updateServerCacheCount,
+  refreshManagedBrowserCacheCounts,
+  refreshBookInfoBrowserCacheCount,
+  saveBlob: downloadBlob,
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  now: () => Date.now(),
+  onSuccess: message => ElMessage.success(message),
+  onInfo: message => ElMessage.info(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  settingCategorySaving,
+  visibilitySavingId,
+  groupOrderSaving,
+  groupManageTableRef,
+  groupSetRows,
+  groupManageRows,
+  isGroupOrderDirty,
+  groupBookCount,
+  prepareOpen: prepareBookGroupOpen,
+  isBookGroupSelected,
+  toggleBookGroupSelection,
+  saveBookGroupSetting,
+  createCategory,
+  renameGroup,
+  toggleGroupVisibility,
+  deleteGroup,
+  handleBookGroupOpened,
+  destroyGroupSortable,
+  handleModeChange: handleBookGroupModeChange,
+  saveGroupOrderDraft,
+} = useOverlayBookGroups({
+  overlay,
+  bookshelf,
+  getManagedBooks: () => managedBooks.value,
+  updateBookCategory,
+  categoryName,
+  getBookProgress: bookProgress,
+  emitBookInfoUpdated: data => {
+    window.dispatchEvent(new CustomEvent('openreader:book-info-updated', {
+      detail: { book: data },
+    }))
+  },
+  prompt: (...args) => ElMessageBox.prompt(...args),
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  createSortable: (...args) => Sortable.create(...args),
+  nextFrame: nextTick,
+  onSuccess: message => ElMessage.success(message),
+  onWarning: message => ElMessage.warning(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
 
 function manageBookSearchText(book) {
@@ -980,7 +950,6 @@ onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
   window.addEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
-  window.addEventListener('openreader:users-updated', handleUsersUpdated)
   window.addEventListener('openreader:sources-update', handleSourcesUpdated)
 })
 
@@ -988,10 +957,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', updateWindowWidth)
   window.removeEventListener('openreader:replace-rules-updated', handleReplaceRulesUpdated)
   window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
-  window.removeEventListener('openreader:users-updated', handleUsersUpdated)
   window.removeEventListener('openreader:sources-update', handleSourcesUpdated)
   clearReplaceRulesRefreshTimer()
-  clearUsersRefreshTimer()
   clearSourceRowsRefreshTimer()
   destroyGroupSortable()
 })
@@ -1006,7 +973,7 @@ watch(
     if (!visible) {
       if (!overlay.bookManageVisible) {
         manageKeyword.value = ''
-        selectedBookIds.value = []
+        clearManagedSelection()
       }
       return
     }
@@ -1035,11 +1002,7 @@ watch(
         return
       }
     }
-    if (overlay.bookGroupVisible && overlay.bookGroupMode === 'set') {
-      selectedCategoryIds.value = bookCategoryIds(overlay.bookInfoBook).map(id => String(id))
-    } else if (overlay.bookGroupVisible) {
-      resetGroupOrderDraft()
-    }
+    if (overlay.bookGroupVisible) prepareBookGroupOpen()
   },
 )
 
@@ -1069,13 +1032,7 @@ watch(
 
 watch(
   () => overlay.bookGroupMode,
-  async (mode) => {
-    destroyGroupSortable()
-    if (mode === 'manage' && overlay.bookGroupVisible) {
-      await nextTick()
-      handleBookGroupOpened()
-    }
-  },
+  mode => handleBookGroupModeChange(mode),
 )
 
 watch(
@@ -1161,26 +1118,6 @@ function clearSourceRowsRefreshTimer() {
   sourceRowsRefreshTimer = undefined
 }
 
-function onManageSelectionChange(rows) {
-  selectedBookIds.value = rows.map(row => row.id)
-}
-
-function toggleManagedBook(bookId, checked) {
-  if (checked) {
-    if (!selectedBookIds.value.includes(bookId)) selectedBookIds.value.push(bookId)
-    return
-  }
-  selectedBookIds.value = selectedBookIds.value.filter(id => id !== bookId)
-}
-
-function selectAllManagedBooks() {
-  selectedBookIds.value = filteredManagedBooks.value.map(book => book.id)
-}
-
-function clearManagedSelection() {
-  selectedBookIds.value = []
-}
-
 function coverInitial(book) {
   if (hasBookCover(book)) return ''
   return (book?.title || '?').slice(0, 1)
@@ -1198,452 +1135,8 @@ function setBookGroup(book) {
   })
 }
 
-async function saveEditedBook(payload) {
-  const book = overlay.bookEditBook
-  if (!book?.id) return
-  editingBookSaving.value = true
-  try {
-    const { data } = await updateBook(book.id, {
-      ...payload,
-      categoryIds: bookCategoryIds(book),
-      canUpdate: book.canUpdate !== false,
-    })
-    const nextBook = applyUpdatedBookToOverlay(data)
-    overlay.bookEditBook = nextBook
-    overlay.bookEditVisible = false
-    ElMessage.success('书籍已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新书籍失败'))
-  } finally {
-    editingBookSaving.value = false
-  }
-}
-
-function isBookGroupSelected(category) {
-  return selectedCategoryIds.value.includes(String(category.id))
-}
-
-function toggleBookGroupSelection(category) {
-  const id = String(category.id)
-  if (!id) return
-  if (selectedCategoryIds.value.includes(id)) {
-    selectedCategoryIds.value = selectedCategoryIds.value.filter(item => item !== id)
-    return
-  }
-  selectedCategoryIds.value = [...selectedCategoryIds.value, id]
-}
-
-async function saveBookGroupSetting() {
-  const book = overlay.bookInfoBook
-  if (!book?.id) return
-  settingCategorySaving.value = true
-  try {
-    const categoryIds = selectedCategoryIds.value.map(id => Number(id)).filter(Boolean)
-    const { data } = await updateBookCategory(book.id, categoryIds)
-    bookshelf.upsertBook(data)
-    overlay.bookInfoBook = data
-    window.dispatchEvent(new CustomEvent('openreader:book-info-updated', {
-      detail: { book: data },
-    }))
-    overlay.bookInfoOptions = {
-      ...overlay.bookInfoOptions,
-      categoryName: categoryName(data),
-      progress: bookProgress(data)?.percent || 0,
-    }
-    overlay.bookGroupVisible = false
-    ElMessage.success('分组已设置')
-  } catch (err) {
-    ElMessage.error(readError(err, '设置分组失败'))
-  } finally {
-    settingCategorySaving.value = false
-  }
-}
-
-async function refreshManagedBrowserCacheCounts() {
-  const rows = managedBooks.value.filter(book => book?.id)
-  try {
-    localCacheCounts.value = await countBooksBrowserCachedChapters(rows)
-  } catch {
-    localCacheCounts.value = Object.fromEntries(rows.map(book => [book.id, 0]))
-  }
-}
-
-async function refreshBookInfoBrowserCacheCount(book) {
-  if (!book?.id) return
-  try {
-    const map = await listBookBrowserCachedChapters(book, book.id)
-    localCacheCounts.value = {
-      ...localCacheCounts.value,
-      [book.id]: Object.keys(map).length,
-    }
-  } catch {
-    localCacheCounts.value = {
-      ...localCacheCounts.value,
-      [book.id]: 0,
-    }
-  }
-}
-
-async function invalidateBookReaderCaches(book, options = {}) {
-  if (!book?.id) return
-  await invalidateReaderDataCache(book.id, { book: true, chapters: true })
-  if (options.clearBrowser) {
-    await clearBookBrowserChapterCache(book, book.id).catch(() => 0)
-    localCacheCounts.value = {
-      ...localCacheCounts.value,
-      [book.id]: 0,
-    }
-  }
-}
-
-async function refreshBookChaptersCache(book) {
-  if (!book?.id) return null
-  try {
-    const { data } = await listChapters(book.id)
-    const chapters = Array.isArray(data) ? data : []
-    await writeReaderDataCache(book.id, { bookData: book, chaptersData: chapters })
-    return chapters
-  } catch {
-    await writeReaderDataCache(book.id, { bookData: book })
-    return null
-  }
-}
-
-function mergedShelfBook(book) {
-  if (!book?.id) return book
-  const current = bookshelf.books.find(item => Number(item.id) === Number(book.id)) ||
-    (Number(overlay.bookInfoBook?.id) === Number(book.id) ? overlay.bookInfoBook : null)
-  return mergeShelfBook(current, book)
-}
-
-function applyUpdatedBookToOverlay(book, chapters = null) {
-  if (!book?.id) return book
-  const nextBook = mergedShelfBook(book)
-  bookshelf.upsertBook(nextBook)
-  if (Number(overlay.bookInfoBook?.id) === Number(nextBook.id)) overlay.bookInfoBook = nextBook
-  window.dispatchEvent(new CustomEvent('openreader:book-info-updated', {
-    detail: { book: nextBook },
-  }))
-  window.dispatchEvent(new CustomEvent('openreader:reader-book-data-updated', {
-    detail: { bookId: nextBook.id, book: nextBook, chapters },
-  }))
-  return nextBook
-}
-
-function localCacheCount(book) {
-  return localCacheCounts.value[book?.id] || 0
-}
-
-function serverCacheCount(book) {
-  return Number(book?.cachedChapterCount || 0)
-}
-
-function updateServerCacheCount(book, count) {
-  if (!book?.id) return
-  const nextCount = Math.max(0, Number(count || 0))
-  const nextBook = { ...book, cachedChapterCount: nextCount }
-  bookshelf.upsertBook(nextBook)
-  if (Number(overlay.bookInfoBook?.id) === Number(book.id)) {
-    overlay.bookInfoBook = { ...overlay.bookInfoBook, cachedChapterCount: nextCount }
-  }
-}
-
-async function refreshLocalBookInfo(book) {
-  if (!book?.id) return
-  refreshingBookId.value = book.id
-  try {
-    const { data } = await refreshLocalBook(book.id)
-    await invalidateBookReaderCaches(book, { clearBrowser: true })
-    const updatedBook = data?.book || data
-    if (updatedBook?.id) {
-      const mergedBook = mergedShelfBook(updatedBook)
-      const chapters = await refreshBookChaptersCache(mergedBook)
-      applyUpdatedBookToOverlay(mergedBook, chapters)
-      await refreshBookInfoBrowserCacheCount(mergedBook)
-    } else {
-      await bookshelf.loadBooks({ force: true, all: true })
-    }
-    ElMessage.success(`本地书已刷新，共 ${data?.chapterCount || updatedBook?.chapterCount || 0} 章`)
-  } catch (err) {
-    ElMessage.error(readError(err, '刷新本地书失败'))
-  } finally {
-    refreshingBookId.value = null
-  }
-}
-
-async function uploadBookInfoCover(file) {
-  const book = overlay.bookInfoBook
-  if (!book?.id || !file) return
-  coverUploadingBookId.value = book.id
-  try {
-    const { data: uploadResult } = await uploadAsset({ file, type: 'cover' })
-    const { data: updatedBook } = await updateBook(book.id, {
-      title: book.title,
-      author: book.author || '',
-      customCoverUrl: uploadResult.url,
-      intro: book.intro || '',
-      categoryIds: bookCategoryIds(book),
-      canUpdate: book.canUpdate !== false,
-    })
-    applyUpdatedBookToOverlay(updatedBook)
-    ElMessage.success('封面已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新封面失败'))
-  } finally {
-    coverUploadingBookId.value = null
-  }
-}
-
-async function toggleBookCanUpdate(value) {
-  const book = overlay.bookInfoBook
-  if (!book?.id || !book.sourceId) return
-  updatingBookId.value = book.id
-  try {
-    const { data: updatedBook } = await updateBook(book.id, {
-      title: book.title,
-      author: book.author || '',
-      coverUrl: book.coverUrl || '',
-      intro: book.intro || '',
-      categoryIds: bookCategoryIds(book),
-      canUpdate: value,
-    })
-    applyUpdatedBookToOverlay(updatedBook)
-    ElMessage.success(value ? '已开启追更' : '已关闭追更')
-  } catch (err) {
-    ElMessage.error(readError(err, '更新追更状态失败'))
-  } finally {
-    updatingBookId.value = null
-  }
-}
-
-async function batchAddCategory(category) {
-  if (!selectedBookIds.value.length) return
-  batchBusy.value = true
-  try {
-    await bookshelf.batchSetCategory([...selectedBookIds.value], category.id, { action: 'category-add' })
-    ElMessage.success(`已添加到“${category.name}”分组`)
-  } catch (err) {
-    ElMessage.error(readError(err, '批量添加分组失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-async function batchRemoveCategory(category) {
-  if (!selectedBookIds.value.length) return
-  const targetIds = managedBooks.value
-    .filter(book => selectedBookIds.value.includes(book.id) && bookHasCategory(book, category.id))
-    .map(book => book.id)
-  if (!targetIds.length) {
-    ElMessage.info('选中书籍不在该分组中')
-    return
-  }
-  batchBusy.value = true
-  try {
-    await bookshelf.batchSetCategory(targetIds, category.id, { action: 'category-remove' })
-    ElMessage.success(`已从“${category.name}”分组移除`)
-  } catch (err) {
-    ElMessage.error(readError(err, '批量移除分组失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-async function batchCacheBooks() {
-  if (!selectedBookIds.value.length) return
-  const remoteBookIds = selectedRemoteBookIds()
-  if (!remoteBookIds.length) {
-    ElMessage.info('选中的本地书无需服务器缓存')
-    return
-  }
-  batchBusy.value = true
-  try {
-    const data = await bookshelf.batchCacheBooks(remoteBookIds)
-    ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
-    await bookshelf.loadBooks({ force: true, all: true })
-  } catch (err) {
-    ElMessage.error(readError(err, '批量缓存失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-async function batchClearCache() {
-  if (!selectedBookIds.value.length) return
-  const remoteBookIds = selectedRemoteBookIds()
-  if (!remoteBookIds.length) {
-    ElMessage.info('选中的本地书没有服务器缓存')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(`确定清理选中 ${remoteBookIds.length} 本远程书的章节缓存吗？`, '清理缓存', { type: 'warning' })
-    batchBusy.value = true
-    const data = await bookshelf.batchClearCache(remoteBookIds)
-    ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
-    for (const bookId of remoteBookIds) {
-      const book = managedBooks.value.find(item => Number(item.id) === Number(bookId))
-      if (book) updateServerCacheCount(book, 0)
-    }
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '清理缓存失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-function handleBatchMoreCommand(command) {
-  if (command === 'cache') {
-    batchCacheBooks()
-  } else if (command === 'clear-cache') {
-    batchClearCache()
-  } else if (command === 'export') {
-    batchExportBooks()
-  }
-}
-
-function selectedRemoteBookIds() {
-  const selected = new Set(selectedBookIds.value)
-  return managedBooks.value
-    .filter(book => selected.has(book.id) && Number(book.sourceId || 0) > 0)
-    .map(book => book.id)
-}
-
-async function batchDeleteBooks() {
-  if (!selectedBookIds.value.length) return
-  try {
-    await ElMessageBox.confirm(`确定删除选中的 ${selectedBookIds.value.length} 本书吗？`, '批量删除', { type: 'warning' })
-    batchBusy.value = true
-    await bookshelf.batchDeleteBooks([...selectedBookIds.value])
-    selectedBookIds.value = []
-    ElMessage.success('已批量删除')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '批量删除失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-async function batchExportBooks() {
-  if (!selectedBookIds.value.length) return
-  batchBusy.value = true
-  try {
-    const bookIds = [...selectedBookIds.value]
-    const blob = await bookshelf.exportSelectedBooks(bookIds, 'json')
-    downloadBlob(blob, `openreader-books-${bookIds.length}.json`)
-    ElMessage.success(`已导出 ${bookIds.length} 本书`)
-  } catch (err) {
-    ElMessage.error(readError(err, '批量导出失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-async function cacheBook(book, command) {
-  if (Number(book?.sourceId || 0) === 0 && command !== 'cacheBookLocal' && command !== 'deleteBookLocalCache') {
-    ElMessage.info('本地书无需服务器缓存')
-    return
-  }
-  if (command === 'deleteBookCache') {
-    await clearBookCache(book)
-    return
-  }
-  if (command === 'deleteBookLocalCache') {
-    await clearBookLocalCache(book)
-    return
-  }
-  if (command === 'cacheBookLocal') {
-    await cacheBookLocal(book)
-    return
-  }
-  cachingBookId.value = book.id
-  try {
-    const chapterIndex = cacheStartChapterIndex(book)
-    const { data } = await cacheBookContent(book.id, { all: true, count: 20, chapterIndex })
-    if (data?.book) bookshelf.upsertBook(data.book)
-    ElMessage.success(`已缓存 ${data.cached || 0}/${data.requested || 0} 章`)
-  } catch (err) {
-    ElMessage.error(readError(err, '缓存失败'))
-  } finally {
-    cachingBookId.value = null
-  }
-}
-
-async function cacheBookLocal(book) {
-  cachingBookId.value = book.id
-  try {
-    const { data } = await listChapters(book.id)
-    const chapterIndex = cacheStartChapterIndex(book)
-    const result = await cacheBookChaptersToBrowser(book, book.id, Array.isArray(data) ? data : [], {
-      startIndex: chapterIndex,
-      count: 100,
-    })
-    ElMessage.success(`已缓存到浏览器 ${result.cached}/${result.requested} 章`)
-    await refreshManagedBrowserCacheCounts()
-    await refreshBookInfoBrowserCacheCount(book)
-  } catch (err) {
-    ElMessage.error(readError(err, '缓存到浏览器失败'))
-  } finally {
-    cachingBookId.value = null
-  }
-}
-
-function cacheStartChapterIndex(book) {
-  const progress = bookProgress(book)
-  const chapterIndex = Number(progress?.chapterIndex)
-  return Number.isInteger(chapterIndex) && chapterIndex > 0 ? chapterIndex : 0
-}
-
 function bookProgress(book) {
   return newestBookProgress(book, reader.progressByBook)
-}
-
-async function clearBookCache(book) {
-  cachingBookId.value = book.id
-  try {
-    const data = await bookshelf.batchClearCache([book.id])
-    updateServerCacheCount(book, 0)
-    ElMessage.success(`已清理 ${data.cleared || 0} 个章节缓存`)
-  } catch (err) {
-    ElMessage.error(readError(err, '清理缓存失败'))
-  } finally {
-    cachingBookId.value = null
-  }
-}
-
-async function clearBookLocalCache(book) {
-  cachingBookId.value = book.id
-  try {
-    const removed = await clearBookBrowserChapterCache(book, book.id)
-    await refreshManagedBrowserCacheCounts()
-    await refreshBookInfoBrowserCacheCount(book)
-    ElMessage.success(`已清理浏览器缓存 ${removed} 章`)
-  } catch (err) {
-    ElMessage.error(readError(err, '清理浏览器缓存失败'))
-  } finally {
-    cachingBookId.value = null
-  }
-}
-
-async function exportBook(book, format = 'txt') {
-  batchBusy.value = true
-  try {
-    const normalizedFormat = ['json', 'txt', 'epub'].includes(format) ? format : 'txt'
-    const blob = await bookshelf.exportSelectedBooks([book.id], normalizedFormat)
-    downloadBlob(blob, exportBookFilename(book, normalizedFormat))
-    ElMessage.success(`已导出《${book.title}》`)
-  } catch (err) {
-    ElMessage.error(readError(err, '导出失败'))
-  } finally {
-    batchBusy.value = false
-  }
-}
-
-function exportBookFilename(book, format) {
-  const fallback = `book-${book?.id || Date.now()}`
-  const title = String(book?.title || fallback).replace(/[\\/:*?"<>|]/g, '-').trim() || fallback
-  return `${title}.${format === 'json' ? 'json' : format === 'epub' ? 'epub' : 'txt'}`
 }
 
 function downloadBlob(blob, filename) {
@@ -1690,43 +1183,6 @@ function joinPath(base, name) {
   return [base, name].filter(Boolean).join('/')
 }
 
-async function createCategory() {
-  try {
-    const { value } = await ElMessageBox.prompt('输入分组名称', '添加分组', {
-      inputValidator: value => !!value?.trim() || '分组名称不能为空',
-    })
-    const name = value.trim()
-    if (!name) return
-    await bookshelf.addCategory({ name })
-    resetGroupOrderDraft()
-    ElMessage.success('分组已创建')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '创建分组失败'))
-  }
-}
-
-async function renameGroup(category) {
-  try {
-    const { value } = await ElMessageBox.prompt('输入新的分组名称', '重命名分组', {
-      inputValue: category.name,
-      inputValidator: value => !!value?.trim() || '分组名称不能为空',
-    })
-    const name = value.trim()
-    if (!name || name === category.name) return
-    await bookshelf.renameCategory(category.id, { name })
-    resetGroupOrderDraft()
-    ElMessage.success('分组已重命名')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '重命名失败'))
-  }
-}
-
-function groupBookCount(category) {
-  return managedBooks.value.filter(book => bookHasCategory(book, category.id)).length
-}
-
 function buildSourceGroupOptions(rows) {
   const counts = new Map()
   for (const item of rows || []) {
@@ -1738,80 +1194,6 @@ function buildSourceGroupOptions(rows) {
   return [...counts.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([value, count]) => ({ value, label: value, count }))
-}
-
-async function toggleGroupVisibility(category, show) {
-  visibilitySavingId.value = category.id
-  try {
-    await bookshelf.setCategoryVisible(category.id, show)
-    ElMessage.success(show ? '分组已显示' : '分组已隐藏')
-  } catch (err) {
-    await bookshelf.loadCategories({ force: true }).catch(() => {})
-    ElMessage.error(readError(err, '修改分组显示状态失败'))
-  } finally {
-    visibilitySavingId.value = null
-  }
-}
-
-async function deleteGroup(category) {
-  if (groupBookCount(category) > 0) {
-    ElMessage.warning('分组内还有书籍，清空后才能删除')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(`确定删除分组“${category.name}”吗？`, '删除分组', { type: 'warning' })
-    await bookshelf.removeCategory(category.id)
-    resetGroupOrderDraft()
-    ElMessage.success('分组已删除')
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '删除分组失败'))
-  }
-}
-
-function resetGroupOrderDraft() {
-  groupOrderDraftIds.value = bookshelf.categories.map(category => String(category.id))
-}
-
-async function handleBookGroupOpened() {
-  if (overlay.bookGroupMode !== 'manage') return
-  await nextTick()
-  destroyGroupSortable()
-  const tableBody = groupManageTableRef.value?.$el?.querySelector('.el-table__body-wrapper tbody')
-  if (!tableBody) return
-  groupSortable = Sortable.create(tableBody, {
-    handle: '.group-drag-handle',
-    animation: 150,
-    forceFallback: true,
-    fallbackTolerance: 4,
-    onEnd: ({ oldIndex, newIndex }) => {
-      if (oldIndex == null || newIndex == null || oldIndex === newIndex) return
-      const ids = groupManageRows.value.map(category => String(category.id))
-      const [moved] = ids.splice(oldIndex, 1)
-      ids.splice(newIndex, 0, moved)
-      groupOrderDraftIds.value = ids
-    },
-  })
-}
-
-function destroyGroupSortable() {
-  groupSortable?.destroy()
-  groupSortable = null
-}
-
-async function saveGroupOrderDraft() {
-  if (!isGroupOrderDirty.value) return
-  const orderedIds = groupManageRows.value.map(item => item.id)
-  groupOrderSaving.value = true
-  try {
-    await bookshelf.reorderCategoryIds(orderedIds)
-    resetGroupOrderDraft()
-    ElMessage.success('分组排序已更新')
-  } catch (err) {
-    ElMessage.error(readError(err, '分组排序失败'))
-  } finally {
-    groupOrderSaving.value = false
-  }
 }
 
 function readError(err, fallback) {
@@ -2170,55 +1552,6 @@ function readError(err, fallback) {
   font-size: 12px;
 }
 
-.user-overlay {
-  display: grid;
-  gap: 12px;
-}
-
-.permission-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.mobile-user-list {
-  display: none;
-}
-
-.mobile-user-card {
-  display: grid;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-}
-
-.mobile-user-card header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.mobile-user-card header > div {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 2px;
-}
-
-.mobile-user-card span {
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-
-.user-manage-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .replace-overlay {
   display: grid;
   gap: 12px;
@@ -2371,21 +1704,12 @@ function readError(err, fallback) {
     justify-content: flex-start;
   }
 
-  .desktop-user-table {
-    display: none;
-  }
-
   .desktop-replace-table {
     display: none;
   }
 
   .desktop-backup-table {
     display: none;
-  }
-
-  .mobile-user-list {
-    display: grid;
-    gap: 10px;
   }
 
   .mobile-rule-list {
