@@ -45,66 +45,7 @@
     @save="saveEditedBook"
   />
 
-  <el-dialog
-    v-model="overlay.importBookVisible"
-    title="导入本地书籍"
-    width="520px"
-    class="import-book-dialog"
-    :fullscreen="isMobileOverlay"
-    @open="loadImportCategories"
-  >
-    <div class="import-form">
-      <el-upload drag :show-file-list="false" :auto-upload="false" accept=".txt,.text,.md,.epub,.pdf,.umd" @change="pickImportFile">
-        <el-icon class="upload-icon"><UploadFilled /></el-icon>
-        <div class="upload-text">{{ importDraft.file ? importDraft.file.name : '拖入或选择 TXT / EPUB / PDF / UMD 文件' }}</div>
-      </el-upload>
-      <el-input v-model="importDraft.title" placeholder="书名（可选，不填则使用文件名）" />
-      <el-input v-model="importDraft.author" placeholder="作者（可选）" />
-      <el-select v-model="importDraft.categoryIds" placeholder="分组（可多选）" multiple clearable>
-        <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
-      </el-select>
-      <el-select
-        v-if="importIsText"
-        v-model="importDraft.tocRule"
-        filterable
-        allow-create
-        clearable
-        default-first-option
-        :loading="tocRulesLoading"
-        placeholder="目录规则（可选，留空自动识别）"
-      >
-        <el-option v-for="rule in tocRuleOptions" :key="rule.id" :label="rule.name" :value="rule.rule">
-          <div class="toc-rule-option">
-            <strong>{{ rule.name }}</strong>
-            <span>{{ rule.rule }}</span>
-          </div>
-        </el-option>
-      </el-select>
-      <el-input
-        v-if="importIsText"
-        v-model="importDraft.tocRule"
-        type="textarea"
-        :rows="2"
-        placeholder="TXT目录规则（可选，留空使用默认规则，例如：^第.+章.*$）"
-      />
-      <el-select v-if="importIsEPUB" v-model="importDraft.tocRule" placeholder="EPUB 目录规则">
-        <el-option v-for="rule in epubTocRuleOptions" :key="rule.value" :label="rule.label" :value="rule.value" />
-      </el-select>
-      <div v-if="importDraft.file" class="direct-import-preview">
-        <div>
-          <strong>{{ importPreview ? `已解析 ${importPreview.chapterCount || 0} 章` : '尚未解析目录' }}</strong>
-          <el-button size="small" text :loading="previewingImport" @click="previewImportFile">重新解析</el-button>
-        </div>
-        <div v-if="importPreview?.chapters?.length" class="direct-import-chapters">
-          <span v-for="chapter in importPreview.chapters" :key="chapter.index">{{ chapter.title }}</span>
-        </div>
-      </div>
-    </div>
-    <template #footer>
-      <el-button @click="overlay.importBookVisible = false">取消</el-button>
-      <el-button type="primary" :loading="importingBook" :disabled="!importDraft.file || !importPreview" @click="importLocalBook">导入</el-button>
-    </template>
-  </el-dialog>
+  <OverlayBookImport :is-mobile="isMobileOverlay" />
 
   <el-drawer
     v-model="overlay.bookManageVisible"
@@ -352,58 +293,16 @@
     </template>
   </el-drawer>
 
-  <el-drawer
-    v-model="overlay.searchBookContentVisible"
-    :title="`搜索正文${overlay.searchBook?.title ? ` · ${overlay.searchBook.title}` : ''}`"
+  <OverlayBookContentSearch
     :direction="narrowDrawerDirection"
     :size="narrowDrawerSize"
-    class="global-search-drawer"
-  >
-    <ReaderSearchPanel
-      v-model="contentKeyword"
-      :results="contentResults"
-      :loading="contentSearching"
-      :searched="contentSearched"
-      :has-more="contentHasMore"
-      :status-text="contentSearchStatus"
-      @search="searchCurrentBookContent"
-      @load-more="loadMoreCurrentBookContent"
-      @load-all="searchAllCurrentBookContent"
-      @jump="jumpToContentResult"
-    />
-  </el-drawer>
+  />
 
-  <el-drawer
-    v-model="overlay.bookmarkVisible"
-    :title="`书签${overlay.bookmarkBook?.title ? ` · ${overlay.bookmarkBook.title}` : ''}`"
+  <OverlayBookmarks
     :direction="narrowDrawerDirection"
     :size="narrowDrawerSize"
-    class="global-bookmark-drawer"
-  >
-    <div v-loading="bookmarkLoading">
-      <ReaderBookmarkPanel
-        :bookmarks="bookmarkItems"
-        :show-add="false"
-        @jump="jumpToBookmark"
-        @edit="openBookmarkEditor"
-        @remove="removeBookmarkItem"
-        @remove-many="removeBookmarkItems"
-        @import="importBookmarkItems"
-      />
-    </div>
-  </el-drawer>
-
-  <el-dialog v-model="bookmarkEditorVisible" title="编辑书签" width="380px" :fullscreen="isMobileOverlay">
-    <div class="bookmark-editor">
-      <el-input v-model="bookmarkDraft.title" placeholder="标题" />
-      <el-input v-model="bookmarkDraft.excerpt" type="textarea" :rows="3" placeholder="摘录" />
-      <el-input v-model="bookmarkDraft.note" type="textarea" :rows="4" placeholder="笔记" />
-    </div>
-    <template #footer>
-      <el-button @click="bookmarkEditorVisible = false">取消</el-button>
-      <el-button type="primary" :loading="bookmarkSaving" @click="saveBookmarkEdit">保存</el-button>
-    </template>
-  </el-dialog>
+    :is-mobile="isMobileOverlay"
+  />
 
   <el-drawer
     v-model="overlay.localStoreVisible"
@@ -426,54 +325,10 @@
     <WebDAVBrowser :is-mobile="isMobileOverlay" />
   </el-drawer>
 
-  <el-drawer
-    v-model="overlay.backupVisible"
-    title="备份恢复"
+  <OverlayBackups
     :direction="wideDrawerDirection"
     :size="wideDrawerSize"
-    class="global-backup-drawer"
-    @open="loadBackups"
-  >
-    <section class="backup-overlay">
-      <header class="file-overlay-head">
-        <div>
-          <strong>备份恢复</strong>
-          <span>保存当前数据到 WebDAV，或从备份包恢复</span>
-        </div>
-        <div class="file-actions">
-          <el-button size="small" type="primary" :icon="Upload" :loading="backupLoading" @click="runBackup">保存到 WebDAV</el-button>
-          <el-upload :show-file-list="false" :auto-upload="false" accept=".zip" @change="restoreBackup">
-            <el-button size="small" :icon="Refresh" :loading="restoreLoading">恢复备份包</el-button>
-          </el-upload>
-          <el-button size="small" :icon="Refresh" :loading="backupListLoading" @click="loadBackups">刷新列表</el-button>
-        </div>
-      </header>
-      <el-table :data="backups" stripe v-loading="backupListLoading" class="desktop-backup-table">
-        <el-table-column prop="name" label="文件名" min-width="220" show-overflow-tooltip />
-        <el-table-column label="大小" width="110">
-          <template #default="{ row }">{{ formatSize(row.size) }}</template>
-        </el-table-column>
-        <el-table-column label="时间" width="190">
-          <template #default="{ row }">{{ formatDate(row.time) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button text type="primary" @click="downloadBackupFile(row)">下载</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-if="backups.length" v-loading="backupListLoading" class="mobile-backup-list">
-        <article v-for="row in backups" :key="row.name" class="mobile-backup-card">
-          <div>
-            <strong>{{ row.name }}</strong>
-            <span>{{ formatDate(row.time) }} · {{ formatSize(row.size) }}</span>
-          </div>
-          <el-button size="small" text type="primary" @click="downloadBackupFile(row)">下载</el-button>
-        </article>
-      </div>
-      <el-empty v-if="!backups.length && !backupListLoading" description="暂无备份文件" />
-    </section>
-  </el-drawer>
+  />
 
   <OverlayUserManagement
     :direction="wideDrawerDirection"
@@ -501,21 +356,14 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Sortable from 'sortablejs'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Rank, Refresh, Upload, UploadFilled } from '@element-plus/icons-vue'
-import { cacheBookContent, listChapters, listTXTTocRules, previewLocalBook, refreshLocalBook, updateBook, updateBookCategory } from '../api/books'
-import * as backupApi from '../api/backup'
+import { ArrowDown, Rank } from '@element-plus/icons-vue'
+import { cacheBookContent, listChapters, refreshLocalBook, updateBook, updateBookCategory } from '../api/books'
 import { listSources } from '../api/sources'
 import { uploadAsset } from '../api/uploads'
 import { mergeShelfBook, useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
-import { useBookBookmarks } from '../composables/useBookBookmarks'
-import { useBookContentSearch } from '../composables/useBookContentSearch'
-import { useOverlayBackups } from '../composables/useOverlayBackups'
-import { useOverlayBookmarkActions } from '../composables/useOverlayBookmarkActions'
-import { useOverlayBookImport } from '../composables/useOverlayBookImport'
 import { useOverlayBookGroups } from '../composables/useOverlayBookGroups'
 import { useOverlayBookInfo } from '../composables/useOverlayBookInfo'
 import { useOverlayBookManagement } from '../composables/useOverlayBookManagement'
@@ -524,133 +372,27 @@ import { cacheBookChaptersToBrowser, clearBookBrowserChapterCache, countBooksBro
 import { newestBookProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { createBookCategoryNameResolver } from '../utils/bookCategory'
 import { localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
-import { epubTocRuleOptions } from '../utils/localBookToc'
 import { invalidateReaderDataCache, writeReaderDataCache } from '../utils/readerDataCache'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
-import { applyRestoreResult } from '../utils/restoreSync'
 import BookEditDialog from './BookEditDialog.vue'
 import BookInfoDialog from './BookInfoDialog.vue'
+import OverlayBackups from './overlays/OverlayBackups.vue'
+import OverlayBookContentSearch from './overlays/OverlayBookContentSearch.vue'
+import OverlayBookImport from './overlays/OverlayBookImport.vue'
+import OverlayBookmarks from './overlays/OverlayBookmarks.vue'
 import OverlayReplaceRules from './overlays/OverlayReplaceRules.vue'
 import OverlayUserManagement from './overlays/OverlayUserManagement.vue'
 import RSSManager from './RSSManager.vue'
 import WebDAVBrowser from './WebDAVBrowser.vue'
-import ReaderBookmarkPanel from './reader/ReaderBookmarkPanel.vue'
-import ReaderSearchPanel from './reader/ReaderSearchPanel.vue'
 
 const LocalStore = defineAsyncComponent(() => import('../views/LocalStore.vue'))
 
-const router = useRouter()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
 const categoryName = createBookCategoryNameResolver(() => bookshelf.categories)
 
-const {
-  importing: importingBook,
-  previewing: previewingImport,
-  previewData: importPreview,
-  draft: importDraft,
-  tocRuleOptions,
-  tocRulesLoading,
-  isText: importIsText,
-  isEPUB: importIsEPUB,
-  supportsTocRule: importSupportsTocRule,
-  open: loadImportCategories,
-  pickFile: pickImportFile,
-  preview: previewImportFile,
-  importBook: importLocalBook,
-} = useOverlayBookImport({
-  visible: computed(() => overlay.importBookVisible),
-  loadCategories: () => warmOverlayCategories(),
-  listTocRules: () => listTXTTocRules(),
-  previewBook: (...args) => previewLocalBook(...args),
-  importBook: payload => bookshelf.importTXT(payload),
-  close: () => {
-    overlay.importBookVisible = false
-  },
-  onSuccess: message => ElMessage.success(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
 const sourceRows = ref([])
-const contentSearchBook = computed(() => overlay.searchBook)
-const contentSearchBookId = computed(() => overlay.searchBook?.id)
-const {
-  keyword: contentKeyword,
-  results: contentResults,
-  loading: contentSearching,
-  searched: contentSearched,
-  hasMore: contentHasMore,
-  status: contentSearchStatus,
-  reset: resetCurrentBookContentSearch,
-  search: searchCurrentBookContent,
-  loadMore: loadMoreCurrentBookContent,
-  loadAll: searchAllCurrentBookContent,
-} = useBookContentSearch({
-  bookId: contentSearchBookId,
-  book: contentSearchBook,
-  chapters: [],
-  onError: error => ElMessage.error(readError(error, '搜索正文失败')),
-})
-const contentSearchBookKey = ref('')
-const bookmarkBookId = computed(() => overlay.bookmarkBook?.id)
-const {
-  items: bookmarkItems,
-  loading: bookmarkLoading,
-  mutating: bookmarkSaving,
-  load: loadBookmarkItems,
-  reset: resetBookmarkItems,
-  update: updateBookmarkData,
-  remove: removeBookmarkData,
-  removeMany: removeBookmarkRows,
-  importPayloads: importBookmarkPayloads,
-  handleUpdated: handleBookmarksUpdated,
-} = useBookBookmarks({
-  bookId: bookmarkBookId,
-  isActive: () => overlay.bookmarkVisible,
-  onLoadError: error => ElMessage.error(readError(error, '加载书签失败')),
-})
-const {
-  editorVisible: bookmarkEditorVisible,
-  draft: bookmarkDraft,
-  jump: jumpToBookmark,
-  openEditor: openBookmarkEditor,
-  saveEdit: saveBookmarkEdit,
-  removeOne: removeBookmarkItem,
-  removeMany: removeBookmarkItems,
-  importRows: importBookmarkItems,
-} = useOverlayBookmarkActions({
-  getBook: () => overlay.bookmarkBook,
-  closePanel: () => {
-    overlay.bookmarkVisible = false
-  },
-  navigate: routeLocation => router.push(routeLocation),
-  update: updateBookmarkData,
-  remove: removeBookmarkData,
-  removeMany: removeBookmarkRows,
-  importPayloads: importBookmarkPayloads,
-  confirm: (...args) => ElMessageBox.confirm(...args),
-  onSuccess: message => ElMessage.success(message),
-  onInvalidImport: message => ElMessage.error(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
-const {
-  backups,
-  backupLoading,
-  listLoading: backupListLoading,
-  restoreLoading,
-  load: loadBackups,
-  run: runBackup,
-  download: downloadBackupFile,
-  restore: restoreBackup,
-} = useOverlayBackups({
-  ...backupApi,
-  restoreBackup: backupApi.restoreLegadoBackup,
-  applyRestoreResult,
-  saveBlob: downloadBlob,
-  createFormData: () => new FormData(),
-  onSuccess: message => ElMessage.success(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
 const manageKeyword = ref('')
 const windowWidth = ref(currentViewportWidth())
 let sourceRowsRefreshTimer
@@ -819,13 +561,11 @@ function isShelfBook(book) {
 }
 onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
-  window.addEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   window.addEventListener('openreader:sources-update', handleSourcesUpdated)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateWindowWidth)
-  window.removeEventListener('openreader:bookmarks-updated', handleBookmarksUpdated)
   window.removeEventListener('openreader:sources-update', handleSourcesUpdated)
   clearSourceRowsRefreshTimer()
   destroyGroupSortable()
@@ -903,15 +643,6 @@ watch(
   mode => handleBookGroupModeChange(mode),
 )
 
-watch(
-  () => overlay.searchBook?.id || overlay.searchBook?.bookUrl || '',
-  (key) => {
-    if (String(key || '') === contentSearchBookKey.value) return
-    contentSearchBookKey.value = String(key || '')
-    resetContentSearchState()
-  },
-)
-
 async function warmOverlayCategories(options = {}) {
   return bookshelf.ensureCategoriesLoaded(options)
 }
@@ -919,34 +650,6 @@ async function warmOverlayCategories(options = {}) {
 async function warmOverlayBooks(options = {}) {
   return bookshelf.ensureBooksLoaded({ all: true, ...options })
 }
-
-function resetContentSearchState() {
-  contentKeyword.value = ''
-  resetCurrentBookContentSearch()
-}
-
-watch(
-  () => overlay.searchBookContentVisible,
-  (visible) => {
-    if (!visible) return
-    const key = String(overlay.searchBook?.id || overlay.searchBook?.bookUrl || '')
-    if (key && key !== contentSearchBookKey.value) {
-      contentSearchBookKey.value = key
-      resetContentSearchState()
-    }
-  },
-)
-
-watch(
-  () => overlay.bookmarkVisible,
-  async (visible) => {
-    if (!visible) {
-      resetBookmarkItems()
-      return
-    }
-    await loadBookmarkItems()
-  },
-)
 
 function progressLabel(book) {
   const progress = bookProgress(book)
@@ -1018,35 +721,6 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
-function jumpToContentResult(result) {
-  const book = overlay.searchBook
-  if (!book?.id) return
-  overlay.searchBookContentVisible = false
-  router.push({
-    name: 'reader',
-    params: { id: book.id },
-    query: {
-      chapter: Number(result.chapterIndex || 0),
-      line: Number.isInteger(result.lineIndex) ? result.lineIndex : undefined,
-      match: Number.isInteger(result.resultCountWithinChapter) ? result.resultCountWithinChapter : undefined,
-      percent: Number.isFinite(Number(result.percent)) ? Number(result.percent) : undefined,
-      q: contentKeyword.value.trim() || undefined,
-    },
-  })
-}
-
-function formatSize(bytes) {
-  if (!bytes) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function formatDate(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
-
 function joinPath(base, name) {
   return [base, name].filter(Boolean).join('/')
 }
@@ -1079,64 +753,6 @@ function readError(err, fallback) {
 
 .overlay-actions {
   margin-top: 4px;
-}
-
-.import-form {
-  display: grid;
-  gap: 12px;
-}
-
-.toc-rule-option {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  line-height: 1.25;
-}
-
-.toc-rule-option strong,
-.toc-rule-option span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.toc-rule-option span {
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-
-.upload-icon {
-  color: var(--app-primary);
-  font-size: 32px;
-}
-
-.upload-text {
-  color: var(--app-text-muted);
-}
-
-.direct-import-preview {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-}
-
-.direct-import-preview > div:first-child {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.direct-import-chapters {
-  display: grid;
-  max-height: 180px;
-  overflow: auto;
-  gap: 5px;
-  padding: 8px;
-  background: var(--app-bg-soft);
-  color: var(--app-text-muted);
-  font-size: 12px;
 }
 
 .manage-head {
@@ -1336,78 +952,6 @@ function readError(err, fallback) {
   background: var(--el-color-primary);
 }
 
-.bookmark-editor {
-  display: grid;
-  gap: 10px;
-}
-
-.file-overlay {
-  display: grid;
-  gap: 12px;
-}
-
-.file-overlay-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.file-overlay-head > div:first-child {
-  display: grid;
-  gap: 2px;
-}
-
-.file-overlay-head span {
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-
-.file-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.backup-overlay {
-  display: grid;
-  gap: 12px;
-}
-
-.mobile-backup-list {
-  display: none;
-}
-
-.mobile-backup-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-sm);
-}
-
-.mobile-backup-card div {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.mobile-backup-card strong,
-.mobile-backup-card span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mobile-backup-card span {
-  color: var(--app-text-muted);
-  font-size: 12px;
-}
-
 @media (max-width: 750px) {
   .desktop-manage-table {
     display: none;
@@ -1466,24 +1010,6 @@ function readError(err, fallback) {
     width: 100%;
     min-height: 38px;
     margin-left: 0;
-  }
-
-  .file-overlay-head {
-    align-items: flex-start;
-    display: grid;
-  }
-
-  .file-actions {
-    justify-content: flex-start;
-  }
-
-  .desktop-backup-table {
-    display: none;
-  }
-
-  .mobile-backup-list {
-    display: grid;
-    gap: 10px;
   }
 
 }
