@@ -63,9 +63,6 @@ function createController(overrides = {}) {
     refreshManagedBrowserCacheCounts: async () => {
       calls.push(['refresh-managed-cache'])
     },
-    refreshBookInfoBrowserCacheCount: async book => {
-      calls.push(['refresh-info-cache', book.id])
-    },
     saveBlob: (blob, filename) => calls.push(['save-blob', blob, filename]),
     confirm: async (...args) => calls.push(['confirm', ...args]),
     now: () => 123,
@@ -182,7 +179,6 @@ test('routes server and browser caching while starting from reading progress', a
     ],
     ['success', '已缓存到浏览器 2/2 章'],
     ['refresh-managed-cache'],
-    ['refresh-info-cache', 1],
   ])
 })
 
@@ -198,7 +194,6 @@ test('clears both cache layers and sanitizes single-book export names', async ()
     ['success', '已清理 2 个章节缓存'],
     ['clear-browser', 1, 1],
     ['refresh-managed-cache'],
-    ['refresh-info-cache', 1],
     ['success', '已清理浏览器缓存 5 章'],
     ['export', [1], 'epub'],
     ['save-blob', { ids: [1], format: 'epub' }, '本地-书.epub'],
@@ -207,4 +202,23 @@ test('clears both cache layers and sanitizes single-book export names', async ()
   assert.equal(fixture.controller.exportBookFilename({ id: 9 }, 'weird'), 'book-9.txt')
   assert.equal(fixture.controller.batchBusy.value, false)
   assert.equal(fixture.controller.cachingBookId.value, null)
+})
+
+test('shares batch busy state with single-book exports', async () => {
+  const fixture = createController()
+  let finishExport
+  fixture.bookshelf.exportSelectedBooks = async () => new Promise((resolve) => {
+    finishExport = resolve
+  })
+
+  const pending = fixture.controller.exportBook(fixture.books[1], 'json')
+  assert.equal(fixture.controller.batchBusy.value, true)
+
+  finishExport({ format: 'json' })
+  await pending
+  assert.equal(fixture.controller.batchBusy.value, false)
+  assert.deepEqual(fixture.calls, [
+    ['save-blob', { format: 'json' }, '远程书.json'],
+    ['success', '已导出《远程书》'],
+  ])
 })

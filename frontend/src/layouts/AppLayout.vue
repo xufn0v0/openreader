@@ -149,14 +149,16 @@ import { useOverlayStore } from '../stores/overlay'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
+import { useAppCacheManagement } from '../composables/useAppCacheManagement'
+import { useAppMobileNavigation } from '../composables/useAppMobileNavigation'
+import { useAppRecentReading } from '../composables/useAppRecentReading'
+import { useAppSidebarSearch } from '../composables/useAppSidebarSearch'
 import { useSync } from '../composables/useSync'
 import { clearCache, getCacheStats } from '../api/cache'
 import { listSources } from '../api/sources'
 import api from '../api/client'
 import { cacheFirstRequest, networkFirstRequest, removeBrowserCache } from '../utils/browserCache'
-import { newestBookProgress, progressUpdatedAt } from '../utils/bookOrder'
 import { clearBrowserLocalCacheGroup, currentBrowserLocalCacheStats } from '../utils/localCacheStats'
-import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { currentUserScope } from '../utils/authScope'
 
@@ -167,24 +169,61 @@ const overlay = useOverlayStore()
 const bookshelf = useBookshelfStore()
 const reader = useReaderStore()
 const preferences = usePreferencesStore()
-const quickSearch = ref('')
 const offline = ref(false)
-const windowWidth = ref(currentViewportWidth())
-const mobileNavigationVisible = ref(false)
-const touchStart = ref(null)
-const touchMoveX = ref(0)
-const touchAxis = ref('')
-let ignoreWorkspaceClickUntil = 0
-const cacheStats = ref({})
-const localBrowserCacheStats = ref({ total: { files: 0, size: 0 }, groups: {} })
 const healthInfo = ref(null)
-const recentSuppressedAt = ref(readRecentSuppressedAt())
-const cacheLoading = ref(false)
-const cacheClearing = ref(false)
-const browserCacheClearing = ref('')
 const FOREGROUND_REFRESH_INTERVAL = 30000
 let lastForegroundRefreshAt = 0
 const { connected: syncConnected, connect, disconnect } = useSync()
+const {
+  visible: mobileNavigationVisible,
+  isMobile: isMobileShell,
+  navigationStyle: mobileNavigationStyle,
+  updateViewport: updateViewportFlags,
+  handleTouchStart,
+  handleTouchMove,
+  handleTouchEnd,
+  handleTouchCancel,
+  close: closeMobileNavigation,
+  toggle: toggleMobileNavigation,
+} = useAppMobileNavigation({
+  currentViewportWidth,
+  getViewportWidth: () => window.innerWidth,
+  getViewportHeight: () => window.innerHeight,
+  getPageMode: () => reader.pageMode,
+  shouldUseMiniInterface,
+  now: () => Date.now(),
+})
+const {
+  clearingServer: cacheClearing,
+  sectionTitle: cacheSectionTitle,
+  clearServerLabel: clearServerChapterCacheLabel,
+  browserNavItems: browserCacheNavItems,
+  loadStats: loadCacheStats,
+  clearServer: clearSystemCache,
+} = useAppCacheManagement({
+  getServerStats: getCacheStats,
+  getBrowserStats: currentBrowserLocalCacheStats,
+  clearServerCache: clearCache,
+  clearBrowserGroup: clearBrowserLocalCacheGroup,
+  confirm: (...args) => ElMessageBox.confirm(...args),
+  onSuccess: message => ElMessage.success(message),
+  onInfo: message => ElMessage.info(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const {
+  recentBook,
+  open: openRecentBook,
+  clear: clearRecentBook,
+  subtitle: recentSubTitle,
+  refreshScope: refreshRecentReadingScope,
+} = useAppRecentReading({
+  getBooks: () => bookshelf.books,
+  getProgressByBook: () => reader.progressByBook,
+  getUserScope: currentUserScope,
+  getStorage: () => window.localStorage,
+  now: () => Date.now(),
+  navigate: route => router.push(route),
+})
 
 const navSections = computed(() => [
   {
@@ -248,55 +287,36 @@ const navSections = computed(() => [
   },
 ])
 
-const concurrentOptions = [8, 16, 32, 60]
-const sidebarSources = ref([])
-const sidebarSearchType = computed({
-  get: () => preferences.search.searchType,
-  set: value => preferences.setSearchConfig({ searchType: value }),
-})
-const sidebarSearchGroup = computed({
-  get: () => preferences.search.group,
-  set: value => preferences.setSearchConfig({ group: value }),
-})
-const sidebarSourceId = computed({
-  get: () => preferences.search.sourceId,
-  set: value => preferences.setSearchConfig({ sourceId: value }),
-})
-const sidebarConcurrent = computed({
-  get: () => preferences.search.concurrent,
-  set: value => preferences.setSearchConfig({ concurrent: value }),
-})
-const sidebarEnabledSources = computed(() => sidebarSources.value.filter(source => source.enabled))
-const sidebarSourceGroups = computed(() => {
-  const groups = new Map()
-  for (const source of sidebarEnabledSources.value) {
-    const name = source.group || '默认分组'
-    groups.set(name, (groups.get(name) || 0) + 1)
-  }
-  return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
-})
-const cacheSectionTitle = computed(() => {
-  const size = Number(cacheStats.value?.size || 0) + Number(localBrowserCacheStats.value?.total?.size || 0)
-  return size ? `本地缓存 ${formatSize(size)}` : '本地缓存'
-})
-const clearServerChapterCacheLabel = computed(() => {
-  const size = Number(cacheStats.value?.size || 0)
-  return size ? `清空服务器缓存 ${formatSize(size)}` : '清空服务器缓存'
-})
-const browserCacheNavItems = computed(() => {
-  const rows = [
-    { group: 'bookSourceList', label: '书源缓存' },
-    { group: 'rssSources', label: 'RSS源缓存' },
-    { group: 'chapterList', label: '章节列表缓存' },
-    { group: 'chapterContent', label: '章节内容缓存' },
-  ]
-  return rows
-    .filter(row => cacheGroupFiles(row.group) > 0 || ['chapterList', 'chapterContent'].includes(row.group))
-    .map(row => ({
-      key: `clear-${row.group}`,
-      label: browserCacheClearing.value === row.group ? '清理中' : clearBrowserLocalCacheLabel(row.group, row.label),
-      action: () => clearBrowserLocalCache(row.group),
-    }))
+const {
+  quickSearch,
+  concurrentOptions,
+  searchType: sidebarSearchType,
+  searchGroup: sidebarSearchGroup,
+  sourceId: sidebarSourceId,
+  concurrent: sidebarConcurrent,
+  enabledSources: sidebarEnabledSources,
+  sourceGroups: sidebarSourceGroups,
+  searchRouteQuery,
+  localSearchRouteQuery,
+  goSearch,
+  goSearchRoute,
+  clearSearchQuery,
+  loadSources: loadSidebarSources,
+  handleSourcesUpdated,
+} = useAppSidebarSearch({
+  preferences,
+  route,
+  router,
+  listSources,
+  cacheFirstRequest,
+  networkFirstRequest,
+  removeBrowserCache,
+  getUserScope: currentUserScope,
+  onWarning: message => ElMessage.warning(message),
+  afterNavigate: () => {
+    if (isMobileShell.value) mobileNavigationVisible.value = false
+  },
+  afterSourcesUpdated: () => loadCacheStats(),
 })
 const isNightTheme = computed(() => reader.theme === 'dark' || reader.theme === 'black')
 const appVersionLabel = computed(() => {
@@ -304,50 +324,6 @@ const appVersionLabel = computed(() => {
   const commit = shortCommit(healthInfo.value?.commit)
   if (version && !['dev', 'unknown'].includes(version)) return version
   return commit || 'dev'
-})
-const isMobileShell = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
-const mobileNavigationWidth = computed(() => {
-  return 260
-})
-const mobileNavigationStyle = computed(() => {
-  const width = mobileNavigationWidth.value
-  const base = { '--mobile-nav-width': `${width}px` }
-  if (!isMobileShell.value || !touchMoveX.value) return base
-  if (!mobileNavigationVisible.value && touchMoveX.value > 0 && touchMoveX.value <= width) {
-    const offset = touchMoveX.value - width
-    return {
-      ...base,
-      '--mobile-nav-drag-offset': `${offset}px`,
-      marginLeft: `${offset}px`,
-      transition: 'none'
-    }
-  }
-  if (mobileNavigationVisible.value && touchMoveX.value < 0 && touchMoveX.value >= -width) {
-    const offset = touchMoveX.value
-    return {
-      ...base,
-      '--mobile-nav-drag-offset': `${offset}px`,
-      marginLeft: `${offset}px`,
-      transition: 'none'
-    }
-  }
-  return base
-})
-const recentBook = computed(() => {
-  const rows = (Array.isArray(bookshelf.books) ? bookshelf.books : [])
-    .filter(book => {
-      const progress = progressForBook(book)
-      return hasReadingProgress(progress) && progressUpdatedAt(progress) > recentSuppressedAt.value
-    })
-    .sort((a, b) => {
-      const aProgress = progressForBook(a)
-      const bProgress = progressForBook(b)
-      const aTime = progressUpdatedAt(aProgress)
-      const bTime = progressUpdatedAt(bProgress)
-      if (aTime !== bTime) return bTime - aTime
-      return Number(b?.id || 0) - Number(a?.id || 0)
-    })
-  return rows[0] || null
 })
 function goHome() {
   router.push({ name: 'home' })
@@ -380,105 +356,6 @@ function isNavActive(item) {
   }
   if (!item.panel) return true
   return String(route.query.panel || 'account') === item.panel
-}
-
-function goSearch() {
-  const keyword = quickSearch.value.trim()
-  if (!keyword) {
-    ElMessage.warning('请输入关键词进行搜索')
-    return
-  }
-  const query = searchRouteQuery(keyword)
-  router.push({ name: 'search', query })
-  if (isMobileShell.value) mobileNavigationVisible.value = false
-}
-
-function goSearchRoute(mode = 'remote') {
-  const keyword = quickSearch.value.trim()
-  const query = mode === 'local' ? localSearchRouteQuery(keyword) : searchRouteQuery(keyword)
-  router.push({ name: 'search', query })
-  if (isMobileShell.value) mobileNavigationVisible.value = false
-}
-
-function searchRouteQuery(keyword = '') {
-  const query = {}
-  if (keyword) query.q = keyword
-  query.searchType = sidebarSearchType.value
-  query.concurrent = sidebarConcurrent.value
-  if (sidebarSearchType.value === 'group' && sidebarSearchGroup.value) query.group = sidebarSearchGroup.value
-  if (sidebarSearchType.value === 'single' && sidebarSourceId.value) query.sourceId = sidebarSourceId.value
-  return query
-}
-
-function localSearchRouteQuery(keyword = quickSearch.value.trim()) {
-  const query = { mode: 'local' }
-  if (keyword) query.q = keyword
-  return query
-}
-
-function clearSearchQuery() {
-  if (route.name === 'search' && route.query.q !== undefined) {
-    const { q, ...query } = route.query
-    router.replace({ name: 'search', query })
-  }
-}
-
-async function loadSidebarSources() {
-  try {
-    const response = await cacheFirstRequest(
-      () => listSources(),
-      sidebarSourceCacheKey(),
-      { validate: data => Array.isArray(data) },
-    )
-    applySidebarSources(response.data)
-    if (response.fromCache) refreshSidebarSourcesCache().catch(() => {})
-  } catch {
-    sidebarSources.value = []
-  }
-}
-
-async function refreshSidebarSourcesCache() {
-  const response = await networkFirstRequest(
-    () => listSources(),
-    sidebarSourceCacheKey(),
-    { validate: data => Array.isArray(data) },
-  )
-  applySidebarSources(response.data)
-}
-
-function applySidebarSources(data) {
-  sidebarSources.value = Array.isArray(data) ? data : []
-  if (!sidebarSearchGroup.value && sidebarSourceGroups.value.length) sidebarSearchGroup.value = sidebarSourceGroups.value[0].value
-  if (!sidebarSourceId.value && sidebarEnabledSources.value.length) sidebarSourceId.value = sidebarEnabledSources.value[0].id
-}
-
-function sidebarSourceCacheKey() {
-  return `bookSourceList@${currentUserScope()}`
-}
-
-async function handleSourcesUpdated() {
-  await removeBrowserCache(sidebarSourceCacheKey())
-  await loadSidebarSources()
-  await loadCacheStats()
-}
-
-async function loadCacheStats() {
-  cacheLoading.value = true
-  const [serverResult, browserResult] = await Promise.allSettled([
-    getCacheStats(),
-    currentBrowserLocalCacheStats(),
-  ])
-  if (serverResult.status === 'fulfilled') {
-    cacheStats.value = serverResult.value?.data || {}
-  } else {
-    cacheStats.value = {}
-  }
-  if (browserResult.status === 'fulfilled') {
-    localBrowserCacheStats.value = browserResult.value || { total: { files: 0, size: 0 }, groups: {} }
-  } else {
-    localBrowserCacheStats.value = { total: { files: 0, size: 0 }, groups: {} }
-  }
-  cacheLoading.value = false
 }
 
 async function syncUserConfig() {
@@ -521,131 +398,8 @@ function shortCommit(value) {
   return String(value).slice(0, 12)
 }
 
-async function clearSystemCache() {
-  try {
-    await ElMessageBox.confirm('确定清理服务器章节缓存吗？清理后阅读时会重新加载远程章节内容。', '清理缓存', { type: 'warning' })
-    cacheClearing.value = true
-    const { data } = await clearCache()
-    ElMessage.success(`已清理 ${data.clearedFiles || 0} 个文件，释放 ${formatSize(data.clearedSize || 0)}`)
-    await loadCacheStats()
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '清理缓存失败'))
-  } finally {
-    cacheClearing.value = false
-  }
-}
-
-async function clearBrowserLocalCache(group) {
-  const label = cacheGroupLabel(group)
-  try {
-    if (!cacheGroupFiles(group)) {
-      ElMessage.info(`${label}为空`)
-      return
-    }
-    await ElMessageBox.confirm(`确定清理当前浏览器的${label}吗？清理后会在需要时重新加载。`, '清理浏览器缓存', { type: 'warning' })
-    browserCacheClearing.value = group
-    const removed = await clearBrowserLocalCacheGroup(group)
-    ElMessage.success(`已清理${label} ${removed} 项`)
-    await loadCacheStats()
-  } catch (err) {
-    if (err === 'cancel' || err === 'close') return
-    ElMessage.error(readError(err, '清理浏览器缓存失败'))
-  } finally {
-    browserCacheClearing.value = ''
-  }
-}
-
-function cacheGroup(group) {
-  return localBrowserCacheStats.value?.groups?.[group] || { files: 0, size: 0 }
-}
-
-function cacheGroupFiles(group) {
-  return Number(cacheGroup(group).files || 0)
-}
-
-function clearBrowserLocalCacheLabel(group, label) {
-  const size = Number(cacheGroup(group).size || 0)
-  return size ? `清空${label} ${formatSize(size)}` : `清空${label}`
-}
-
-function cacheGroupLabel(group) {
-  const labels = {
-    bookSourceList: '书源缓存',
-    rssSources: 'RSS源缓存',
-    chapterList: '章节列表缓存',
-    chapterContent: '章节内容缓存',
-  }
-  return labels[group] || '缓存'
-}
-
-function formatSize(bytes) {
-  const value = Number(bytes || 0)
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
-
-function openRecentBook() {
-  if (!recentBook.value) return
-  router.push({ name: 'reader', params: { id: recentBook.value.id }, query: readerRouteQuery(recentBook.value) })
-}
-
-function clearRecentBook() {
-  const progress = recentBook.value ? progressForBook(recentBook.value) : null
-  const nextValue = Math.max(Date.now(), progressUpdatedAt(progress))
-  recentSuppressedAt.value = nextValue
-  writeRecentSuppressedAt(nextValue)
-}
-
 function toggleNightTheme() {
   reader.setTheme(isNightTheme.value ? 'parchment' : 'dark')
-}
-
-function recentSubTitle(book) {
-  const progress = progressForBook(book)
-  if (progress?.chapterTitle) return progress.chapterTitle
-  if (Number.isInteger(progress?.chapterIndex)) return `第 ${progress.chapterIndex + 1} 章`
-  return book.lastChapter || book.author || '继续阅读'
-}
-
-function readerRouteQuery(book) {
-  return readerRouteQueryFromBook(book, progressForBook(book))
-}
-
-function progressForBook(book) {
-  return newestBookProgress(book, reader.progressByBook)
-}
-
-function hasReadingProgress(progress) {
-  if (!progress?.bookId) return false
-  if (progressUpdatedAt(progress) > 0) return true
-  if (progress.chapterTitle) return true
-  if (Number.isInteger(progress.chapterIndex) && progress.chapterIndex >= 0) return true
-  return Number(progress.offset || 0) > 0 ||
-    Number(progress.percent || 0) > 0 ||
-    Number(progress.chapterPercent || 0) > 0
-}
-
-function recentSuppressedCacheKey() {
-  return `openreader:readingRecentClearedAt:${currentUserScope()}`
-}
-
-function readRecentSuppressedAt() {
-  try {
-    return Number(window.localStorage?.getItem(recentSuppressedCacheKey()) || 0)
-  } catch {
-    return 0
-  }
-}
-
-function writeRecentSuppressedAt(value) {
-  try {
-    window.localStorage?.setItem(recentSuppressedCacheKey(), String(Number(value || 0)))
-  } catch {
-    // Ignore private-mode storage errors; the in-memory value still hides it for this session.
-  }
 }
 
 async function refreshShelfData() {
@@ -683,98 +437,14 @@ function setOnline() {
   offline.value = false
 }
 
-function updateViewportFlags() {
-  windowWidth.value = currentViewportWidth()
-}
-
-function handleTouchStart(event) {
-  if (!isMobileShell.value || event.touches?.length !== 1) return
-  const touch = event.touches[0]
-  if (touch.clientY <= 20 || touch.clientY >= window.innerHeight - 20) {
-    touchStart.value = null
-    return
-  }
-  if (touch.clientX <= 20 || touch.clientX >= window.innerWidth - 20) {
-    touchStart.value = null
-    return
-  }
-  touchStart.value = { x: touch.clientX, y: touch.clientY }
-  touchMoveX.value = 0
-  touchAxis.value = ''
-}
-
-function handleTouchMove(event) {
-  if (!isMobileShell.value || !touchStart.value || event.touches?.length !== 1) return
-  const touch = event.touches[0]
-  const moveX = touch.clientX - touchStart.value.x
-  const moveY = touch.clientY - touchStart.value.y
-  if (!touchAxis.value && Math.max(Math.abs(moveX), Math.abs(moveY)) >= 8) {
-    touchAxis.value = Math.abs(moveX) > Math.abs(moveY) ? 'x' : 'y'
-  }
-  if (touchAxis.value === 'y') {
-    touchMoveX.value = 0
-    return
-  }
-  if (touchAxis.value !== 'x') return
-  const width = mobileNavigationWidth.value
-  if ((!mobileNavigationVisible.value && moveX > 0 && moveX <= width) || (mobileNavigationVisible.value && moveX < 0 && moveX >= -width)) {
-    event.preventDefault()
-    event.stopPropagation()
-    touchMoveX.value = moveX
-  }
-}
-
-function handleTouchEnd() {
-  if (!isMobileShell.value) return
-  if (touchAxis.value === 'x' && touchMoveX.value > 0) mobileNavigationVisible.value = true
-  if (touchAxis.value === 'x' && touchMoveX.value < 0) mobileNavigationVisible.value = false
-  if (touchAxis.value === 'x' && touchMoveX.value !== 0) {
-    ignoreWorkspaceClickUntil = Date.now() + 350
-  }
-  touchStart.value = null
-  touchMoveX.value = 0
-  touchAxis.value = ''
-}
-
-function handleTouchCancel() {
-  touchStart.value = null
-  touchMoveX.value = 0
-  touchAxis.value = ''
-}
-
-function closeMobileNavigation() {
-  if (Date.now() < ignoreWorkspaceClickUntil) return
-  if (isMobileShell.value && mobileNavigationVisible.value) {
-    mobileNavigationVisible.value = false
-  }
-}
-
-function toggleMobileNavigation() {
-  if (isMobileShell.value) {
-    mobileNavigationVisible.value = !mobileNavigationVisible.value
-  }
-}
-
 watch(
   () => userStore.token,
   (token) => {
-    recentSuppressedAt.value = readRecentSuppressedAt()
+    refreshRecentReadingScope()
     if (token) {
       connect()
     } else {
       disconnect()
-    }
-  },
-  { immediate: true },
-)
-
-watch(
-  () => [route.name, route.query.q],
-  ([name, value]) => {
-    if (name === 'search') {
-      quickSearch.value = typeof value === 'string' ? value : ''
-    } else if (name !== 'home') {
-      quickSearch.value = ''
     }
   },
   { immediate: true },
