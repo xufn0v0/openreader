@@ -8,7 +8,6 @@ function createController(overrides = {}) {
   const book = ref({ id: 7, sourceId: 2, title: '测试书' })
   const state = {
     mobileChromeVisible: ref(true),
-    mobileMoreVisible: ref(true),
     settingsVisible: ref(false),
     bookmarkVisible: ref(false),
     searchVisible: ref(false),
@@ -52,20 +51,20 @@ function createController(overrides = {}) {
 test('opens reader panels while preserving their existing visibility side effects', () => {
   const fixture = createController()
   fixture.controller.openSettings()
-  assert.equal(fixture.state.mobileChromeVisible.value, false)
+  assert.equal(fixture.state.mobileChromeVisible.value, true)
   assert.equal(fixture.state.settingsVisible.value, true)
   assert.equal(fixture.state.customBg.value, '#efe4c5')
   assert.equal(fixture.state.sliderLineHeight.value, 1.8)
 
   fixture.controller.showClickZone()
   assert.equal(fixture.state.settingsVisible.value, false)
-  assert.equal(fixture.state.mobileMoreVisible.value, false)
   assert.equal(fixture.state.clickZoneVisible.value, true)
 
   fixture.controller.openCache()
   fixture.controller.openBookmarks()
   fixture.controller.openContentSearch()
   fixture.controller.openReplaceRules()
+  assert.equal(fixture.state.mobileChromeVisible.value, true)
   assert.equal(fixture.state.cacheVisible.value, true)
   assert.equal(fixture.state.bookmarkVisible.value, true)
   assert.equal(fixture.state.searchVisible.value, true)
@@ -82,7 +81,7 @@ test('saves progress before navigating to the shelf or full book detail', async 
   await fixture.controller.goBookDetail()
   fixture.state.mobileChromeVisible.value = true
   await fixture.controller.goShelf()
-  assert.equal(fixture.state.mobileChromeVisible.value, false)
+  assert.equal(fixture.state.mobileChromeVisible.value, true)
   assert.deepEqual(fixture.calls, [
     ['save', { force: true, background: true }],
     ['navigate', { name: 'book-detail', params: { id: 7 } }],
@@ -134,4 +133,5 @@ test('opens the group panel even when loading categories fails', async () => {
       statusType: 'success',
     }],
   ])
+  assert.equal(fixture.state.mobileChromeVisible.value, true)
 })

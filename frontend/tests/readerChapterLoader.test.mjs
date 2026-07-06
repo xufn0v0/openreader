@@ -15,6 +15,8 @@ function createController(overrides = {}) {
     chapterLoading: ref(false),
     chapter: ref(null),
     content: ref(''),
+    chapterFormat: ref('text'),
+    epubResource: ref(null),
     page: ref(4),
     chapterBlocks: ref([]),
     progressVersion: ref(0),
@@ -30,6 +32,7 @@ function createController(overrides = {}) {
       return {
         chapter: { id: index + 1, title: `第 ${index + 1} 章` },
         content: `正文 ${index}`,
+        format: 'text',
       }
     },
     makeChapterBlock: (index, chapter, content) => ({ index, id: chapter.id, content }),
@@ -50,6 +53,7 @@ function createController(overrides = {}) {
 test('loads a clamped chapter and marks its restored progress', async () => {
   const fixture = createController()
   await fixture.controller.load(9, 120, { restorePercent: 0.5 })
+  assert.equal(fixture.state.mobileChromeVisible.value, true)
   assert.equal(fixture.state.currentIndex.value, 2)
   assert.equal(fixture.state.chapter.value.id, 3)
   assert.equal(fixture.state.content.value, '正文 2')
@@ -67,6 +71,12 @@ test('loads a clamped chapter and marks its restored progress', async () => {
     ['mark', fixture.currentProgress],
     ['frame'],
   ])
+})
+
+test('hides mobile chrome only when the caller explicitly requests it', async () => {
+  const fixture = createController()
+  await fixture.controller.load(1, 0, { hideChrome: true })
+  assert.equal(fixture.state.mobileChromeVisible.value, false)
 })
 
 test('saves forced progress and expands continuous chapter windows', async () => {
@@ -100,4 +110,44 @@ test('records load failures and always releases loading guards', async () => {
     ['cancel'],
     ['frame'],
   ])
+})
+
+test('keeps EPUB document metadata out of the ordinary paragraph renderer', async () => {
+  const fixture = createController({
+    loadContent: async () => ({
+      chapter: { id: 2, title: 'EPUB 第二章', resourcePath: 'OPS/two.xhtml' },
+      content: '可搜索纯文本',
+      format: 'epub',
+      resourceUrl: '/api/epub-resource/token/OPS/two.xhtml',
+      resourceExpiresAt: '2026-07-06T12:00:00Z',
+    }),
+  })
+  await fixture.controller.load(1, 88, { restorePercent: 0.4 })
+  assert.equal(fixture.state.chapterFormat.value, 'epub')
+  assert.deepEqual(fixture.state.epubResource.value, {
+    url: '/api/epub-resource/token/OPS/two.xhtml',
+    expiresAt: '2026-07-06T12:00:00Z',
+  })
+  assert.deepEqual(fixture.state.chapterBlocks.value, [])
+  assert.equal(fixture.state.content.value, '可搜索纯文本')
+})
+
+test('renders CBZ image chapter responses through the ordinary image block path', async () => {
+  const fixture = createController({
+    loadContent: async () => ({
+      chapter: { id: 3, title: 'pages/001.jpg', resourcePath: 'pages/001.jpg' },
+      content: '<img src="/api/cbz-resource/token/pages/001.jpg" />',
+      format: 'cbz',
+      resourceUrl: '/api/cbz-resource/token/pages/001.jpg',
+      resourceExpiresAt: '2026-07-06T12:00:00Z',
+    }),
+  })
+  await fixture.controller.load(0)
+  assert.equal(fixture.state.chapterFormat.value, 'text')
+  assert.equal(fixture.state.epubResource.value, null)
+  assert.deepEqual(fixture.state.chapterBlocks.value, [{
+    index: 0,
+    id: 3,
+    content: '<img src="/api/cbz-resource/token/pages/001.jpg" />',
+  }])
 })

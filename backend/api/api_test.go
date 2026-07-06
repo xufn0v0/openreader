@@ -27,6 +27,8 @@ import (
 	"openreader/backend/engine"
 	"openreader/backend/models"
 	"openreader/backend/services/backup"
+	"openreader/backend/services/cbzreader"
+	"openreader/backend/services/epubreader"
 	"openreader/backend/services/scheduler"
 	readersync "openreader/backend/sync"
 )
@@ -69,7 +71,15 @@ func setupTestServer(t *testing.T) (*gin.Engine, *Server) {
 	router := gin.New()
 	RegisterRoutes(router, cfg, database, hub, sched, backupSvc)
 
-	server := &Server{cfg: cfg, db: database, hub: hub, scheduler: sched, backupSvc: backupSvc}
+	server := &Server{
+		cfg:        cfg,
+		db:         database,
+		hub:        hub,
+		scheduler:  sched,
+		backupSvc:  backupSvc,
+		cbzReader:  cbzreader.New(cfg, database),
+		epubReader: epubreader.New(cfg, database),
+	}
 	return router, server
 }
 
@@ -5744,6 +5754,91 @@ func TestDirectImportPreviewDoesNotCreateBook(t *testing.T) {
 	}
 }
 
+func TestDirectImportReusesStagedUploadForReparseAndImport(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	request := func(path string, fields map[string]string, withFile bool) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if withFile {
+			part, err := writer.CreateFormFile("file", "staged.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := part.Write([]byte("第一章 开始\n正文\n第二章 继续\n正文")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for key, value := range fields {
+			if err := writer.WriteField(key, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	first := request("/api/imports/books/preview", nil, true)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first staged preview: expected 200, got %d: %s", first.Code, first.Body.String())
+	}
+	var preview struct {
+		ImportToken  string `json:"importToken"`
+		ChapterCount int    `json:"chapterCount"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if !validLocalImportToken(preview.ImportToken) || preview.ChapterCount < 1 {
+		t.Fatalf("unexpected staged preview: %+v", preview)
+	}
+	dataPath, metadataPath := localImportStagePaths(server.localImportStageDir(1), preview.ImportToken)
+	if _, err := os.Stat(dataPath); err != nil {
+		t.Fatalf("staged book data missing: %v", err)
+	}
+	if _, err := os.Stat(metadataPath); err != nil {
+		t.Fatalf("staged metadata missing: %v", err)
+	}
+
+	second := request("/api/imports/books/preview", map[string]string{
+		"importToken": preview.ImportToken,
+		"tocRule":     `^第.+章.*$`,
+	}, false)
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"chapterCount":2`) {
+		t.Fatalf("token reparse: expected 2 chapters, got %d: %s", second.Code, second.Body.String())
+	}
+
+	imported := request("/api/imports/books", map[string]string{
+		"importToken": preview.ImportToken,
+		"title":       "复用上传测试",
+		"tocRule":     `^第.+章.*$`,
+	}, false)
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("token import: expected 201, got %d: %s", imported.Code, imported.Body.String())
+	}
+	var count int64
+	if err := server.db.Model(&models.Book{}).Where("title = ?", "复用上传测试").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected imported book, got %d", count)
+	}
+	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
+		t.Fatalf("staged data should be removed after import, got %v", err)
+	}
+	if _, err := os.Stat(metadataPath); !os.IsNotExist(err) {
+		t.Fatalf("staged metadata should be removed after import, got %v", err)
+	}
+}
+
 func TestDirectEPUBImportAndRefreshUseTocRule(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -5811,6 +5906,176 @@ func TestDirectEPUBImportAndRefreshUseTocRule(t *testing.T) {
 	if len(chapters) != 2 || chapters[0].Title != "正文一" || chapters[1].Title != "正文二" {
 		t.Fatalf("import ignored spine rule: %+v", chapters)
 	}
+	if chapters[0].ResourcePath != "OPS/one.xhtml" || chapters[1].ResourcePath != "OPS/two.xhtml" {
+		t.Fatalf("epub resource paths were not imported: %+v", chapters)
+	}
+
+	contentReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content",
+		nil,
+	)
+	contentReq.Header.Set("Authorization", token)
+	contentW := httptest.NewRecorder()
+	router.ServeHTTP(contentW, contentReq)
+	if contentW.Code != http.StatusOK {
+		t.Fatalf("epub chapter content: expected 200, got %d: %s", contentW.Code, contentW.Body.String())
+	}
+	var contentResponse struct {
+		Format            string         `json:"format"`
+		ResourceURL       string         `json:"resourceUrl"`
+		ResourceExpiresAt string         `json:"resourceExpiresAt"`
+		Content           string         `json:"content"`
+		Chapter           models.Chapter `json:"chapter"`
+	}
+	if err := json.Unmarshal(contentW.Body.Bytes(), &contentResponse); err != nil {
+		t.Fatal(err)
+	}
+	if contentResponse.Format != "epub" || contentResponse.ResourceURL == "" || contentResponse.ResourceExpiresAt == "" {
+		t.Fatalf("missing epub resource metadata: %+v", contentResponse)
+	}
+	if !strings.Contains(contentResponse.Content, "内容一") || contentResponse.Chapter.ResourcePath != "OPS/one.xhtml" {
+		t.Fatalf("epub response lost text/resource path: %+v", contentResponse)
+	}
+	if strings.Contains(contentResponse.ResourceURL, strings.TrimPrefix(token, "Bearer ")) {
+		t.Fatal("resource URL leaked the login JWT")
+	}
+
+	resourceReq := httptest.NewRequest(http.MethodGet, contentResponse.ResourceURL, nil)
+	resourceW := httptest.NewRecorder()
+	router.ServeHTTP(resourceW, resourceReq)
+	if resourceW.Code != http.StatusOK {
+		t.Fatalf("epub XHTML resource: expected 200, got %d: %s", resourceW.Code, resourceW.Body.String())
+	}
+	if !strings.Contains(resourceW.Body.String(), "openreader-epub-bridge") ||
+		!strings.Contains(resourceW.Body.String(), "内容一") ||
+		strings.Contains(resourceW.Body.String(), "epub-authored-script") {
+		t.Fatalf("unexpected served XHTML: %s", resourceW.Body.String())
+	}
+	if resourceW.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		resourceW.Header().Get("Referrer-Policy") != "no-referrer" ||
+		resourceW.Header().Get("Content-Security-Policy") == "" {
+		t.Fatalf("missing EPUB security headers: %v", resourceW.Header())
+	}
+
+	resourcePrefix := strings.TrimSuffix(contentResponse.ResourceURL, "OPS/one.xhtml")
+	cssReq := httptest.NewRequest(http.MethodGet, resourcePrefix+"OPS/styles/book.css", nil)
+	cssW := httptest.NewRecorder()
+	router.ServeHTTP(cssW, cssReq)
+	if cssW.Code != http.StatusOK || !strings.Contains(cssW.Header().Get("Content-Type"), "text/css") {
+		t.Fatalf("epub CSS resource: got %d %q: %s", cssW.Code, cssW.Header().Get("Content-Type"), cssW.Body.String())
+	}
+	imageReq := httptest.NewRequest(http.MethodGet, resourcePrefix+"OPS/images/cover.svg", nil)
+	imageW := httptest.NewRecorder()
+	router.ServeHTTP(imageW, imageReq)
+	if imageW.Code != http.StatusOK || !strings.Contains(imageW.Header().Get("Content-Type"), "image/svg+xml") {
+		t.Fatalf("epub image resource: got %d %q: %s", imageW.Code, imageW.Header().Get("Content-Type"), imageW.Body.String())
+	}
+
+	extractionRoot := filepath.Join(server.cfg.LibraryDir, book.LibraryPath, ".epub-resources")
+	if err := os.RemoveAll(extractionRoot); err != nil {
+		t.Fatal(err)
+	}
+	rebuildReq := httptest.NewRequest(http.MethodGet, contentResponse.ResourceURL, nil)
+	rebuildW := httptest.NewRecorder()
+	router.ServeHTTP(rebuildW, rebuildReq)
+	if rebuildW.Code != http.StatusOK || !strings.Contains(rebuildW.Body.String(), "内容一") {
+		t.Fatalf("epub resource rebuild: got %d: %s", rebuildW.Code, rebuildW.Body.String())
+	}
+
+	parts := strings.Split(strings.TrimPrefix(contentResponse.ResourceURL, "/api/epub-resource/"), "/")
+	if len(parts) < 2 {
+		t.Fatalf("unexpected resource URL: %q", contentResponse.ResourceURL)
+	}
+	tamperedCapability := parts[0]
+	if strings.HasSuffix(tamperedCapability, "a") {
+		tamperedCapability = strings.TrimSuffix(tamperedCapability, "a") + "b"
+	} else {
+		tamperedCapability += "a"
+	}
+	tamperedReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/epub-resource/"+tamperedCapability+"/OPS/one.xhtml",
+		nil,
+	)
+	tamperedW := httptest.NewRecorder()
+	router.ServeHTTP(tamperedW, tamperedReq)
+	if tamperedW.Code == http.StatusOK {
+		t.Fatal("tampered EPUB capability unexpectedly succeeded")
+	}
+
+	unsupportedReq := httptest.NewRequest(
+		http.MethodGet,
+		resourcePrefix+"OPS/scripts/evil.js",
+		nil,
+	)
+	unsupportedW := httptest.NewRecorder()
+	router.ServeHTTP(unsupportedW, unsupportedReq)
+	if unsupportedW.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("unsupported EPUB script: expected 415, got %d: %s", unsupportedW.Code, unsupportedW.Body.String())
+	}
+	missingReq := httptest.NewRequest(
+		http.MethodGet,
+		resourcePrefix+"OPS/images/missing.png",
+		nil,
+	)
+	missingW := httptest.NewRecorder()
+	router.ServeHTTP(missingW, missingReq)
+	if missingW.Code != http.StatusNotFound {
+		t.Fatalf("missing EPUB resource: expected 404, got %d: %s", missingW.Code, missingW.Body.String())
+	}
+
+	if err := server.db.Model(&models.Chapter{}).
+		Where("id = ?", chapters[0].ID).
+		Update("resource_path", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	recoverReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content",
+		nil,
+	)
+	recoverReq.Header.Set("Authorization", token)
+	recoverW := httptest.NewRecorder()
+	router.ServeHTTP(recoverW, recoverReq)
+	if recoverW.Code != http.StatusOK {
+		t.Fatalf("legacy EPUB path recovery: expected 200, got %d: %s", recoverW.Code, recoverW.Body.String())
+	}
+	var recovered models.Chapter
+	if err := server.db.First(&recovered, chapters[0].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if recovered.ResourcePath != "OPS/one.xhtml" {
+		t.Fatalf("legacy EPUB resource path was not recovered: %+v", recovered)
+	}
+
+	sourcePath := filepath.Join(server.cfg.LibraryDir, book.OriginalFile)
+	if err := os.WriteFile(sourcePath, testEPUBArchiveWithBody(t, "更新后的内容一。"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleReq := httptest.NewRequest(http.MethodGet, contentResponse.ResourceURL, nil)
+	staleW := httptest.NewRecorder()
+	router.ServeHTTP(staleW, staleReq)
+	if staleW.Code != http.StatusForbidden {
+		t.Fatalf("stale EPUB capability: expected 403, got %d: %s", staleW.Code, staleW.Body.String())
+	}
+
+	if err := server.db.Model(&models.Book{}).
+		Where("id = ?", book.ID).
+		Update("user_id", book.UserID+100).Error; err != nil {
+		t.Fatal(err)
+	}
+	ownershipReq := httptest.NewRequest(http.MethodGet, recoverResourceURL(t, recoverW.Body.Bytes()), nil)
+	ownershipW := httptest.NewRecorder()
+	router.ServeHTTP(ownershipW, ownershipReq)
+	if ownershipW.Code != http.StatusNotFound {
+		t.Fatalf("ownership-changed EPUB capability: expected 404, got %d: %s", ownershipW.Code, ownershipW.Body.String())
+	}
+	if err := server.db.Model(&models.Book{}).
+		Where("id = ?", book.ID).
+		Update("user_id", book.UserID).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	refreshReq := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/refresh-local", strings.NewReader(`{"tocRule":"toc"}`))
 	refreshReq.Header.Set("Content-Type", "application/json")
@@ -5835,7 +6100,200 @@ func TestDirectEPUBImportAndRefreshUseTocRule(t *testing.T) {
 	}
 }
 
+func TestDirectCBZImportAndResourceCapability(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	cbzData := testCBZArchive(t, "first")
+
+	request := func(path string) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("file", "comic.cbz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(cbzData); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", token)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	previewW := request("/api/imports/books/preview")
+	if previewW.Code != http.StatusOK {
+		t.Fatalf("cbz preview: expected 200, got %d: %s", previewW.Code, previewW.Body.String())
+	}
+	var preview struct {
+		Title    string `json:"title"`
+		Author   string `json:"author"`
+		Chapters []struct {
+			Title string `json:"title"`
+		} `json:"chapters"`
+	}
+	if err := json.Unmarshal(previewW.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.Title != "CBZ 标题" || preview.Author != "CBZ 作者" {
+		t.Fatalf("preview did not use ComicInfo: %+v", preview)
+	}
+	if len(preview.Chapters) != 2 || preview.Chapters[0].Title != "pages/001.jpg" || preview.Chapters[1].Title != "pages/002.png" {
+		t.Fatalf("preview chapters not sorted image entries: %+v", preview.Chapters)
+	}
+
+	importW := request("/api/imports/books")
+	if importW.Code != http.StatusCreated {
+		t.Fatalf("cbz import: expected 201, got %d: %s", importW.Code, importW.Body.String())
+	}
+	var imported bookListItem
+	if err := json.Unmarshal(importW.Body.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	var book models.Book
+	if err := server.db.First(&book, imported.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if book.Title != "CBZ 标题" || book.Author != "CBZ 作者" || book.ChapterCount != 2 {
+		t.Fatalf("imported CBZ metadata mismatch: %+v", book)
+	}
+	var chapters []models.Chapter
+	if err := server.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 || chapters[0].ResourcePath != "pages/001.jpg" || chapters[1].ResourcePath != "pages/002.png" {
+		t.Fatalf("cbz resource paths were not imported: %+v", chapters)
+	}
+
+	contentReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content",
+		nil,
+	)
+	contentReq.Header.Set("Authorization", token)
+	contentW := httptest.NewRecorder()
+	router.ServeHTTP(contentW, contentReq)
+	if contentW.Code != http.StatusOK {
+		t.Fatalf("cbz chapter content: expected 200, got %d: %s", contentW.Code, contentW.Body.String())
+	}
+	var contentResponse struct {
+		Format            string         `json:"format"`
+		ResourceURL       string         `json:"resourceUrl"`
+		ResourceExpiresAt string         `json:"resourceExpiresAt"`
+		Content           string         `json:"content"`
+		Chapter           models.Chapter `json:"chapter"`
+	}
+	if err := json.Unmarshal(contentW.Body.Bytes(), &contentResponse); err != nil {
+		t.Fatal(err)
+	}
+	if contentResponse.Format != "cbz" ||
+		contentResponse.ResourceURL == "" ||
+		contentResponse.ResourceExpiresAt == "" ||
+		!strings.Contains(contentResponse.Content, "<img") ||
+		!strings.Contains(contentResponse.Content, contentResponse.ResourceURL) ||
+		contentResponse.Chapter.ResourcePath != "pages/001.jpg" {
+		t.Fatalf("missing cbz resource metadata: %+v", contentResponse)
+	}
+	if strings.Contains(contentResponse.ResourceURL, strings.TrimPrefix(token, "Bearer ")) {
+		t.Fatal("CBZ resource URL leaked the login JWT")
+	}
+
+	resourceReq := httptest.NewRequest(http.MethodGet, contentResponse.ResourceURL, nil)
+	resourceW := httptest.NewRecorder()
+	router.ServeHTTP(resourceW, resourceReq)
+	if resourceW.Code != http.StatusOK || !strings.Contains(resourceW.Header().Get("Content-Type"), "image/jpeg") || resourceW.Body.String() != "first" {
+		t.Fatalf("cbz image resource: got %d %q: %s", resourceW.Code, resourceW.Header().Get("Content-Type"), resourceW.Body.String())
+	}
+	if resourceW.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		resourceW.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("missing CBZ security headers: %v", resourceW.Header())
+	}
+
+	resourcePrefix := strings.TrimSuffix(contentResponse.ResourceURL, "pages/001.jpg")
+	unsupportedReq := httptest.NewRequest(http.MethodGet, resourcePrefix+"notes/readme.txt", nil)
+	unsupportedW := httptest.NewRecorder()
+	router.ServeHTTP(unsupportedW, unsupportedReq)
+	if unsupportedW.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("unsupported CBZ resource: expected 415, got %d: %s", unsupportedW.Code, unsupportedW.Body.String())
+	}
+
+	parts := strings.Split(strings.TrimPrefix(contentResponse.ResourceURL, "/api/cbz-resource/"), "/")
+	if len(parts) < 2 {
+		t.Fatalf("unexpected cbz resource URL: %q", contentResponse.ResourceURL)
+	}
+	tamperedCapability := parts[0]
+	if strings.HasSuffix(tamperedCapability, "a") {
+		tamperedCapability = strings.TrimSuffix(tamperedCapability, "a") + "b"
+	} else {
+		tamperedCapability += "a"
+	}
+	tamperedReq := httptest.NewRequest(http.MethodGet, "/api/cbz-resource/"+tamperedCapability+"/pages/001.jpg", nil)
+	tamperedW := httptest.NewRecorder()
+	router.ServeHTTP(tamperedW, tamperedReq)
+	if tamperedW.Code == http.StatusOK {
+		t.Fatal("tampered CBZ capability unexpectedly succeeded")
+	}
+
+	if err := server.db.Model(&models.Chapter{}).
+		Where("id = ?", chapters[0].ID).
+		Update("resource_path", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	recoverReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content",
+		nil,
+	)
+	recoverReq.Header.Set("Authorization", token)
+	recoverW := httptest.NewRecorder()
+	router.ServeHTTP(recoverW, recoverReq)
+	if recoverW.Code != http.StatusOK {
+		t.Fatalf("legacy CBZ path recovery: expected 200, got %d: %s", recoverW.Code, recoverW.Body.String())
+	}
+	var recovered models.Chapter
+	if err := server.db.First(&recovered, chapters[0].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if recovered.ResourcePath != "pages/001.jpg" {
+		t.Fatalf("legacy CBZ resource path was not recovered: %+v", recovered)
+	}
+
+	sourcePath := filepath.Join(server.cfg.LibraryDir, book.OriginalFile)
+	if err := os.WriteFile(sourcePath, testCBZArchive(t, "changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleReq := httptest.NewRequest(http.MethodGet, contentResponse.ResourceURL, nil)
+	staleW := httptest.NewRecorder()
+	router.ServeHTTP(staleW, staleReq)
+	if staleW.Code != http.StatusForbidden {
+		t.Fatalf("stale CBZ capability: expected 403, got %d: %s", staleW.Code, staleW.Body.String())
+	}
+}
+
 func testEPUBArchive(t *testing.T) []byte {
+	return testEPUBArchiveWithBody(t, "内容一。")
+}
+
+func recoverResourceURL(t *testing.T, response []byte) string {
+	t.Helper()
+	var payload struct {
+		ResourceURL string `json:"resourceUrl"`
+	}
+	if err := json.Unmarshal(response, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ResourceURL == "" {
+		t.Fatalf("response has no EPUB resource URL: %s", response)
+	}
+	return payload.ResourceURL
+}
+
+func testEPUBArchiveWithBody(t *testing.T, firstChapterBody string) []byte {
 	t.Helper()
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)
@@ -5859,8 +6317,43 @@ func testEPUBArchive(t *testing.T) []byte {
   <spine><itemref idref="one"/><itemref idref="two"/></spine>
 </package>`)
 	write("OPS/nav.xhtml", `<html><body><nav epub:type="toc"><a href="two.xhtml">目录二</a><a href="one.xhtml">目录一</a></nav></body></html>`)
-	write("OPS/one.xhtml", `<html><body><h1>正文一</h1><p>内容一。</p></body></html>`)
-	write("OPS/two.xhtml", `<html><body><h1>正文二</h1><p>内容二。</p></body></html>`)
+	write("OPS/one.xhtml", `<html><head>
+  <link rel="stylesheet" href="styles/book.css"/>
+  <script id="epub-authored-script">window.evil = true</script>
+</head><body>
+  <h1 id="start">正文一</h1>
+  <p>`+firstChapterBody+`</p>
+  <img src="images/cover.svg" alt="封面"/>
+  <a href="#start">页内链接</a>
+  <a href="two.xhtml">下一章</a>
+</body></html>`)
+	write("OPS/two.xhtml", `<html><body><h1>正文二</h1><p>内容二。</p><a href="one.xhtml">上一章</a></body></html>`)
+	write("OPS/styles/book.css", `body { color: rgb(12, 34, 56); }`)
+	write("OPS/images/cover.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>`)
+	write("OPS/scripts/evil.js", `window.epubAuthoredScript = true`)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func testCBZArchive(t *testing.T, firstPageContent string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	write := func(name string, content string) {
+		file, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ComicInfo.xml", `<ComicInfo><Title>CBZ 标题</Title><Writer>CBZ 作者</Writer></ComicInfo>`)
+	write("pages/002.png", "second")
+	write("pages/001.jpg", firstPageContent)
+	write("notes/readme.txt", "ignored")
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

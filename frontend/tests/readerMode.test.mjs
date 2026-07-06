@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { computed, effectScope, nextTick, reactive, ref } from 'vue'
-import { useReaderMode } from '../src/composables/useReaderMode.js'
+import { readerEffectiveMode, useReaderMode } from '../src/composables/useReaderMode.js'
 
 async function flushModeChange() {
   await nextTick()
   await Promise.resolve()
   await nextTick()
 }
+
+test('forces EPUB documents through the upstream vertical page branch', () => {
+  assert.equal(readerEffectiveMode('flip', true), 'page')
+  assert.equal(readerEffectiveMode('scroll2', true), 'page')
+  assert.equal(readerEffectiveMode('scroll2', false), 'scroll2')
+})
 
 test('rebuilds continuous chapter windows and restores reading position', async () => {
   const calls = []
@@ -43,7 +49,7 @@ test('rebuilds continuous chapter windows and restores reading position', async 
   assert.equal(page.value, 0)
   assert.equal(chapterLoading.value, false)
   assert.deepEqual(calls, [
-    ['window', true],
+    ['window', false],
     ['layout'],
     ['restore', 240, { saveAfterLoad: false }],
     ['save'],

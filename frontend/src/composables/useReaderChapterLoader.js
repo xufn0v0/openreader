@@ -13,7 +13,9 @@ export function useReaderChapterLoader(options) {
       0,
       Math.min(index, Math.max(options.chapters.value.length - 1, 0)),
     )
-    options.mobileChromeVisible.value = false
+    if (loadOptions.hideChrome) {
+      options.mobileChromeVisible.value = false
+    }
     options.restoringPosition.value = true
     options.chapterLoaded.value = false
     options.chapterLoadError.value = ''
@@ -36,14 +38,31 @@ export function useReaderChapterLoader(options) {
       )
       options.chapter.value = data.chapter
       options.content.value = data.content || ''
+      const format = data.format === 'epub' && data.resourceUrl ? 'epub' : 'text'
+      options.chapterFormat.value = format
+      options.epubResource.value = format === 'epub'
+        ? {
+            url: data.resourceUrl,
+            expiresAt: data.resourceExpiresAt || '',
+          }
+        : null
       options.page.value = 0
-      options.chapterBlocks.value = [
-        options.makeChapterBlock(
-          options.currentIndex.value,
-          options.chapter.value,
-          options.content.value,
-        ),
-      ]
+      options.chapterBlocks.value = format === 'epub'
+        ? []
+        : [
+            options.makeChapterBlock(
+              options.currentIndex.value,
+              options.chapter.value,
+              options.content.value,
+            ),
+          ]
+      if (format === 'epub') {
+        options.onEpubPrepared?.({
+          chapterIndex: options.currentIndex.value,
+          offset,
+          restoreOptions: loadOptions,
+        })
+      }
       options.chapterLoading.value = false
       await nextTick()
       options.updateLayout()
@@ -60,6 +79,7 @@ export function useReaderChapterLoader(options) {
         options.computeChapterWindow({ anchorIndex: options.currentIndex.value }).catch(() => {})
       }
     } catch (error) {
+      options.epubResource.value = null
       options.chapterLoadError.value = options.formatError(error)
     } finally {
       clearLoadingTimer()

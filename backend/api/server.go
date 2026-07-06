@@ -11,6 +11,8 @@ import (
 	"openreader/backend/config"
 	"openreader/backend/middleware"
 	"openreader/backend/services/backup"
+	"openreader/backend/services/cbzreader"
+	"openreader/backend/services/epubreader"
 	"openreader/backend/services/scheduler"
 	readersync "openreader/backend/sync"
 )
@@ -21,14 +23,28 @@ type Server struct {
 	hub        *readersync.Hub
 	scheduler  *scheduler.Scheduler
 	backupSvc  *backup.Service
+	cbzReader  *cbzreader.Service
+	epubReader *epubreader.Service
 	registerMu sync.Mutex
 }
 
 func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hub *readersync.Hub, sched *scheduler.Scheduler, backupSvc *backup.Service) {
-	server := &Server{cfg: cfg, db: database, hub: hub, scheduler: sched, backupSvc: backupSvc}
+	server := &Server{
+		cfg:        cfg,
+		db:         database,
+		hub:        hub,
+		scheduler:  sched,
+		backupSvc:  backupSvc,
+		cbzReader:  cbzreader.New(cfg, database),
+		epubReader: epubreader.New(cfg, database),
+	}
 
 	api := router.Group("/api")
 	api.GET("/health", server.health)
+	api.GET("/cbz-resource/:capability/*resourcePath", server.cbzResource)
+	api.HEAD("/cbz-resource/:capability/*resourcePath", server.cbzResource)
+	api.GET("/epub-resource/:capability/*resourcePath", server.epubResource)
+	api.HEAD("/epub-resource/:capability/*resourcePath", server.epubResource)
 
 	auth := api.Group("/auth")
 	auth.POST("/register", server.register)

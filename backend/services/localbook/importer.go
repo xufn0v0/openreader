@@ -46,6 +46,7 @@ type PreviewResult struct {
 	Author       string           `json:"author"`
 	ChapterCount int              `json:"chapterCount"`
 	Chapters     []PreviewChapter `json:"chapters"`
+	ImportToken  string           `json:"importToken,omitempty"`
 }
 
 func NewImporter(cfg config.Config, db *gorm.DB) Importer {
@@ -164,26 +165,28 @@ func (importer Importer) Import(request ImportRequest) (models.Book, error) {
 			cachePath := filepath.Join("content", contentPath)
 
 			chapter := models.Chapter{
-				BookID:    book.ID,
-				Index:     index,
-				Title:     chapterTitle,
-				URL:       chapterURL,
-				CachePath: cachePath,
+				BookID:       book.ID,
+				Index:        index,
+				Title:        chapterTitle,
+				URL:          chapterURL,
+				CachePath:    cachePath,
+				ResourcePath: parsedChapter.ResourcePath,
 			}
 			if err := tx.Create(&chapter).Error; err != nil {
 				return err
 			}
 			archivedChapters = append(archivedChapters, engine.ArchivedChapter{
-				ID:        chapter.ID,
-				URL:       chapterURL,
-				Title:     chapterTitle,
-				IsVolume:  false,
-				BaseURL:   "",
-				BookURL:   archive.OriginalFile,
-				Index:     index,
-				Start:     parsedChapter.Start,
-				End:       parsedChapter.End,
-				CachePath: cachePath,
+				ID:           chapter.ID,
+				URL:          chapterURL,
+				Title:        chapterTitle,
+				IsVolume:     false,
+				BaseURL:      "",
+				BookURL:      archive.OriginalFile,
+				Index:        index,
+				Start:        parsedChapter.Start,
+				End:          parsedChapter.End,
+				CachePath:    cachePath,
+				ResourcePath: parsedChapter.ResourcePath,
 			})
 		}
 
@@ -217,6 +220,8 @@ func (importer Importer) Import(request ImportRequest) (models.Book, error) {
 func parseUploadedBook(ext string, data []byte, tocRule string) (engine.ParsedBook, error) {
 	ext = strings.ToLower(strings.TrimSpace(ext))
 	switch ext {
+	case ".cbz":
+		return engine.ParseCBZ(data)
 	case ".epub":
 		return engine.ParseEPUBWithRule(data, tocRule)
 	case ".txt", ".text", ".md":

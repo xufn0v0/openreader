@@ -6,22 +6,48 @@
     <button type="button" @click="emit('reload')">重新加载</button>
   </div>
 
+  <ReaderEpubContent
+    v-else-if="epubResource?.url"
+    :resource="epubResource"
+    :style-text="epubStyle"
+    :viewport-height="viewportHeight"
+    @ready="emit('epub-ready')"
+    @load="emit('epub-load', $event)"
+    @height="emit('epub-height', $event)"
+    @click-point="emit('epub-click', $event)"
+    @hash="emit('epub-hash', $event)"
+    @keydown="emit('epub-keydown', $event)"
+    @preview="emit('epub-preview', $event)"
+    @error="emit('epub-error', $event)"
+  />
+
   <template v-else>
     <section
       v-for="block in blocks"
       :key="block.index"
       class="chapter-content reading-chapter"
-      :class="mode"
+      :class="[mode, { 'volume-chapter': block.isVolume, 'comic-chapter': block.isComic }]"
       :data-index="block.index"
     >
-      <h1 data-pos="0">{{ block.title || '正文' }}</h1>
-      <template v-for="(line, index) in block.paragraphs" :key="`${block.index}-${index}`">
+      <div v-if="block.isVolume" class="volume-content">
+        <h1 data-pos="0">{{ block.title || '正文' }}</h1>
+        <p v-if="block.volumeText" class="volume-tag" data-reader-block>{{ block.volumeText }}</p>
+      </div>
+      <div v-else-if="block.error" class="chapter-inline-error">
+        <h1 data-pos="0">{{ block.title || '正文' }}</h1>
+        <p data-pos="0" data-reader-block>{{ block.error }}</p>
+        <button type="button" @click.stop="emit('retry-block', block.index)">重新加载</button>
+      </div>
+      <template v-else>
+        <h1 v-if="!block.hideTitle" data-pos="0">{{ block.title || '正文' }}</h1>
+        <template v-for="(line, index) in block.paragraphs" :key="`${block.index}-${index}`">
         <figure
           v-if="line.type === 'image'"
           class="reader-content-image"
           :class="{ 'is-full': line.imageStyle === 'FULL' }"
           :data-pos="line.pos"
           data-reader-block
+          @click.stop
         >
           <el-image
             :src="line.src"
@@ -31,17 +57,22 @@
             fit="contain"
             lazy
             preview-teleported
+            @load="emit('image-load', { blockIndex: block.index, pos: line.pos, src: line.src })"
           />
           <figcaption v-if="line.alt">{{ line.alt }}</figcaption>
         </figure>
+        <p v-else-if="line.html" :data-pos="line.pos" data-reader-block v-html="line.html"></p>
         <p v-else :data-pos="line.pos" data-reader-block>{{ line.text }}</p>
+        </template>
+        <p v-if="loaded && block.paragraphs.length === 0" class="empty-hint">当前章节暂无正文内容</p>
       </template>
-      <p v-if="loaded && block.paragraphs.length === 0" class="empty-hint">当前章节暂无正文内容</p>
     </section>
   </template>
 </template>
 
 <script setup>
+import ReaderEpubContent from './ReaderEpubContent.vue'
+
 defineProps({
   blocks: {
     type: Array,
@@ -63,9 +94,33 @@ defineProps({
     type: String,
     required: true,
   },
+  epubResource: {
+    type: Object,
+    default: null,
+  },
+  epubStyle: {
+    type: String,
+    default: '',
+  },
+  viewportHeight: {
+    type: Number,
+    default: 0,
+  },
 })
 
-const emit = defineEmits(['reload'])
+const emit = defineEmits([
+  'reload',
+  'epub-ready',
+  'epub-load',
+  'epub-height',
+  'epub-click',
+  'epub-hash',
+  'epub-keydown',
+  'epub-preview',
+  'epub-error',
+  'image-load',
+  'retry-block',
+])
 </script>
 
 <style scoped>
@@ -78,6 +133,24 @@ const emit = defineEmits(['reload'])
   padding-top: 58px;
 }
 
+.chapter-content.volume-chapter {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+}
+
+.volume-content {
+  width: 100%;
+  text-align: center;
+}
+
+.volume-tag {
+  text-align: right;
+  text-indent: 0;
+  white-space: pre-line;
+}
+
 h1 {
   font-size: var(--reader-heading-size);
   line-height: 1.35;
@@ -86,8 +159,9 @@ h1 {
 }
 
 p {
-  margin: 0 0 var(--reader-paragraph-space);
+  margin: var(--reader-paragraph-space) 0;
   font-weight: var(--reader-font-weight);
+  text-align: inherit;
   text-indent: 2em;
 }
 
@@ -104,10 +178,19 @@ p {
   text-indent: 0;
 }
 
+.comic-chapter .reader-content-image {
+  margin-bottom: 0;
+}
+
 .reader-content-image :deep(.el-image) {
   display: block;
   width: min(100%, 960px);
   min-height: 1px;
+}
+
+.comic-chapter .reader-content-image :deep(.el-image) {
+  width: 100%;
+  max-width: 100vw;
 }
 
 .reader-content-image.is-full :deep(.el-image) {
@@ -123,6 +206,11 @@ p {
 
 .reader-content-image.is-full :deep(img) {
   width: 100%;
+}
+
+.comic-chapter .reader-content-image :deep(img) {
+  width: 100%;
+  max-width: 100vw;
 }
 
 .reader-content-image figcaption {
@@ -144,6 +232,24 @@ p {
   margin: 0;
   color: rgba(112, 48, 42, 0.8);
   text-indent: 0;
+}
+
+.chapter-inline-error {
+  display: grid;
+  min-height: 45vh;
+  place-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.chapter-inline-error h1,
+.chapter-inline-error p {
+  margin: 0;
+  text-indent: 0;
+}
+
+.chapter-inline-error p {
+  color: rgba(112, 48, 42, 0.8);
 }
 
 .chapter-load-error button {
@@ -170,6 +276,9 @@ p.reader-search-active {
 }
 
 @media (max-width: 750px) {
+  .chapter-content {
+    text-align: justify;
+  }
   h1 {
     font-size: var(--reader-heading-size);
     margin-bottom: 28px;

@@ -1,17 +1,102 @@
 <template>
-  <main ref="shellEl" class="reader-shell" :class="[reader.mode, { 'mobile-chrome-visible': mobileChromeVisible }]" :style="readerStyle">
+  <main ref="shellEl" class="reader-shell" :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible }]" :style="readerStyle">
     <ReaderDesktopTools
       :remote-book="isRemoteBook"
       :auto-reading="autoReading"
       :tts-playing="tts.state.playing"
-      :tts-supported="tts.state.supported"
+      :tts-supported="tts.state.supported && chapterFormat !== 'epub'"
+      :active-panel="desktopWorkspacePanel"
+      :is-night="isNightTheme"
       @action="handleDesktopToolAction"
     />
 
+    <ReaderDesktopWorkspacePanel
+      v-if="!isMobileReader && desktopWorkspacePanel"
+      :title="desktopWorkspaceTitle"
+      @close="closeDesktopWorkspace"
+    >
+      <template #actions>
+        <template v-if="desktopWorkspacePanel === 'shelf'">
+          <button type="button" :disabled="shelfLoading" @click="refreshReaderShelf">
+            {{ shelfLoading ? '刷新中...' : '刷新' }}
+          </button>
+        </template>
+        <template v-else-if="desktopWorkspacePanel === 'toc'">
+          <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
+          <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
+          <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
+          <button v-if="canChangeLocalTocRule" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
+          <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
+        </template>
+      </template>
+
+      <ReaderShelfPanel
+        v-if="desktopWorkspacePanel === 'shelf'"
+        ref="shelfPanelRef"
+        v-loading="shelfLoading"
+        :books="filteredShelfBooks"
+        :current-book-id="bookId"
+        :progress-by-book="reader.progressByBook"
+        :loading="shelfLoading"
+        @select="changeBookFromShelf"
+      />
+      <SourceSwitchPanel
+        v-else-if="desktopWorkspacePanel === 'source'"
+        :book="book"
+        :sources="sourceCandidates"
+        :loading="loadingSources"
+        :changing-source="changingSource"
+        :current-source-name="currentSourceName"
+        :group="sourceGroup"
+        :groups="sourceGroups"
+        :has-more="sourceHasMore"
+        @refresh="refreshSourceCandidates"
+        @load-more="loadMoreSourceCandidates"
+        @group-change="changeSourceGroup"
+        @change="changeSource"
+      />
+      <ReaderTocPanel
+        v-else-if="desktopWorkspacePanel === 'toc'"
+        ref="tocPanelRef"
+        :chapters="chapters"
+        :current-index="currentIndex"
+        :reverse="tocReverse"
+        :locate-key="tocLocateKey"
+        :browser-cached-map="browserCachedChapters"
+        desktop-grid
+        @jump="jumpFromToc"
+      />
+      <ReaderSettingsPanel
+        v-else-if="desktopWorkspacePanel === 'settings'"
+        v-model:custom-bg="customBg"
+        v-model:line-height="sliderLineHeight"
+        :reader="reader"
+        :tts="tts"
+        :tts-voices="ttsVoices"
+        :font-options="fontOptions"
+        :theme-presets="themePresets"
+        :mini-interface="false"
+        @mode-change="onModeChange"
+        @theme-change="setTheme"
+        @pick-bg-image="pickBgImage"
+        @clear-bg-image="clearBgImage"
+        @pick-font-file="pickFontFile"
+        @clear-font-file="clearFontFile"
+        @tts-rate-change="setTTSRate"
+        @tts-pitch-change="setTTSPitch"
+        @tts-voice-change="setTTSVoice"
+        @open-replace-rules="openReplaceRules"
+        @show-click-zone="showClickZone"
+      />
+    </ReaderDesktopWorkspacePanel>
+
     <ReaderMobileChrome
       :visible="mobileChromeVisible"
-      :book-title="book?.title || '阅读中'"
-      :chapter-title="displayChapterTitle(chapter?.title) || chapterLabel"
+      :remote-book="isRemoteBook"
+      :auto-reading="autoReading"
+      :tts-playing="tts.state.playing"
+      :tts-supported="tts.state.supported && chapterFormat !== 'epub'"
+      :is-night="isNightTheme"
       :book-progress-label="bookProgressLabel"
       :chapter-label="chapterLabel"
       :book-slider-value="mobileBookSliderValue"
@@ -51,13 +136,26 @@
             :error="chapterLoadError"
             :loaded="chapterLoaded"
             :loading="chapterLoading"
-            :mode="reader.mode"
+            :mode="effectiveReaderMode"
+            :epub-resource="epubResource"
+            :epub-style="epubStyleText"
+            :viewport-height="readerViewportHeight"
             @reload="reloadChapter"
+            @epub-load="handleEpubLoad"
+            @epub-height="handleEpubHeight"
+            @epub-click="handleEpubClick"
+            @epub-hash="handleEpubHash"
+            @epub-keydown="handleEpubKeydown"
+            @epub-preview="handleEpubPreview"
+            @epub-error="handleEpubError"
+            @image-load="handleReaderImageLoad"
+            @retry-block="retryContinuousChapter"
           />
         </div>
       </article>
       <ReaderClickZones
-        :mode="reader.mode"
+        v-if="chapterFormat !== 'epub'"
+        :mode="effectiveReaderMode"
         :show-overlay="showClickZoneOverlay"
         @tap="handleTapZone"
         @close-overlay="showClickZoneOverlay = false"
@@ -66,14 +164,11 @@
 
     <ReaderDesktopProgress
       :book-progress-label="bookProgressLabel"
-      :chapter-slider-value="desktopChapterSliderValue"
-      :chapter-progress-label="desktopChapterProgressLabel"
       :previous-disabled="currentIndex <= 0"
       :next-disabled="currentIndex >= chapters.length - 1"
+      @cache="runWithDesktopWorkspaceClosed(openCacheDrawer)"
       @previous="goChapter(currentIndex - 1)"
       @next="goChapter(currentIndex + 1)"
-      @chapter-progress-input="handleDesktopProgressInput"
-      @chapter-progress-change="handleDesktopProgressChange"
     />
 
     <!-- TTS 朗读条 -->
@@ -97,14 +192,17 @@
     <!-- Toast -->
     <div v-if="toastMsg" class="reader-toast">{{ toastMsg }}</div>
 
-    <!-- ===== 书架抽屉 ===== -->
-    <el-drawer v-model="showShelfDrawer" title="书架" :direction="drawerDirection" :size="shelfDrawerSize" @opened="locateReaderShelfCurrentBook">
-      <div class="reader-drawer-title">
-        <span>书架({{ filteredShelfBooks.length }})</span>
+    <!-- ===== 移动端书架面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showShelfDrawer"
+      :title="`书架(${filteredShelfBooks.length})`"
+      @close="showShelfDrawer = false"
+    >
+      <template #actions>
         <button type="button" :disabled="shelfLoading" @click="refreshReaderShelf">
           {{ shelfLoading ? '刷新中...' : '刷新' }}
         </button>
-      </div>
+      </template>
       <ReaderShelfPanel
         ref="shelfPanelRef"
         v-loading="shelfLoading"
@@ -114,20 +212,21 @@
         :loading="shelfLoading"
         @select="changeBookFromShelf"
       />
-    </el-drawer>
+    </ReaderMobileWorkspacePanel>
 
-    <!-- ===== 目录抽屉 ===== -->
-    <el-drawer v-model="showTocDrawer" title="目录" :direction="drawerDirection" :size="drawerSize" @opened="locateTocCurrentChapter">
-      <div class="reader-drawer-title">
-        <span>目录({{ chapters.length }})</span>
-        <div class="reader-drawer-actions">
-          <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
-          <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
-          <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
-          <button v-if="canChangeLocalTocRule" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
-          <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
-        </div>
-      </div>
+    <!-- ===== 移动端目录面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showTocDrawer"
+      :title="`目录(${chapters.length})`"
+      @close="showTocDrawer = false"
+    >
+      <template #actions>
+        <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
+        <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
+        <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
+        <button v-if="canChangeLocalTocRule" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
+        <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
+      </template>
       <ReaderTocPanel
         ref="tocPanelRef"
         :chapters="chapters"
@@ -137,10 +236,14 @@
         :browser-cached-map="browserCachedChapters"
         @jump="jumpFromToc"
       />
-    </el-drawer>
+    </ReaderMobileWorkspacePanel>
 
-    <!-- ===== 书签抽屉 ===== -->
-    <el-drawer v-model="showBookmarkDrawer" title="书签" :direction="drawerDirection" :size="drawerSize">
+    <!-- ===== 移动端书签面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showBookmarkDrawer"
+      title="书签"
+      @close="showBookmarkDrawer = false"
+    >
       <ReaderBookmarkPanel
         :bookmarks="bookmarks"
         @add="createBookmark"
@@ -150,10 +253,14 @@
         @remove-many="removeBookmarks"
         @import="importBookmarks"
       />
-    </el-drawer>
+    </ReaderMobileWorkspacePanel>
 
-    <!-- ===== 正文搜索抽屉 ===== -->
-    <el-drawer v-model="showSearchDrawer" title="搜索正文" :direction="drawerDirection" :size="drawerSize">
+    <!-- ===== 移动端正文搜索面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showSearchDrawer"
+      title="搜索正文"
+      @close="showSearchDrawer = false"
+    >
       <ReaderSearchPanel
         v-model="contentSearch"
         :results="bookSearchResults"
@@ -166,10 +273,14 @@
         @load-all="searchAllBookContent"
         @jump="jumpToBookSearchResult"
       />
-    </el-drawer>
+    </ReaderMobileWorkspacePanel>
 
-    <!-- ===== 书源抽屉 ===== -->
-    <el-drawer v-model="showSourceDrawer" title="书源" :direction="drawerDirection" :size="drawerSize" @open="ensureSourceCandidates">
+    <!-- ===== 移动端书源面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showSourceDrawer"
+      title="书源"
+      @close="showSourceDrawer = false"
+    >
       <SourceSwitchPanel
         :book="book"
         :sources="sourceCandidates"
@@ -184,31 +295,28 @@
         @group-change="changeSourceGroup"
         @change="changeSource"
       />
-    </el-drawer>
+    </ReaderMobileWorkspacePanel>
 
-    <!-- ===== 移动端更多 ===== -->
-    <el-drawer v-model="showMobileMoreDrawer" title="阅读工具" direction="btt" size="72%" class="mobile-more-drawer">
-      <ReaderMobileToolsPanel
-        :remote-book="isRemoteBook"
-        :auto-reading="autoReading"
-        :tts-playing="tts.state.playing"
-        :tts-supported="tts.state.supported"
-        @action="handleMobileToolAction"
-      />
-    </el-drawer>
-
-    <!-- ===== 缓存抽屉 ===== -->
-    <el-drawer v-model="showCacheDrawer" title="缓存章节" :direction="drawerDirection" :size="drawerSize">
+    <!-- ===== 移动端缓存面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showCacheDrawer"
+      title="缓存章节"
+      @close="showCacheDrawer = false"
+    >
       <ReaderCachePanel
         :caching="isCachingContent"
         :status-text="cachingContentTip"
         @cache="cacheFollowingChapters"
         @cancel="cancelCachingContent"
       />
-    </el-drawer>
+    </ReaderMobileWorkspacePanel>
 
-    <!-- ===== 设置抽屉 ===== -->
-    <el-drawer v-model="showSettingsDrawer" title="阅读设置" :direction="drawerDirection" :size="drawerSize">
+    <!-- ===== 移动端设置面板 ===== -->
+    <ReaderMobileWorkspacePanel
+      v-if="isMobileReader && showSettingsDrawer"
+      title="设置"
+      @close="showSettingsDrawer = false"
+    >
       <ReaderSettingsPanel
         v-model:custom-bg="customBg"
         v-model:line-height="sliderLineHeight"
@@ -229,6 +337,45 @@
         @tts-voice-change="setTTSVoice"
         @open-replace-rules="openReplaceRules"
         @show-click-zone="showClickZone"
+      />
+    </ReaderMobileWorkspacePanel>
+
+    <!-- ===== 桌面端书签抽屉 ===== -->
+    <el-drawer v-if="!isMobileReader" v-model="showBookmarkDrawer" title="书签" :direction="drawerDirection" :size="drawerSize">
+      <ReaderBookmarkPanel
+        :bookmarks="bookmarks"
+        @add="createBookmark"
+        @jump="jumpToBookmark"
+        @edit="openBookmarkEditor"
+        @remove="removeBookmark"
+        @remove-many="removeBookmarks"
+        @import="importBookmarks"
+      />
+    </el-drawer>
+
+    <!-- ===== 桌面端正文搜索抽屉 ===== -->
+    <el-drawer v-if="!isMobileReader" v-model="showSearchDrawer" title="搜索正文" :direction="drawerDirection" :size="drawerSize">
+      <ReaderSearchPanel
+        v-model="contentSearch"
+        :results="bookSearchResults"
+        :loading="bookSearching"
+        :searched="searchedBookContent"
+        :has-more="bookSearchHasMore"
+        :status-text="bookSearchStatus"
+        @search="searchBookContent"
+        @load-more="loadMoreBookContent"
+        @load-all="searchAllBookContent"
+        @jump="jumpToBookSearchResult"
+      />
+    </el-drawer>
+
+    <!-- ===== 桌面端缓存抽屉 ===== -->
+    <el-drawer v-if="!isMobileReader" v-model="showCacheDrawer" title="缓存章节" :direction="drawerDirection" :size="drawerSize">
+      <ReaderCachePanel
+        :caching="isCachingContent"
+        :status-text="cachingContentTip"
+        @cache="cacheFollowingChapters"
+        @cancel="cancelCachingContent"
       />
     </el-drawer>
 
@@ -251,6 +398,13 @@
       :saving="savingBookmark"
       @save="saveBookmarkEdit"
     />
+
+    <el-image-viewer
+      v-if="epubPreviewVisible"
+      :url-list="epubPreviewImages"
+      :initial-index="epubPreviewIndex"
+      @close="epubPreviewVisible = false"
+    />
   </main>
 </template>
 
@@ -268,10 +422,11 @@ import ReaderBookmarkPanel from '../components/reader/ReaderBookmarkPanel.vue'
 import ReaderCachePanel from '../components/reader/ReaderCachePanel.vue'
 import ReaderChapterContent from '../components/reader/ReaderChapterContent.vue'
 import ReaderClickZones from '../components/reader/ReaderClickZones.vue'
+import ReaderDesktopWorkspacePanel from '../components/reader/ReaderDesktopWorkspacePanel.vue'
 import ReaderDesktopProgress from '../components/reader/ReaderDesktopProgress.vue'
 import ReaderDesktopTools from '../components/reader/ReaderDesktopTools.vue'
+import ReaderMobileWorkspacePanel from '../components/reader/ReaderMobileWorkspacePanel.vue'
 import ReaderMobileChrome from '../components/reader/ReaderMobileChrome.vue'
-import ReaderMobileToolsPanel from '../components/reader/ReaderMobileToolsPanel.vue'
 import ReaderSearchPanel from '../components/reader/ReaderSearchPanel.vue'
 import ReaderShelfPanel from '../components/reader/ReaderShelfPanel.vue'
 import ReaderSettingsPanel from '../components/reader/ReaderSettingsPanel.vue'
@@ -299,6 +454,7 @@ import { useReaderChapterPresentation } from '../composables/useReaderChapterPre
 import { useReaderChapterWindow } from '../composables/useReaderChapterWindow'
 import { useReaderChrome } from '../composables/useReaderChrome'
 import { useReaderExternalUpdates } from '../composables/useReaderExternalUpdates'
+import { epubChapterIndexForResourceURL } from '../composables/useReaderEpubFrame'
 import { useReaderLayout } from '../composables/useReaderLayout'
 import { useReaderKeyboard } from '../composables/useReaderKeyboard'
 import { useReaderLocalTocRulePicker } from '../composables/useReaderLocalTocRulePicker'
@@ -307,7 +463,7 @@ import { useReaderProgressPersistence } from '../composables/useReaderProgressPe
 import { useReaderProgressControls } from '../composables/useReaderProgressControls'
 import { useReaderBookmarkActions } from '../composables/useReaderBookmarkActions'
 import { useReaderNavigation } from '../composables/useReaderNavigation'
-import { useReaderMode } from '../composables/useReaderMode'
+import { readerEffectiveMode, useReaderMode } from '../composables/useReaderMode'
 import { useReaderPageLifecycle } from '../composables/useReaderPageLifecycle'
 import { useReaderPanels } from '../composables/useReaderPanels'
 import { useReaderPositionRestore } from '../composables/useReaderPositionRestore'
@@ -365,6 +521,7 @@ const book = ref(null)
 const chapters = ref([])
 const chapter = ref(null)
 const currentIndex = ref(Number(route.query.chapter || 0))
+const isNightTheme = computed(() => reader.theme === 'dark' || reader.theme === 'black')
 const {
   cacheKey: readerDataCacheKey,
   invalidate: invalidateReaderDataCache,
@@ -448,6 +605,12 @@ const {
   onSuccess: message => ElMessage.success(message),
 })
 const content = ref('')
+const chapterFormat = ref('text')
+const epubResource = ref(null)
+const epubPendingRestore = ref(null)
+const epubPreviewVisible = ref(false)
+const epubPreviewImages = ref([])
+const epubPreviewIndex = ref(0)
 const chapterBlocks = ref([])
 const chapterLoading = ref(true)
 const chapterLoadError = ref('')
@@ -473,7 +636,6 @@ const showSettingsDrawer = ref(false)
 const showBookmarkDrawer = ref(false)
 const showSearchDrawer = ref(false)
 const showSourceDrawer = ref(false)
-const showMobileMoreDrawer = ref(false)
 const showCacheDrawer = ref(false)
 const showClickZoneOverlay = ref(false)
 const sourceGroupOptions = ref([])
@@ -523,9 +685,6 @@ const {
   currentBookId: bookId,
   currentChapterCount: () => chapters.value.length,
   router,
-  beforeOpen: () => {
-    mobileChromeVisible.value = false
-  },
   saveProgress: () => saveCurrentProgress({ force: true }),
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
@@ -560,8 +719,6 @@ const restoringPosition = ref(false)
 const chapterContentCache = createMultiBookChapterMemoryCache(3)
 
 const fontOptions = readerFontOptions
-const SHOW_PREV_CHAPTER_SIZE = 1
-const SHOW_NEXT_CHAPTER_SIZE = 2
 const NEARBY_PRELOAD_RADIUS = 2
 
 const currentSourceName = computed(() => {
@@ -589,9 +746,6 @@ const {
 } = useReaderToc({
   chapters,
   isRemoteBook,
-  beforeOpen: () => {
-    mobileChromeVisible.value = false
-  },
   refreshCachedChapters: (...args) => computeBrowserCachedChapters(...args),
   syncCurrentChapter: (...args) => updateCurrentChapterFromScroll(...args),
   goChapter: (...args) => goChapter(...args),
@@ -721,6 +875,7 @@ const {
   makeParagraphs,
 } = useReaderChapterPresentation({
   reader,
+  book,
   chapters,
 })
 
@@ -731,11 +886,36 @@ const lines = computed(() => chapterParagraphs.value.filter(item => item.type ==
 const chapterTextLength = computed(() => {
   return chapterBlockTextLength({ paragraphs: chapterParagraphs.value })
 })
-const isVerticalPagedRead = computed(() => reader.mode === 'page')
-const isScrollRead = computed(() => reader.mode === 'scroll' || reader.mode === 'scroll2')
+const effectiveReaderMode = computed(() => (
+  readerEffectiveMode(reader.mode, chapterFormat.value === 'epub')
+))
+const effectiveReaderState = {
+  get mode() {
+    return effectiveReaderMode.value
+  },
+  get clickMethod() {
+    return reader.clickMethod
+  },
+  get fontSize() {
+    return reader.fontSize
+  },
+  get lineHeight() {
+    return reader.lineHeight
+  },
+  get animateDuration() {
+    return reader.animateDuration
+  },
+}
+const isVerticalPagedRead = computed(() => effectiveReaderMode.value === 'page')
+const isScrollRead = computed(() => (
+  effectiveReaderMode.value === 'scroll' || effectiveReaderMode.value === 'scroll2'
+))
 const isVerticalRead = computed(() => isVerticalPagedRead.value || isScrollRead.value)
-const isContinuousScrollRead = computed(() => reader.mode === 'scroll' || reader.mode === 'scroll2')
+const isContinuousScrollRead = computed(() => (
+  effectiveReaderMode.value === 'scroll' || effectiveReaderMode.value === 'scroll2'
+))
 const displayedChapterBlocks = computed(() => {
+  if (chapterFormat.value === 'epub') return []
   if (isContinuousScrollRead.value && chapterBlocks.value.length) return chapterBlocks.value
   return [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
 })
@@ -762,7 +942,8 @@ const {
   page,
   pageCount,
   isContinuousScrollRead,
-  getMode: () => reader.mode,
+  isEPUB: computed(() => chapterFormat.value === 'epub'),
+  getMode: () => effectiveReaderMode.value,
   makeChapterBlock,
   chapterBlockTextLength,
   nextFrame,
@@ -788,6 +969,7 @@ const {
 const {
   compute: computeShowChapterList,
   maybeExtend: maybeExtendShowChapters,
+  retry: retryContinuousChapter,
   syncCurrentChapter: updateCurrentChapterFromScroll,
 } = useReaderChapterWindow({
   reader,
@@ -805,15 +987,15 @@ const {
   restoreScrollAnchor: restoreReaderScrollAnchor,
   visibleProgressSnapshot: visibleChapterProgressSnapshot,
   nextFrame,
-  previousSize: SHOW_PREV_CHAPTER_SIZE,
-  nextSize: SHOW_NEXT_CHAPTER_SIZE,
+  nextSize: 1,
+  formatError: error => readError(error, '章节加载失败，请检查书源或网络后重试'),
 })
 const {
   readableViewportSize,
   resize: handleResize,
   update: updateFlipLayout,
 } = useReaderLayout({
-  reader,
+  reader: effectiveReaderState,
   contentEl,
   contentBody,
   page,
@@ -843,7 +1025,7 @@ const {
   page,
   pageCount,
   pageWidth,
-  getMode: () => reader.mode,
+  getMode: () => effectiveReaderMode.value,
   getRouteQuery: () => route.query,
   closeDrawer: () => {
     showSearchDrawer.value = false
@@ -879,11 +1061,15 @@ const {
   progressVersion,
   isContinuousScrollRead,
   isVerticalRead,
-  getMode: () => reader.mode,
+  getMode: () => effectiveReaderMode.value,
   getAnimateDuration: () => reader.animateDuration,
   scrollStep,
   scrollBehavior: readerScrollBehavior,
   jumpToParagraph,
+  rebuildContinuousWindow: index => computeShowChapterList({
+    anchorIndex: index,
+    activate: true,
+  }),
   closeToc: () => {
     showTocDrawer.value = false
   },
@@ -913,12 +1099,8 @@ const {
 const {
   bookProgress,
   bookProgressLabel,
-  desktopChapterProgressLabel,
-  desktopChapterSliderValue,
   mobileBookProgressLabel,
   mobileBookSliderValue,
-  handleDesktopProgressChange,
-  handleDesktopProgressInput,
   handleMobileBookProgressChange,
   handleMobileBookProgressInput,
 } = useReaderProgressControls({
@@ -930,7 +1112,7 @@ const {
   pageCount,
   progressVersion,
   isContinuousScrollRead,
-  getMode: () => reader.mode,
+  getMode: () => effectiveReaderMode.value,
   getCurrentChapterPercent: currentChapterPercent,
   navigate: query => router.replace({
     name: 'reader',
@@ -969,6 +1151,52 @@ const readerContentStyle = computed(() => ({
   lineHeight: reader.lineHeight,
 }))
 
+const readerViewportHeight = computed(() => (
+  contentEl.value?.clientHeight ||
+  pageHeight.value ||
+  (typeof window === 'undefined' ? 0 : window.innerHeight)
+))
+
+const epubStyleText = computed(() => `
+  *::-webkit-scrollbar {
+    display: none;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  *:focus {
+    outline: none !important;
+  }
+  html {
+    min-height: 100%;
+    color: ${reader.fontColor || reader.currentTheme.text};
+    background: transparent;
+    font-family: ${fontStack.value};
+    font-size: ${reader.fontSize}px;
+    font-weight: ${reader.fontWeight};
+  }
+  body {
+    min-height: 100%;
+    margin: 0 !important;
+    color: inherit;
+    background: transparent !important;
+    font: inherit;
+  }
+  body p {
+    margin-top: ${reader.paragraphSpace}em !important;
+    margin-bottom: ${reader.paragraphSpace}em !important;
+    color: inherit !important;
+    font-family: ${fontStack.value} !important;
+    font-size: ${reader.fontSize}px !important;
+    font-weight: ${reader.fontWeight} !important;
+    line-height: ${reader.lineHeight} !important;
+  }
+  img {
+    display: block;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+`)
+
 const bodyStyle = computed(() => {
   const baseStyle = {
     fontFamily: fontStack.value,
@@ -976,7 +1204,7 @@ const bodyStyle = computed(() => {
     lineHeight: reader.lineHeight,
     fontWeight: reader.fontWeight,
   }
-  if (reader.mode === 'flip') {
+  if (effectiveReaderMode.value === 'flip') {
     return {
       ...baseStyle,
       '--reader-page-width': `${pageWidth.value}px`,
@@ -988,15 +1216,78 @@ const bodyStyle = computed(() => {
 
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
 const isMobileReader = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
-const drawerDirection = computed(() => isMobileReader.value ? 'btt' : 'rtl')
-const drawerSize = computed(() => isMobileReader.value ? '88%' : '360px')
-const shelfDrawerSize = computed(() => isMobileReader.value ? '88%' : 'min(900px, calc(100vw - 80px))')
+const drawerDirection = computed(() => 'rtl')
+const drawerSize = computed(() => '360px')
+const desktopWorkspacePanel = computed(() => {
+  if (isMobileReader.value) return ''
+  if (showShelfDrawer.value) return 'shelf'
+  if (showSourceDrawer.value) return 'source'
+  if (showTocDrawer.value) return 'toc'
+  if (showSettingsDrawer.value) return 'settings'
+  return ''
+})
+const desktopWorkspaceTitle = computed(() => {
+  if (desktopWorkspacePanel.value === 'shelf') {
+    return `书架 (${filteredShelfBooks.value.length})`
+  }
+  if (desktopWorkspacePanel.value === 'source') return ''
+  if (desktopWorkspacePanel.value === 'toc') {
+    return `目录 (${chapters.value.length})`
+  }
+  return ''
+})
+
+function closeDesktopWorkspace() {
+  showShelfDrawer.value = false
+  showSourceDrawer.value = false
+  showTocDrawer.value = false
+  showSettingsDrawer.value = false
+}
+
+function openDesktopToolPanel(panel, open) {
+  if (!isMobileReader.value && desktopWorkspacePanel.value === panel) {
+    closeDesktopWorkspace()
+    return
+  }
+  if (!isMobileReader.value) closeDesktopWorkspace()
+  open()
+}
+
+function runWithDesktopWorkspaceClosed(action) {
+  if (!isMobileReader.value) closeDesktopWorkspace()
+  return action?.()
+}
+
+watch(
+  [showShelfDrawer, showSourceDrawer, showTocDrawer, showSettingsDrawer],
+  (values, previous = []) => {
+    if (isMobileReader.value) return
+    const opened = values.findIndex((value, index) => (
+      value && !previous[index]
+    ))
+    if (opened < 0) return
+    const refs = [
+      showShelfDrawer,
+      showSourceDrawer,
+      showTocDrawer,
+      showSettingsDrawer,
+    ]
+    refs.forEach((state, index) => {
+      if (index !== opened) state.value = false
+    })
+  },
+)
+
+watch(showSourceDrawer, (visible) => {
+  if (visible) ensureSourceCandidates()
+})
 const {
   change: onModeChange,
 } = useReaderMode({
   reader,
   isMobileReader,
   isContinuousScrollRead,
+  isEPUB: computed(() => chapterFormat.value === 'epub'),
   page,
   chapterLoading,
   chapterBlocks,
@@ -1010,7 +1301,7 @@ const {
   restorePosition: restoreReadingPosition,
   saveProgress: () => saveCurrentProgress(),
 })
-const mobileChromeVisible = ref(false)
+const mobileChromeVisible = ref(true)
 const {
   toggle: toggleReaderChrome,
 } = useReaderChrome({
@@ -1028,7 +1319,6 @@ const isOverlayOpen = computed(() => (
   showSearchDrawer.value ||
   showShelfDrawer.value ||
   showSourceDrawer.value ||
-  showMobileMoreDrawer.value ||
   showCacheDrawer.value ||
   showNoteDialog.value ||
   showBookmarkEditor.value
@@ -1036,11 +1326,11 @@ const isOverlayOpen = computed(() => (
 const {
   handle: handleReaderWheel,
 } = useReaderWheel({
-  reader,
+  reader: effectiveReaderState,
   shellEl,
   contentEl,
   isOverlayOpen,
-  isScrollRead,
+  isVerticalRead,
   nextPage,
   previousPage,
 })
@@ -1071,8 +1361,9 @@ const {
   handleTouchEnd: handleReaderTouchEnd,
   handleTouchMove: handleReaderTouchMove,
   handleTouchStart: handleReaderTouchStart,
+  tapPoint: handleReaderTapPoint,
 } = useReaderPointer({
-  reader,
+  reader: effectiveReaderState,
   pageEl,
   isMobileReader,
   isOverlayOpen,
@@ -1100,7 +1391,7 @@ const {
   applyLocal: applyLocalProgressSnapshot,
   saveRemote: payload => reader.saveProgress(payload),
   onSaved: progress => upsertReaderBookProgress(progress, { replace: true }),
-  getMode: () => reader.mode,
+  getMode: () => effectiveReaderMode.value,
   getStoredProgress: targetBookId => reader.progressByBook[targetBookId],
   ensureClientId: () => reader.ensureClientId(),
 })
@@ -1122,7 +1413,6 @@ const {
   bookProgress,
   bookProgressLabel,
   mobileChromeVisible,
-  mobileMoreVisible: showMobileMoreDrawer,
   settingsVisible: showSettingsDrawer,
   bookmarkVisible: showBookmarkDrawer,
   searchVisible: showSearchDrawer,
@@ -1165,6 +1455,8 @@ const {
   chapterLoading,
   chapter,
   content,
+  chapterFormat,
+  epubResource,
   page,
   chapterBlocks,
   progressVersion,
@@ -1182,6 +1474,9 @@ const {
   computeChapterWindow: computeShowChapterList,
   formatError: error => readError(error, '章节加载失败，请检查书源或网络后重试'),
   nextFrame,
+  onEpubPrepared: pending => {
+    epubPendingRestore.value = pending
+  },
 })
 const {
   handle: onScroll,
@@ -1267,34 +1562,35 @@ const {
   goChapter,
   notify: showReaderToast,
 })
+watch(chapterFormat, format => {
+  if (format === 'epub') ttsStop()
+})
 const {
   handleDesktopToolAction,
   handleMobileChromeAction,
-  handleMobileToolAction,
 } = useReaderTools({
   currentIndex,
   mobileChromeVisible,
-  mobileMoreVisible: showMobileMoreDrawer,
   goChapter,
   toggleChrome: toggleReaderChrome,
   actions: {
-    home: goShelf,
-    shelf: openShelfPanel,
-    source: goSourcePanel,
-    toc: openTocDrawer,
-    settings: openSettingsDrawer,
-    bookmarks: openBookmarkDrawer,
-    search: openContentSearch,
-    info: openReaderBookInfo,
-    note: openNoteDialog,
-    cache: openCacheDrawer,
-    'clear-cache': clearCurrentBookCache,
-    reload: reloadChapter,
-    'auto-read': toggleAutoReading,
-    tts: toggleTTS,
-    night: toggleNight,
-    top: scrollToTop,
-    bottom: scrollToBottom,
+    home: () => runWithDesktopWorkspaceClosed(goShelf),
+    shelf: () => openDesktopToolPanel('shelf', openShelfPanel),
+    source: () => openDesktopToolPanel('source', goSourcePanel),
+    toc: () => openDesktopToolPanel('toc', openTocDrawer),
+    settings: () => openDesktopToolPanel('settings', openSettingsDrawer),
+    bookmarks: () => runWithDesktopWorkspaceClosed(openBookmarkDrawer),
+    search: () => runWithDesktopWorkspaceClosed(openContentSearch),
+    info: () => runWithDesktopWorkspaceClosed(openReaderBookInfo),
+    note: () => runWithDesktopWorkspaceClosed(openNoteDialog),
+    cache: () => runWithDesktopWorkspaceClosed(openCacheDrawer),
+    'clear-cache': () => runWithDesktopWorkspaceClosed(clearCurrentBookCache),
+    reload: () => runWithDesktopWorkspaceClosed(reloadChapter),
+    'auto-read': () => runWithDesktopWorkspaceClosed(toggleAutoReading),
+    tts: () => runWithDesktopWorkspaceClosed(toggleTTS),
+    night: () => runWithDesktopWorkspaceClosed(toggleNight),
+    top: () => runWithDesktopWorkspaceClosed(scrollToTop),
+    bottom: () => runWithDesktopWorkspaceClosed(scrollToBottom),
   },
 })
 
@@ -1393,6 +1689,114 @@ function nextFrame() {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
 }
 
+async function handleEpubLoad(location) {
+  const resourceLocation = location?.href || location?.path || ''
+  const navigatedIndex = epubChapterIndexForResourceURL(resourceLocation, chapters.value)
+  if (navigatedIndex >= 0 && navigatedIndex !== currentIndex.value) {
+    currentIndex.value = navigatedIndex
+    chapter.value = chapters.value[navigatedIndex] || chapter.value
+    page.value = 0
+    chapterBlocks.value = []
+    epubPendingRestore.value = {
+      chapterIndex: navigatedIndex,
+      offset: 0,
+      restoreOptions: { restorePercent: 0, saveAfterLoad: false },
+    }
+    const cached = getChapterContentFromMemory(navigatedIndex)
+    if (cached?.content !== undefined) {
+      content.value = cached.content || ''
+    } else {
+      loadChapterContent(navigatedIndex)
+        .then(data => {
+          if (currentIndex.value === navigatedIndex) {
+            content.value = data.content || ''
+          }
+        })
+        .catch(() => {})
+    }
+  }
+
+  const pending = epubPendingRestore.value
+  await nextTick()
+  updateFlipLayout()
+  if (pending && pending.chapterIndex === currentIndex.value) {
+    await restoreReadingPosition(pending.offset, pending.restoreOptions)
+    epubPendingRestore.value = null
+  }
+  chapterLoaded.value = true
+  progressVersion.value += 1
+  scheduleProgressSave(120)
+}
+
+function handleEpubHeight() {
+  updateFlipLayout()
+  progressVersion.value += 1
+}
+
+function handleEpubClick(point) {
+  const frame = contentBody.value?.querySelector('.epub-iframe')
+  const page = pageEl.value
+  if (!frame || !page || !point) return
+  const frameRect = frame.getBoundingClientRect()
+  const pageRect = page.getBoundingClientRect()
+  const clientX = frameRect.left + (Number(point.clientX) || 0)
+  const clientY = frameRect.top + (Number(point.clientY) || 0)
+  handleReaderTapPoint({
+    rect: pageRect,
+    relX: clientX - pageRect.left,
+    relY: clientY - pageRect.top,
+    clientX,
+    clientY,
+  }, isMobileReader.value)
+}
+
+function handleEpubHash(rect) {
+  const viewport = contentEl.value
+  const frame = contentBody.value?.querySelector('.epub-iframe')
+  if (!viewport || !frame || !Number.isFinite(Number(rect?.top))) return
+  const viewportRect = viewport.getBoundingClientRect()
+  const frameRect = frame.getBoundingClientRect()
+  viewport.scrollTop = Math.max(
+    0,
+    viewport.scrollTop + frameRect.top - viewportRect.top + Number(rect.top),
+  )
+  scheduleProgressSave(120)
+}
+
+function handleEpubKeydown(event) {
+  const key = String(event?.key || '')
+  if (!key) return
+  window.dispatchEvent(new KeyboardEvent('keydown', {
+    key,
+    code: key,
+    bubbles: true,
+    cancelable: true,
+  }))
+}
+
+function handleEpubPreview(payload) {
+  const images = Array.isArray(payload?.imageList)
+    ? payload.imageList.filter(Boolean)
+    : []
+  if (!images.length) return
+  epubPreviewImages.value = images
+  epubPreviewIndex.value = Math.max(
+    0,
+    Math.min(Number(payload.imageIndex) || 0, images.length - 1),
+  )
+  epubPreviewVisible.value = true
+}
+
+function handleEpubError(error) {
+  chapterLoadError.value = error?.message || 'EPUB 正文加载失败，请重试'
+  chapterLoaded.value = false
+}
+
+function handleReaderImageLoad() {
+  updateFlipLayout()
+  progressVersion.value += 1
+}
+
 function scrollStep() {
   const viewportHeight = contentEl.value?.clientHeight || window.innerHeight || readableViewportSize().height
   return readerScrollStep({
@@ -1431,7 +1835,7 @@ function flashParagraph(lineEl) {
 }
 
 useReaderKeyboard({
-  reader,
+  reader: effectiveReaderState,
   currentIndex,
   chapters,
   isScrollRead,
@@ -1538,14 +1942,6 @@ function readError(err, fallback) {
   transform: translateX(-50%); z-index: 5; font-size: 14px;
 }
 
-.reader-drawer-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin: -2px 0 14px;
-}
-
 .reader-shell :deep(.el-drawer) {
   color: var(--reader-text);
   background: var(--reader-popup-bg);
@@ -1558,30 +1954,6 @@ function readError(err, fallback) {
 
 .reader-shell :deep(.el-drawer__body) {
   background: var(--reader-popup-bg);
-}
-
-.reader-drawer-title span {
-  color: #ed4259;
-  border-bottom: 1px solid #ed4259;
-  font-size: 18px;
-}
-.reader-drawer-title button {
-  padding: 0;
-  color: #ed4259;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font-size: 14px;
-}
-.reader-drawer-title button:disabled {
-  color: #8c8c8c;
-  cursor: default;
-}
-.reader-drawer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 14px;
 }
 /* ---- 响应式 ---- */
 @media (max-width: 750px) {
@@ -1599,10 +1971,12 @@ function readError(err, fallback) {
   .reader-page {
     height: 100dvh;
     border: 0;
-    width: 100%;
+    width: 100vw;
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
+    padding: 0 16px;
+    text-align: justify;
   }
   .reader-page-head { display: none; }
   .reader-content {
@@ -1611,9 +1985,15 @@ function readError(err, fallback) {
     max-width: 100%;
     min-width: 0;
     font-size: var(--reader-font-size);
-    padding: 42px 22px calc(42px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(42px + env(safe-area-inset-bottom));
+    padding: 0;
+    scroll-padding-bottom: calc(15px + env(safe-area-inset-bottom));
     touch-action: pan-y pinch-zoom;
+  }
+  .reader-body {
+    margin-top: calc(30px + env(safe-area-inset-top));
+    padding-top: 15px;
+    padding-bottom: calc(15px + env(safe-area-inset-bottom));
+    text-align: justify;
   }
   .reader-shell.scroll .reader-content,
   .reader-shell.scroll2 .reader-content {
@@ -1625,10 +2005,6 @@ function readError(err, fallback) {
     display: none;
     width: 0;
     height: 0;
-  }
-  .reader-shell.mobile-chrome-visible .reader-content {
-    padding-bottom: calc(250px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(250px + env(safe-area-inset-bottom));
   }
 }
 </style>
