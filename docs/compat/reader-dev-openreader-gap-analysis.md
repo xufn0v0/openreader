@@ -20,24 +20,50 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Module | reader-dev original behavior/files | OpenReader current behavior/files | Difference/risk | Status | Recommended tests |
 |---|---|---|---|---|---|
 | Frontend scene structure | `web/src/views/Index.vue`, `web/src/views/Reader.vue`; router has `/` and `/reader`. | `frontend/src/router/index.js` splits `/`, `/search`, `/discover`, `/local-store`, `/sources`, `/settings`, `/books/:id`, `/books/:id/read`. | Current route/page split fragments upstream workspace flows. Old URLs may stay as redirects, but product structure should converge to Index + Reader. | `must-fix` for P1 | Router redirect tests; browser flow search → BookInfo → read. |
-| Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar. | `frontend/src/views/Reader.vue`: `mobileChromeVisible = ref(false)`; `useReaderTools` and `useReaderPanels` hide chrome on panel actions. | Directly causes mobile reader mismatch and blank/operation confusion reports. | `must-fix` for P0 | Contract tests for default visible and panel coexistence; mobile browser smoke. |
-| Reader mobile panel structure | Upstream uses Element popovers with `popper-class="popper-component"`; mini interface popper is full-width and coexists with toolbar. | Current reader uses multiple mobile bottom `el-drawer` instances. | Drawer architecture changes z-index, hit testing, toolbar coexistence, and upstream layout. | `must-fix` for P0 | Browser tests for settings/catalog/source/shelf panel + toolbar visible. |
-| Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile CSS uses `padding: 42px 22px ...`; paragraph justification/spacing does not fully match upstream. | Causes asymmetric left/right whitespace and paragraph layout drift. | `must-fix` for P0 | DOM geometry probe for left/right padding within 1px across 390×844 and 360×800. |
+| Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar. | `frontend/src/views/Reader.vue` now uses `mobileChromeVisible = ref(true)`, and `useReaderTools` / `useReaderPanels` no longer hide chrome for panel actions. | Default-visible toolbar and panel coexistence are implemented; remaining work is full upstream interaction audit for all special branches. | `aligned` for base P0; `partial` for full Reader P0 | Keep unit contracts and `scripts/smoke/reader-mobile-contract.mjs`; extend branch coverage as missing upstream cases are extracted. |
+| Reader mobile panel structure | Upstream uses Element popovers with `popper-class="popper-component"`; mini interface popper is full-width and coexists with toolbar. | Current mobile shelf/toc/source/settings/search/cache/bookmark panels use `ReaderMobileWorkspacePanel`, a full-width toolbar-coexisting workspace; visible mobile `el-drawer` is no longer used for these panels. | Full-width coexistence and no visible drawer are implemented as a Vue 3/Element Plus adaptation. Exact upstream popover internals still need per-panel layout review. | `technical-stack-equivalent` + `partial` | Browser tests for settings/catalog/source/shelf panel + toolbar visible; per-panel layout review before final P0. |
+| Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Base geometry is implemented; acceptance requires actual rendered paragraph left/right gap checks, not only CSS value checks. | `aligned` for base P0 | DOM geometry probe for page/body/paragraph left/right gaps within 1px across 390×844 and 360×800; ensure toolbar show/hide does not shift content. |
 | Reader scrolling vs click paging | Upstream has page/scroll modes with discrete click navigation. | User requested continuous native finger/wheel scrolling while click paging remains segmented. | Intentional UX improvement if it does not change mode selection semantics. | `acceptable-change` | Browser scroll continuity probe; click paging regression tests. |
 | Reader settings controls | Upstream uses controls that are easier to distinguish visually; user requested minus/value/plus controls instead of current easy-to-mis-tap slider behavior. | Current setting stepper exists but must be rechecked against upstream layout/state. | Allowed UX adaptation, but values/defaults/state must match upstream. | `acceptable-change` | Unit tests for value bounds; browser setting interaction test. |
-| Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, and cross-chapter behavior. | Current `ReaderChapterContent.vue` handles text/images/volume blocks, CBZ image resources, EPUB iframe resources, and a dedicated audio branch for `type === 1` chapters; continuous chapter retention, extension, anchor, error, and explicit-jump behavior follows the extracted fixed-baseline contract. | EPUB, image/CBZ rendering/import/resource serving, continuous cross-chapter behavior, and basic audio playback are implemented and browser-validated. TTS parity and local/private signed audio resources remain pending. | `aligned` for implemented formats; `partial` for audio; `unknown` for TTS | Keep EPUB/image/CBZ/continuous/audio browser contracts; add TTS and local/private audio-resource fixtures. |
+| Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, and cross-chapter behavior. | Current `ReaderChapterContent.vue` handles text/images/volume blocks, CBZ image resources, EPUB iframe resources, and a dedicated audio branch for `type === 1` chapters; continuous chapter retention, extension, anchor, error, and explicit-jump behavior follows the extracted fixed-baseline contract. | EPUB, image/CBZ rendering/import/resource serving, continuous cross-chapter behavior, remote/local audio playback, and audio resource capabilities are implemented and browser/backend-validated. TTS parity remains pending. | `aligned` for implemented formats; `unknown` for TTS | Keep EPUB/image/CBZ/continuous/audio browser contracts; add TTS fixtures. |
 | BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent `BookDetail.vue` route structure has been removed from the product path; search/discover/route actions are centralized; Reader opens plain BookInfo without injecting toolbar shortcut actions. Remaining P1 work is Index-scene placement and search/discover/source flow convergence. | `partial` for P1 | Single BookInfo action contract; search/shelf/reader reuse tests. |
 | Bookshelf/BookManage/BookGroup | Upstream: `BookShelf.vue`, `BookManage.vue`, `BookGroup.vue` under Index workspace. | Current: `Home.vue`, overlay management components, categories/store utilities. | Some enhancements may be valid, but workflow and mobile sidebar behavior need upstream comparison. | `unknown` | Workspace browser flows; category/order tests. |
 | Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons must be extracted from `Index.vue` and related CSS. | Current `AppLayout.vue` and mobile navigation had reported drag/fixed-button mismatch. | User-visible mismatch: GitHub/day-night buttons should not slide with drawer content. | `must-fix` for P1 | Mobile drag smoke; fixed-bottom button geometry probe. |
 | Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Current has separate `Search.vue`, `Discover.vue`, `Sources.vue` pages. | Flow fragmentation can change API order, panel state, and back behavior. | `must-fix` for P1 | Search → result group → BookInfo → add/read browser test. |
 | Online source parsing | Upstream reader3-compatible source semantics live across web components and Java backend. | Current Go parser in `backend/engine/source_*` has tests and compatibility shims. | Must continue fixture-based extraction; do not infer equivalence from passing current tests alone. | `unknown` | HTML fixture/golden tests for search/info/toc/content. |
-| Local import catalog parsing | Upstream behavior needs deterministic catalog extraction independent of network. | Current staged upload token flow reduces repeated upload/network dependency. | Staged token is acceptable enhancement; catalog detection still needs upstream fixture comparison. | `acceptable-change` + `unknown` | TXT/EPUB/Markdown/PDF/UMD fixture tests; reparse without upload test. |
+| Local import catalog parsing | Upstream `BookController.kt` imports local files through `Book.initLocalBook(...)` and `LocalBook.getChapterList(...)`; TXT parsing uses `TextFile.kt` with `DefaultData.txtTocRules`, enabled-rule reverse scoring, Java regex constructs such as `(?<=...)` and `(?!...)`, deterministic local file reads, and `TocEmptyException` for empty catalogs. | Current staged upload token flow is a valid OpenReader enhancement, but Go TXT detection uses a reduced rule set and only partially normalizes Java regex lookbehind; negative lookahead rules can fail to compile or over-match. | Staged tokens remain acceptable; TXT catalog rule compatibility is a user-visible parser bug and must be fixed before claiming local import parity. | `must-fix` for parser slice; staged upload is `acceptable-change` | Golden TXT fixtures for upstream enabled rules, Java regex normalization, negative-lookahead false-positive prevention, deterministic preview/import/reparse without upload; keep EPUB/PDF/UMD/CBZ regression fixtures. |
 | Replace rules/content cleanup | Upstream `ReplaceRule.vue` and backend semantics need extraction. | Current Go endpoints and overlays exist. | Rule ordering, scope, and test output may differ. | `unknown` | Golden rule application tests; UI batch action tests. |
 | RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current `RSSManager.vue`, overlays, Go RSS parser. | UI and parser semantics need mapping. | `unknown` | RSS fixture parser tests; source/article browser smoke. |
 | WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go WebDAV/local-store endpoints and browser component exist. | Path safety and workflow compatibility both need explicit contract. | `unknown` | Path traversal tests; upload/list/import browser smoke; Docker volume smoke. |
 | Backup/restore | Upstream backup flows and reader-dev formats require extraction. | Current OpenReader backup service and Legado restore exist. | Must preserve OpenReader data and document reader-dev/Legado import semantics. | `unknown` | Restore testdata; backup list/download/restore tests. |
 | Auth/user management | Upstream user management components include `AddUser.vue`, `UserManage.vue`; OpenReader adds JWT. | Current JWT/multi-user/admin endpoints are intentional runtime adaptation. | Auth model differs intentionally, but UI/workspace placement and permission behavior need checks. | `intentional-redesign` + `unknown` | Auth dialog and admin browser smoke; user-scope API tests. |
 | Docker/runtime | Upstream ships Java/Gradle/Docker variants. | Current single Go binary + frontend dist in Alpine, env-driven volumes. | Intentional deployment redesign. Must preserve local Docker build and volume compatibility. | `intentional-redesign` | `PUSH=0 ./scripts/docker-build-push.sh`; `scripts/docker-volume-backup-smoke.sh`. |
+
+## Immediate parser contract: TXT local import catalog rules
+
+Status: extracted and implemented for the TXT rule-compatibility slice on 2026-07-07.
+
+Upstream files:
+
+- `/private/tmp/changshengyu-reader-dev/src/main/java/com/htmake/reader/api/controller/BookController.kt`
+- `/private/tmp/changshengyu-reader-dev/src/main/java/io/legado/app/model/localBook/LocalBook.kt`
+- `/private/tmp/changshengyu-reader-dev/src/main/java/io/legado/app/model/localBook/TextFile.kt`
+- `/private/tmp/changshengyu-reader-dev/src/main/resources/defaultData/txtTocRule.json`
+
+| Concern | Upstream behavior | Required OpenReader behavior | Status |
+|---|---|---|---|
+| Local read source | Uploaded/imported local files are copied into local storage, then parsed from the local file by `LocalBook.getBookInputStream`; catalog extraction is not network-dependent after the file exists locally. | OpenReader keeps staged upload/import-token and local-store import flows, but preview/reparse/import must parse the staged/local bytes deterministically without depending on client upload speed after staging. | `acceptable-change` for staged tokens |
+| TXT rule source | `DefaultData.txtTocRules` loads the fixed JSON rule list; only enabled rules participate in automatic detection. | `DefaultTXTTocRules()` should expose the upstream enabled rule set, including rule `-1 目录(去空白)`, not a reduced/simplified subset. | `aligned` for enabled TXT rules in this slice |
+| Rule scoring | `TextFile.getTocRule()` iterates enabled rules in reverse order and chooses a rule only when its match count is at least 2; ties update to the later iteration, effectively preserving upstream preference. | Automatic TXT detection must use the same enabled-rule reverse scoring rather than relying only on the old broad `ChapterTitlePattern`. | `aligned` for line-based Go parser adaptation |
+| Java regex compatibility | Upstream rules use Java regex lookbehind/lookahead, especially `(?<=...)`, `正文(?!完|结)`, `节(?!课)`, `集(?![合和])`, `部(?![分赛游])`, and `篇(?!张)`. | Go parser must normalize supported upstream Java regex forms without compile failure and must preserve the false-positive prevention semantics for common negative lookaheads. | `aligned` for known enabled-rule constructs |
+| Empty catalog | Upstream throws `TocEmptyException` when no chapters are found. | OpenReader keeps its existing preview/import error mapping for no readable chapters; this is an API adaptation, not a parser behavior change. | `technical-stack-equivalent` |
+| Non-TXT formats | EPUB/UMD/CBZ delegate to format-specific parsers; PDF is an OpenReader-added format already in the current pipeline. | This slice does not change EPUB/PDF/UMD/CBZ behavior. | `unchanged` |
+
+Validation evidence:
+
+1. `backend/engine.TestDefaultTXTTocRulesIncludeUpstreamEnabledRules` verifies the exposed rule list includes upstream rule `-1` and every enabled rule compiles after normalization.
+2. `backend/engine.TestParseTXTWithRuleAcceptsUpstreamNegativeLookahead` verifies upstream Java negative-lookahead rules do not fail compilation and do not split on false-positive text like `第一节课` or `正文完结`.
+3. Existing parser/localbook/API tests cover import archiving, custom TXT rules, local-store import preview/import, and chapter refresh.
 
 ## Immediate P1 contract: Index mobile sidebar and workspace shell
 
@@ -238,7 +264,7 @@ Implemented in commit work following this contract:
 
 Still pending in Reader P0:
 
-- Complete separate `Content.vue` parity review for TTS/read-aloud media controls and local/private signed audio resources.
+- Complete separate `Content.vue` parity review for TTS/read-aloud controls.
 - The final Reader P0 acceptance image remains pending. Intermediate validation image `ca43409` has been published and is not the final Reader P0 release.
 
 ## Immediate P0 contract: continuous cross-chapter reading
@@ -348,6 +374,7 @@ Real-browser gate:
 2. Confirm comic/CBZ images fill the readable width, CBZ titles are hidden, and ordinary text remains justified with symmetric mobile padding.
 3. Confirm image load changes page count/layout rather than leaving stale pagination.
 4. Confirm image preview does not hide the mobile toolbar or pass through as a center tap.
+5. Confirm actual rendered mobile page/body/paragraph left/right gaps remain symmetric within 1px and do not shift when toolbar visibility changes.
 
 Implemented coverage:
 
@@ -478,7 +505,7 @@ Deferred from this EPUB slice:
 | CBZ content response | `backend/api/books.go.chapterContent` returns `format: "cbz"`, `resourceUrl`, `resourceExpiresAt`, and `<img src="...">` content for CBZ chapters. | Existing JSON envelope is preserved; resource serving is capability-protected. | `aligned` |
 | Image rendering | `frontend/src/components/reader/ReaderChapterContent.vue`, `useReaderChapterPresentation.js`, `parseReaderContentBlocks` convert `<img>` to image blocks, hide CBZ titles, collect preview image lists, and recompute layout on image load. | Vue 3/Element Plus `el-image lazy` replaces upstream `v-lazy-container`. | `technical-stack-equivalent` |
 | Lazy-loading model | Upstream uses `v-lazy-container` and `data-src`; OpenReader uses Element Plus `el-image lazy` with preview. | Visible behavior is acceptable if images load lazily, trigger layout recomputation, and preview does not toggle toolbar. | `acceptable-change` |
-| Audio detection/API | `backend/api/books.go.chapterContent` returns `format: "audio"` for `book.Type == 1`, validates direct HTTP(S) audio URLs, keeps `content`, and adds `resourceUrl/resourceExpiresAt`. | Remote/direct audio is implemented; same-origin signed local/private `/api/audio-resource` remains pending. | `partial` |
+| Audio detection/API | `backend/api/books.go.chapterContent` returns `format: "audio"` for `book.Type == 1`, validates direct HTTP(S) audio URLs, keeps `content`, and adds `resourceUrl/resourceExpiresAt`. | Remote/direct audio and same-origin signed local/private `/api/audio-resource` are implemented. | `aligned` |
 | Audio UI | `frontend/src/components/reader/ReaderAudioContent.vue` renders an audio branch with cover, hidden media element, elapsed/total time, seek slider, `-15s/+15s`, previous/next, play/pause, mute/unmute, volume slider, progress events, ended-to-next behavior, and restore-by-offset. | Uses Vue/native range inputs instead of upstream Element `el-slider`, preserving visible behavior. | `technical-stack-equivalent` |
 | Reader controls | `Reader.vue`, `useReaderPointer`, `useReaderKeyboard`, and `useReaderMode` now keep audio out of text paging/scrolling, hide auto-reading/TTS, and let center taps toggle the mobile toolbar without side paging. | Escape still closes panels/returns home as an OpenReader compatibility behavior. | `aligned` |
 
@@ -510,10 +537,76 @@ Implemented in commit work following this contract:
 - Audio chapters hide auto-reading and TTS controls, force the non-text page branch, and suppress text paging from click zones, side taps, keyboard arrows, page keys, Home/End, Space, and wheel-driven vertical reading.
 - `scripts/smoke/reader-audio-contract.mjs` validates the audio reader in Chrome at 390×844 and 1440×900.
 
-Still pending:
+Follow-up status:
 
-- Same-origin signed local/private `/api/audio-resource/:capability/*resourcePath` with byte-range support and MIME allow-list.
-- Full online audio book-source parsing fixtures if upstream source rules expose audio URLs through additional parser branches.
+- Same-origin signed local/private `/api/audio-resource/:capability/*resourcePath` with byte-range support and MIME allow-list is covered in the local/private audio resources slice below.
+- Online audio source parsing fixtures for empty content rules and common media selector rules are covered in the online audio source parsing slice below.
+
+### 2026-07-07 follow-up contract: local/private audio resources
+
+Additional OpenReader adaptation required by the audio contract:
+
+- Upstream audio rendering treats chapter content as the playable media URL. OpenReader may keep safe remote HTTP(S) URLs direct, but local/private library media must not expose raw filesystem paths or require the login JWT inside the media URL.
+- Local/private audio chapter media can be identified by chapter content, `chapter.url`, or `chapter.resourcePath`; the chosen path is valid only if it resolves below the scoped book library root after cleaning and symlink-aware absolute-path checks.
+- The signed capability must be scoped to one user, one book, one source/library fingerprint, a single purpose (`audio-resource`), and a bounded expiry. It must not be interchangeable with login, EPUB, or CBZ capabilities.
+- The resource route must support `GET`, `HEAD`, and byte `Range` requests with browser-friendly audio MIME headers, `nosniff`, `no-referrer`, `same-origin`, and private short cache headers.
+- Error bodies and access logs must not leak host filesystem paths, signed capabilities, login JWTs, source credentials, or WebDAV secrets.
+
+Required tests for this slice:
+
+| Layer | Test requirement |
+|---|---|
+| API response | Remote safe HTTP(S) audio remains direct; local/private audio returns `/api/audio-resource/<capability>/<resourcePath>` with `format: "audio"` and RFC3339 expiry. |
+| Resource serving | Valid signed local audio serves `GET`, `HEAD`, and `Range: bytes=...` with an allow-listed audio MIME type. |
+| Authorization | Tampered/expired/wrong-purpose capabilities and ownership-changed books are rejected. |
+| Path safety | Traversal, absolute paths outside the book library root, missing files, and unsupported media extensions are rejected with client-safe JSON errors. |
+| Logging | Access logs redact the audio capability segment. |
+
+Implementation status:
+
+- Completed in this slice: `GET /api/books/:id/chapters/:index/content` now keeps safe remote HTTP(S) audio direct and returns same-origin signed `/api/audio-resource/<capability>/<path>` URLs for local/private audio under the scoped book library root.
+- Completed in this slice: `/api/audio-resource/:capability/*resourcePath` supports `GET`, `HEAD`, browser byte ranges, allow-listed audio MIME types, private cache headers, and EPUB/CBZ-style capability redaction.
+- Completed in this slice: capability validation is purpose-separated and binds user ID, book ID, resource path, file fingerprint, and expiry.
+- Completed in this slice: API tests cover safe remote behavior, local signed resource serving, `HEAD`, `Range`, tampered capability, ownership changes, traversal, unsupported media, and log redaction.
+- Follow-up online audio source parsing fixtures for empty content rules and common media selector rules are covered in the next slice.
+
+### 2026-07-07 follow-up contract: online audio source parsing
+
+Upstream evidence:
+
+| Feature | Upstream authority | Contract |
+|---|---|---|
+| Source type | `BookSource.bookSourceType`, `BookType.audio`, `WebBook.getBookInfo/getChapterList` | A source whose `bookSourceType` is `1` creates/searches books with `book.type = 1`, which drives the Reader audio branch. |
+| Empty content rule | `WebBook.getBookContent` | If `bookSource.getContentRule().content` is empty, upstream returns `bookChapter.url` directly. For audio sources this means a chapter URL can itself be the playable media URL. |
+| Content rule result | `BookContent.analyzeContent` | If a content rule exists, upstream evaluates `ruleContent.content`, formats the result, follows `nextContentUrl` pages, applies `replaceRegex`, and returns the final string. For audio sources the returned string is consumed by the audio player as the media `src`. |
+| URL base | `BookChapter.getAbsoluteURL`, `AnalyzeUrl`, and `BookContent.analyzeContent` | Relative chapter URLs are resolved from the TOC/book base before fetching; relative media URLs extracted from content rules must resolve against the redirected content page URL. |
+
+Current OpenReader evidence and classification:
+
+| Layer | Current evidence | Difference | Classification |
+|---|---|---|---|
+| Source type propagation | `engine.SearchBooks`, `FetchBookInfoAndTOC`, `createRemoteBook`, `changeBookSource` carry `BookSource.SourceType` to result/book `Type`. | Matches upstream audio type propagation. | `aligned` |
+| Empty content rule | `engine.FetchChapterContent` falls back to `body|text` when `ContentRule` is empty. | Upstream returns the chapter URL directly; current behavior can fetch an MP3 URL as HTML/text or return page text, producing an unplayable audio chapter. | `must-fix` |
+| Extracted media URL | `extractChapterContent` joins `Extract(...)` results but only resolves image URLs in the `html` branch. | For audio sources, `ruleContent.content` such as `audio|attr:src`, `source|attr:src`, or `a|attr:href` must produce absolute playable URLs, including relative paths. | `must-fix` |
+| Pagination/replace | Existing content pagination and replace logic applies to all sources. | Keep for audio sources, but only after media URL extraction has produced URL strings. | `technical-stack-equivalent` |
+| Safety | `chapterContent` and `audioreader` validate direct HTTP(S), credentials, and local/private resource paths. | Parser may return a candidate URL; API layer remains responsible for final safety enforcement. | `acceptable-change` security hardening |
+
+Required tests for this slice:
+
+| Layer | Test requirement |
+|---|---|
+| Engine parser | Audio source with empty `ContentRule` returns the resolved chapter URL without fetching/parsing a content page. |
+| Engine parser | Audio source with `ContentRule: "audio|attr:src"` resolves relative media URLs against the redirected content page URL. |
+| Engine parser | Audio source with `ContentRule: "source|attr:src"` and `a|attr:href` also resolves to absolute media URLs. |
+| API integration | A remote audio book created from `bookSourceType: 1` can load chapter content as `format: "audio"` with `resourceUrl` equal to the resolved playable URL. |
+| Regression | Existing text content, image HTML content, pagination, `ContentURLRule`, and replace rules remain unchanged for non-audio sources. |
+
+Implementation status:
+
+- Completed in this slice: `engine.FetchChapterContent` now matches upstream `WebBook.getBookContent` for audio sources by returning the resolved chapter URL directly when `ruleContent.content` is empty.
+- Completed in this slice: audio source `ruleContent.content` extraction resolves `audio|attr:src`, `source|attr:src`, and `a|attr:href` media candidates against the content page URL, including relative and protocol-relative URLs.
+- Completed in this slice: API integration test verifies a `bookSourceType: 1` remote book returns `format: "audio"` and a playable resolved `resourceUrl`.
+- Still pending: broader real-world online audio source corpus fixtures if imported source sets contain additional non-selector/audio-specific rules.
 
 ### 2026-07-07 follow-up contract: audio custom controls
 
@@ -569,8 +662,69 @@ Real-browser gate:
 
 Deferred from this slice:
 
-- Full online audio book-source parsing semantics, if upstream source rules expose audio differently from local/imported chapters.
+- Broader real-world online audio book-source corpus fixtures, if imported source sets expose audio through additional non-selector/audio-specific rules.
 - Browser autoplay restrictions: OpenReader may require an explicit user gesture before first audio playback, but previous/next and ended autoplay should match upstream after the user has interacted.
+
+### 2026-07-07 follow-up contract: Reader TTS/read-aloud controls
+
+Upstream evidence from `reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`:
+
+| Feature | Upstream authority | Contract |
+|---|---|---|
+| Availability | `web/src/views/Reader.vue` floating button `v-if="speechAvalable && !isEpub && !isCarToon && !isAudio"` | System speech is available only when `window.speechSynthesis.getVoices` exists and the current chapter is not EPUB, comic/image, or audio. |
+| Read bar visibility | `showReadBar`, `readBarTheme`, floating TTS button | Clicking the read-aloud button toggles the read bar independently from active speaking; the bar can be visible before playback starts. |
+| Paging/slide mode coupling | `isSlideRead()` | Showing the read bar disables slide-read behavior in the same way as auto-reading, EPUB, comic, and audio modes. |
+| Bottom spacing | `chapterTheme()` | When the read bar is visible, content adds bottom padding of `280px` when config is expanded and `80px` when collapsed. |
+| Controls | `read-bar` template and `speechPrev/toggleSpeech/speechNext/exitRead` | Visible controls are close, previous paragraph, play/pause, next paragraph, and collapse/expand config. Close stops speech and hides the bar. |
+| Voice list | `fetchVoiceList()` | Voices are sorted with `zh-*` voices first, then by `lang`; config presents the voice list as selectable buttons. |
+| Persisted config | `plugins/config.js` and `plugins/vuex.js` `speechVoiceConfig` | Defaults are `voiceName: ""`, `speechRate: 1`, `speechPitch: 1`; changes persist in cache. |
+| Rate range | `speechRate` slider | Rate is `0.5` to `2`, step `0.1`, reset `1`. Changing while speaking restarts the current paragraph. |
+| Pitch range | `speechPitch` slider | Pitch is `0` to `2`, step `0.1`, reset `1`. Changing while speaking restarts the current paragraph. |
+| Sleep timer | `speechMinutes` slider and `speechEndTime` | Sleep is `0` to `180` minutes. When the deadline passes, reading stops and shows `定时关闭朗读`. |
+| Paragraph source | `getCurrentParagraph/getPrevParagraph/getNextParagraph` | Speech reads visible `h3,p` DOM paragraphs, highlights the active paragraph with class `reading`, previous/next move across chapter boundaries. |
+| Error handling | `startSpeech()` `utterance.onerror` | Speech synthesis errors show `朗读错误: ...` and update speaking state without blanking the page. |
+
+Current OpenReader evidence and classification:
+
+| Layer | Current evidence | Difference | Classification |
+|---|---|---|---|
+| Availability | `Reader.vue` `ttsSupportedForChapter` checks speech support, non-EPUB, and non-audio; image/comic uses chapter format checks elsewhere. | Equivalent for audio/EPUB; image/comic eligibility still needs explicit verification against `chapterFormat` values. | `unknown` |
+| Read bar visibility | `Reader.vue` now keeps `ttsBarRequested` separate from `tts.state.playing`, and `readerTTSBarVisible()` gates only requested/support/chapter eligibility. | Matches upstream requirement that opening the read bar does not start speech; unlike upstream, OpenReader keeps the mobile tool layer policy governed by the existing Reader chrome contract. | `technical-stack-equivalent` |
+| Read bar structure | `ReaderTTSBar.vue` now exposes close, previous paragraph, play/pause, next paragraph, collapse/expand config, voice list, rate, pitch, and sleep controls. | Equivalent control surface, with Vue 3/Element Plus styling and current pause/resume support retained. | `technical-stack-equivalent` |
+| Rate range | `useTTS`, `readerStore`, `ReaderTTSBar`, `ReaderSettingsPanel`, `Settings.vue` use `0.5–2`. | Matches upstream. | `aligned` |
+| Pitch range | `useTTS`, `readerStore`, `ReaderTTSBar`, `ReaderSettingsPanel`, `Settings.vue` use `0–2`. | Matches upstream. | `aligned` |
+| Voice ordering | `useTTS.loadVoices()` uses `sortTTSVoices()`, sorting `zh-*` first then by language without filtering non-English/non-Chinese voices. | Matches upstream ordering while keeping `voiceURI` persistence. | `aligned` |
+| Config persistence | Pinia reader store persists `ttsRate`, `ttsPitch`, `ttsVoiceURI`. | Uses `voiceURI` instead of upstream `voiceName`; this is a Vue 3/browser-stability adaptation as long as display labels remain human-readable. | `acceptable-change` |
+| Restart on config change | `useTTS.setRate/setPitch/setVoice` call `restartCurrent()`. | Matches upstream restart-on-change behavior. | `aligned` |
+| Sleep timer | `useReaderTTS` uses 0–180 minutes and emits `定时关闭朗读`. | Matches upstream timer range and message. | `aligned` |
+| Paragraph traversal | `useReaderTTS` now derives speech paragraphs from rendered `h1,h2,h3,p`, starts from an active/visible paragraph, marks `.reading/.tts-active`, and routes previous/next across chapter boundaries. | Upstream reads `h3,p`; OpenReader includes `h1/h2` because current Vue renderer uses headings for chapter titles. | `technical-stack-equivalent` |
+| Error handling | `useTTS` now forwards utterance errors to `useReaderTTS`, which displays `朗读错误: ...`. | Matches upstream user-visible error semantics. | `aligned` |
+
+Required tests for this TTS slice:
+
+| Layer | Test requirement |
+|---|---|
+| Utility/store | Rate clamps to `0.5–2`; pitch clamps to `0–2`; sleep remains `0–180`. |
+| Voice ordering | Browser voices are sorted with `zh-*` first, then by `lang`, without dropping non-Chinese/non-English voices when available. |
+| UI contract | Reader TTS bar and reader/global settings expose the upstream rate and pitch ranges. |
+| Runtime behavior | Changing rate, pitch, or voice while speaking restarts the current paragraph. |
+| Follow-up UI | TTS button toggles bar visibility independently from speaking, and the bar exposes voice list/config in the reader surface. |
+| Follow-up navigation | Previous/next paragraph starts from visible `h3,p` and crosses chapter boundaries. |
+| Follow-up errors | Speech synthesis errors surface `朗读错误: ...` without breaking the Reader. |
+
+Implementation status:
+
+- Completed in this slice: TTS rate is normalized to upstream `0.5–2` everywhere it is stored or edited.
+- Completed in this slice: TTS pitch is normalized to upstream `0–2` everywhere it is stored or edited.
+- Completed in this slice: browser voices are sorted with upstream `zh-*` first, then by language, without dropping non-Chinese/non-English voices.
+- Completed in this slice: unit tests cover TTS rate/pitch normalization, sleep timer range, progress label, deadline expiration, and voice ordering.
+- Completed in this slice: Reader TTS button opens/closes the read bar without starting speech; the play button starts speech; closing the read bar stops active speech.
+- Completed in this slice: `ReaderTTSBar` now contains voice list/config controls in the Reader surface and uses an upstream-like high layer so mobile floating tools do not intercept its controls.
+- Completed in this slice: `scripts/smoke/reader-tts-contract.mjs` verifies the real-browser TTS bar contract with a mocked `speechSynthesis`.
+- Completed in this slice: TTS paragraph source now comes from rendered DOM headings/paragraphs rather than only splitting plain text, and starts from the active or first visible paragraph.
+- Completed in this slice: TTS previous/next now restarts the target DOM paragraph and can cross chapter boundaries.
+- Completed in this slice: `speechSynthesis` utterance errors are surfaced as `朗读错误: ...`.
+- Validation note: unit tests and production build passed after this slice. The enhanced real-browser TTS smoke was updated to check next-paragraph DOM highlighting and error toast, but final rerun was blocked by the workspace approval/spend cap after an initial timing assertion exposed and fixed an insufficient wait condition.
 
 ## Required workflow for each future module
 
