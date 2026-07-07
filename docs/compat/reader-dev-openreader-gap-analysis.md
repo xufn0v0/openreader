@@ -25,8 +25,8 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile CSS uses `padding: 42px 22px ...`; paragraph justification/spacing does not fully match upstream. | Causes asymmetric left/right whitespace and paragraph layout drift. | `must-fix` for P0 | DOM geometry probe for left/right padding within 1px across 390×844 and 360×800. |
 | Reader scrolling vs click paging | Upstream has page/scroll modes with discrete click navigation. | User requested continuous native finger/wheel scrolling while click paging remains segmented. | Intentional UX improvement if it does not change mode selection semantics. | `acceptable-change` | Browser scroll continuity probe; click paging regression tests. |
 | Reader settings controls | Upstream uses controls that are easier to distinguish visually; user requested minus/value/plus controls instead of current easy-to-mis-tap slider behavior. | Current setting stepper exists but must be rechecked against upstream layout/state. | Allowed UX adaptation, but values/defaults/state must match upstream. | `acceptable-change` | Unit tests for value bounds; browser setting interaction test. |
-| Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, and cross-chapter behavior. | Current `ReaderChapterContent.vue` handles text/images/volume blocks and the rebuilt EPUB iframe branch; continuous chapter retention, extension, anchor, error, and explicit-jump behavior now follows the extracted fixed-baseline contract. | EPUB, image/CBZ rendering, and continuous cross-chapter behavior are implemented and browser-validated. Audio/TTS still needs a separate extraction; CBZ archive/import edges remain. | `aligned` for implemented formats; `unknown` for audio/TTS and CBZ archive edges | Keep EPUB/image/continuous browser contracts; add separate audio/TTS and CBZ archive fixtures. |
-| BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace flows. | Current has `BookDetail.vue`, `BookInfoDialog.vue`, `BookInfoPanel.vue`, `OverlayBookInfo.vue`. | Duplicate logic risks inconsistent actions/search/read/source behavior. | `must-fix` for P1 | Single BookInfo action contract; search/shelf/reader reuse tests. |
+| Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, and cross-chapter behavior. | Current `ReaderChapterContent.vue` handles text/images/volume blocks, CBZ image resources, EPUB iframe resources, and a dedicated audio branch for `type === 1` chapters; continuous chapter retention, extension, anchor, error, and explicit-jump behavior follows the extracted fixed-baseline contract. | EPUB, image/CBZ rendering/import/resource serving, continuous cross-chapter behavior, and basic audio playback are implemented and browser-validated. TTS parity and local/private signed audio resources remain pending. | `aligned` for implemented formats; `partial` for audio; `unknown` for TTS | Keep EPUB/image/CBZ/continuous/audio browser contracts; add TTS and local/private audio-resource fixtures. |
+| BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent `BookDetail.vue` route structure has been removed from the product path; search/discover/route actions are centralized; Reader opens plain BookInfo without injecting toolbar shortcut actions. Remaining P1 work is Index-scene placement and search/discover/source flow convergence. | `partial` for P1 | Single BookInfo action contract; search/shelf/reader reuse tests. |
 | Bookshelf/BookManage/BookGroup | Upstream: `BookShelf.vue`, `BookManage.vue`, `BookGroup.vue` under Index workspace. | Current: `Home.vue`, overlay management components, categories/store utilities. | Some enhancements may be valid, but workflow and mobile sidebar behavior need upstream comparison. | `unknown` | Workspace browser flows; category/order tests. |
 | Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons must be extracted from `Index.vue` and related CSS. | Current `AppLayout.vue` and mobile navigation had reported drag/fixed-button mismatch. | User-visible mismatch: GitHub/day-night buttons should not slide with drawer content. | `must-fix` for P1 | Mobile drag smoke; fixed-bottom button geometry probe. |
 | Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Current has separate `Search.vue`, `Discover.vue`, `Sources.vue` pages. | Flow fragmentation can change API order, panel state, and back behavior. | `must-fix` for P1 | Search → result group → BookInfo → add/read browser test. |
@@ -38,6 +38,178 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Backup/restore | Upstream backup flows and reader-dev formats require extraction. | Current OpenReader backup service and Legado restore exist. | Must preserve OpenReader data and document reader-dev/Legado import semantics. | `unknown` | Restore testdata; backup list/download/restore tests. |
 | Auth/user management | Upstream user management components include `AddUser.vue`, `UserManage.vue`; OpenReader adds JWT. | Current JWT/multi-user/admin endpoints are intentional runtime adaptation. | Auth model differs intentionally, but UI/workspace placement and permission behavior need checks. | `intentional-redesign` + `unknown` | Auth dialog and admin browser smoke; user-scope API tests. |
 | Docker/runtime | Upstream ships Java/Gradle/Docker variants. | Current single Go binary + frontend dist in Alpine, env-driven volumes. | Intentional deployment redesign. Must preserve local Docker build and volume compatibility. | `intentional-redesign` | `PUSH=0 ./scripts/docker-build-push.sh`; `scripts/docker-volume-backup-smoke.sh`. |
+
+## Immediate P1 contract: Index mobile sidebar and workspace shell
+
+Status: extracted on 2026-07-07 before implementation.
+
+This contract is tied to `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`, primarily `web/src/views/Index.vue`.
+
+### Upstream behavior contract
+
+| Concern | Upstream evidence | Required OpenReader behavior |
+|---|---|---|
+| Scene boundary | The upstream router is effectively `Index.vue` plus `Reader.vue`; `Index.vue` owns the shelf, search, explore, source management, import, local store, WebDAV, user, backup, cache, RSS, replace-rule, and book-info flows. | OpenReader may keep old URLs as compatibility shims, but the visible workspace shell must behave like one Index scene. Search/source/settings page splits must not create different mobile sidebar state or duplicate business flows. |
+| Sidebar width | `.navigation-wrapper` has `width: 260px` and `min-width: 260px`. | The visible sidebar width is 260px on desktop and mobile. CSS variables/tests must assert 260px, not infer it from current layout. |
+| Mobile collapsed state | `showNavigation` starts `false`; when `collapseMenu` is true the computed `navigationClass` becomes `navigation-hidden`, which sets `margin-left: -260px`. | On mobile/mini workspace the sidebar is hidden by default and exposed by menu button or horizontal drag. Desktop keeps the sidebar visible. |
+| Mobile drag boundary | `handleTouchMove()` accepts right-drag opening when `!showNavigation && moveX > 0 && moveX <= 270`, and left-drag closing when `showNavigation && moveX < 0 && moveX >= -270`. During drag it writes `navigationStyle.marginLeft = moveX - 270 + "px"` for opening and `moveX + "px"` for closing. | Drag should follow the finger using the upstream 270px gesture window while final static sidebar width remains 260px. Tests should cover the 270px boundary separately from the 260px CSS width. |
+| Gesture start guard | Upstream ignores touches within 20px of any viewport edge and cancels horizontal dragging when vertical movement dominates. | Keep the 20px edge guard and vertical-scroll passthrough. Horizontal drags must call `preventDefault`/`stopPropagation`; vertical scrolls must not. |
+| Gesture end transition | Any positive horizontal move opens; any negative horizontal move closes. `navigationStyle` is reset after touch end. | Keep the upstream sign-based open/close decision and reset inline drag style at the end/cancel of the gesture. |
+| Shelf click close | `.shelf-wrapper` has `@click="showNavigation = false"`. The menu icon uses `@click.stop="toggleMenu"`. | Clicking/tapping the workspace closes an open mobile sidebar. Sidebar/menu clicks and bottom icon clicks must not pass through and close it. |
+| Bottom icons placement | The GitHub and night/day buttons live in `.bottom-icons`, a direct child of `.navigation-wrapper`, not inside `.navigation-inner-wrapper`. CSS: `position: absolute; bottom: 30px; width: 188px; left: 36px; display:flex; justify-content:space-between; pointer-events:none`, while child controls set `pointer-events: all`. | GitHub and day/night controls must be fixed to the sidebar bottom area, not part of the scrollable sidebar content. Scrolling sidebar content must not move them. OpenReader additionally keeps them visually stable during mobile drag because the user explicitly reported that these buttons should not slide with the drawer gesture. |
+| Scrollable navigation content | `.navigation-inner-wrapper` has `height: 100%`, `overflow-y: auto`, and bottom padding `66px`; bottom icons are outside this scrollable wrapper. | The navigation content can scroll independently, leaving a bottom clearance so it does not hide behind fixed bottom buttons. |
+| Mobile shelf geometry | At `max-width: 750px`, `.shelf-wrapper` uses `padding: 0`, safe-area top padding, title padding `20px 24px 0`, group margins `24px`, and list rows `padding: 10px 20px`. | Mobile shelf should keep upstream-like compact title/group/list spacing while sidebar behavior is being restored. Current Home mobile layout may retain OpenReader-specific book-row details only when spacing and menu visibility remain compatible. |
+| Night toggle | Upstream `toogleNight` toggles day/night and changes icon color/image. | OpenReader may map this to the existing theme store, but it must be reachable from the fixed bottom control and not depend on navigating to Settings. |
+| GitHub target | Upstream links to the original project; OpenReader links to `changshengyu/openreader`. | This repository target is an intentional OpenReader adaptation. Placement/interaction must still match upstream. |
+
+### Upstream mobile shelf geometry contract
+
+| Concern | Upstream evidence | Required OpenReader behavior |
+|---|---|---|
+| Mobile breakpoint | `@media screen and (max-width: 750px)` wraps the mini Index layout. | OpenReader mobile shelf geometry should switch at the same 750px breakpoint through `shouldUseMiniInterface`/CSS-compatible rules. |
+| Shelf shell | Mobile `.shelf-wrapper` sets `padding: 0`, safe-area top padding, and hides horizontal overflow through the parent `.index-wrapper`. | The mobile shelf page should not keep desktop card padding, border radius, or horizontal overflow. |
+| Title row | Mobile `.shelf-title` uses `padding: 20px 24px 0 24px`; base title font remains the upstream 20px shelf-title style. The menu icon appears only when `collapseMenu` is true and uses `@click.stop`. | Mobile Home title should use upstream spacing and a compact title scale. The menu button must remain click-isolated and placed in the title row. |
+| Header actions | Upstream title actions are right-floated `.title-btn` text buttons inside the same title row. | OpenReader can keep flex actions for Vue 3 responsiveness, but action text must remain compact and horizontally scrollable if needed; it should not force a 30px title or squeeze the title to one side. |
+| Shelf search | Upstream only shows shelf search when edit mode is active, directly after the title and before groups. | Keep current behavior but align horizontal inset to the upstream title/group geometry. |
+| Book groups | Mobile `.book-group-wrapper` uses `margin-left: 24px` and `margin-right: 24px`. | Group tabs/chips must respect 24px side insets on mobile instead of spanning flush edge-to-edge. |
+| Book list container | Mobile `.books-wrapper .wrapper` switches from desktop grid to vertical flex column. | OpenReader list mode is acceptable, but mobile book rows should be full-width vertical list rows, not desktop cards. |
+| Book row spacing | Mobile `.book` sets `box-sizing: border-box`, `width: 100%`, `margin-bottom: 0`, and `padding: 10px 20px`. | OpenReader mobile `.book-row` must use upstream row padding and no card radius/shadow/border chrome. |
+| Cover and info | Upstream keeps desktop cover/info dimensions: cover `84px × 112px`, info height `112px`, info left margin `20px`, title 16px/2-line clamp, metadata 12–13px. | OpenReader may use CSS grid, but mobile rows should resolve to the same visible cover width/height and info spacing, not viewport-scaled cover sizes. |
+
+### Current mobile shelf evidence and classification
+
+| Layer | Current evidence | Difference | Classification |
+|---|---|---|---|
+| Title spacing/scale | `Home.vue` mobile CSS uses `padding: 22px 16px 10px`, and narrower breakpoints override to `18px 14px 0`; title font is 30px/28px. | Too large and too narrow compared with upstream 20px title and 24px side inset. | `must-fix` |
+| Group wrapper | Mobile `.book-group-wrapper` has `margin-left: 0`, `margin-right: 0`, and later `padding: 5px 0`. | Groups span edge-to-edge instead of upstream 24px margins. | `must-fix` |
+| Book rows | Mobile `.book-row` uses viewport-clamped cover columns, 14/16px or 12/clamped padding, and no fixed 84×112 cover. | Visible row geometry differs from upstream and can drift across 360/390px screens. | `must-fix` |
+| Layout model | OpenReader uses CSS grid/list rows and chip buttons instead of Element tabs/desktop `.book` flex. | Acceptable only if visible geometry and operations remain upstream-compatible. | `technical-stack-equivalent` |
+| Empty/loading rows | OpenReader adds skeleton/empty states. | Acceptable enhancement; must not alter normal loaded shelf geometry. | `acceptable-change` |
+
+Required implementation gates for this shelf-geometry slice:
+
+1. Change mobile Home CSS to upstream insets and dimensions: title 24px side inset, compact 20px title, group 24px side margins, rows `10px 20px`, covers `84px × 112px`, info margin/gap equivalent to 20px.
+2. Add source-level CSS tests for these constants so future refactors do not drift back.
+3. Extend the Index mobile browser smoke to verify at 390×844 and 360×800:
+   - title left/right insets are approximately 24px;
+   - group wrapper side insets are approximately 24px;
+   - first book row left/right padding is approximately 20px;
+   - cover box is approximately 84×112;
+   - no horizontal overflow.
+4. Keep the larger Index scene convergence and BookInfo consolidation as separate P1 slices.
+
+### Current OpenReader evidence and classification
+
+| Layer | Current evidence | Difference | Classification |
+|---|---|---|---|
+| Sidebar frame | `frontend/src/layouts/AppLayout.vue` uses `.app-sidebar` fixed left, width `var(--app-sidebar-width)`, and `.app-sidebar-scroll` for the scrollable content. | Structurally capable of matching upstream. Need assert width source and mobile transitions. | `technical-stack-equivalent` |
+| Bottom icons | `sidebar-bottom-icons` is outside `.app-sidebar-scroll`, so scroll does not move it. | This is already aligned with the upstream fixed-bottom structure, but tests should lock it so future edits do not regress. | `aligned` |
+| Bottom icon drag behavior | Mobile CSS applies a counter-transform using `--mobile-nav-drag-offset`. | Upstream moves the whole navigation frame during drag, but the user explicitly requested GitHub/day-night controls not to slide with side-panel dragging. Keep this as a documented OpenReader UX difference. | `acceptable-change` |
+| Gesture width | `useAppMobileNavigation.js` uses `navigationWidth = 260` for both CSS width and drag clamp. | Upstream drag window is 270px while the sidebar width is 260px. | `must-fix` |
+| Drag style | Current opening drag style uses `marginLeft: moveX - width`, producing `-180px` for an 80px drag from hidden state. | Upstream uses `moveX - 270`; after changing only the drag bound, an 80px drag should be `-190px`. | `must-fix` |
+| Touch guards | Current composable keeps the 20px edge guard and vertical-dominance passthrough. | Aligned and should be retained. | `aligned` |
+| Route/action close | `runNavAction()` and sidebar search navigation close mobile sidebar after every route/action. | Upstream Index does not navigate between separate pages for these workspace panels, but shelf click does close the sidebar. This is part of the larger P1 scene-convergence work; for this slice, do not add new closures beyond the existing workspace click behavior. | `partial` |
+| Workspace click close | `.app-workspace @click="closeMobileNavigation"` mirrors upstream shelf click close. | Keep, but make sure sidebar controls/bottom buttons do not pass the click into workspace. | `aligned` |
+| Tests | `frontend/tests/appMobileNavigation.test.mjs` currently asserts 260px drag clamp/style. | Tests encode the wrong drag contract and must be updated to upstream 270px gesture semantics while preserving 260px visual width. | `must-fix` |
+
+### Required implementation gates
+
+1. Split the mobile sidebar visual width (260px) from the upstream gesture window (270px).
+2. Update `useAppMobileNavigation` drag style and clamp tests:
+   - static `navigationStyle` keeps `--mobile-nav-width: 260px`;
+   - hidden + 80px right-drag yields `marginLeft: -190px`;
+   - hidden + 270px right-drag is accepted;
+   - hidden + 271px right-drag is ignored/clamped according to the upstream window;
+   - open + 270px left-drag is accepted.
+3. Add a source/DOM-level test locking `.sidebar-bottom-icons` outside `.app-sidebar-scroll`, with fixed/absolute positioning and child pointer events.
+4. Add or update a real-browser mobile smoke that:
+   - opens the sidebar by menu and by drag at 390×844;
+   - verifies content scrolling does not move GitHub/day-night buttons relative to the sidebar frame;
+   - verifies workspace tap closes the sidebar;
+   - verifies bottom icon click does not close the sidebar by propagation.
+5. Keep this as an incremental P1 shell-alignment slice. Larger Index convergence remains pending: merging Search/Discover/Sources/Settings into the upstream single workspace scene and consolidating BookInfo.
+
+## Immediate P1 contract: shared BookInfo and old detail URL compatibility
+
+Status: extracted on 2026-07-07 before implementation.
+
+Upstream authority: `web/src/components/BookInfo.vue` used from the single `Index.vue` workspace.
+
+### Upstream behavior contract
+
+| Concern | Upstream evidence | Required OpenReader behavior |
+|---|---|---|
+| Single BookInfo scene | Upstream has one `BookInfo.vue` dialog with `title="书籍信息"`, bound to `$store.state.showBookInfo`. It is a child of the Index workspace, not an independent route scene. | OpenReader should converge to one shared `BookInfoPanel/Dialog` flow opened from shelf, search, discover, reader, and old URLs. |
+| Dialog shell | Upstream uses `el-dialog`, width `dialogSmallWidth`, fullscreen on mini interface, and closes through the dialog close hook. | OpenReader's Vue 3 `BookInfoDialog` fullscreen/mobile behavior is a technical equivalent if every entry point uses it. |
+| In-shelf state | Upstream computes `isInShelf` by comparing `bookUrl` against shelf books. In-shelf books show source, latest chapter, follow switch, group name/action, local refresh, cover upload, and intro. | OpenReader may use `id/sourceId/categoryIds`, but the same visible actions must be available from the shared dialog for shelf books. |
+| Search/explore result state | When not in shelf, upstream shows a centered `加入书架` operation zone instead of a separate detail page. | Search/discover previews should not route to `/books/:id`; they should use the shared dialog actions to add/read. |
+| Old detail route | Upstream does not expose a separate `/books/:id` detail page. | OpenReader may preserve `/books/:id` as an old-link compatibility entry, but it should redirect into the Index workspace and open the shared BookInfo dialog. It must not keep an independent full-page BookDetail product structure as the canonical flow. |
+| Reader entry | Reader can open book info while preserving reader toolbar/panel state rules. | Reader book-info action should open the shared dialog/actions; it should not depend on the independent BookDetail page. |
+| Allowed additions | Current OpenReader has browser-cache counts, local cache actions, multi-user scopes, and Go API ids. | These are acceptable additions only inside the shared BookInfo/workspace flow. They are not a reason to keep duplicate page-level business logic. |
+
+### Current evidence and classification
+
+| Layer | Current evidence | Difference | Classification |
+|---|---|---|---|
+| Shared panel | `BookInfoPanel.vue` is shared by `BookInfoDialog.vue` and `OverlayBookInfo.vue`; the old `BookDetail.vue` file has been removed after `/books/:id` became a compatibility redirect. | Good base for convergence. | `aligned` |
+| Global overlay | `OverlayBookInfo.vue` owns shared source name, group name, cover upload, local refresh, follow switch, and cache count actions. | This is the closest current equivalent of upstream `BookInfo.vue`. | `aligned` |
+| Full detail route | `frontend/src/router/index.js` keeps the `book-detail` route name only as an old-link redirect to `/` with `bookInfo=<id>`. | Aligned with old-link compatibility while removing the independent page structure. | `aligned` |
+| Search/discover actions | Search/discover previews no longer create `完整详情` actions that route to `book-detail`. | Aligned with shared BookInfo flow. | `aligned` |
+| Reader action | `useReaderPanels.openBookInfo()` no longer adds a `完整详情` route action. | Aligned with shared BookInfo flow. | `aligned` |
+| Shelf edit action | `Home.vue.goEditBook()` opens the shared edit dialog. | Aligned with workspace dialog responsibility. | `aligned` |
+| Action ownership | Upstream `BookInfo.vue` owns only BookInfo-native actions: add to shelf for non-shelf books, cover upload, local-book update, follow/update switch, and group setting. Current OpenReader centralizes allowed search/discover and old-link compatibility actions in `bookInfoOverlayActions.js`; Reader no longer injects toolbar shortcut actions. | Contextual action policy is now centralized. Broader Index-scene placement remains pending. | `aligned` for this slice |
+| Search/discover existing-book preview | Upstream uses the same BookInfo dialog fed through the Index workspace event bus; it does not route to a separate detail scene. Current Search/Discover correctly open the shared overlay and use shared action policy for `查看详情`/`继续阅读`/add actions. | Old-link and “read after add” compatibility are generated by shared action policy rather than local label construction. | `aligned` for this slice |
+| Route compatibility action | Upstream has no `/books/:id`; OpenReader keeps it only as old-link compatibility. `AppLayout.vue` uses the shared read-action builder while opening the shared overlay. | Acceptable compatibility action is centralized. | `aligned` |
+| Reader BookInfo actions | Upstream Reader opens the same `BookInfo.vue` for the current reading book by emitting `showBookInfoDialog` with the merged shelf book; reader toolbar buttons such as catalog/bookmarks/settings remain separate controls. | OpenReader Reader BookInfo must open the shared overlay with the current book/progress/status only. It must not inject catalog/bookmark/search/source/cache/settings shortcut buttons into BookInfo. | `must-fix` |
+
+Required implementation gates for this slice:
+
+1. Change `/books/:id` to redirect to the Index workspace with `?bookInfo=<id>` while preserving login guard behavior.
+2. Add AppLayout-level old-link handler that loads `/api/books/:id`, merges shelf/progress context when available, and opens `overlay.openBookInfo()` with shared actions such as continue reading.
+3. Remove `book-detail` navigation from shelf/search/discover/reader BookInfo actions; use shared overlay/edit/read flows instead.
+4. Add unit/source tests for route redirect and action removal.
+5. Add or extend smoke coverage proving `/books/1` lands on `/` with BookInfo dialog visible, without rendering the full `BookDetail.vue` page.
+
+### 2026-07-07 implementation note
+
+- `/books/:id` now redirects to `/` with `?bookInfo=<id>`.
+- `AppLayout.vue` hydrates that query by loading the book and opening the shared `OverlayBookInfo` dialog.
+- `BookDetail.vue` has been removed from the frontend source tree.
+- Search, Discover, Reader, and mobile shelf edit no longer route users into the removed independent detail page.
+- `frontend/tests/bookInfoRouteContract.test.mjs` and `scripts/smoke/index-mobile-sidebar-contract.mjs` lock the compatibility redirect and shared-dialog behavior.
+
+### Next BookInfo action-convergence gate
+
+Authoritative upstream files:
+
+- `web/src/components/BookInfo.vue`: visible BookInfo dialog and native actions.
+- `web/src/App.vue`: single `BookInfo` instance, opened by `showBookInfoDialog` event.
+- `web/src/views/Index.vue`, `web/src/views/Reader.vue`, `web/src/components/BookManage.vue`: entry points emit the same BookInfo dialog rather than navigating to independent detail pages.
+
+Current files to converge:
+
+- `frontend/src/components/overlays/OverlayBookInfo.vue`: single visible overlay host.
+- `frontend/src/views/Search.vue` and `frontend/src/views/Discover.vue`: search/explore preview and add-to-shelf actions.
+- `frontend/src/layouts/AppLayout.vue`: `/books/:id` old-link compatibility action.
+- `frontend/src/composables/useReaderPanels.js`: reader BookInfo contextual action list.
+
+Required implementation before claiming P1 BookInfo parity:
+
+1. Introduce one shared BookInfo overlay action-policy module/composable.
+2. Move route/search/discover/reader contextual actions through that module.
+3. Preserve allowed OpenReader compatibility actions only with explicit policy names:
+   - old-link `/books/:id` may expose `继续阅读`;
+   - search/discover may expose `加入并阅读` as an OpenReader convenience only if the normal `加入书架` path remains identical;
+   - reader BookInfo actions must not close or hide reader tool layers unless the invoked target panel itself requires it.
+4. Add source tests proving the action labels and handlers are not hand-written in individual pages.
+5. Re-run the `/books/:id` real-browser smoke after implementation.
+
+### 2026-07-07 action-policy implementation note
+
+- `frontend/src/utils/bookInfoOverlayActions.js` centralizes contextual search/discover and old-link BookInfo action labels.
+- Search/Discover no longer hand-write `查看详情` / `继续阅读` / `加入书架` / `加入并阅读` / `开始阅读` labels.
+- `/books/:id` old-link compatibility uses the shared read-action builder.
+- Reader-specific toolbar shortcuts are not upstream BookInfo actions and have been removed from `useReaderPanels.openBookInfo()`; Reader now opens a plain shared BookInfo overlay like upstream.
 
 ## Immediate P0 contract: Reader mobile
 
@@ -66,7 +238,7 @@ Implemented in commit work following this contract:
 
 Still pending in Reader P0:
 
-- Complete separate `Content.vue` parity reviews for CBZ import/archive edge cases and audio/TTS media controls.
+- Complete separate `Content.vue` parity review for TTS/read-aloud media controls and local/private signed audio resources.
 - The final Reader P0 acceptance image remains pending. Intermediate validation image `ca43409` has been published and is not the final Reader P0 release.
 
 ## Immediate P0 contract: continuous cross-chapter reading
@@ -301,14 +473,14 @@ Deferred from this EPUB slice:
 
 | Layer | Current OpenReader evidence | Difference | Classification |
 |---|---|---|---|
-| Local import allow-list | `backend/api/imports.go`, `backend/api/localstore.go`, `backend/api/books.go.isSupportedLocalBookFile` accept `txt/text/md/epub/pdf/umd` but not `.cbz`. | New CBZ local imports are rejected even though upstream accepts CBZ. | `must-fix` |
-| CBZ parsing/extraction | No current Go CBZ parser/extractor exists in `backend/engine` or `backend/services/localbook`; frontend only infers CBZ from existing book path fields. | Existing legacy CBZ rows may render if content already contains `<img>`, but OpenReader cannot build upstream-style CBZ chapter rows from the archive. | `must-fix` |
-| CBZ content response | `backend/api/books.go.getBookChapterContent` always returns `format: "text"` except EPUB; no CBZ branch generates `<img src='...'>` from an extracted page. | A CBZ chapter cannot be served through the upstream chapter-content contract. | `must-fix` |
-| Image rendering | `frontend/src/components/reader/ReaderChapterContent.vue`, `useReaderChapterPresentation.js`, `parseReaderContentBlocks` already convert `<img>` to image blocks, hide CBZ titles, collect preview image lists, and recompute layout on image load. | This is a Vue 3 equivalent for HTML image chapters, but it depends on the backend producing the right image chapter content. | `technical-stack-equivalent`, pending backend CBZ support |
+| Local import allow-list | `backend/api/imports.go`, `backend/api/localstore.go`, and local import services accept `.cbz` in the same local-book pipeline. | OpenReader keeps the single Go import path rather than upstream Java extraction classes. | `technical-stack-equivalent` |
+| CBZ parsing/extraction | `backend/services/cbzreader` and local-book import tests preserve the archive, derive sorted image chapters, and protect archive/resource paths. | Uses scoped capability URLs instead of exposing library paths. | `acceptable-change` security hardening |
+| CBZ content response | `backend/api/books.go.chapterContent` returns `format: "cbz"`, `resourceUrl`, `resourceExpiresAt`, and `<img src="...">` content for CBZ chapters. | Existing JSON envelope is preserved; resource serving is capability-protected. | `aligned` |
+| Image rendering | `frontend/src/components/reader/ReaderChapterContent.vue`, `useReaderChapterPresentation.js`, `parseReaderContentBlocks` convert `<img>` to image blocks, hide CBZ titles, collect preview image lists, and recompute layout on image load. | Vue 3/Element Plus `el-image lazy` replaces upstream `v-lazy-container`. | `technical-stack-equivalent` |
 | Lazy-loading model | Upstream uses `v-lazy-container` and `data-src`; OpenReader uses Element Plus `el-image lazy` with preview. | Visible behavior is acceptable if images load lazily, trigger layout recomputation, and preview does not toggle toolbar. | `acceptable-change` |
-| Audio detection/API | Current Reader has TTS/Web Speech but no chapter `format: "audio"` response and no book `type === 1` reader branch. | Upstream audio books cannot be represented as audio in the rewritten Reader. | `must-fix` |
-| Audio UI | No `ReaderAudioContent`/audio player component exists. | Missing cover/progress/seek/chapter/volume controls and audio-specific event handling. | `must-fix` |
-| Reader controls | Current toolbar disables TTS for EPUB only; image/comic detection exists, but audio-specific touch/keyboard guards are absent because no audio state exists. | Audio must suppress paging and speech/auto-reading like upstream. | `must-fix` |
+| Audio detection/API | `backend/api/books.go.chapterContent` returns `format: "audio"` for `book.Type == 1`, validates direct HTTP(S) audio URLs, keeps `content`, and adds `resourceUrl/resourceExpiresAt`. | Remote/direct audio is implemented; same-origin signed local/private `/api/audio-resource` remains pending. | `partial` |
+| Audio UI | `frontend/src/components/reader/ReaderAudioContent.vue` renders an audio branch with cover, hidden media element, elapsed/total time, seek slider, `-15s/+15s`, previous/next, play/pause, mute/unmute, volume slider, progress events, ended-to-next behavior, and restore-by-offset. | Uses Vue/native range inputs instead of upstream Element `el-slider`, preserving visible behavior. | `technical-stack-equivalent` |
+| Reader controls | `Reader.vue`, `useReaderPointer`, `useReaderKeyboard`, and `useReaderMode` now keep audio out of text paging/scrolling, hide auto-reading/TTS, and let center taps toggle the mobile toolbar without side paging. | Escape still closes panels/returns home as an OpenReader compatibility behavior. | `aligned` |
 
 ### OpenReader adaptation contract
 
@@ -325,6 +497,51 @@ Deferred from this EPUB slice:
 | Audio frontend | Add a dedicated audio content branch/component with upstream controls: cover, elapsed/total duration, seek, -15s/+15s, previous/next chapter, play/pause, mute and volume. Mount should load metadata and respect autoplay after manual previous/next or ended advancement. | `must-fix` |
 | Audio progress | Save audio progress on `timeupdate` as chapter position/time without disturbing text scroll position semantics. On chapter reopen, restore the saved playback second before autoplay. | `must-fix` |
 | Audio input model | Parent touch/click/keyboard paging handlers must return early for audio. Center tap toggles toolbar only; audio must not trigger page navigation, auto-reading, or TTS. | `must-fix` |
+
+### 2026-07-07 implementation note
+
+Implemented in commit work following this contract:
+
+- `GET /api/books/:id/chapters/:index/content` now emits `format: "audio"` for `type == 1` books and rejects unsafe direct audio URLs such as non-HTTP(S) schemes or embedded credentials.
+- Audio chapter URLs skip text replacement rules so global cleanup regexes cannot corrupt media URLs.
+- Reader loader keeps audio chapters out of the ordinary paragraph renderer and stores `resourceUrl/resourceExpiresAt` in an audio resource branch.
+- `ReaderAudioContent` renders the audio media branch, restores the saved playback second, emits time progress, supports `-15s/+15s`, previous/next chapter, and advances on ended.
+- Audio progress is persisted as playback seconds in the chapter offset while preserving existing text/EPUB/CBZ progress semantics.
+- Audio chapters hide auto-reading and TTS controls, force the non-text page branch, and suppress text paging from click zones, side taps, keyboard arrows, page keys, Home/End, Space, and wheel-driven vertical reading.
+- `scripts/smoke/reader-audio-contract.mjs` validates the audio reader in Chrome at 390×844 and 1440×900.
+
+Still pending:
+
+- Same-origin signed local/private `/api/audio-resource/:capability/*resourcePath` with byte-range support and MIME allow-list.
+- Full online audio book-source parsing fixtures if upstream source rules expose audio URLs through additional parser branches.
+
+### 2026-07-07 follow-up contract: audio custom controls
+
+Additional upstream evidence from `web/src/components/Content.vue.renderAudio` and methods:
+
+- The underlying `<audio>` element is present but not rendered as the primary browser-native control surface.
+- Visible audio UI consists of cover, elapsed time, seek slider, total duration, `-15s`, previous chapter, play/pause, next chapter, `+15s`, mute/unmute icon, and volume slider.
+- Component state includes `currentTime`, `audioDuration`, `playing`, `currentSpeed`, `audioVolume`, `startTime`, and `autoPlay`.
+- `seekTime(val)` writes `audio.currentTime`; `setAudioVolume(val)` writes `audio.volume = val / 100`.
+- `toggle()` pauses if currently playing, otherwise calls `play()`.
+- `onPlay/onPause/onTimeupdate/onEnd` update playing/current time and emit progress or next chapter transitions.
+
+OpenReader follow-up requirements:
+
+| Concern | Required behavior | Status before implementation |
+|---|---|---|
+| Hidden media element | Keep the real `<audio preload="metadata">` for browser playback, but remove native `controls` from the primary UI. | `must-fix` |
+| Play state | Add explicit play/pause button tied to audio `play/pause/ended/error` events. Browser autoplay failures must not break the page. | `must-fix` |
+| Seek slider | Add visible range slider bound to current playback second and duration. Drag/change must call `audio.currentTime` and emit progress. | `must-fix` |
+| Volume | Add mute/unmute and 0-100 volume slider, writing `audio.volume`. | `must-fix` |
+| Cover | Display book cover when available, with a stable fallback. | `must-fix` |
+| Tests | Extend unit/source tests and `reader-audio-contract.mjs` to verify no native controls, custom buttons/sliders, play/pause, seek, volume, and mute behavior. | `must-fix` |
+
+Implementation status:
+
+- Completed in the follow-up audio-control slice: OpenReader now hides native audio controls, renders cover/fallback, custom seek slider, play/pause, previous/next, `-15s/+15s`, mute/unmute, and volume slider.
+- `frontend/tests/readerAudioContent.test.mjs` verifies the component wiring against the extracted upstream control contract.
+- `scripts/smoke/reader-audio-contract.mjs` verifies custom controls in Chrome, including play/pause, seek, volume, mute, and mobile toolbar center-tap behavior.
 
 ### Recommended tests before implementation
 
