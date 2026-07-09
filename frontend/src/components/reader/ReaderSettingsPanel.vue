@@ -7,10 +7,18 @@
 
     <div class="setting-row">
       <label class="setting-label">特殊模式</label>
-      <el-radio-group v-model="pageTypeModel" size="small" class="read-method-group">
-        <el-radio-button value="normal">正常</el-radio-button>
-        <el-radio-button value="kindle">简洁</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in pageTypeOptions"
+          :key="option.value"
+          class="selection-button"
+          :class="{ active: pageTypeModel === option.value }"
+          type="button"
+          @click="pageTypeModel = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
       <small class="setting-help">开启简洁模式会关闭动画以及首页的部分功能。</small>
     </div>
 
@@ -51,70 +59,65 @@
     </div>
 
     <div class="setting-row">
-      <label class="setting-label">主题</label>
-      <div class="theme-grid">
+      <label class="setting-label">阅读主题</label>
+      <div class="selection-zone theme-grid">
         <span
           v-for="(preset, key) in visibleThemePresets"
           :key="key"
-          class="theme-dot"
+          class="theme-item"
           :class="{ active: reader.theme === key }"
           :style="{ background: preset.bg }"
           :title="preset.label"
           @click="$emit('themeChange', key)"
-        />
-        <span
-          class="theme-dot custom-dot"
+        >
+          <em v-if="key === 'dark'" class="moon-icon">◐</em>
+          <em v-else class="theme-check">✓</em>
+        </span>
+        <button
+          class="selection-button theme-custom-button"
           :class="{ active: reader.theme === 'custom' }"
+          type="button"
           @click="$emit('themeChange', 'custom')"
-        >+</span>
+        >自定义</button>
       </div>
     </div>
 
     <template v-if="reader.theme === 'custom'">
       <div class="setting-row">
-        <label class="setting-label">页面背景颜色</label>
-        <div class="color-setting">
-          <el-color-picker v-model="bodyColorModel" size="small" />
-          <el-button v-if="reader.customBodyColor" size="small" text type="danger" @click="reader.setCustomBodyColor('')">恢复默认</el-button>
-        </div>
-      </div>
-      <div class="setting-row">
-        <label class="setting-label">浮窗背景颜色</label>
-        <div class="color-setting">
-          <el-color-picker v-model="popupColorModel" size="small" />
-          <el-button v-if="reader.customPopupColor" size="small" text type="danger" @click="reader.setCustomPopupColor('')">恢复默认</el-button>
-        </div>
-      </div>
-      <div class="setting-row">
-        <label class="setting-label">阅读背景颜色</label>
-        <el-color-picker v-model="localCustomBg" size="small" />
-      </div>
-      <div class="setting-row">
-        <label class="setting-label">背景图</label>
-        <div v-if="reader.customBgImageList?.length" class="bg-image-grid">
-          <div
-            v-for="image in reader.customBgImageList"
-            :key="image"
-            class="bg-image-option"
-            :class="{ active: reader.customBgImage === image }"
-            :style="{ backgroundImage: `url(${image})` }"
-            role="button"
-            tabindex="0"
-            @click="toggleBgImage(image)"
-            @keydown.enter.prevent="toggleBgImage(image)"
-            @keydown.space.prevent="toggleBgImage(image)"
-          >
-            <span>{{ reader.customBgImage === image ? '使用中' : '选择' }}</span>
-            <button class="bg-image-delete" type="button" title="删除背景图" @click.stop="$emit('clearBgImage', image)">
-              <el-icon><Close /></el-icon>
-            </button>
-          </div>
-        </div>
-        <div class="bg-image-actions">
-          <el-upload accept="image/*" :show-file-list="false" :auto-upload="false" @change="$emit('pickBgImage', $event)">
-            <el-button size="small">上传</el-button>
-          </el-upload>
-          <el-button v-if="reader.customBgImage" size="small" text type="danger" @click="reader.setCustomBgImage('')">取消背景图</el-button>
+        <label class="setting-label">自定义</label>
+        <div class="custom-theme">
+          <span class="custom-theme-title">页面背景颜色
+            <el-color-picker v-model="bodyColorModel" size="small" />
+          </span>
+          <span class="custom-theme-title">浮窗背景颜色
+            <el-color-picker v-model="popupColorModel" size="small" />
+          </span>
+          <span class="custom-theme-title">阅读背景颜色
+            <el-color-picker v-model="localCustomBg" size="small" />
+          </span>
+          <span class="custom-theme-title bg-image-title">阅读背景图片
+            <span v-if="reader.customBgImageList?.length" class="content-bg-preview-list">
+              <span
+                v-for="image in reader.customBgImageList"
+                :key="image"
+                class="content-bg-preview"
+                :class="{ selected: reader.customBgImage === image }"
+                role="button"
+                tabindex="0"
+                @click="toggleBgImage(image)"
+                @keydown.enter.prevent="toggleBgImage(image)"
+                @keydown.space.prevent="toggleBgImage(image)"
+              >
+                <img :src="image" alt="" />
+                <button class="delete-bg-icon" type="button" title="删除背景图" @click.stop="$emit('clearBgImage', image)">
+                  <el-icon><Close /></el-icon>
+                </button>
+              </span>
+            </span>
+            <el-upload class="upload-bg-upload" accept="image/*" :show-file-list="false" :auto-upload="false" @change="$emit('pickBgImage', $event)">
+              <span class="upload-bg-btn">上传</span>
+            </el-upload>
+          </span>
         </div>
       </div>
     </template>
@@ -132,8 +135,8 @@
     </div>
 
     <div class="setting-row">
-      <label class="setting-label">字体</label>
-      <div class="font-family-grid">
+      <label class="setting-label">正文字体</label>
+      <div class="selection-zone font-family-grid">
         <div
           v-for="font in fontOptions"
           :key="font.value"
@@ -144,7 +147,6 @@
         >
           <button class="font-family-select" type="button">
             <span>{{ font.label }}</span>
-            <small v-if="hasCustomFont(font.value)">已上传</small>
           </button>
           <span class="font-family-actions" @click.stop>
             <el-upload
@@ -153,7 +155,12 @@
               :auto-upload="false"
               @change="file => $emit('pickFontFile', { file, font })"
             >
-              <button class="font-action-btn" type="button" :title="hasCustomFont(font.value) ? '替换字体' : '上传字体'">
+              <button
+                class="font-action-btn"
+                :class="{ active: hasCustomFont(font.value) }"
+                type="button"
+                :title="hasCustomFont(font.value) ? '替换字体' : '上传字体'"
+              >
                 <el-icon><Upload /></el-icon>
               </button>
             </el-upload>
@@ -176,14 +183,22 @@
 
     <div class="setting-row">
       <label class="setting-label">简繁转换</label>
-      <el-radio-group v-model="chineseFontModel" size="small" class="read-method-group">
-        <el-radio-button value="简体">简体</el-radio-button>
-        <el-radio-button value="繁体">繁体</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in chineseFontOptions"
+          :key="option"
+          class="selection-button"
+          :class="{ active: chineseFontModel === option }"
+          type="button"
+          @click="chineseFontModel = option"
+        >
+          {{ option }}
+        </button>
+      </div>
     </div>
 
     <div class="setting-row typography-setting-row">
-      <label class="setting-label">字号</label>
+      <label class="setting-label">字体大小</label>
       <ReaderSettingStepper
         v-model="fontSizeModel"
         :min="8"
@@ -207,7 +222,7 @@
     </div>
 
     <div class="setting-row typography-setting-row">
-      <label class="setting-label">字重</label>
+      <label class="setting-label">字体粗细</label>
       <ReaderSettingStepper
         v-model="fontWeightModel"
         :min="100"
@@ -219,7 +234,7 @@
     </div>
 
     <div class="setting-row typography-setting-row">
-      <label class="setting-label">行高</label>
+      <label class="setting-label">段落行高</label>
       <ReaderSettingStepper
         v-model="localLineHeight"
         :min="1"
@@ -252,10 +267,18 @@
 
     <div class="setting-row">
       <label class="setting-label">页面模式（本机）</label>
-      <el-radio-group v-model="pageModeModel" size="small" class="read-method-group">
-        <el-radio-button value="auto">自适应</el-radio-button>
-        <el-radio-button value="mobile">手机模式</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in pageModeOptions"
+          :key="option.value"
+          class="selection-button"
+          :class="{ active: pageModeModel === option.value }"
+          type="button"
+          @click="pageModeModel = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
     </div>
 
     <div v-if="!miniInterface" class="setting-row stepper-setting-row">
@@ -272,12 +295,18 @@
 
     <div class="setting-row">
       <label class="setting-label">翻页方式</label>
-      <el-radio-group v-model="readerModeModel" size="small" class="read-method-group">
-        <el-radio-button value="page">上下滑动</el-radio-button>
-        <el-radio-button v-if="miniInterface" value="flip">左右滑动</el-radio-button>
-        <el-radio-button value="scroll">上下滚动</el-radio-button>
-        <el-radio-button value="scroll2">上下滚动2</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in visibleReaderModeOptions"
+          :key="option.value"
+          class="selection-button"
+          :class="{ active: readerModeModel === option.value }"
+          type="button"
+          @click="readerModeModel = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
       <small class="setting-help">上下滚动2会自动隐藏看过的章节，但是可能会抖动。</small>
     </div>
 
@@ -297,10 +326,18 @@
 
     <div class="setting-row">
       <label class="setting-label">自动阅读</label>
-      <el-radio-group v-model="autoReadingMethodModel" size="small" class="read-method-group">
-        <el-radio-button value="像素滚动">像素滚动</el-radio-button>
-        <el-radio-button value="段落滚动">段落滚动</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in autoReadingMethodOptions"
+          :key="option"
+          class="selection-button"
+          :class="{ active: autoReadingMethodModel === option }"
+          type="button"
+          @click="autoReadingMethodModel = option"
+        >
+          {{ option }}
+        </button>
+      </div>
     </div>
 
     <div v-if="reader.autoReadingMethod === '像素滚动'" class="setting-row stepper-setting-row">
@@ -329,19 +366,34 @@
 
     <div class="setting-row">
       <label class="setting-label">全屏点击</label>
-      <el-radio-group v-model="clickMethodModel" size="small" class="read-method-group">
-        <el-radio-button value="next">下一页</el-radio-button>
-        <el-radio-button value="auto">自动</el-radio-button>
-        <el-radio-button value="none">不翻页</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in clickMethodOptions"
+          :key="option.value"
+          class="selection-button"
+          :class="{ active: clickMethodModel === option.value }"
+          type="button"
+          @click="clickMethodModel = option.value"
+        >
+          {{ option.label }}
+        </button>
+      </div>
     </div>
 
     <div class="setting-row">
       <label class="setting-label">选择文字</label>
-      <el-radio-group v-model="selectionActionModel" size="small" class="read-method-group">
-        <el-radio-button value="操作弹窗">操作弹窗</el-radio-button>
-        <el-radio-button value="忽略">忽略</el-radio-button>
-      </el-radio-group>
+      <div class="selection-zone">
+        <button
+          v-for="option in selectionActionOptions"
+          :key="option"
+          class="selection-button"
+          :class="{ active: selectionActionModel === option }"
+          type="button"
+          @click="selectionActionModel = option"
+        >
+          {{ option }}
+        </button>
+      </div>
     </div>
 
     <div class="setting-row">
@@ -434,6 +486,28 @@ const emit = defineEmits([
 
 const fontSizePresets = [14, 16, 18, 20, 22, 24, 28, 32]
 const configDefaultTypes = ['白天默认', '黑夜默认']
+const pageTypeOptions = [
+  { value: 'normal', label: '正常' },
+  { value: 'kindle', label: '简洁' },
+]
+const chineseFontOptions = ['简体', '繁体']
+const pageModeOptions = [
+  { value: 'auto', label: '自适应' },
+  { value: 'mobile', label: '手机模式' },
+]
+const readerModeOptions = [
+  { value: 'page', label: '上下滑动' },
+  { value: 'flip', label: '左右滑动', mobileOnly: true },
+  { value: 'scroll', label: '上下滚动' },
+  { value: 'scroll2', label: '上下滚动2' },
+]
+const autoReadingMethodOptions = ['像素滚动', '段落滚动']
+const clickMethodOptions = [
+  { value: 'next', label: '下一页' },
+  { value: 'auto', label: '自动' },
+  { value: 'none', label: '不翻页' },
+]
+const selectionActionOptions = ['操作弹窗', '忽略']
 
 const fontPreviewStyle = computed(() => ({
   fontFamily: props.fontOptions.find(font => font.value === props.reader.fontFamily)?.stack,
@@ -447,6 +521,9 @@ const currentCustomConfig = computed(() => {
 })
 const visibleThemePresets = computed(() => Object.fromEntries(
   Object.entries(props.themePresets).filter(([key]) => key !== 'black'),
+))
+const visibleReaderModeOptions = computed(() => (
+  readerModeOptions.filter(option => props.miniInterface || !option.mobileOnly)
 ))
 
 const pageModeModel = computed({
@@ -674,9 +751,36 @@ function resetReaderSettings() {
   font-size: 13px;
 }
 
-.read-method-group {
+.selection-zone {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.selection-button {
+  min-width: 78px;
+  height: 34px;
+  padding: 0 12px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+  cursor: pointer;
+  font: 14px / 34px PingFangSC-Regular, HelveticaNeue-Light, "Helvetica Neue Light", "Microsoft YaHei", sans-serif;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.selection-button.active {
+  color: #ed4259;
+  border-color: #ed4259;
+}
+
+@media (hover: hover) {
+  .selection-button:hover {
+    color: #ed4259;
+    border-color: #ed4259;
+  }
 }
 
 .config-scheme-list {
@@ -754,173 +858,214 @@ function resetReaderSettings() {
 }
 
 .theme-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 5px 16px;
 }
 
-.theme-dot {
-  width: 28px;
-  height: 28px;
-  border: 2px solid transparent;
-  border-radius: 50%;
+.theme-item {
+  width: 34px;
+  height: 34px;
+  color: #ed4259;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 100%;
   cursor: pointer;
+  display: inline-block;
+  line-height: 32px;
+  text-align: center;
+  vertical-align: middle;
 }
 
-.theme-dot.active {
-  border-color: #409eff;
-  box-shadow: 0 0 0 1px #409eff;
+.theme-item.active {
+  border-color: #ed4259;
 }
 
-.theme-dot.custom-dot {
-  display: grid;
-  color: #fff;
-  background: linear-gradient(135deg, #f4e9bd, #2d2d2d);
-  font-size: 14px;
-  place-items: center;
+.theme-check {
+  display: none;
+  font-style: normal;
 }
 
-.bg-image-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+.theme-item.active .theme-check {
+  display: inline;
 }
 
-.bg-image-option {
-  position: relative;
+.moon-icon {
+  color: rgba(255, 255, 255, 0.2);
+  font-style: normal;
+}
+
+.theme-item.active .moon-icon {
+  color: #ed4259;
+}
+
+.theme-custom-button {
+  min-width: 78px;
+}
+
+.custom-theme {
+  display: inline-block;
   min-width: 0;
-  aspect-ratio: 4 / 3;
-  color: #fff;
-  background-color: #eadfca;
-  background-position: center;
-  background-size: cover;
-  border: 2px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  overflow: hidden;
+  width: 100%;
+  word-wrap: break-word;
 }
 
-.bg-image-option::before {
-  position: absolute;
-  inset: 0;
-  content: "";
-  background: linear-gradient(to top, rgba(0,0,0,0.52), rgba(0,0,0,0.05));
+.custom-theme-title {
+  display: inline-block;
+  margin-right: 28px;
+  margin-bottom: 5px;
 }
 
-.bg-image-option.active {
-  border-color: #409eff;
-}
-
-.bg-image-option > span {
-  position: absolute;
-  left: 8px;
-  bottom: 6px;
-  z-index: 1;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.bg-image-delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 1;
-  width: 24px;
-  height: 24px;
-  color: #fff;
-  background: rgba(0,0,0,0.42);
-  border: 0;
-  border-radius: 50%;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-
-.bg-image-actions {
-  display: flex;
+.bg-image-title {
+  display: inline-flex;
+  min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 8px 0;
+}
+
+.content-bg-preview-list {
+  display: inline;
+}
+
+.content-bg-preview {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  margin-left: 10px;
+  margin-bottom: 8px;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.content-bg-preview img {
+  width: 100%;
+  height: 100%;
+  display: inline-block;
+  object-fit: cover;
+  vertical-align: middle;
+}
+
+.content-bg-preview.selected {
+  color: #ed4259;
+  border-color: #ed4259;
+}
+
+.delete-bg-icon {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 10;
+  padding: 0;
+  color: #ed4259;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.upload-bg-upload {
+  display: inline-block;
+}
+
+.upload-bg-btn {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 0;
+  color: #ed4259;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.upload-bg-upload :deep(.upload-bg-btn) {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 0;
+  color: #ed4259;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+:global(.upload-bg-btn) {
+  display: inline-block !important;
 }
 
 .font-family-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px 16px;
 }
 
 .font-family-option {
-  min-width: 0;
-  min-height: 40px;
-  padding: 0 8px 0 10px;
+  position: relative;
+  width: 78px;
+  height: 34px;
+  padding: 0;
   color: #5f564a;
-  background: #fffaf0;
-  border: 1px solid #eadfca;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
   cursor: pointer;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: space-between;
+  font: 14px / 34px PingFangSC-Regular, HelveticaNeue-Light, "Helvetica Neue Light", "Microsoft YaHei", sans-serif;
+  display: inline-block;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .font-family-option.active {
-  color: #0f5451;
-  background: #e6f2ee;
-  border-color: #2f6f6d;
-  font-weight: 700;
+  color: #ed4259;
+  border-color: #ed4259;
 }
 
 .font-family-select {
-  min-width: 0;
+  width: 100%;
+  height: 100%;
   color: inherit;
   background: transparent;
   border: 0;
   cursor: pointer;
-  display: grid;
-  gap: 1px;
+  display: block;
   padding: 0;
-  text-align: left;
+  font: inherit;
+  line-height: inherit;
+  text-align: center;
 }
 
-.font-family-select span,
-.font-family-select small {
-  min-width: 0;
+.font-family-select span {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.font-family-select small {
-  color: #409eff;
-  font-size: 11px;
-  font-weight: 500;
-}
-
 .font-family-actions {
-  flex: 0 0 auto;
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  z-index: 10;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
 }
 
 .font-action-btn {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   padding: 0;
-  color: #7b705f;
+  color: #606266;
   background: transparent;
   border: 0;
-  border-radius: 50%;
   cursor: pointer;
   display: grid;
   place-items: center;
+  font-size: 20px;
 }
 
+.font-action-btn.active,
 .font-action-btn:hover {
-  color: #0f5451;
-  background: rgba(47, 111, 109, 0.1);
+  color: #ed4259;
 }
 
 .font-preview {
@@ -962,9 +1107,9 @@ function resetReaderSettings() {
 }
 
 .font-size-preset.active {
-  color: #0f5451;
-  background: #e6f2ee;
-  border-color: #2f6f6d;
+  color: #ed4259;
+  background: rgba(237, 66, 89, 0.08);
+  border-color: #ed4259;
   font-weight: 700;
 }
 
@@ -998,7 +1143,6 @@ function resetReaderSettings() {
 
   .font-family-grid {
     max-width: 480px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .font-preview {
@@ -1012,29 +1156,28 @@ function resetReaderSettings() {
 
 @media (max-width: 750px) {
   .settings-body {
-    gap: 16px;
+    gap: 20px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .setting-row {
-    gap: 10px;
+    grid-template-columns: 72px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px 0;
   }
 
-  .theme-dot {
-    width: 34px;
-    height: 34px;
+  .setting-row > .setting-label {
+    grid-column: 1;
+    line-height: 36px;
   }
 
-  .font-family-option,
-  .font-size-preset {
-    min-height: 42px;
-    font-size: 14px;
+  .setting-row > :not(.setting-label) {
+    grid-column: 2;
   }
 
   .typography-setting-row,
   .stepper-setting-row {
-    grid-template-columns: 70px minmax(0, 1fr);
-    gap: 10px 8px;
+    grid-template-columns: 72px minmax(0, 1fr);
   }
 }
 </style>

@@ -726,6 +726,73 @@ Implementation status:
 - Completed in this slice: `speechSynthesis` utterance errors are surfaced as `朗读错误: ...`.
 - Validation note: unit tests and production build passed after this slice. The enhanced real-browser TTS smoke was updated to check next-paragraph DOM highlighting and error toast, but final rerun was blocked by the workspace approval/spend cap after an initial timing assertion exposed and fixed an insufficient wait condition.
 
+### 2026-07-08 follow-up contract: Reader settings panel labels and first-screen structure
+
+Upstream evidence from `reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`:
+
+| Feature | Upstream authority | Contract |
+|---|---|---|
+| Component | `web/src/components/ReadSettings.vue` | Reader settings is a scrollable `settings-wrapper` with title `设置` and action `重置为默认配置`. |
+| First-screen order | `ReadSettings.vue` template | The main sections appear in order: `特殊模式`, `配置方案`, `方案类型`, `阅读主题`, custom theme block, `正文字体`, `简繁转换`, `字体大小`, `字体粗细`, `段落行高`, `段落间距`, `字体颜色`, `页面模式`, `页面宽度` on desktop, `翻页方式`, `动画时长`, `自动翻页`, `滚动像素`, `翻页速度`, `全屏点击`, `选择文字`, operations. |
+| Selection controls | `.selection-zone .span-item` | Choices are button-like discrete items, not hard-to-hit raw sliders. Numeric settings use a minus/value/plus control. |
+| Theme controls | `ReadSettings.vue` template and scoped style | `阅读主题` uses `.selection-zone`; preset themes are `.theme-item` circles at `34px × 34px`, `margin-right: 16px`, `border-radius: 100%`, selected state reveals a check icon and uses the same `#ed4259` selected color. The custom theme entry is a normal `.span-item` labeled `自定义`, so it keeps the 78×34 button geometry instead of another circle. |
+| Custom theme block | `ReadSettings.vue` custom theme block | When custom theme is active, the settings row has left label `自定义`; the right side is `.custom-theme`, and each color/background item is an inline `.custom-theme-title` with `margin-right: 28px` and `margin-bottom: 5px`. |
+| Custom background previews | `ReadSettings.vue` custom theme block | Built-in/custom background images are compact `.content-bg-preview` thumbnails at `36px × 36px`; delete icons sit at `top: -6px; right: -6px`; upload is an inline red `上传` text action. |
+| Font controls | `ReadSettings.vue` template and scoped style | `正文字体` is rendered in `.selection-zone` with one `.span-item` per font. Each font item is `78px × 34px`, uses `font: 14px / 34px ...`, has `border-radius: 2px`, selected state `border/color #ed4259`, and an upload icon absolutely positioned at `top: -10px; right: -10px`; uploaded fonts mark that icon active in `#ed4259`. |
+| Selection color | `ReadSettings.vue` scoped style | `.span-item.selected`, custom background `.selected`, theme/font `.selected`, upload active icons, and hover states use `#ed4259` for selected border/text. |
+| Settings density | `ReadSettings.vue` scoped style | `.settings-wrapper` uses 24px padding, title margin-bottom 28px, list rows separated by 20px, left labels are inline-block `56px` plus `16px` right margin, and right-side controls start on the same row. |
+| Mobile gating | `v-if="!$store.state.miniInterface"` and `v-show` on read methods | `页面宽度` is hidden on mobile; `左右滑动` appears only on mobile. |
+| User-requested adaptation | Existing OpenReader issue/request | OpenReader may keep the safer minus/value/plus `ReaderSettingStepper` and larger mobile controls instead of upstream small inputs/sliders. |
+
+Current OpenReader evidence and classification:
+
+| Layer | Current evidence | Difference | Classification |
+|---|---|---|---|
+| Shell/title | `ReaderMobileWorkspacePanel` wraps `ReaderSettingsPanel`; `ReaderSettingsPanel` title row shows `设置` and `重置为默认配置`. | Upstream `Reader.vue` opens `ReadSettings` directly inside `el-popover popper-class="popper-component"`; there is no second mobile wrapper title. The current mobile wrapper adds a duplicate `设置` header. | `must-fix` |
+| Order | `ReaderSettingsPanel.vue` broadly follows upstream order and adds brightness plus TTS controls. | `亮度` and TTS controls are OpenReader enhancements/user-requested additions; placement does not block upstream core flow. | `acceptable-change` |
+| Labels | Current labels shorten several upstream names: `主题`, `字体`, `字号`, `字重`, `行高`. | These should match upstream visible text: `阅读主题`, `正文字体`, `字体大小`, `字体粗细`, `段落行高`. | `must-fix` |
+| Mobile row density | `ReaderSettingsPanel.vue` mobile CSS uses stacked `.setting-row` labels for general rows and only makes typography/stepper rows two-column. | Upstream keeps labels and controls on the same row throughout the settings list, which makes the first screen denser and reduces misalignment between settings sections. | `must-fix` |
+| Selected control color | `ReaderSettingsPanel.vue` still uses `#409eff`, `#0f5451`, and `#2f6f6d` for active theme dots, uploaded labels, font options, hover states, and font-size presets. | Upstream selected state is consistently `#ed4259`; blue/teal selected states make the settings UI look like the wrong component system. | `must-fix` |
+| Discrete option controls | `ReaderSettingsPanel.vue` uses `el-radio-group` / `el-radio-button` for `特殊模式`, `简繁转换`, `页面模式`, `翻页方式`, `自动阅读`, `全屏点击`, and `选择文字`. | Upstream renders these as `.span-item` button-like options in `.selection-zone`, not Element segmented radios. | `must-fix` |
+| Theme controls | `ReaderSettingsPanel.vue` uses `.theme-grid`, `.theme-dot`, `28px` desktop dots, `34px` mobile dots, a selected `box-shadow`, and renders the custom theme entry as another circular `+` dot. | Upstream uses `.selection-zone`, `.theme-item` circles, check/moon glyphs, and a rectangular `.span-item` `自定义` button. | `must-fix` |
+| Custom theme block | `ReaderSettingsPanel.vue` renders custom theme controls as several separate `.setting-row` entries with labels `页面背景颜色`, `浮窗背景颜色`, `阅读背景颜色`, and `阅读背景图片`; it also adds per-color `恢复默认` buttons. | Upstream groups these under one left label `自定义` and inline `.custom-theme-title` controls. The global `重置为默认配置` remains the upstream reset path. | `must-fix` |
+| Custom theme mode | Current OpenReader has no confirmed `themeType` state equivalent for upstream `主题模式` day/night buttons. | Do not fabricate state until the reader setting/store mapping is verified; record as a follow-up semantic gap. | `unknown` |
+| Custom background previews | `ReaderSettingsPanel.vue` uses card-like `.bg-image-grid` tiles with 4:3 aspect ratio, overlay text, and large circular delete buttons. | Upstream uses compact inline 36×36 thumbnails with a small top-right delete icon and inline red `上传`. | `must-fix` |
+| Font controls | `ReaderSettingsPanel.vue` still uses `.font-family-grid` as a 2/5-column card grid; `.font-family-option` is at least 40/42px tall, padded, rounded 6px, uses card background, and shows `已上传` text plus inline action buttons. | Upstream font choices are compact `.span-item` controls in the same visual system as other settings choices. OpenReader can keep upload/clear capabilities, but the visible option geometry, active color, and upload icon placement should match upstream. | `must-fix` |
+| Numeric controls | `ReaderSettingStepper` is used for size/weight/line-height/paragraph/animation/auto-read/TTS. | Preserves user-requested minus/value/plus controls; do not revert to mis-tap sliders. | `intentional-redesign` |
+| Mobile gating | `页面宽度` is hidden when `miniInterface`; `左右滑动` is shown only when `miniInterface`. | Matches upstream gating. | `aligned` |
+
+Required tests for this settings-label slice:
+
+| Layer | Test requirement |
+|---|---|
+| Unit/static | `ReaderSettingsPanel` must expose the upstream canonical labels for theme/font/typography sections. Mobile settings must suppress the generic workspace header so the panel has only one `设置` title row. |
+| Unit/static | Mobile settings CSS must keep `.setting-row` in a two-column `72px + content` layout, matching upstream `56px + 16px` label geometry while preserving larger touch controls. |
+| Unit/static | Reader settings active/selected CSS must use upstream `#ed4259` and reject the previous blue/teal active colors. |
+| Unit/static | Reader settings must not use `el-radio-group` / `el-radio-button`; upstream-style discrete options must use local `.selection-zone` and `.selection-button` controls. |
+| Unit/static | Theme presets must use upstream-like `.theme-item` geometry (`34px × 34px`, circular, no selected `box-shadow`), expose a check/moon glyph, and render `自定义` as a rectangular selection button instead of a circular plus dot. |
+| Unit/static | Custom theme controls must render as one upstream-like `自定义` setting row with `.custom-theme` and inline `.custom-theme-title` items; separate rows and per-color `恢复默认` buttons should not remain in the reader panel. |
+| Unit/static | Custom background previews must use upstream-like `.content-bg-preview` geometry (`36px × 36px` inline thumbnails), small top-right delete icons, and an inline red `上传` action; they must not keep 4:3 card overlays. |
+| Unit/static | Font options must use upstream-like `.font-family-option` geometry: `78px × 34px`, `border-radius: 2px`, selected `#ed4259`, and upload/clear actions positioned like upstream upload icons at the item top-right. |
+| Real browser | Mobile settings smoke must verify theme item, background thumbnail, and font option width/height so later responsive CSS cannot drift back to card-style controls. |
+| Regression | Existing reader settings stepper tests must continue passing. |
+| Build | Production build must compile after label changes. |
+
+Implementation status:
+
+- Completed in this slice: `ReaderSettingsPanel` visible labels now use upstream canonical text for `阅读主题`, `正文字体`, `字体大小`, `字体粗细`, and `段落行高`.
+- Completed in this slice: `frontend/tests/readerSettingsPanelContract.test.mjs` locks those labels and rejects the previous shortened forms.
+- Completed in this slice: mobile settings now suppresses the generic `ReaderMobileWorkspacePanel` header, keeps the upstream-like `ReadSettings` title row, and closes via the still-visible mobile settings tool toggle.
+- Completed in this slice: mobile settings rows now use upstream-like two-column label/control geometry for the base row layout.
+- Completed in this slice: settings active theme dots, background selections, uploaded labels, font options, hover states, and font-size presets now use the upstream `#ed4259` selected color instead of blue/teal.
+- Completed in this slice: first-batch discrete options now use upstream-like `.selection-zone` / `.selection-button` controls instead of Element radio groups.
+- Completed in this slice: `正文字体` font choices now use upstream-like compact `.selection-zone` geometry with `78px × 34px` options, `#ed4259` selected/upload active states, and top-right upload/clear action placement.
+- Completed in this slice: `阅读主题` now uses upstream-like `.selection-zone` / `.theme-item` controls, `34px × 34px` circular preset themes, check/moon glyphs, and a rectangular `自定义` selection button instead of a circular plus dot.
+- Completed in this slice: custom background image previews now use upstream-like compact `36px × 36px` `.content-bg-preview` thumbnails, small top-right red delete icons, and an inline red `上传` action instead of card overlays.
+- Completed in this slice: custom theme color/background controls now render under one upstream-like `自定义` row with inline `.custom-theme-title` items instead of several separate setting rows.
+- Pending follow-up: upstream `主题模式` day/night buttons still need a verified OpenReader state mapping before implementation.
+- Pending follow-up: detailed per-control visual pass for mobile `ReadSettings` first-screen density after the base row structure is aligned.
+
 ## Required workflow for each future module
 
 1. Use `readerdev-compat-inventory`.
