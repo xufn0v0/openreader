@@ -1,6 +1,16 @@
 <template>
-  <section class="app-page discover-page">
-    <header class="discover-head">
+  <section class="app-page discover-page" :class="{ 'workspace-result-page': embedded }">
+    <header v-if="embedded" class="workspace-result-head">
+      <div>
+        <h1 class="app-page-title">探索 ({{ books.length }})</h1>
+        <p class="workspace-result-subtitle">{{ activeSource ? `${activeSource.name} · ${activeExploreName || '默认'}` : '选择书源入口开始探索' }}</p>
+      </div>
+      <div class="workspace-result-actions">
+        <button type="button" @click="backToShelf">书架</button>
+      </div>
+    </header>
+
+    <header v-else class="discover-head">
       <div>
         <h1 class="app-page-title">书海</h1>
         <p class="discover-subtitle">{{ sourceCountText }}</p>
@@ -8,7 +18,7 @@
       <el-button :icon="Refresh" :loading="loadingSources" @click="loadSources">刷新书源</el-button>
     </header>
 
-    <section class="discover-toolbar app-panel">
+    <section v-if="!embedded" class="discover-toolbar app-panel">
       <el-select v-model="targetCategoryIds" placeholder="加入书架分组（可多选）" multiple collapse-tags collapse-tags-tooltip clearable>
         <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
       </el-select>
@@ -71,7 +81,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
@@ -81,6 +91,8 @@ import RemoteBookResultGroups from '../components/RemoteBookResultGroups.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
+import { useIndexWorkspaceStore } from '../stores/indexWorkspace'
+import { useBookInfoAddToShelf } from '../composables/useBookInfoAddToShelf'
 import {
   buildBookInfoReadActions,
   buildBookInfoStartReadActions,
@@ -94,14 +106,18 @@ import {
   remoteBookKey,
   remoteBookSourceId,
   remoteBookSourceName,
-  remoteBookTitle,
   remoteBookUrl,
 } from '../utils/remoteBookResult'
 
 const router = useRouter()
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+})
+const emit = defineEmits(['back-to-shelf'])
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
 const reader = useReaderStore()
+const workspace = useIndexWorkspaceStore()
 const sources = ref([])
 const books = ref([])
 const selectedSourceId = ref('')
@@ -111,11 +127,20 @@ const activeExploreName = ref('')
 const targetCategoryIds = ref([])
 const loadingSources = ref(false)
 const loadingBooks = ref(false)
-const addingBook = ref(null)
+const addToShelf = useBookInfoAddToShelf({
+  selectCategories: initialCategoryIds => overlay.selectBookAddCategories(initialCategoryIds),
+  buildPayload: (book, categoryIds, context) => remoteBookCreatePayload(book, categoryIds, context),
+  createRemoteBook,
+  upsertBook: book => bookshelf.upsertBook(book),
+  onSuccess: message => ElMessage.success(message),
+  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+})
+const addingBook = addToShelf.addingBookKey
 const page = ref(1)
 const hasMore = ref(false)
 const loadingMore = ref(false)
 const expandedSources = ref('')
+const embeddedExploreReady = ref(false)
 
 const activeSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value))
 const sourceCountText = computed(() => {
@@ -161,6 +186,7 @@ const filteredSources = computed(() => {
 })
 
 onMounted(async () => {
+  if (props.embedded) applyWorkspaceExploreIntent()
   const [sourcesResult, shelfResult] = await Promise.allSettled([
     loadSources(),
     warmDiscoverShelf(),
@@ -171,8 +197,26 @@ onMounted(async () => {
   if (sourcesResult.status === 'rejected') {
     ElMessage.warning(readError(sourcesResult.reason, '加载探索书源失败'))
   }
+  embeddedExploreReady.value = true
   if (selectedSourceId.value) await loadBooks()
 })
+
+watch(
+  () => [workspace.mode, workspace.exploreRevision],
+  () => {
+    if (!props.embedded || workspace.mode !== 'explore') return
+    applyWorkspaceExploreIntent()
+    if (embeddedExploreReady.value && selectedSourceId.value) loadBooks()
+  },
+)
+
+function applyWorkspaceExploreIntent() {
+  const intent = workspace.explore
+  selectedSourceId.value = intent.sourceId || ''
+  selectedGroup.value = intent.sourceGroup || ''
+  activeExploreUrl.value = intent.url || ''
+  activeExploreName.value = intent.name || ''
+}
 
 async function warmDiscoverShelf() {
   const jobs = [
@@ -247,6 +291,8 @@ function loadBooksFromEntry(source, entry) {
 async function loadBooks() {
   ensureActiveEntry()
   if (!selectedSourceId.value || !activeExploreUrl.value) return
+  workspace.showExploreResults([], exploreWorkspaceIntent())
+  workspace.setResultLoading(true)
   loadingBooks.value = true
   try {
     page.value = 1
@@ -254,16 +300,19 @@ async function loadBooks() {
     const result = normalizeExploreResult(data, page.value)
     books.value = result.items
     hasMore.value = result.hasMore
+    workspace.showExploreResults(books.value, exploreWorkspaceIntent())
   } catch (err) {
     ElMessage.error(readError(err, '加载探索结果失败'))
   } finally {
     loadingBooks.value = false
+    workspace.setResultLoading(false)
   }
 }
 
 async function loadMoreBooks() {
   if (!selectedSourceId.value || !activeExploreUrl.value || loadingMore.value || !hasMore.value) return
   loadingMore.value = true
+  workspace.setResultLoading(true)
   try {
     const nextPage = page.value + 1
     const { data } = await exploreBooks(selectedSourceId.value, { page: nextPage, url: activeExploreUrl.value })
@@ -273,11 +322,29 @@ async function loadMoreBooks() {
     books.value = [...books.value, ...nextItems]
     page.value = result.page || nextPage
     hasMore.value = result.hasMore && nextItems.length > 0
+    workspace.appendResultRows(nextItems, exploreWorkspaceIntent())
   } catch (err) {
     ElMessage.error(readError(err, '加载更多失败'))
   } finally {
     loadingMore.value = false
+    workspace.setResultLoading(false)
   }
+}
+
+function exploreWorkspaceIntent() {
+  return {
+    sourceId: selectedSourceId.value,
+    sourceGroup: activeSource.value?.group || selectedGroup.value,
+    url: activeExploreUrl.value,
+    name: activeExploreName.value,
+    page: page.value,
+    hasMore: hasMore.value,
+  }
+}
+
+function backToShelf() {
+  workspace.backToShelf()
+  emit('back-to-shelf')
 }
 
 function normalizeExploreResult(data, fallbackPage) {
@@ -312,32 +379,25 @@ function openPreview(book) {
 }
 
 async function addRemoteBook(book, shouldRead) {
-  addingBook.value = activeRemoteKey(book)
-  try {
-    const payload = remoteBookCreatePayload(book, targetCategoryIds.value, {
-      sourceId: activeRemoteSourceId(book),
-      sourceName: activeRemoteSourceName(book),
-    })
-    const { data } = await createRemoteBook(payload)
-    bookshelf.upsertBook(data)
-    ElMessage.success(`已加入书架：《${remoteBookTitle(book)}》`)
-    if (shouldRead) {
-      overlay.closeBookInfo()
-      router.push({ name: 'reader', params: { id: data.id } })
-      return
-    }
-    overlay.openBookInfo(data, {
-      sourceName: activeRemoteSourceName(book),
-      statusLabel: '已加入书架',
-      statusType: 'success',
-      progress: 0,
-      actions: buildBookInfoStartReadActions({ read: () => openExistingReader(data) }),
-    })
-  } catch (err) {
-    ElMessage.error(readError(err, '加入书架失败'))
-  } finally {
-    addingBook.value = null
+  const data = await addToShelf.addRemoteBook(book, {
+    key: activeRemoteKey(book),
+    categoryIds: targetCategoryIds.value,
+    sourceId: activeRemoteSourceId(book),
+    sourceName: activeRemoteSourceName(book),
+  })
+  if (!data) return
+  if (shouldRead) {
+    overlay.closeBookInfo()
+    router.push({ name: 'reader', params: { id: data.id } })
+    return
   }
+  overlay.openBookInfo(data, {
+    sourceName: activeRemoteSourceName(book),
+    statusLabel: '已加入书架',
+    statusType: 'success',
+    progress: 0,
+    actions: buildBookInfoStartReadActions({ read: () => openExistingReader(data) }),
+  })
 }
 
 function findExistingBook(book) {
@@ -392,6 +452,77 @@ function readError(err, fallback) {
   display: grid;
   min-width: 0;
   gap: 16px;
+}
+
+.workspace-result-page {
+  grid-template-rows: auto minmax(0, 1fr);
+  box-sizing: border-box;
+  height: 100vh;
+  max-height: 100vh;
+  gap: 0;
+  padding: 48px;
+  overflow: hidden;
+}
+
+.workspace-result-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0 18px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.workspace-result-head > div:first-child {
+  min-width: 0;
+}
+
+.workspace-result-head .app-page-title {
+  margin: 0;
+  color: #26394a;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.workspace-result-subtitle {
+  min-width: 0;
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-result-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.workspace-result-actions button {
+  padding: 0;
+  color: #26394a;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 28px;
+}
+
+.workspace-result-actions button:hover {
+  color: var(--app-accent);
+}
+
+.workspace-result-page .discover-main {
+  min-height: 0;
+  padding: 18px 0;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .discover-head,
@@ -580,6 +711,27 @@ function readError(err, fallback) {
   .discover-page {
     gap: 8px;
     padding-bottom: 14px;
+  }
+
+  .workspace-result-page {
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    gap: 0;
+    padding: 0;
+  }
+
+  .workspace-result-head {
+    min-height: 64px;
+    padding: max(16px, env(safe-area-inset-top)) 24px 12px;
+  }
+
+  .workspace-result-head .app-page-title {
+    font-size: 20px;
+  }
+
+  .workspace-result-page .discover-main {
+    padding: 12px 20px calc(16px + env(safe-area-inset-bottom));
   }
 
   .discover-head,

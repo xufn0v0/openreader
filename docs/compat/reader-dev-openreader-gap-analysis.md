@@ -21,7 +21,7 @@ The current risk is not framework selection. The risk is implementing from an ab
 |---|---|---|---|---|---|
 | Frontend scene structure | `web/src/views/Index.vue`, `web/src/views/Reader.vue`; router has `/` and `/reader`. | `frontend/src/router/index.js` splits `/`, `/search`, `/discover`, `/local-store`, `/sources`, `/settings`, `/books/:id`, `/books/:id/read`. | Current route/page split fragments upstream workspace flows. Old URLs may stay as redirects, but product structure should converge to Index + Reader. | `must-fix` for P1 | Router redirect tests; browser flow search → BookInfo → read. |
 | Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar. | `frontend/src/views/Reader.vue` now uses `mobileChromeVisible = ref(true)`, and `useReaderTools` / `useReaderPanels` no longer hide chrome for panel actions. | Default-visible toolbar and panel coexistence are implemented; remaining work is full upstream interaction audit for all special branches. | `aligned` for base P0; `partial` for full Reader P0 | Keep unit contracts and `scripts/smoke/reader-mobile-contract.mjs`; extend branch coverage as missing upstream cases are extracted. |
-| Reader mobile panel structure | Upstream uses Element popovers with `popper-class="popper-component"`; mini interface popper is full-width and coexists with toolbar. | Current mobile shelf/toc/source/settings/search/cache/bookmark panels use `ReaderMobileWorkspacePanel`, a full-width toolbar-coexisting workspace; visible mobile `el-drawer` is no longer used for these panels. | Full-width coexistence and no visible drawer are implemented as a Vue 3/Element Plus adaptation. Exact upstream popover internals still need per-panel layout review. | `technical-stack-equivalent` + `partial` | Browser tests for settings/catalog/source/shelf panel + toolbar visible; per-panel layout review before final P0. |
+| Reader mobile panel structure | Primary shelf/source/catalog/settings use Element popovers; bookmarks/search-content are App-level dialogs; cache is an inline read-bar zone. | OpenReader now aligns the four primary panels with `ReaderMobileWorkspacePanel.primary`, but Reader still has local workspace panels for bookmark/search/cache while global drawer implementations coexist. | Primary popovers are aligned; bookmarks/search/cache are a separate `must-fix` P0 dialog/cache slice, not valid variants of a popover. | `partial` for Reader P0 | Keep primary-panel browser contract; add App-dialog and inline-cache browser contracts before replacing the remaining local workspaces. |
 | Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Base geometry is implemented; acceptance requires actual rendered paragraph left/right gap checks, not only CSS value checks. | `aligned` for base P0 | DOM geometry probe for page/body/paragraph left/right gaps within 1px across 390×844 and 360×800; ensure toolbar show/hide does not shift content. |
 | Reader scrolling vs click paging | Upstream has page/scroll modes with discrete click navigation. | User requested continuous native finger/wheel scrolling while click paging remains segmented. | Intentional UX improvement if it does not change mode selection semantics. | `acceptable-change` | Browser scroll continuity probe; click paging regression tests. |
 | Reader settings controls | Upstream uses controls that are easier to distinguish visually; user requested minus/value/plus controls instead of current easy-to-mis-tap slider behavior. | Current setting stepper exists but must be rechecked against upstream layout/state. | Allowed UX adaptation, but values/defaults/state must match upstream. | `acceptable-change` | Unit tests for value bounds; browser setting interaction test. |
@@ -241,11 +241,11 @@ Required implementation before claiming P1 BookInfo parity:
 
 | Behavior | Upstream evidence | Current evidence | Required action |
 |---|---|---|---|
-| Tool layer default | `Reader.vue` data contains `showToolBar: true`. | `Reader.vue` contains `mobileChromeVisible = ref(false)`. | Set mobile toolbar default to visible and test it. |
-| Panel open | Upstream click handler returns when popovers/settings are visible; opening a panel does not hide `showToolBar`. | `useReaderTools.openMobileTool` and `useReaderPanels` set `mobileChromeVisible.value = false`. | Remove panel/action coupling to toolbar visibility. |
-| Mobile panel container | Upstream mobile popper is full-width via `.popper-component`. | Current mobile uses bottom drawers for shelf/toc/source/settings/search/cache/bookmark. | Rebuild mobile panels as toolbar-coexisting popovers/workspaces. |
-| Horizontal layout | Upstream mini chapter padding is 16px and justified. | Current mobile content padding is 22px with altered vertical padding. | Restore upstream 16px geometry and paragraph semantics. |
-| Tests | Upstream behavior is source contract. | Existing tests assert toolbar hides after panel actions. | Delete/rewrite conflicting tests. |
+| Tool layer default | `Reader.vue` data contains `showToolBar: true`. | `Reader.vue` now contains `mobileChromeVisible = ref(true)`. | Base behavior is aligned; retain direct state and browser coverage. |
+| Panel open | Upstream click handler returns when primary popovers/settings are visible; opening a panel does not hide `showToolBar`. | `useReaderTools` and `useReaderPanels` do not hide `mobileChromeVisible` for panel actions. | Base behavior is aligned; primary-panel toggle/exclusivity remains a separate must-fix. |
+| Mobile panel container | Upstream mini `.popper-component` is `top: 0`, `left: 0`, `width: 100vw`, without border/shadow; each child owns its own `24px + safe-area` padding. | `ReaderMobileWorkspacePanel` is full viewport but centrally reserves `58px` above and `96px` below for every panel. | Rebuild generic panel geometry and let panel content own the upstream-like insets. |
+| Horizontal layout | Upstream mini chapter padding is 16px and justified. | Current mobile reader page uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified body. | Base geometry is aligned; real rendered symmetry remains required. |
+| Tests | Upstream behavior is source contract. | Existing toolbar-hide tests were replaced, but not every primary tool has a same-button toggle/exclusive-panel contract. | Add state and browser coverage before implementation. |
 
 ### 2026-07-06 implementation note
 
@@ -253,7 +253,7 @@ Implemented in commit work following this contract:
 
 - Mobile reader tool layer now defaults to visible and initial chapter loading no longer hides it.
 - Opening reader tools/panels no longer forces the mobile tool layer closed.
-- Mobile shelf, catalog, bookmark, search, source, cache, and settings panels now use a toolbar-coexisting full-width workspace instead of visible bottom `el-drawer`.
+- Mobile shelf, catalog, source, and settings now use the toolbar-coexisting full-width workspace/popup adaptation. Bookmark, search, and cache were initially moved there too, but the 2026-07-10 dialog/cache audit classifies that structure as incorrect and requires replacement.
 - Settings panel coexistence, no visible mobile drawer, center tap behavior, and 16px mobile reader geometry are covered by `scripts/smoke/reader-mobile-contract.mjs`.
 - Ordinary text rendering now preserves safe upstream inline HTML semantics via sanitized `v-html`, while keeping plain text for search/progress.
 - Image markup now marks chapters with upstream comic semantics, and CBZ-like book URLs hide the chapter title to match upstream `Content.vue`.
@@ -266,6 +266,336 @@ Still pending in Reader P0:
 
 - Complete separate `Content.vue` parity review for TTS/read-aloud controls.
 - The final Reader P0 acceptance image remains pending. Intermediate validation image `ca43409` has been published and is not the final Reader P0 release.
+
+### 2026-07-10 focused audit: mobile primary popovers and reader chrome
+
+Authoritative upstream files:
+
+- `web/src/views/Reader.vue`: the four primary `el-popover` controls, `showToolBar: true`, central-content state machine, keyboard branches, `popperWidth`, and toolbar/read-bar z-index ordering.
+- `web/src/App.vue`: mini `.popper-component` is pinned to `(0, 0)`, forced to `100vw`, has no border/shadow, and stays visually beneath the reader top toolbar.
+- `web/src/components/BookShelf.vue`, `BookSource.vue`, and `PopCatalog.vue`: each popover body uses its own negative Element-Popover margin and `24px + safe-area` content padding; `ReadSettings.vue` owns its own settings title/layout.
+
+| Contract | Upstream behavior | Current OpenReader evidence | Classification | Required test before code |
+|---|---|---|---|---|
+| Initial chrome | `showToolBar` starts `true`; loading a chapter does not change it. | `Reader.vue` starts `mobileChromeVisible` at `true`; `useReaderChapterLoader` changes it only when a caller explicitly asks for `hideChrome`. | `aligned` | Initial 390×844 and 360×800 assertions. |
+| Primary panel action | Shelf, source, catalog, and settings are click-triggered `el-popover` references. A second click on the same reference closes its popover; opening a different reference must not leave a second visible primary workspace. Neither operation mutates `showToolBar`. | `useReaderPrimaryPanels` owns the four refs. `toggle()` closes all primary refs before opening another and closes a same-tool second click; it never receives or mutates `mobileChromeVisible`. Reader routes only mobile primary actions through it. | `aligned` for state transition | `readerPrimaryPanels.test.mjs` plus browser test asserting same-tool close, A→B switching, exactly one workspace, and visible chrome at 390×844/360×800. |
+| Popover root geometry | In mini mode, `.popper-component` is `top:0`, `left:0`, `width:100vw`, `box-sizing:border-box`, no border/shadow. Its component decides body padding. | `ReaderMobileWorkspacePanel.primary` is a `0px`-padded, direct `100vw × 100dvh` popup root with no glass blur. Its `Reader.vue` child body owns `24px + safe-area` insets; shelf/toc/source lists fill the remaining scrollable row and settings owns its own scroll. | `aligned` for the four primary popovers | Static contract plus 390×844/360×800 DOM assertion for root `(0,0,100vw)`, `0px` root padding, primary body, and no visible drawer. |
+| Primary panel header ownership | Shelf/source/catalog provide their own title/actions; settings provides its own `设置 / 重置为默认配置` row. There is no generic popover close header. | Shelf and catalog now render their own upstream-like title/action rows, source retains its own `来源(n)` row, and settings retains `ReaderSettingsPanel`'s title row. All four use `primary` with `show-header=false`; App-level bookmark/search dialogs and the inline cache zone are documented in the focused audit below. | `aligned` for shelf/source/catalog/settings. | Static ownership contract and mobile DOM assertion that primary panels have no generic header. |
+| Chrome layering | Top toolbar is `z-index:2001`; popover is below it. The content click handler first returns when one of the four primary popovers is open, so no tool toggle/page action leaks through. | Reader mobile chrome uses `z-index:8`, workspace uses `z-index:7`, `isOverlayOpen` blocks reader click/touch/wheel actions, and workspace events stop propagation. | `technical-stack-equivalent` for current primary panels | Panel click + center tap + side paging test, including each primary panel. |
+| Floating dialogs | Bookmark, search-content, and BookInfo are App-level dialogs raised from Reader events, not the four primary popovers. | Bookmark/search now use App-level Element Plus dialogs; BookInfo remains the existing global overlay. Their modal interactions are covered by the focused dialog contract below. | `aligned` for bookmark/search shell ownership. | Real-browser dialog and click-through contract. |
+| Paging/keyboard | With no primary popover open, center toggles toolbar; side click/page and arrow keys hide toolbar before moving. With a primary popover open, keyboard does nothing. `Escape` returns to shelf. | `useReaderKeyboard` takes the computed `useReaderPrimaryPanels.isOpen()` state and returns before page, arrow, home/end, space, or Escape handling. The pre-existing pointer overlay guard continues to prevent panel clicks from reaching reader interactions. | `aligned` for primary popovers | `readerKeyboard.test.mjs` locks the keyboard guard; browser panel center-tap check covers pointer leakage. Bookmark/search/cache remain deferred to their dialog audit. |
+
+Allowed differences retained for this slice:
+
+- Vue 3/Element Plus workspace implementation may replace Vue 2 `el-popover`, provided the state machine, visible layering, root geometry, and per-panel layout match the contract.
+- Native continuous finger/wheel scrolling with click paging remains the explicit user-requested improvement.
+- Numeric minus/value/plus setting controls remain the explicit user-requested improvement.
+
+Implementation order after this audit gate:
+
+1. Completed: `useReaderPrimaryPanels` is the single controller shared by shelf/source/catalog/settings, without coupling it to `mobileChromeVisible`.
+2. Completed: root geometry moved out of `ReaderMobileWorkspacePanel.primary`; shelf/source/catalog own upstream-like content headers/insets and settings retains its existing owner.
+3. Completed: keyboard guards use the active primary-panel contract; pointer guards already use the shared reader-overlay guard.
+4. Run desktop 1440×900 plus mobile 390×844/360×800 browser contracts; publish a Docker image only after the cohesive slice passes.
+
+### 2026-07-10 focused audit: Reader App dialogs and inline cache zone
+
+Authoritative upstream files:
+
+- `web/src/views/Reader.vue`: Reader emits `showBookmarkDialog` and `showSearchBookContentDialog`, consumes `showBookmark` and `showSearchContent` results, and renders the cache controls directly inside `.read-bar` as `showCacheContentZone`.
+- `web/src/App.vue`: owns one root `Bookmark` and one root `SearchBookContent` instance; event listeners set their visible state and target book.
+- `web/src/components/Bookmark.vue`: book-scoped bookmark-management dialog; mini interface uses `el-dialog :fullscreen="true"` and jump emits an event back to Reader before closing.
+- `web/src/components/SearchBookContent.vue`: root fullscreen-on-mini dialog with a header search input, tabular results, load-more, and saved-scroll restoration; choosing a result emits back to Reader before closing.
+
+| Contract | Upstream behavior | Current OpenReader evidence | Classification | Required test before code |
+|---|---|---|---|---|
+| Bookmark ownership | Reader merges the reading/shelf book and asks the root App `Bookmark` dialog to open. The root dialog filters the global bookmark collection to that book. Reader itself owns the content positioning after receiving the selected bookmark. | `Reader.vue` now routes the current merged reading book through `useOverlayStore.openBookmark()`. It retains only position-scoped bookmark creation/note mutation with `trackItems:false`; `OverlayBookmarks` is the unique list/edit/import/delete UI/data owner. | `aligned` for UI ownership; position-scoped creation is a required reader responsibility. | Reader action opens exactly one global bookmark dialog with the current book; no Reader-local bookmark workspace remains; selected bookmark closes dialog and preserves reader route semantics. |
+| Bookmark dialog shell | Upstream uses App-level `el-dialog`, `dialogWidth` on desktop and `fullscreen` on mini interface; its title is `<book> 书签管理` with import, table selection, batch delete, jump, and edit. | `OverlayBookmarks` now uses one App-level `el-dialog`: 880px desktop width, `fullscreen` mini mode, title/import action, table selection, batch delete, jump, and edit. The old Reader workspace/drawer and card panel have been removed. | `aligned` | 1440×900 dialog width/title/action contract; 390×844/360×800 fullscreen dialog rect; verify no bottom drawer and no duplicate dialog. |
+| Bookmark data adaptation | Upstream stores bookmarks globally and filters by name/author; save/delete/import refresh the shared collection. | OpenReader keeps authenticated per-book APIs and user-scoped data, with `useBookBookmarks` update events. This is required for Go/multi-user isolation. | `acceptable-change` | Same-book and cross-book jump/import/delete tests; ensure one active data owner and refresh event path. |
+| Search ownership | Reader asks the root App `SearchBookContent` dialog to open with the current book. A chosen result emits `showSearchContent`; Reader loads/rebuilds the target chapter then finds/highlights the requested occurrence. | Reader now opens `useOverlayStore.openSearchBookContent()` and no longer owns a search panel or `useBookContentSearch` instance. The global dialog owns the sole search state and routes the existing `chapter`, `line`, `match`, `percent`, and `q` query fields back to Reader. | `aligned` | Reader action opens only global search dialog; result closes it, preserves route compatibility, then uses existing route-sync highlighting. |
+| Search dialog shell | Upstream uses root `el-dialog`, fullscreen on mini interface. The header is the search input; results are a table; footer provides load-more, restore-last-position when relevant, and cancel. | `OverlayBookContentSearch` now uses one App-level `el-dialog`: header input, tabular results, load-more, existing full-scan enhancement, saved-scroll restoration, cancel, and mini fullscreen. The old narrow drawer and Reader workspace/card UI have been removed. | `aligned` | Desktop/mobile dialog geometry and no-drawer assertion; search input/header, result selection, load-more, cancellation, and previous-result scroll restoration tests. |
+| Search pagination/API | Upstream posts a book URL, keyword, and `lastIndex`; its result rows carry chapter/result text and a next cursor. | OpenReader uses a per-book authenticated route plus richer `chapter/line/match/percent/q` navigation metadata, remote/local paging guards, and scoped result cache. | `acceptable-change` | Preserve current API/data fields and route compatibility while replacing only UI ownership/shell. No backend route change is required in this slice. |
+| Cache ownership | `showCacheContent()` toggles an inline `.cache-content-zone` within Reader's bottom `.read-bar`. It shows `后面50章`, `后面100章`, `后面全部`; while active it replaces actions with status and cancel. On mini interface this zone is part of the bottom reader bar, not a dialog. | `showCacheContentZone` is now the Reader state. `ReaderDesktopProgress` positions `ReaderCachePanel` beside the desktop progress control, and `ReaderMobileChrome` places it inside the bottom bar. It preserves 50/100/all/status/cancel and toggles without closing the tool layer. | `aligned` | Cache action toggles a single inline zone, does not open workspace/drawer or hide chrome, preserves 50/100/all/cancel and status, and remains reachable at desktop/mobile target viewports. |
+| Dialog/chrome layering | Upstream Reader's top tool bar is above ordinary Reader content; App dialogs own their modal input surface. Exact Element UI z-index interaction must be tested instead of inferred from current custom workspace z-indexes. | Global dialogs now own the full-screen mobile input surface while Reader chrome state remains `visible`; a center click inside each dialog is caught by the dialog and does not toggle or page Reader. Primary toolbar/workspace state remains independent. | `aligned` for state isolation and click blocking. | Runtime mobile dialog click-through and geometry assertion at both target viewports. |
+
+Allowed differences retained for this slice:
+
+- Go per-book bookmark/search APIs, user-scoped storage, explicit route query fields, and browser-cache paging are multi-user/runtime adaptations; their data semantics remain intact.
+- The result presentation may use Vue 3/Element Plus components rather than Vue 2 tables only when the dialog ownership, fullscreen/mobile behavior, controls, and jump transition remain equivalent.
+
+Implementation order after this audit gate:
+
+1. Completed: Reader bookmark/search actions route through `useOverlayStore`; local list/search drawers, card panels, and duplicate list/search owners are removed.
+2. Completed: `OverlayBookmarks` and `OverlayBookContentSearch` are App-level dialogs with upstream-like desktop/fullscreen mobile shells, while keeping the existing Go API and route semantics.
+3. Completed: `showCacheDrawer` is replaced by `showCacheContentZone` in the desktop/mobile read bars; the cache engine and cancellation behavior are unchanged.
+4. Completed: `readerGlobalDialogContract.test.mjs` plus `scripts/smoke/reader-mobile-contract.mjs` cover no-drawer ownership, desktop 1440×900 dialog/cache geometry, 390×844 and 360×800 fullscreen geometry, inline cache controls, Dialog click blocking, and tool-layer state.
+
+### 2026-07-10 implementation and validation note
+
+- Validation passed: frontend 298 tests, production build, backend `go test ./...`, and the real-browser Reader contract at 1440×900, 390×844, and 360×800.
+- The user-requested native continuous finger/wheel scrolling and numeric reader setting steppers remain intact.
+- The former Reader-bound note dialog has been replaced by the root `OverlayBookmarkForm` protocol documented below.
+
+### 2026-07-10 focused audit: Reader App-level BookmarkForm protocol
+
+Authoritative upstream files:
+
+- `web/src/App.vue`: renders one root `BookmarkForm`, receives `showBookmarkForm(bookmark, isAdd, callback)`, and invokes the callback exactly once when the Dialog closes.
+- `web/src/components/BookmarkForm.vue`: one `el-dialog`, desktop `dialogWidth`, mini-interface fullscreen; book, author, chapter, and content are readonly while the note is editable. Save validates book identity/content then persists and closes.
+- `web/src/views/Reader.vue`: selection action opens the operation confirmation; its bookmark branch builds the reading-position payload and emits `showBookmarkForm(..., true, callback)` rather than writing directly. The callback clears the in-flight selection-create guard.
+- `web/src/components/Bookmark.vue`: edit starts the same root `BookmarkForm` protocol with `isAdd=false`; the list manager does not own a nested editor dialog.
+
+| Contract | Upstream behavior | Current OpenReader evidence | Classification | Required test before code |
+|---|---|---|---|---|
+| Root ownership | `App.vue` owns one `BookmarkForm` instance, separate from the bookmark-management dialog and Reader. | `GlobalOverlayHost` mounts the single `OverlayBookmarkForm`; Reader and `OverlayBookmarks` only invoke `useOverlayStore.openBookmarkForm()`. The former local form and nested editor are removed. | `aligned` | Exactly one `OverlayBookmarkForm` is mounted by `GlobalOverlayHost`; Reader and list actions only open it through the overlay store. |
+| Open/close callback | `showBookmarkForm` receives a callback; the root watcher invokes it once after either save or cancel/close, releasing Reader's `showAddBookmarking` lock. | `useOverlayStore.openBookmarkForm()` returns one promise and stores one resolver; `finishBookmarkForm()` clears it before resolving, so save/cancel/close cannot resolve it twice. `useReaderSelection` awaits the form promise while its operation guard is active. | `aligned` | A pending Reader selection creation remains guarded until the global form finishes; confirm, cancel, Escape, and modal close each resolve exactly once without click-through. |
+| Create from selected text | Upstream `showTextOperate()` uses the cancel branch for “添加书签”; `showAddBookmark()` resolves the selected paragraph context and opens `BookmarkForm` with the generated book/chapter/content payload. No write happens until the user confirms the form. | The Reader selection branch now calls `useReaderBookmarkActions.createFromSelectedText()`, which opens the root form with the current book, chapter, offset/percent, and trimmed excerpt. No Reader-side API create call remains. | `aligned` for state transition | Selection cancel opens the global form with the current book/chapter/trimmed excerpt; saving performs one create, cancellation performs none. |
+| Current-position note | Reader derives current chapter/position/content, then the root form displays the immutable reading context plus editable note. | The Reader note action now opens the same root form. `OverlayBookmarkForm` presents readonly book/author/chapter/excerpt and an editable note; mini mode uses fullscreen. | `aligned` | Reader note action opens the same global form at 1440×900 and 390×844/360×800; readonly context remains visible and mobile is fullscreen. |
+| Edit flow | Bookmark list emits the selected bookmark into the root form with `isAdd=false`. The root form edits note content and persists through the same close lifecycle. | `OverlayBookmarks.openEditor()` opens the root form in `edit` mode. The root form preserves title/excerpt as readonly context and uses the existing update API for the note; `useOverlayBookmarkActions` no longer has draft/editor state. | `aligned` | Bookmark-list edit opens the root form; no nested editor remains. Preserve existing title/excerpt data but treat it as readonly context unless a later user requirement explicitly expands upstream editing. |
+| Data/API adaptation | Upstream uses global `bookName/bookAuthor/chapterName/bookText/content` fields and a single `/saveBookmark` request. | OpenReader uses authenticated per-book `POST /books/:id/bookmarks` and `PUT /bookmarks/:id` with `chapterId/chapterIndex/offset/percent/title/excerpt/note`. | `acceptable-change` | The global form maps its readonly fields to existing rows and uses the current per-book create/update routes; no backend/data migration. |
+| Reader state and route | Upstream Reader takes responsibility for extracting current reading context, while the form does not alter Reader route/progress. | Reader already has `currentOffset`, `currentChapterPercent`, chapter title and visible excerpt helpers. | `technical-stack-equivalent` | Opening/cancelling/saving a form does not change chapter, progress, tool visibility, or Reader route. |
+| Modal shell | Upstream uses a root Element dialog at desktop width and `fullscreen` mini mode. Form clicks are modal input, not Reader clicks. | `OverlayBookmarkForm` is a root 640px desktop Dialog and fullscreen mini Dialog. It participates in Reader overlay guards and browser tests verify modal click isolation. | `aligned` | Browser: one desktop dialog and one fullscreen mobile dialog; clicking the form does not page/hide Reader chrome. |
+
+Allowed differences retained for this slice:
+
+- The Go per-book create/update routes, authenticated user isolation, stable numeric `bookId`, and precise reading-progress fields replace upstream’s global bookmark storage.
+- Existing stored `title` and `excerpt` fields remain preserved in SQLite and backups, but the upstream-compatible form presents them as readonly context.
+- The existing selection confirmation wording is a Vue 3/Element Plus adaptation; its “add bookmark” branch must still open the form rather than write directly.
+
+Implementation order after this audit gate:
+
+1. Completed: root form state and resolve-once close protocol live in `useOverlayStore`; `GlobalOverlayHost` mounts `OverlayBookmarkForm`.
+2. Completed: the form uses upstream readonly book/chapter/content context and editable note fields, mapped to existing `createBookmark`/`updateBookmark` API helpers.
+3. Completed: Reader note and selected-text bookmark actions open the root form; `ReaderBookmarkFormDialog` and direct Reader create writes are removed.
+4. Completed: bookmark-list edit opens the root form; nested editor state is removed from `OverlayBookmarks` and `useOverlayBookmarkActions`.
+5. Completed: unit/static contracts plus the real-browser Reader test cover root ownership, resolve-once close, edit save, desktop/mobile geometry, readonly context, no drawer, and click isolation.
+
+### 2026-07-10 BookmarkForm implementation and validation note
+
+- Browser verification now opens a bookmark from the App-level manager, edits its note through the root form, and saves through `PUT /bookmarks/:id` at 1440×900, 390×844, and 360×800.
+- The form click remains modal and does not toggle Reader chrome or page content. Opening/cancelling/saving does not alter the Reader route or progress.
+- The selected-text create path is covered by unit contracts for “open form, do not direct-write”; the API/form-close branches are the next target if this flow gains a dedicated browser fixture.
+
+## P1 full audit: Index workspace scene convergence
+
+Status: audit completed on 2026-07-10. No application implementation is authorized by this section until its test contracts have been added for the selected implementation batch.
+
+Fixed upstream authority: `web/src/views/Index.vue` and the root dialogs in `web/src/App.vue` at `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`.
+
+### Upstream scene contract
+
+`Index.vue` is one long-lived product scene, not a group of page routes. Its state owns `isSearchResult`, `isExploreResult`, result rows, result pagination/scroll position, `showNavigation`, source/import/manage Dialog flags, local-store/WebDAV Dialog flags, and the shelf list. Search and Explore replace the shelf list in-place; returning to the shelf clears only result state. Shared BookInfo, Bookmark, SearchBookContent, and BookmarkForm live once at root `App.vue` and are opened by Index/Reader events.
+
+| Concern | Upstream evidence | Required OpenReader behavior |
+|---|---|---|
+| Scene boundary | `Index.vue` renders the navigation and shelf together; it has no separate Search/Discover/Sources/Settings/LocalStore product routes. | The canonical visible workspace must be one Index-equivalent scene. Existing URLs may remain only as redirects/query compatibility shims. |
+| Shelf / search / explore state | `isSearchResult` and `isExploreResult` switch `bookList` from shelf rows to search/explore results. `backToShelf()` clears only result state. `showSearchList()` accepts Explore results in the same shelf area. | Sidebar search and Explore must transition within the workspace, keep the same sidebar/mobile navigation state, and use the shared BookInfo/add/read flow. |
+| Search continuation | `searchPage`, `searchLastIndex`, `loadingMore`, and `lastScrollTop` keep continuation in the same list. | Remote/local pagination and query metadata may use Go APIs, but load-more/back-to-shelf must stay in the same workspace list and retain result scroll position. |
+| Navigation/sidebar | `.navigation-wrapper` and `.shelf-wrapper` coexist in one flex scene. Desktop width is 260px. Mobile starts hidden, uses 270px drag range, ignores 20px edges/vertical gestures, and shelf clicks close it. | Keep the existing 260px visual width, 270px gesture window, 20px guard, fixed bottom controls, and user-requested bottom-icon drag stabilization. Do not make a navigation action implicitly destroy the current workspace scene. |
+| Mobile shelf geometry | At ≤750px the shelf uses 24px title/group insets, 20px title, 10×20px book rows, 84×112 covers. | Retain the previously aligned OpenReader mobile Home geometry when it becomes the Index workspace body. |
+| Source operations | Index sidebar opens source management/import/remote/failure/debug Dialogs; Explore is an in-scene popover. | Source management remains a workspace overlay responsibility. Full-page source settings may only survive as compatibility entry redirects. |
+| Shelf operations | Index opens book manage, group manage, import, local-store and cache actions in the same scene. | Existing global overlays are valid Vue 3 equivalents; avoid a second full-page operation flow. |
+| User/WebDAV/RSS/replace operations | Index sidebar opens user-space, WebDAV, backup/cache, RSS and root dialogs without leaving the workspace. | Preserve OpenReader’s secure multi-user and Go backup/WebDAV APIs, but surface them as workspace overlays rather than canonical pages. |
+| Shared BookInfo | Cover click emits one root BookInfo Dialog; search/explore and shelf reuse it. | Retain the existing shared `OverlayBookInfo` implementation and old `/books/:id` redirect; remove remaining page-specific preview/action ownership as each flow converges. |
+
+### OpenReader mapping and classification
+
+| Layer | Current evidence | Difference from upstream | Classification |
+|---|---|---|---|
+| Workspace shell | `AppLayout.vue` already owns the persistent sidebar, recent reading, search settings, bottom GitHub/theme controls, cache/user/WebDAV actions, and `GlobalOverlayHost`. | It is structurally capable of being Index, but renders a route slot rather than owning one workspace scene. | `partial` |
+| Canonical routes | `router/index.js` exposes `/`, `/search`, `/discover`, `/sources`, `/settings`, and `/local-store` as separate business pages. | This is the central information-architecture split absent from upstream. | `must-fix` |
+| Sidebar search | `useAppSidebarSearch` stores search preferences, but `goSearch()` navigates to `/search`; `AppLayout.runNavAction()` closes mobile sidebar after every route/action. | Search is no longer an in-place shelf transition and mobile sidebar/workspace state is reset by navigation. | `must-fix` |
+| Explore | `Home.vue` routes `书海` to `Discover.vue`; sidebar Explore also routes to `/discover`. | Upstream Explore is an Index popover/result state sharing the shelf body. | `must-fix` |
+| Search / BookInfo / read | `Search.vue` and `Discover.vue` already reuse `overlay.openBookInfo()` plus shared add/read actions. | Shared BookInfo is good, but result orchestration/data state is duplicated across separate pages. | `partial` |
+| Source manager | `Sources.vue` is a full page; `AppLayout` links sidebar source actions to its route/query panels. | Upstream source manager/import/failure/debug live as Index-owned dialogs. | `must-fix` |
+| Book manage / groups / import | `GlobalOverlayHost` already hosts BookManagement, BookGroups, BookImport, LocalStore, WebDAV, backup, user, RSS, replace-rule and BookInfo overlays. | Overlay ownership is close to upstream; duplicate full-page LocalStore and Settings routes remain. | `partial` |
+| Local store / WebDAV | `OverlayLocalStore`/`OverlayWebDAV` exist, while `/local-store` and part of `Settings.vue` provide additional full-page flows. | Two visible entry structures can drift and do not match one Index scene. | `must-fix` for canonical ownership; `acceptable-change` for Go filesystem/security APIs |
+| Settings / user space | `Settings.vue` is a standalone page; sidebar account action navigates to it. Reader-specific settings are already separate as required by upstream Reader. | Index-level user/config/backup management must become workspace overlays; Reader settings are not part of this P1 merge. | `must-fix` for workspace settings; `out-of-scope` for Reader settings |
+| Mobile sidebar interaction | `useAppMobileNavigation.js` uses a 260px visual width and 270px drag limit. `AppLayout.vue` keeps bottom controls outside the scroll container and counter-transforms them during drag. | Matches upstream mechanics, with the user-requested fixed bottom-icon behavior as an explicit difference. Route-driven close behavior still conflicts with one-scene ownership. | `aligned` for geometry/gesture; `must-fix` for scene transition semantics |
+| Mobile shelf body | `Home.vue` now carries upstream 24px/20px/10×20px/84×112 geometry and a mobile menu trigger. | The visual shelf body is already suitable for reuse as Index content. | `aligned` |
+| Data/API | OpenReader uses Pinia, authenticated Go APIs, numeric ids, browser cache, multi-user progress and URL query contracts. | Different from Vuex/event bus/global JSON storage but required by the current runtime. | `acceptable-change` |
+
+### Canonical ownership target
+
+| Capability | Target owner | Legacy compatibility |
+|---|---|---|
+| Shelf, search results, Explore results | One `IndexWorkspace` body rendered from `/` under `AppLayout` | `/search` and `/discover` redirect to `/` with explicit query/mode; preserve keyword/source/search-type query fields. |
+| Source list/manage/import/remote/failure/debug | `GlobalOverlayHost` source overlays opened by `AppLayout`/Index actions | `/sources` redirects to `/` with a source overlay intent query. |
+| Local store, WebDAV, backup, account/user/RSS/replace | Existing global overlays | `/local-store` and `/settings` redirect to `/` with an overlay intent query; preserve only documented panel parameters. |
+| BookInfo/add/read | Existing shared `OverlayBookInfo` and reader route | `/books/:id` remains the existing `?bookInfo=<id>` compatibility shim. |
+| Reader | `Reader.vue` remains its own scene | `/books/:id/read` and current reading query semantics remain unchanged. |
+
+### Implementation batches and gates
+
+1. **P1-A — Workspace state contract, no visual migration yet.** Extract a shared Index workspace store/composable for `mode = shelf|search|explore`, keyword, result rows, continuation cursor, and list scroll restoration. Existing Search/Discover pages must mirror their resolved result state into it. No route is removed in this batch.
+2. **P1-B — Shelf/search/explore body convergence.** Move Search/Discover result rendering into the canonical `/` workspace body while reusing their current API clients and shared BookInfo actions. Convert `/search` and `/discover` into compatibility redirects. Real-browser gates: sidebar search → result → BookInfo → add/read → back to shelf at 1440×900, 390×844, 360×800.
+3. **P1-C — Source workspace convergence.** Extract Sources page actions into overlays, route sidebar actions directly to those overlays, and turn `/sources` into an intent redirect. Verify import/remote/failure/debug preserve current source API fields and no mobile sidebar click leaks through.
+4. **P1-D — Operations/settings convergence.** Canonicalize LocalStore/WebDAV/backup/account/user/RSS/replace overlays; convert full-page legacy routes into intent redirects. Preserve multi-user permissions and data directories; no database migration.
+5. **P1-E — Final workspace regression.** Verify one BookInfo, one import flow, one source flow, one local-store/WebDAV flow, mobile drag/toolbar/bottom controls, and full old-link compatibility before each Docker release.
+
+### Required pre-implementation tests for P1-A
+
+- Unit contract for workspace mode transition: `shelf → search → explore → shelf`, preserving the workspace search configuration and query-compatible intent fields.
+- Unit contract that result pagination/scroll state remains in the same workspace mode rather than a new route component.
+- Static contract that canonical `/` owns the workspace body while legacy `/search` and `/discover` are only redirects after P1-B; do not add this assertion until the migration batch begins.
+- Existing mobile sidebar tests must continue to prove 260px visual width, 270px gesture window, 20px edge guard, fixed bottom controls, and workspace click close.
+- Browser fixture design for P1-B must mock shelf/search/explore/add/read APIs and check no horizontal overflow at 390×844 and 360×800.
+
+### P1-A implementation record (2026-07-10)
+
+- Added `frontend/src/stores/indexWorkspace.js`: a route-independent Pinia representation of upstream `isSearchResult`, `isExploreResult`, shared result rows, page/`lastIndex` continuation, loading state, result scroll position, and return-to-shelf reset semantics.
+- The legacy `Search.vue` and `Discover.vue` pages now mirror their completed request state into this store; `Home.vue` applies the upstream result-reset when the shelf scene is entered. Their existing API calls, BookInfo actions, layouts, and URLs remain unchanged in this batch.
+- Tests lock the `shelf → search → explore → shelf` transitions, continuation/scroll semantics, route-independent store boundary, and legacy-page adapter ownership. Full frontend regression and production build pass.
+- Deliberately unfinished: sidebar search and Explore still navigate to legacy pages. Replacing those navigation transitions with the canonical `/` scene, rendering the shared results there, and converting `/search`/`/discover` to redirects are P1-B work; this record does not claim those behaviors are aligned yet.
+
+### P1-B implementation record (2026-07-10, browser gate passed)
+
+- Canonical `/` now owns all three Index body modes. `Home.vue` renders the shelf, embedded Search, or embedded Explore from the shared `indexWorkspace` state without changing the `AppLayout` sidebar or remounting a separate route scene.
+- `/search` and `/discover` are compatibility redirects to `/?workspace=search` and `/?workspace=explore`; all existing query parameters are retained. Returning to the shelf, branding, and the sidebar shelf action clear only the workspace compatibility parameters so refresh cannot reopen an obsolete result scene.
+- Sidebar searches call a workspace callback rather than `router.push`; the sidebar remains in its current mobile state for search. Explore intentionally carries `closeMobile: true`, matching upstream's Explore-trigger close behavior. The shelf is still the only ordinary workspace click that closes the mobile sidebar.
+- Search and Explore retain their existing Go API clients, shared BookInfo dialog, add/read actions, result deduplication, and source selection logic. A request revision makes a second sidebar search while already on the Search body refresh the existing component instead of requiring a remount.
+- Added `scripts/smoke/index-workspace-contract.mjs` for `/search` and `/discover` compatibility redirects, sidebar second-search, BookInfo → add-and-read, Explore, shelf return, and 1440×900 / 390×844 / 360×800 overflow checks. Its syntax is validated.
+- Non-browser validation passed: frontend 307 tests, frontend production build, backend `go test ./...`, `git diff --check`, and smoke script syntax validation.
+- Real-browser execution passed: `index-workspace-contract.mjs` covered old-link redirects, a second sidebar search in the same scene, BookInfo → add-and-read, Explore, shelf return, and horizontal-overflow checks at 1440×900, 390×844, and 360×800. The existing `index-mobile-sidebar-contract.mjs` also passed at 390×844 and 360×800, confirming the 260px width, 270px drag range, fixed bottom controls, and shelf geometry remain intact.
+- P1-B is therefore suitable for a local Docker release and user verification. P1-C/P1-D remain separate work: canonical source, local-store, WebDAV, user-space, and settings overlays have not yet been converged.
+
+## P1-C full audit: source-management workspace convergence
+
+Status: audit completed on 2026-07-10. This section is an implementation gate: no source-management application code changes are allowed until the listed state, route, and browser contracts are added.
+
+Fixed upstream authority: `web/src/views/Index.vue` methods `uploadBookSource`, `onSourceFileChange`, `loadRemoteBookSource`, `saveSourceList`, `showFailureBookSource`, `debugBookSource`, `editBookSource`, and the source import/manage Dialogs at `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`.
+
+### Upstream source workspace contract
+
+| Concern | Upstream evidence | Required OpenReader behavior |
+|---|---|---|
+| Ownership | The `Index.vue` sidebar opens `showBookSourceManageDialog`; it does not navigate to a Sources route. | Canonical source management must be a workspace overlay opened from `AppLayout`/Index, while `/sources` survives only as an intent redirect. |
+| Main manager | A single dialog owns grouped source filtering, source table, paging, source-to-shelf usage protection, add/edit, export, clear, restore-default, and batch selection. | Preserve one controller and one visible manager. Existing current-page table/mobile cards may be retained as a Vue 3 equivalent only after they are rehomed into the overlay. |
+| Local import | File input parses JSON; valid entries open a selection preview. User confirms selected rows. Invalid input shows a source-file error. | Preserve file selection/preview/confirmation, JSON shapes, source tags, cancellation and reload broadcast. Do not directly import a file without the preview selection. |
+| Remote import | Prompt remembers the last remote URL, fetches remote JSON, then opens the same selection preview as local import. | Keep one remote URL dialog and the same preview/confirm transaction. Persisting the last URL per authenticated user is a compatible current-runtime adaptation. |
+| Failure detection | Upstream obtains invalid-source errors, opens the same manager in failure view, and supports disabling/removing failed rows. | Keep current bounded batch test and health summary as a security/runtime improvement, but surface it inside the source overlay rather than a route page. |
+| Debug | Upstream opens a separate source-debug page. | The current in-overlay three-step debug dialog (search → TOC → content) is an allowed improvement if it keeps source rules and request results unmodified and opens without leaving Index. |
+| Mobile | Upstream source dialogs are fullscreen under collapsed/mobile UI; side actions do not create a second product page. | Source overlay is fullscreen/appropriate mobile popover and must consume clicks. Source manager opening does not implicitly close the Index sidebar unless the specific upstream action does. |
+| Events | Successful save/import/default/restore causes source list refresh. | Keep `sources_update` WebSocket event and `openreader:sources-update` browser event with debounced reload; no stale list after an overlay transaction. |
+
+### Current OpenReader mapping and classification
+
+| Layer | Current evidence | Difference from upstream | Classification |
+|---|---|---|---|
+| Canonical UI | `frontend/src/views/Sources.vue` is a full application page and `AppLayout.vue` routes sidebar actions to `/sources` with `panel`/`action` query fields. | Separates source management from the Index workspace. | `must-fix` |
+| Controller/UI capability | `Sources.vue` already owns add/edit, grouped search, paging, selection, usage guard, batch actions, defaults, health state, file/remote preview and three-step debug. | The capability is richer but entangled with page route lifecycle. | `partial`; extract/rehome, do not duplicate |
+| Transfer transaction | `useSourceTransfer.js` provides one local/remote preview and selected-source save path. | Functionally close to upstream and already avoids direct blind imports. | `aligned` |
+| Source editor | Current editor exposes compatible rule fields and text replacements in a responsive drawer. | Upstream JSON editor is less structured. Vue form/drawer is a user-safety improvement. | `acceptable-change` |
+| Health/failure | Current `/sources/batch-test` performs bounded concurrent tests and returns explicit rows; `failedOnly`/disable-failed are page controls. | Upstream failure state is less structured. | `acceptable-change` in API/runtime; `must-fix` for overlay ownership |
+| Debug | Current `/sources/:id/test`, `/test-chapter`, `/test-content` dialog is more guided than the upstream external debug page. | Same parser semantics need preserved; navigation is intentionally improved. | `acceptable-change` |
+| Backend persistence | `models.BookSource`, `backend/api/sources.go`, backup restore and source-update broadcast retain legacy `bookSource*`, rule, header, group, default and import shapes. | Go/SQLite/multi-user authorization differs from upstream JavaScript/local storage. | `acceptable-change` and must retain |
+| Legacy URL | `/sources`, `/sources?action=import`, `/sources?panel=remote`, `/sources?action=health`, `/sources?action=debug` are live routes. | They need to become root-workspace intents without discarding query compatibility. | `must-fix` |
+
+### API and data contract to retain
+
+| Operation | OpenReader method/path | Required side effect/error semantics |
+|---|---|---|
+| List/create/update/delete | `GET/POST /sources`, `GET/PUT/DELETE /sources/:id` | Source-edit permission for writes; list includes `usedBookCount`; deleting a used source returns a conflict/guard rather than destroying referenced books. |
+| Defaults | `GET /sources/default`, `POST /sources/default/save`, `POST /sources/default/restore` | Save writes the current compatible source snapshot; restore is transactional replacement and broadcasts `restore-default`. |
+| Batch | `POST /sources/batch` | Supports `enable`, `disable`, `delete`, `group`; caps ids, reports `affected`/`skippedUsed`, and broadcasts. |
+| File import/export | `POST /sources/import`, `GET /sources/export?sourceIds=` | Accept legacy array, `bookSources`, `sources`, or single-source JSON; export retains legacy field names/rules and source ordering. |
+| Remote import | `POST /sources/remote-preview`, `POST /sources/remote` | Preview is read-only; only confirmed import mutates data and broadcasts `remote-import`. Remote fetching remains bounded by engine policy. |
+| Health/debug | `POST /sources/batch-test`, `POST /sources/:id/test`, `/test-chapter`, `/test-content` | Health bounds timeout and concurrency; debug must return parser data/error without changing the source. |
+| Sync | `sources_update` WebSocket → `openreader:sources-update` | Overlay and sidebar source caches invalidate/reload without a route reload. |
+
+### P1-C canonical target and migration batches
+
+1. **P1-C1 — Overlay state and controller extraction.** Move the reusable manager body and its controller from `Sources.vue` into a shared source-manager component/composable. Add a single `overlay.sourceManageVisible` plus `overlay.sourceManageIntent = manage|import|remote|health|debug`; no API or parser changes.
+2. **P1-C2 — Index entry convergence.** Change all source sidebar items to overlay actions. The root workspace remains mounted, source operations do not route away, and `/sources` query variants redirect to `/?overlay=sources&sourceAction=…`.
+3. **P1-C3 — Lifecycle/mobile regression.** Retire the full Sources page structure, preserve the source editor/import/remote/debug nested interactions, and verify mobile fullscreen/pointer isolation, source-update reload and legacy URLs.
+
+### Required pre-implementation contracts
+
+- Unit state contract for source-manager intent replacement, close/reset behavior, and route-intent normalization (`manage`, `import`, `remote`, `health`, `debug`).
+- Static route contract: canonical `/` owns source overlay intent after P1-C2; old `/sources` fields map one-for-one and preserve unrelated query parameters.
+- Reuse/update source transfer tests so local and remote imports always preview before mutation and keep selected-source counts/tags.
+- Preserve backend API tests for legacy import/export, default snapshot restore, used-source deletion guard, batch bounds, remote preview/import, health timeout/concurrency, and three-step debug. No backend API rewrite is authorized in P1-C unless a documented contract gap is found.
+- Real-browser smoke: desktop 1440×900 and mobile 390×844/360×800 sidebar source-management action → overlay → import/remote/health/debug intent → close → same root route; assert no pointer leakage, no horizontal overflow, and source-update refresh.
+
+### P1-C implementation record
+
+Status: implemented and validated on 2026-07-10.
+
+- **C1 — shared controller ownership.** The former route-owned `Sources.vue` has been moved to `frontend/src/components/workspace/SourceManager.vue`. `OverlaySources.vue` is the only host and owns the single Pinia state pair `sourceManageVisible` / `sourceManageIntent`. Reopening with another intent replaces the intent; closing resets it to `manage`.
+- **C2 — Index convergence and old URLs.** Every AppLayout source action opens that shared overlay. `/sources`, `/sources?action=import|health|debug`, and `/sources?panel=remote` now redirect to the root workspace with `overlay=sources` and a normalized `sourceAction`, retaining all unrelated query keys. Closing the overlay removes only these intent keys.
+- **C3 — lifecycle and mobile behavior.** The manager is full-screen on compact screens, remains in the same root-workspace scene, receives `openreader:sources-update` reload events, and does not close or receive clicks through to the mobile sidebar. Local and remote import continue to use a selection preview before any mutation; health and three-step debug remain nested manager dialogs.
+- **Allowed differences.** The current Vue 3/Pinia dialog, structured editor, bounded health test, guided in-overlay debug, Go/SQLite authorization, and user-scoped persisted remote URL are retained runtime/safety improvements. No book-source API, parser, database, or backup contract changed in P1-C.
+- **Evidence.** Unit contracts cover resettable intents, one shared host, old-route normalization, and all Index actions. `scripts/smoke/source-workspace-contract.mjs` passed at 1440×900, 390×844, and 360×800: legacy remote/import/health/debug intents, manager close/query cleanup, mobile sidebar persistence and no click-through, import preview/confirmation, source-update reload, and no horizontal overflow. Full frontend tests (311), production build, and backend tests also pass.
+
+## P1-D full audit: BookInfo and shelf-operation convergence
+
+Status: audit completed on 2026-07-10. This is a compatibility gate: implementation begins only after the listed controller, API, and browser contracts are added or updated. The authority is `web/src/views/Index.vue` (`toDetail`, `addBookToShelf`, `saveBook`, `deleteBook`, `showBookManage`, `showManageBookGroup`), `web/src/components/BookInfo.vue`, `BookManage.vue`, and `BookGroup.vue` in `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`.
+
+### Upstream BookInfo and shelf-operation contract
+
+| Concern | Upstream behavior | Required OpenReader behavior |
+|---|---|---|
+| Ownership | `Index` and reader invoke one global BookInfo dialog through `showBookInfoDialog`; it is not a product page. | All shelf, search, explore and reader entry points must retain one global BookInfo overlay and one current-book state, with old `/books/:id` links only acting as compatibility intents. |
+| BookInfo content | Cover, title, tags/kind, author, origin, latest chapter, follow switch, group summary, intro and local-book refresh are in one dialog. Cover editing, follow and group controls appear only for a shelf book. | Preserve the same visibility gates and order. Extra word count, progress and browser-cache rows are acceptable only when they do not replace or hide the upstream fields. Plain-text intro rendering is a required XSS-safe adaptation of upstream HTML rendering. |
+| Add to shelf | A searched/explored book opens BookInfo; “加入书架” asks for groups, lets the user cancel, then saves the selected group mask. “加入并阅读” must preserve the same choice before routing to Reader. | Remote add actions must use one reusable category-selection transaction before mutation. A preselected workspace category may seed the choice, but must not silently bypass confirmation or cancellation. |
+| Read and edit | Reading routes from the selected shelf record and saved progress. JSON editing requires title, URL and origin, and a non-shelf book must be added before it can be edited. | Keep the existing structured Vue editor as an allowed safer UI, but it must share the same shelf-record/update transaction and never create a second BookInfo flow. |
+| Delete | Single and batch deletion require confirmation, delete book metadata plus progress, then reload the shelf. | Keep confirmation and preserve current multi-user transactional cleanup of progress, bookmarks, categories, chapters/cache files and browser-cache invalidation. All live shelf/reader/BookInfo consumers must receive the removal event. |
+| Book management | One `书架管理` dialog owns search, selection, per-book information/edit/group/cache/export operations, and batch delete/add-group/remove-group. Desktop remains a table; compact UI becomes fullscreen rather than a separate product scene. | Rebuild the current management Drawer into a root-workspace dialog/fullscreen-mobile overlay while retaining the one controller, current responsive cards and allowed batch safety enhancements. |
+| Cache/export | Upstream exposes server/browser cache actions and TXT/EPUB export; server cache uses cancellable SSE. | Retain the current REST/Go bounded cache pipeline only after its visible whole-book/selection/cancel semantics are mapped explicitly. JSON export is an allowed current backup/interoperability extension; TXT/EPUB must remain available. |
+| Group management | One BookGroup dialog has a setting mode for a book and a management mode for add/rename/show/delete/drag-sort. A non-empty group cannot be deleted. | Use one category controller and preserve set/manage modes, confirmation/empty guard, visibility and ordering. Current user-scoped many-to-many categories are an allowed data-model adaptation of upstream bit masks, but UI must remain one dialog/fullscreen-mobile overlay. |
+
+### Current mapping and classification
+
+| Layer | Current evidence | Classification and required outcome |
+|---|---|---|
+| BookInfo host | `OverlayBookInfo.vue` + `BookInfoDialog.vue` + `BookInfoPanel.vue` are the single host used by `Home`, `Search`, `Discover`, `Reader`, and compatibility routes. | `aligned` structurally. Recheck every context action and overlay-close route transition during implementation. |
+| Shelf-only fields | Current code limits cover replacement, remote follow, local refresh and group setting by actual shelf membership. Source/category rows refresh from live events. | `aligned`; retain. Plain-text intro and extra stats are `acceptable-change` security/usability improvements. |
+| Search/explore add | `Search.vue`/`Discover.vue` inject contextual action closures and call `createRemoteBook` with currently selected category ids. | `must-fix`: add and add-and-read must open a shared group-selection confirmation, including cancel, as upstream does. Remove duplicated category/route closure logic after convergence. |
+| Edit ownership | `BookEditDialog` is shared through `OverlayBookInfo`; Home and BookManage open it directly. | `partial`: structured edit is `acceptable-change`, but its preconditions, post-save shelf/reader/BookInfo synchronization and non-shelf prohibition need contract tests. |
+| Single/batch deletion | `bookshelf.removeBook` and `batchDeleteBooks` update local shelf/cache state after REST actions. Backend scopes all rows by user. | `partial`: retain the hardened backend cleanup, then add API and browser tests proving progress/bookmarks/categories/chapters/cache cleanup plus active overlay/reader handling. |
+| Book management shell | `OverlayBookManagement.vue` is a Drawer with desktop table and mobile card list. | `must-fix`: upstream ownership is a root workbench dialog (fullscreen on compact UI), not a side/bottom Drawer. Rebuild shell only; preserve the current shared controller and safe card/table rendering. |
+| Batch cache/export | Current controller adds batch cache/clear/JSON export and uses bounded REST operations instead of upstream SSE cancellation. | `unknown` pending exact cache-state audit: preserve Go resource limits, but either restore an explicit cancel/progress contract or record the bounded behavior as an approved security difference. |
+| Group shell and data | `OverlayBookGroups.vue` is a Drawer; `useOverlayBookGroups` has correct set/manage modes, empty guard, visibility, sort and live BookInfo update. Categories are user-scoped rows/many-to-many relations. | `must-fix` for dialog/fullscreen-mobile shell; `aligned`/`acceptable-change` for controller and data model. |
+| Backend/API | Go routes map book/category operations to authenticated REST endpoints and broadcasts. | `acceptable-change` architecture, subject to action-by-action response/error/side-effect tests; no schema migration or endpoint rewrite is authorized solely for UI convergence. |
+
+### API/data semantics that P1-D must preserve
+
+| Upstream action | Current API mapping | Required result |
+|---|---|---|
+| shelf list / refresh | `GET /books`, `GET /categories` | Per-user ordering/progress/category/cache counts; refresh must not merge another user's rows or regress newer local progress. |
+| add/update/delete | `POST /books`, `POST /books/remote`, `PUT/DELETE /books/:id`, `POST /books/batch` | Validate shelf ownership and category ids, atomically update book/category rows, broadcast shelf changes, and clean dependent rows/files when deleting. |
+| local refresh / follow | `POST /books/:id/refresh-local`, `PUT /books/:id` | Keep local import file and TOC-rule semantics; refresh invalidates reader/browser chapter caches only for that book. Follow toggling changes only `canUpdate`. |
+| category set/manage | `PUT /books/:id/category`, `GET/POST/PUT/DELETE /categories`, `PUT /categories/reorder` | Many-to-many user-scoped categories retain empty/delete guards, ordering and visible state; legacy primary `categoryId` remains compatible. |
+| source change | `GET /books/:id/source-candidates`, `POST /books/:id/change-source` | Preserve reader’s current-book source switching separately from P1-D shell work; candidate selection must replace catalog atomically and retain title/author rename rules. |
+| cache/export | `POST /books/:id/cache`, `POST /books/export`, `POST /books/batch` | Preserve ownership, cache path safety, local/remote distinction, bounded work, and TXT/EPUB compatibility. |
+
+### P1-D implementation batches and mandatory tests
+
+1. **P1-D1 — BookInfo action contract.** Add a shared add-to-shelf category-selection controller and tests for shelf/search/explore/reader ownership, follow/local-refresh/cover gates, add cancellation, add-and-read route, edit synchronization and old detail URL close behavior.
+2. **P1-D2 — BookManage shell.** Rehost the existing management controller in an upstream-style dialog/fullscreen-mobile overlay. Test desktop table, mobile fullscreen layout, search/selection, single and batch delete, group add/remove, cache/clear/export and no root-workspace/sidebar disappearance.
+3. **P1-D3 — BookGroup shell.** Rehost set/manage modes in one dialog/fullscreen-mobile overlay. Test preselection, save/cancel, non-empty delete guard, visibility, drag order and live BookInfo/shelf synchronization.
+4. **P1-D4 — API/data regression.** Expand Go/API contract coverage for category validation, user isolation, transactional delete cleanup, local refresh cache invalidation, update/follow field preservation, batch cache bounds and export formats. Do not alter persistent schemas unless a demonstrated compatibility gap requires a non-destructive migration.
+5. **Release gate.** Run front/back full tests, production build, and real-browser checks at 1440×900, 390×844 and 360×800. The browser probe must open BookInfo from shelf/search/explore/reader, exercise add/cancel/add-and-read, both management overlays, and assert no duplicate UI/route transition, no pointer leakage and no horizontal overflow.
+
+### P1-D1 implementation record: BookInfo add-to-shelf transaction
+
+Status: implemented and validated on 2026-07-10.
+
+- Added one global `OverlayBookAddToShelf` dialog and a cancellable Pinia transaction (`selectBookAddCategories` / `finishBookAddCategories`). It is fullscreen on compact UI, seeds the current search/explore category selection, accepts an intentionally empty selection, resolves cancellation without mutation, and closes/replaces an earlier pending transaction safely.
+- Added `useBookInfoAddToShelf`, the only remote BookInfo creation transaction. Search and Explore now use it to select categories before `POST /books/remote`; it normalizes ids, prevents cancellation from creating a book, updates the shared shelf only after success, and always clears the per-book action loading key.
+- Kept the current workspace category select as a convenience default rather than a silent bypass. Structured Vue controls and the current multi-category relation are allowed Vue 3/data-model adaptations of the upstream group-mask prompt.
+- Evidence: five new unit/static contracts cover cancellation, id normalization, failure cleanup, transaction replacement and Search/Explore ownership. The Index browser smoke passed at 1440×900, 390×844 and 360×800: legacy search redirect → BookInfo → add-and-read → category cancel (zero creates) → category confirm (one create) → Reader, followed by sidebar search/explore and overflow checks. P1-D2/P1-D3/D4 remain pending.
+
+### P1-D2/D3 implementation record: BookManage and BookGroup dialog shells
+
+Status: implemented and validated on 2026-07-10.
+
+- **D2 — BookManage.** `OverlayBookManagement.vue` now uses one root-workspace `el-dialog`, with a bounded desktop width and `fullscreen` at the compact breakpoint. The old side/bottom Drawer shell and direction/size coupling have been removed. `useOverlayBookManagement`, the desktop table, mobile cards, search, selection, cache/export operations and batch footer are retained as the one existing management controller rather than duplicated into a route or second scene.
+- **D3 — BookGroup.** `OverlayBookGroups.vue` now hosts both `set` and `manage` modes in one root-workspace `el-dialog`, again fullscreen on compact UI. The shared category controller, preselected groups, confirmation/cancel, non-empty delete guard, visibility toggling, drag-sort lifecycle and BookInfo update event remain intact; the previous narrow Drawer shell is removed.
+- **Overlay ownership.** `GlobalOverlayHost.vue` supplies the shared compact-mode decision to both dialogs. Opening either workspace tool does not navigate away from `/`, and closing it does not manufacture a second workspace route.
+- **Allowed differences.** Vue 3/Element Plus dialogs replace the upstream Vue 2 shell; OpenReader retains responsive mobile cards for book management and user-scoped many-to-many category rows instead of the upstream category bit mask. These are implementation/data adaptations, not separate user flows.
+- **Evidence.** `frontend/tests/bookManagementDialogContract.test.mjs` and `frontend/tests/bookGroupDialogContract.test.mjs` lock the single-dialog/fullscreen host contract. Existing `overlayBookManagement.test.mjs` covers selection, category batch changes, cache/clear, delete and export; `overlayBookGroups.test.mjs` covers set/save/cancel, deletion guard, visibility, sort persistence and lifecycle. `scripts/smoke/book-management-dialog-contract.mjs` passed at 1440×900, 390×844 and 360×800: both dialogs open/close in the root workspace without horizontal overflow, both are fullscreen on compact screens, panel clicks do not close the mobile sidebar, and BookInfo opens above BookManage then closes without closing it.
+- **Remaining P1-D work.** D4 still must extend Go/API/data coverage for category validation, multi-user isolation, delete cleanup, local-refresh cache invalidation, follow/update field preservation, cache bounds and export formats before the entire shelf-operation module can claim parity.
 
 ## Immediate P0 contract: continuous cross-chapter reading
 

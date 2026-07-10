@@ -1,28 +1,21 @@
 <template>
   <OverlayBookInfo />
 
+  <OverlayBookAddToShelf :is-mobile="isMobileOverlay" />
+
   <OverlayBookImport :is-mobile="isMobileOverlay" />
 
-  <OverlayBookManagement
-    :direction="wideDrawerDirection"
-    :size="wideDrawerSize"
-  />
+  <OverlaySources :is-mobile="isMobileOverlay" />
 
-  <OverlayBookGroups
-    :direction="narrowDrawerDirection"
-    :size="narrowDrawerSize"
-  />
+  <OverlayBookManagement :is-mobile="isMobileOverlay" />
 
-  <OverlayBookContentSearch
-    :direction="narrowDrawerDirection"
-    :size="narrowDrawerSize"
-  />
+  <OverlayBookGroups :is-mobile="isMobileOverlay" />
 
-  <OverlayBookmarks
-    :direction="narrowDrawerDirection"
-    :size="narrowDrawerSize"
-    :is-mobile="isMobileOverlay"
-  />
+  <OverlayBookContentSearch :is-mobile="isMobileOverlay" />
+
+  <OverlayBookmarks :is-mobile="isMobileOverlay" />
+
+  <OverlayBookmarkForm :is-mobile="isMobileOverlay" />
 
   <OverlayLocalStore
     :direction="wideDrawerDirection"
@@ -67,15 +60,18 @@ import {
   shouldUseMiniInterface,
 } from '../utils/responsive'
 import OverlayBackups from './overlays/OverlayBackups.vue'
+import OverlayBookAddToShelf from './overlays/OverlayBookAddToShelf.vue'
 import OverlayBookContentSearch from './overlays/OverlayBookContentSearch.vue'
 import OverlayBookGroups from './overlays/OverlayBookGroups.vue'
 import OverlayBookImport from './overlays/OverlayBookImport.vue'
 import OverlayBookInfo from './overlays/OverlayBookInfo.vue'
 import OverlayBookManagement from './overlays/OverlayBookManagement.vue'
 import OverlayBookmarks from './overlays/OverlayBookmarks.vue'
+import OverlayBookmarkForm from './overlays/OverlayBookmarkForm.vue'
 import OverlayLocalStore from './overlays/OverlayLocalStore.vue'
 import OverlayReplaceRules from './overlays/OverlayReplaceRules.vue'
 import OverlayRSS from './overlays/OverlayRSS.vue'
+import OverlaySources from './overlays/OverlaySources.vue'
 import OverlayUserManagement from './overlays/OverlayUserManagement.vue'
 import OverlayWebDAV from './overlays/OverlayWebDAV.vue'
 
@@ -90,13 +86,6 @@ const wideDrawerDirection = computed(() => (
 const wideDrawerSize = computed(() => (
   isMobileOverlay.value ? '88%' : '82%'
 ))
-const narrowDrawerDirection = computed(() => (
-  isMobileOverlay.value ? 'btt' : 'rtl'
-))
-const narrowDrawerSize = computed(() => (
-  isMobileOverlay.value ? '86%' : '420px'
-))
-
 onMounted(() => {
   window.addEventListener('resize', updateWindowWidth, { passive: true })
 })

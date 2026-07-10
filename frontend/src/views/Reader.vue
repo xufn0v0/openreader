@@ -103,9 +103,14 @@
       :chapter-label="chapterLabel"
       :book-slider-value="mobileBookSliderValue"
       :book-slider-label="mobileBookProgressLabel"
+      :cache-visible="showCacheContentZone"
+      :caching="isCachingContent"
+      :cache-status-text="cachingContentTip"
       :previous-disabled="currentIndex <= 0"
       :next-disabled="currentIndex >= chapters.length - 1"
       @action="handleMobileChromeAction"
+      @cache="cacheFollowingChapters"
+      @cache-cancel="cancelCachingContent"
       @book-progress-input="handleMobileBookProgressInput"
       @book-progress-change="handleMobileBookProgressChange"
     />
@@ -179,9 +184,14 @@
 
     <ReaderDesktopProgress
       :book-progress-label="bookProgressLabel"
+      :cache-visible="showCacheContentZone"
+      :caching="isCachingContent"
+      :cache-status-text="cachingContentTip"
       :previous-disabled="currentIndex <= 0"
       :next-disabled="currentIndex >= chapters.length - 1"
-      @cache="runWithDesktopWorkspaceClosed(openCacheDrawer)"
+      @cache-toggle="toggleCacheContentZone"
+      @cache="cacheFollowingChapters"
+      @cache-cancel="cancelCachingContent"
       @previous="goChapter(currentIndex - 1)"
       @next="goChapter(currentIndex + 1)"
     />
@@ -217,210 +227,121 @@
     <!-- ===== 移动端书架面板 ===== -->
     <ReaderMobileWorkspacePanel
       v-if="isMobileReader && showShelfDrawer"
+      primary
+      :show-header="false"
       :title="`书架(${filteredShelfBooks.length})`"
       @close="showShelfDrawer = false"
     >
-      <template #actions>
-        <button type="button" :disabled="shelfLoading" @click="refreshReaderShelf">
-          {{ shelfLoading ? '刷新中...' : '刷新' }}
-        </button>
-      </template>
-      <ReaderShelfPanel
-        ref="shelfPanelRef"
-        v-loading="shelfLoading"
-        :books="filteredShelfBooks"
-        :current-book-id="bookId"
-        :progress-by-book="reader.progressByBook"
-        :loading="shelfLoading"
-        @select="changeBookFromShelf"
-      />
+      <div class="reader-mobile-primary-popover-body reader-mobile-primary-shelf">
+        <div class="reader-mobile-primary-title-zone">
+          <div class="reader-mobile-primary-title">书架({{ filteredShelfBooks.length }})</div>
+          <div class="reader-mobile-primary-actions">
+            <button type="button" :disabled="shelfLoading" @click="refreshReaderShelf">
+              {{ shelfLoading ? '刷新中...' : '刷新' }}
+            </button>
+          </div>
+        </div>
+        <ReaderShelfPanel
+          ref="shelfPanelRef"
+          v-loading="shelfLoading"
+          :books="filteredShelfBooks"
+          :current-book-id="bookId"
+          :progress-by-book="reader.progressByBook"
+          :loading="shelfLoading"
+          @select="changeBookFromShelf"
+        />
+      </div>
     </ReaderMobileWorkspacePanel>
 
     <!-- ===== 移动端目录面板 ===== -->
     <ReaderMobileWorkspacePanel
       v-if="isMobileReader && showTocDrawer"
+      primary
+      :show-header="false"
       :title="`目录(${chapters.length})`"
       @close="showTocDrawer = false"
     >
-      <template #actions>
-        <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
-        <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
-        <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
-        <button v-if="canChangeLocalTocRule" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
-        <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
-      </template>
-      <ReaderTocPanel
-        ref="tocPanelRef"
-        :chapters="chapters"
-        :current-index="currentIndex"
-        :reverse="tocReverse"
-        :locate-key="tocLocateKey"
-        :browser-cached-map="browserCachedChapters"
-        @jump="jumpFromToc"
-      />
-    </ReaderMobileWorkspacePanel>
-
-    <!-- ===== 移动端书签面板 ===== -->
-    <ReaderMobileWorkspacePanel
-      v-if="isMobileReader && showBookmarkDrawer"
-      title="书签"
-      @close="showBookmarkDrawer = false"
-    >
-      <ReaderBookmarkPanel
-        :bookmarks="bookmarks"
-        @add="createBookmark"
-        @jump="jumpToBookmark"
-        @edit="openBookmarkEditor"
-        @remove="removeBookmark"
-        @remove-many="removeBookmarks"
-        @import="importBookmarks"
-      />
-    </ReaderMobileWorkspacePanel>
-
-    <!-- ===== 移动端正文搜索面板 ===== -->
-    <ReaderMobileWorkspacePanel
-      v-if="isMobileReader && showSearchDrawer"
-      title="搜索正文"
-      @close="showSearchDrawer = false"
-    >
-      <ReaderSearchPanel
-        v-model="contentSearch"
-        :results="bookSearchResults"
-        :loading="bookSearching"
-        :searched="searchedBookContent"
-        :has-more="bookSearchHasMore"
-        :status-text="bookSearchStatus"
-        @search="searchBookContent"
-        @load-more="loadMoreBookContent"
-        @load-all="searchAllBookContent"
-        @jump="jumpToBookSearchResult"
-      />
+      <div class="reader-mobile-primary-popover-body reader-mobile-primary-toc">
+        <div class="reader-mobile-primary-title-zone">
+          <div class="reader-mobile-primary-title">目录<span v-if="chapters.length">({{ chapters.length }})</span></div>
+          <div class="reader-mobile-primary-actions">
+            <button v-if="chapters.length" type="button" @click="toggleTocReverse">{{ tocReverse ? '顺序' : '倒序' }}</button>
+            <button v-if="chapters.length" type="button" @click="scrollTocTop">顶部</button>
+            <button v-if="chapters.length" type="button" @click="scrollTocBottom">底部</button>
+            <button v-if="canChangeLocalTocRule" type="button" :disabled="tocRefreshing" @click="changeReaderLocalTocRule">修改规则</button>
+            <button type="button" :disabled="tocRefreshing" @click="refreshTocDrawer">{{ tocRefreshing ? '刷新中...' : '刷新' }}</button>
+          </div>
+        </div>
+        <ReaderTocPanel
+          ref="tocPanelRef"
+          :chapters="chapters"
+          :current-index="currentIndex"
+          :reverse="tocReverse"
+          :locate-key="tocLocateKey"
+          :browser-cached-map="browserCachedChapters"
+          @jump="jumpFromToc"
+        />
+      </div>
     </ReaderMobileWorkspacePanel>
 
     <!-- ===== 移动端书源面板 ===== -->
     <ReaderMobileWorkspacePanel
       v-if="isMobileReader && showSourceDrawer"
+      primary
+      :show-header="false"
       title="书源"
       @close="showSourceDrawer = false"
     >
-      <SourceSwitchPanel
-        :book="book"
-        :sources="sourceCandidates"
-        :loading="loadingSources"
-        :changing-source="changingSource"
-        :current-source-name="currentSourceName"
-        :group="sourceGroup"
-        :groups="sourceGroups"
-        :has-more="sourceHasMore"
-        @refresh="refreshSourceCandidates"
-        @load-more="loadMoreSourceCandidates"
-        @group-change="changeSourceGroup"
-        @change="changeSource"
-      />
-    </ReaderMobileWorkspacePanel>
-
-    <!-- ===== 移动端缓存面板 ===== -->
-    <ReaderMobileWorkspacePanel
-      v-if="isMobileReader && showCacheDrawer"
-      title="缓存章节"
-      @close="showCacheDrawer = false"
-    >
-      <ReaderCachePanel
-        :caching="isCachingContent"
-        :status-text="cachingContentTip"
-        @cache="cacheFollowingChapters"
-        @cancel="cancelCachingContent"
-      />
+      <div class="reader-mobile-primary-popover-body reader-mobile-primary-source">
+        <SourceSwitchPanel
+          :book="book"
+          :sources="sourceCandidates"
+          :loading="loadingSources"
+          :changing-source="changingSource"
+          :current-source-name="currentSourceName"
+          :group="sourceGroup"
+          :groups="sourceGroups"
+          :has-more="sourceHasMore"
+          @refresh="refreshSourceCandidates"
+          @load-more="loadMoreSourceCandidates"
+          @group-change="changeSourceGroup"
+          @change="changeSource"
+        />
+      </div>
     </ReaderMobileWorkspacePanel>
 
     <!-- ===== 移动端设置面板 ===== -->
     <ReaderMobileWorkspacePanel
       v-if="isMobileReader && showSettingsDrawer"
+      primary
       title="设置"
       :show-header="false"
       @close="showSettingsDrawer = false"
     >
-      <ReaderSettingsPanel
-        v-model:custom-bg="customBg"
-        v-model:line-height="sliderLineHeight"
-        :reader="reader"
-        :tts="tts"
-        :tts-voices="ttsVoices"
-        :font-options="fontOptions"
-        :theme-presets="themePresets"
-        :mini-interface="isMobileReader"
-        @mode-change="onModeChange"
-        @theme-change="setTheme"
-        @pick-bg-image="pickBgImage"
-        @clear-bg-image="clearBgImage"
-        @pick-font-file="pickFontFile"
-        @clear-font-file="clearFontFile"
-        @tts-rate-change="setTTSRate"
-        @tts-pitch-change="setTTSPitch"
-        @tts-voice-change="setTTSVoice"
-        @open-replace-rules="openReplaceRules"
-        @show-click-zone="showClickZone"
-      />
+      <div class="reader-mobile-primary-popover-body reader-mobile-primary-settings">
+        <ReaderSettingsPanel
+          v-model:custom-bg="customBg"
+          v-model:line-height="sliderLineHeight"
+          :reader="reader"
+          :tts="tts"
+          :tts-voices="ttsVoices"
+          :font-options="fontOptions"
+          :theme-presets="themePresets"
+          :mini-interface="isMobileReader"
+          @mode-change="onModeChange"
+          @theme-change="setTheme"
+          @pick-bg-image="pickBgImage"
+          @clear-bg-image="clearBgImage"
+          @pick-font-file="pickFontFile"
+          @clear-font-file="clearFontFile"
+          @tts-rate-change="setTTSRate"
+          @tts-pitch-change="setTTSPitch"
+          @tts-voice-change="setTTSVoice"
+          @open-replace-rules="openReplaceRules"
+          @show-click-zone="showClickZone"
+        />
+      </div>
     </ReaderMobileWorkspacePanel>
-
-    <!-- ===== 桌面端书签抽屉 ===== -->
-    <el-drawer v-if="!isMobileReader" v-model="showBookmarkDrawer" title="书签" :direction="drawerDirection" :size="drawerSize">
-      <ReaderBookmarkPanel
-        :bookmarks="bookmarks"
-        @add="createBookmark"
-        @jump="jumpToBookmark"
-        @edit="openBookmarkEditor"
-        @remove="removeBookmark"
-        @remove-many="removeBookmarks"
-        @import="importBookmarks"
-      />
-    </el-drawer>
-
-    <!-- ===== 桌面端正文搜索抽屉 ===== -->
-    <el-drawer v-if="!isMobileReader" v-model="showSearchDrawer" title="搜索正文" :direction="drawerDirection" :size="drawerSize">
-      <ReaderSearchPanel
-        v-model="contentSearch"
-        :results="bookSearchResults"
-        :loading="bookSearching"
-        :searched="searchedBookContent"
-        :has-more="bookSearchHasMore"
-        :status-text="bookSearchStatus"
-        @search="searchBookContent"
-        @load-more="loadMoreBookContent"
-        @load-all="searchAllBookContent"
-        @jump="jumpToBookSearchResult"
-      />
-    </el-drawer>
-
-    <!-- ===== 桌面端缓存抽屉 ===== -->
-    <el-drawer v-if="!isMobileReader" v-model="showCacheDrawer" title="缓存章节" :direction="drawerDirection" :size="drawerSize">
-      <ReaderCachePanel
-        :caching="isCachingContent"
-        :status-text="cachingContentTip"
-        @cache="cacheFollowingChapters"
-        @cancel="cancelCachingContent"
-      />
-    </el-drawer>
-
-    <ReaderBookmarkFormDialog
-      v-model="showNoteDialog"
-      v-model:note="noteText"
-      dialog-title="添加笔记"
-      width="360px"
-      note-placeholder="写下当前阅读位置的笔记..."
-      @save="saveNote"
-    />
-
-    <ReaderBookmarkFormDialog
-      v-model="showBookmarkEditor"
-      v-model:title="bookmarkDraft.title"
-      v-model:excerpt="bookmarkDraft.excerpt"
-      v-model:note="bookmarkDraft.note"
-      dialog-title="编辑书签"
-      show-details
-      :saving="savingBookmark"
-      @save="saveBookmarkEdit"
-    />
 
     <el-image-viewer
       v-if="epubPreviewVisible"
@@ -440,9 +361,6 @@ import { refreshBook, refreshLocalBook } from '../api/books'
 import { createReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
-import ReaderBookmarkFormDialog from '../components/reader/ReaderBookmarkFormDialog.vue'
-import ReaderBookmarkPanel from '../components/reader/ReaderBookmarkPanel.vue'
-import ReaderCachePanel from '../components/reader/ReaderCachePanel.vue'
 import ReaderChapterContent from '../components/reader/ReaderChapterContent.vue'
 import ReaderClickZones from '../components/reader/ReaderClickZones.vue'
 import ReaderDesktopWorkspacePanel from '../components/reader/ReaderDesktopWorkspacePanel.vue'
@@ -450,7 +368,6 @@ import ReaderDesktopProgress from '../components/reader/ReaderDesktopProgress.vu
 import ReaderDesktopTools from '../components/reader/ReaderDesktopTools.vue'
 import ReaderMobileWorkspacePanel from '../components/reader/ReaderMobileWorkspacePanel.vue'
 import ReaderMobileChrome from '../components/reader/ReaderMobileChrome.vue'
-import ReaderSearchPanel from '../components/reader/ReaderSearchPanel.vue'
 import ReaderShelfPanel from '../components/reader/ReaderShelfPanel.vue'
 import ReaderSettingsPanel from '../components/reader/ReaderSettingsPanel.vue'
 import ReaderTTSBar from '../components/reader/ReaderTTSBar.vue'
@@ -465,8 +382,6 @@ import { useReaderAutoReading } from '../composables/useReaderAutoReading'
 import { useReaderBookLoad } from '../composables/useReaderBookLoad'
 import { useReaderBookState } from '../composables/useReaderBookState'
 import { useReaderCatalogActions } from '../composables/useReaderCatalogActions'
-import { useBookBookmarks } from '../composables/useBookBookmarks'
-import { useBookContentSearch } from '../composables/useBookContentSearch'
 import { useBookSourceChange } from '../composables/useBookSourceChange'
 import { useBookSourceCandidates } from '../composables/useBookSourceCandidates'
 import { useReaderChapterCache } from '../composables/useReaderChapterCache'
@@ -489,6 +404,7 @@ import { useReaderNavigation } from '../composables/useReaderNavigation'
 import { readerEffectiveMode, useReaderMode } from '../composables/useReaderMode'
 import { useReaderPageLifecycle } from '../composables/useReaderPageLifecycle'
 import { useReaderPanels } from '../composables/useReaderPanels'
+import { useReaderPrimaryPanels } from '../composables/useReaderPrimaryPanels'
 import { useReaderPositionRestore } from '../composables/useReaderPositionRestore'
 import { useReaderPointer } from '../composables/useReaderPointer'
 import { useReaderRouteSync } from '../composables/useReaderRouteSync'
@@ -558,62 +474,16 @@ const {
   mergeBook: mergeShelfBook,
 })
 const {
-  items: bookmarks,
-  mutating: savingBookmark,
-  load: loadBookmarks,
-  create: addBookmark,
-  update: updateBookmarkData,
-  remove: removeBookmarkData,
-  removeMany: removeBookmarkRows,
-  importPayloads: importBookmarkPayloads,
-  handleUpdated: handleBookmarksUpdated,
-} = useBookBookmarks({
-  bookId,
-  onLoadError: error => ElMessage.error(readError(error, '加载书签失败')),
-})
-const {
-  draft: bookmarkDraft,
-  editorVisible: showBookmarkEditor,
-  noteText,
-  noteVisible: showNoteDialog,
-  createCurrent: createBookmark,
   createFromSelectedText: createBookmarkFromSelectedText,
-  importRows: importBookmarks,
-  jump: jumpToBookmark,
-  openEditor: openBookmarkEditor,
   openNote: openNoteDialog,
-  removeMany: removeBookmarks,
-  removeOne: removeBookmark,
-  saveEdit: saveBookmarkEdit,
-  saveNote,
 } = useReaderBookmarkActions({
+  book,
   chapter,
   currentIndex,
   getOffset: () => currentOffset(),
   getPercent: () => currentChapterPercent(),
   getExcerpt: currentVisibleExcerpt,
-  create: addBookmark,
-  update: updateBookmarkData,
-  remove: removeBookmarkData,
-  removeMany: removeBookmarkRows,
-  importPayloads: importBookmarkPayloads,
-  confirm: (...args) => ElMessageBox.confirm(...args),
-  closeDrawer: () => {
-    showBookmarkDrawer.value = false
-  },
-  reloadCurrent: ({ offset, percent }) => loadChapter(
-    currentIndex.value,
-    offset,
-    { restorePercent: percent, saveAfterLoad: true },
-  ),
-  navigate: query => router.replace({
-    name: 'reader',
-    params: { id: bookId.value },
-    query,
-  }),
-  onToast: message => showReaderToast(message),
-  onSuccess: message => ElMessage.success(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
+  openForm: (...args) => overlay.openBookmarkForm(...args),
 })
 const {
   operate: operateSelectedText,
@@ -662,10 +532,8 @@ const shellEl = ref(null)
 const page = ref(0)
 const pageCount = ref(1)
 const showSettingsDrawer = ref(false)
-const showBookmarkDrawer = ref(false)
-const showSearchDrawer = ref(false)
 const showSourceDrawer = ref(false)
-const showCacheDrawer = ref(false)
+const showCacheContentZone = ref(false)
 const showClickZoneOverlay = ref(false)
 const sourceGroupOptions = ref([])
 const {
@@ -716,23 +584,6 @@ const {
   router,
   saveProgress: () => saveCurrentProgress({ force: true }),
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
-const {
-  keyword: contentSearch,
-  results: bookSearchResults,
-  loading: bookSearching,
-  searched: searchedBookContent,
-  hasMore: bookSearchHasMore,
-  status: bookSearchStatus,
-  reset: resetContentSearchState,
-  search: searchBookContent,
-  loadMore: loadMoreBookContent,
-  loadAll: searchAllBookContent,
-} = useBookContentSearch({
-  bookId,
-  book,
-  chapters,
-  onError: error => ElMessage.error(readError(error, '搜索正文失败')),
 })
 const {
   message: toastMsg,
@@ -889,7 +740,6 @@ const {
     const { data } = await api.get(`/books/${targetBookId}/chapters`)
     return data
   },
-  resetContentSearch: resetContentSearchState,
   refreshSourceCandidates,
   closeSourceDrawer: () => {
     showSourceDrawer.value = false
@@ -1042,10 +892,9 @@ const {
   jumpToLine,
   jumpToMatch: jumpToSearchMatch,
   jumpToParagraph,
-  jumpToResult: jumpToBookSearchResult,
   jumpToRouteLine,
 } = useReaderSearchNavigation({
-  keyword: contentSearch,
+  keyword: computed(() => String(route.query.q || '')),
   contentEl,
   contentBody,
   currentIndex,
@@ -1058,9 +907,6 @@ const {
   pageWidth,
   getMode: () => effectiveReaderMode.value,
   getRouteQuery: () => route.query,
-  closeDrawer: () => {
-    showSearchDrawer.value = false
-  },
   navigate: query => router.replace({
     name: 'reader',
     params: { id: bookId.value },
@@ -1247,8 +1093,6 @@ const bodyStyle = computed(() => {
 
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
 const isMobileReader = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
-const drawerDirection = computed(() => 'rtl')
-const drawerSize = computed(() => '360px')
 const desktopWorkspacePanel = computed(() => {
   if (isMobileReader.value) return ''
   if (showShelfDrawer.value) return 'shelf'
@@ -1335,6 +1179,17 @@ const {
 })
 const mobileChromeVisible = ref(true)
 const {
+  isOpen: isReaderPrimaryPanelOpen,
+  toggle: toggleReaderPrimaryPanel,
+} = useReaderPrimaryPanels({
+  panels: {
+    shelf: showShelfDrawer,
+    source: showSourceDrawer,
+    toc: showTocDrawer,
+    settings: showSettingsDrawer,
+  },
+})
+const {
   toggle: toggleReaderChrome,
 } = useReaderChrome({
   isMobileReader,
@@ -1347,13 +1202,9 @@ const {
 const isOverlayOpen = computed(() => (
   showTocDrawer.value ||
   showSettingsDrawer.value ||
-  showBookmarkDrawer.value ||
-  showSearchDrawer.value ||
   showShelfDrawer.value ||
   showSourceDrawer.value ||
-  showCacheDrawer.value ||
-  showNoteDialog.value ||
-  showBookmarkEditor.value
+  overlay.bookmarkFormVisible
 ))
 const {
   handle: handleReaderWheel,
@@ -1431,8 +1282,8 @@ const {
 const {
   goShelf,
   openBookInfo: openReaderBookInfo,
-  openBookmarks: openBookmarkDrawer,
-  openCache: openCacheDrawer,
+  openBookmarks: openBookmarkDialog,
+  openCache: toggleCacheContentZone,
   openContentSearch,
   openReplaceRules,
   openSettings: openSettingsDrawer,
@@ -1446,10 +1297,8 @@ const {
   bookProgressLabel,
   mobileChromeVisible,
   settingsVisible: showSettingsDrawer,
-  bookmarkVisible: showBookmarkDrawer,
-  searchVisible: showSearchDrawer,
   sourceVisible: showSourceDrawer,
-  cacheVisible: showCacheDrawer,
+  cacheVisible: showCacheContentZone,
   clickZoneVisible: showClickZoneOverlay,
   customBg,
   sliderLineHeight,
@@ -1458,11 +1307,8 @@ const {
   refreshBrowserCachedChapters: computeBrowserCachedChapters,
   saveProgress: saveCurrentProgress,
   navigate: routeLocation => router.push(routeLocation),
-  defer: nextTick,
-  focusContentSearch: () => {
-    const input = document.querySelector('.content-search-row input')
-    input?.focus()
-  },
+  openBookmarksOverlay: currentBook => overlay.openBookmark(currentBook),
+  openContentSearchOverlay: currentBook => overlay.openSearchBookContent(currentBook),
   closeBookInfo: () => overlay.closeBookInfo(),
   openBookInfoOverlay: (...args) => overlay.openBookInfo(...args),
   openReplaceRulesOverlay: () => overlay.openReplaceRules(),
@@ -1538,10 +1384,8 @@ const {
   book,
   chapters,
   currentIndex,
-  bookmarks,
   getRouteQuery: () => route.query,
   cancelProgressSave,
-  loadBookmarks,
   loadCachedBook: targetBookId => cacheFirstRequest(
     () => api.get(`/books/${targetBookId}`),
     readerDataCacheKey(`book:${targetBookId}`),
@@ -1622,6 +1466,12 @@ function closeTTSBar() {
   ttsBarRequested.value = false
   ttsStop()
 }
+
+function openReaderPrimaryTool(name, open) {
+  if (isMobileReader.value) return toggleReaderPrimaryPanel(name, open)
+  return openDesktopToolPanel(name, open)
+}
+
 watch(chapterFormat, format => {
   if (format === 'epub' || format === 'audio') {
     ttsBarRequested.value = false
@@ -1639,15 +1489,15 @@ const {
   toggleChrome: toggleReaderChrome,
   actions: {
     home: () => runWithDesktopWorkspaceClosed(goShelf),
-    shelf: () => openDesktopToolPanel('shelf', openShelfPanel),
-    source: () => openDesktopToolPanel('source', goSourcePanel),
-    toc: () => openDesktopToolPanel('toc', openTocDrawer),
-    settings: () => openDesktopToolPanel('settings', openSettingsDrawer),
-    bookmarks: () => runWithDesktopWorkspaceClosed(openBookmarkDrawer),
-    search: () => runWithDesktopWorkspaceClosed(openContentSearch),
-    info: () => runWithDesktopWorkspaceClosed(openReaderBookInfo),
-    note: () => runWithDesktopWorkspaceClosed(openNoteDialog),
-    cache: () => runWithDesktopWorkspaceClosed(openCacheDrawer),
+    shelf: () => openReaderPrimaryTool('shelf', openShelfPanel),
+    source: () => openReaderPrimaryTool('source', goSourcePanel),
+    toc: () => openReaderPrimaryTool('toc', openTocDrawer),
+    settings: () => openReaderPrimaryTool('settings', openSettingsDrawer),
+    bookmarks: openBookmarkDialog,
+    search: openContentSearch,
+    info: openReaderBookInfo,
+    note: openNoteDialog,
+    cache: toggleCacheContentZone,
     'clear-cache': () => runWithDesktopWorkspaceClosed(clearCurrentBookCache),
     reload: () => runWithDesktopWorkspaceClosed(reloadChapter),
     'auto-read': () => {
@@ -1721,7 +1571,6 @@ const {
   getCurrentPercent: currentChapterPercent,
   clearChapterCache: () => clearChapterContentMemory(),
   resetCachedChapters: resetBrowserCachedChapters,
-  resetContentSearch: resetContentSearchState,
   refreshCachedChapters: computeBrowserCachedChapters,
   onReplaceSuccess: () => ElMessage.success('已按最新替换规则刷新当前章节'),
   onReplaceError: error => ElMessage.error(readError(error, '刷新当前章节失败')),
@@ -1748,7 +1597,7 @@ useReaderPageLifecycle({
   onProgressUpdated: handleProgressUpdated,
   onBookDataUpdated: handleReaderBookDataUpdated,
   onReplaceRulesUpdated: handleReplaceRulesUpdated,
-  onBookmarksUpdated: handleBookmarksUpdated,
+  onBookmarksUpdated: () => {},
 })
 
 onBeforeRouteLeave(() => {
@@ -1959,6 +1808,7 @@ useReaderKeyboard({
   isScrollRead,
   isAudio: isAudioChapter,
   mobileChromeVisible,
+  primaryPanelOpen: computed(() => isReaderPrimaryPanelOpen()),
   tocVisible: showTocDrawer,
   settingsVisible: showSettingsDrawer,
   previousPage,
@@ -2113,6 +1963,79 @@ function readError(err, fallback) {
     padding-top: 15px;
     padding-bottom: calc(15px + env(safe-area-inset-bottom));
     text-align: justify;
+  }
+  .reader-mobile-primary-popover-body {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+    color: var(--reader-text);
+  }
+  .reader-mobile-primary-shelf,
+  .reader-mobile-primary-toc,
+  .reader-mobile-primary-source {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0;
+    overflow: hidden;
+  }
+  .reader-mobile-primary-settings {
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .reader-mobile-primary-title-zone {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    margin: 0 0 20px;
+  }
+  .reader-mobile-primary-title {
+    width: fit-content;
+    color: #ed4259;
+    border-bottom: 1px solid #ed4259;
+    font-family: -apple-system, "Noto Sans", "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 18px;
+    font-weight: 400;
+  }
+  .reader-mobile-primary-actions {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0 15px;
+    min-width: 0;
+    color: #ed4259;
+    font-size: 14px;
+    line-height: 26px;
+  }
+  .reader-mobile-primary-actions button {
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    line-height: inherit;
+  }
+  .reader-mobile-primary-actions button:disabled {
+    color: #606266;
+    cursor: default;
+  }
+  .reader-mobile-primary-shelf :deep(.reader-shelf-list),
+  .reader-mobile-primary-toc :deep(.toc-list),
+  .reader-mobile-primary-source :deep(.source-switch-list) {
+    height: 100%;
+    max-height: none;
+    min-height: 0;
+    padding-bottom: 0;
+  }
+  .reader-mobile-primary-source :deep(.title-zone) {
+    margin-bottom: 20px;
   }
   .reader-shell.scroll .reader-content,
   .reader-shell.scroll2 .reader-content {
