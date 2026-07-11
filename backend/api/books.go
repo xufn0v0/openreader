@@ -455,13 +455,20 @@ func (s *Server) deleteBook(c *gin.Context) {
 		return
 	}
 
+	var cleanup bookCleanupPlan
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		cleanup, err = s.captureBookCleanup(tx, userID, book)
+		if err != nil {
+			return err
+		}
 		return deleteBookRecords(tx, userID, bookID, &book)
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete book"})
 		return
 	}
 
+	s.cleanupDeletedBookArtifacts([]bookCleanupPlan{cleanup})
 	_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_delete", "payload": gin.H{"id": bookID}})
 	c.Status(http.StatusNoContent)
 }
@@ -493,6 +500,11 @@ func (s *Server) batchBooks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "too many books"})
 		return
 	}
+	ownedBookIDs, ok := s.requireOwnedBookIDs(c, userID, request.BookIDs)
+	if !ok {
+		return
+	}
+	request.BookIDs = ownedBookIDs
 	if request.Action == "cache" {
 		s.batchCacheBooks(c, userID, request.BookIDs)
 		return
@@ -519,6 +531,7 @@ func (s *Server) batchBooks(c *gin.Context) {
 	var affected int64
 	var deletedIDs []uint
 	var updatedBooks []models.Book
+	var cleanupPlans []bookCleanupPlan
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		switch request.Action {
 		case "delete":
@@ -527,10 +540,15 @@ func (s *Server) batchBooks(c *gin.Context) {
 				return err
 			}
 			for i := range books {
+				cleanup, err := s.captureBookCleanup(tx, userID, books[i])
+				if err != nil {
+					return err
+				}
 				deletedIDs = append(deletedIDs, books[i].ID)
 				if err := deleteBookRecords(tx, userID, books[i].ID, &books[i]); err != nil {
 					return err
 				}
+				cleanupPlans = append(cleanupPlans, cleanup)
 				affected++
 			}
 		case "category", "category-add", "category-remove":
@@ -569,6 +587,7 @@ func (s *Server) batchBooks(c *gin.Context) {
 
 	switch request.Action {
 	case "delete":
+		s.cleanupDeletedBookArtifacts(cleanupPlans)
 		if len(deletedIDs) > 0 {
 			_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_delete", "payload": gin.H{"ids": deletedIDs}})
 		}
@@ -611,6 +630,13 @@ func (s *Server) batchCacheBooks(c *gin.Context, userID uint, bookIDs []uint) {
 			failed++
 		}
 	}
+	items := make([]bookListItem, 0, len(books))
+	for _, book := range books {
+		items = append(items, s.bookShelfListItem(userID, book))
+	}
+	if len(items) > 0 {
+		_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": items})
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"affected":  len(books),
@@ -632,14 +658,27 @@ func (s *Server) batchClearBookCache(c *gin.Context, userID uint, bookIDs []uint
 		return
 	}
 
-	cleared := 0
+	ownedBookIDs := make([]uint, 0, len(books))
 	for _, book := range books {
-		bookCleared, err := s.clearBookCache(book.ID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear cache"})
-			return
-		}
-		cleared += bookCleared
+		ownedBookIDs = append(ownedBookIDs, book.ID)
+	}
+	cleared := 0
+	var cachePaths []string
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		cleared, cachePaths, err = s.clearRemoteBookCacheRows(tx, ownedBookIDs)
+		return err
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to clear cache"})
+		return
+	}
+	s.pruneUnreferencedRemoteCachePaths(cachePaths)
+	items := make([]bookListItem, 0, len(books))
+	for _, book := range books {
+		items = append(items, s.bookShelfListItem(userID, book))
+	}
+	if len(items) > 0 {
+		_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": items})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -663,6 +702,11 @@ func (s *Server) exportBooks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "too many books"})
 		return
 	}
+	ownedBookIDs, ok := s.requireOwnedBookIDs(c, userID, request.BookIDs)
+	if !ok {
+		return
+	}
+	request.BookIDs = ownedBookIDs
 
 	var books []models.Book
 	if err := s.db.Where("user_id = ? AND id IN ?", userID, request.BookIDs).Order("updated_at desc").Find(&books).Error; err != nil {
@@ -674,6 +718,11 @@ func (s *Server) exportBooks(c *gin.Context) {
 		s.exportBooksJSON(c, userID, books)
 		return
 	}
+	if len(books) == 1 && books[0].SourceID == 0 && (format == "txt" || format == "epub") {
+		if s.exportOriginalLocalBook(c, books[0]) {
+			return
+		}
+	}
 	if format == "txt" {
 		s.exportBooksTXT(c, books)
 		return
@@ -683,6 +732,23 @@ func (s *Server) exportBooks(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported export format"})
+}
+
+func (s *Server) exportOriginalLocalBook(c *gin.Context, book models.Book) bool {
+	path, ok := s.localBookSourcePath(book)
+	if !ok {
+		return false
+	}
+	if _, ok := relativePathInside(s.cfg.LibraryDir, path); !ok {
+		return false
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	setAttachmentHeader(c, filepath.Base(path))
+	c.Data(http.StatusOK, "application/octet-stream", content)
+	return true
 }
 
 func (s *Server) exportBooksJSON(c *gin.Context, userID uint, books []models.Book) {
@@ -1072,39 +1138,23 @@ func (s *Server) refreshBook(c *gin.Context) {
 		return
 	}
 
-	var added int
+	var supersededCachePaths []string
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var existing []models.Chapter
-		if err := tx.Where("book_id = ?", book.ID).Find(&existing).Error; err != nil {
-			return err
-		}
-		existingByIndex := make(map[int]models.Chapter, len(existing))
-		for _, chapter := range existing {
-			existingByIndex[chapter.Index] = chapter
-		}
+		nextChapters := make([]models.Chapter, 0, len(remoteChapters))
 		for _, remoteChapter := range remoteChapters {
-			if chapter, ok := existingByIndex[remoteChapter.Index]; ok {
-				chapter.Title = remoteChapter.Title
-				chapter.URL = remoteChapter.URL
-				chapter.IsVolume = remoteChapter.IsVolume
-				chapter.Tag = remoteChapter.Tag
-				if err := tx.Save(&chapter).Error; err != nil {
-					return err
-				}
-				continue
-			}
-			chapter := models.Chapter{
+			nextChapters = append(nextChapters, models.Chapter{
 				BookID:   book.ID,
 				Index:    remoteChapter.Index,
 				Title:    remoteChapter.Title,
 				URL:      remoteChapter.URL,
 				IsVolume: remoteChapter.IsVolume,
 				Tag:      remoteChapter.Tag,
-			}
-			if err := tx.Create(&chapter).Error; err != nil {
-				return err
-			}
-			added++
+			})
+		}
+		var err error
+		supersededCachePaths, _, err = s.replaceBookChapterRows(tx, userID, book.ID, nextChapters)
+		if err != nil {
+			return err
 		}
 		book.Title = firstNonBlankCanRename(remoteInfo.Title, book.Title, remoteInfo.CanRename)
 		book.Author = firstNonBlankCanRename(remoteInfo.Author, book.Author, remoteInfo.CanRename)
@@ -1120,8 +1170,9 @@ func (s *Server) refreshBook(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh book"})
 		return
 	}
+	s.pruneUnreferencedRemoteCachePaths(supersededCachePaths)
 
-	c.JSON(http.StatusOK, gin.H{"book": s.broadcastBookShelfUpdate(userID, book), "added": added, "chapterCount": len(remoteChapters)})
+	c.JSON(http.StatusOK, gin.H{"book": s.broadcastBookShelfUpdate(userID, book), "added": len(remoteChapters), "chapterCount": len(remoteChapters)})
 }
 
 func (s *Server) refreshLocalBook(c *gin.Context) {
@@ -1172,68 +1223,33 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 		return
 	}
 
-	newChapterIDs := make(map[int]uint, len(parsed))
+	bookURL := strings.TrimSpace(book.URL)
+	if bookURL == "" {
+		bookURL = fmt.Sprintf("local://book_%d", book.ID)
+	}
+	archiveRoot, _ := s.ownedLocalRefreshArchiveRoot(userID, book)
+	stage, nextChapters, err := s.stageLocalRefresh(book, archiveRoot, parsed, bookURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stage local refreshed content"})
+		return
+	}
+	defer stage.cleanup()
+
+	archive := engine.ArchivedBook{
+		Directory:    book.LibraryPath,
+		OriginalFile: book.OriginalFile,
+		TOCFile:      book.TOCFile,
+		SourceFile:   book.SourceFile,
+	}
+	var supersededCachePaths []string
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("book_id = ?", book.ID).Delete(&models.Chapter{}).Error; err != nil {
+		var nextChapterIDs map[int]uint
+		var err error
+		supersededCachePaths, nextChapterIDs, err = s.replaceBookChapterRows(tx, userID, book.ID, nextChapters)
+		if err != nil {
 			return err
 		}
-		archive := engine.ArchivedBook{
-			Directory:    book.LibraryPath,
-			OriginalFile: book.OriginalFile,
-			TOCFile:      book.TOCFile,
-			SourceFile:   book.SourceFile,
-		}
-		archivedChapters := make([]engine.ArchivedChapter, 0, len(parsed))
-		contentDir := s.cfg.CacheDir
-		useLibraryContent := strings.TrimSpace(book.LibraryPath) != ""
-		if useLibraryContent {
-			contentDir = filepath.Join(s.cfg.LibraryDir, book.LibraryPath, "content")
-		}
-		bookURL := strings.TrimSpace(book.URL)
-		if bookURL == "" {
-			bookURL = fmt.Sprintf("local://book_%d", book.ID)
-			book.URL = bookURL
-		}
-		for index, parsedChapter := range parsed {
-			title := strings.TrimSpace(parsedChapter.Title)
-			if title == "" {
-				title = fmt.Sprintf("第 %d 章", index+1)
-			}
-			chapterURL := fmt.Sprintf("%s/chapter_%d", bookURL, index)
-			cachePath, err := engine.WriteChapterCache(contentDir, bookURL, chapterURL, parsedChapter.Content)
-			if err != nil {
-				return err
-			}
-			chapterCachePath := cachePath
-			if useLibraryContent {
-				chapterCachePath = filepath.Join("content", cachePath)
-			}
-			chapter := models.Chapter{
-				BookID:       book.ID,
-				Index:        index,
-				Title:        title,
-				URL:          chapterURL,
-				CachePath:    chapterCachePath,
-				ResourcePath: parsedChapter.ResourcePath,
-			}
-			if err := tx.Create(&chapter).Error; err != nil {
-				return err
-			}
-			newChapterIDs[index] = chapter.ID
-			archivedChapters = append(archivedChapters, engine.ArchivedChapter{
-				ID:           chapter.ID,
-				URL:          chapterURL,
-				Title:        title,
-				IsVolume:     false,
-				BaseURL:      "",
-				BookURL:      book.OriginalFile,
-				Index:        index,
-				Start:        parsedChapter.Start,
-				End:          parsedChapter.End,
-				CachePath:    chapter.CachePath,
-				ResourcePath: parsedChapter.ResourcePath,
-			})
-		}
+		book.URL = bookURL
 		book.LastChapter = strings.TrimSpace(parsed[len(parsed)-1].Title)
 		if book.LastChapter == "" {
 			book.LastChapter = fmt.Sprintf("第 %d 章", len(parsed))
@@ -1243,43 +1259,47 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 		if err := tx.Save(&book).Error; err != nil {
 			return err
 		}
-		if archive.TOCFile != "" {
-			if err := engine.WriteChapterArchive(s.cfg.LibraryDir, archive, archivedChapters); err != nil {
-				return err
-			}
+		archivedChapters := make([]engine.ArchivedChapter, 0, len(parsed))
+		for index, parsedChapter := range parsed {
+			chapter := nextChapters[index]
+			chapter.ID = nextChapterIDs[chapter.Index]
+			archivedChapters = append(archivedChapters, engine.ArchivedChapter{
+				ID:           chapter.ID,
+				URL:          chapter.URL,
+				Title:        chapter.Title,
+				IsVolume:     false,
+				BaseURL:      "",
+				BookURL:      book.OriginalFile,
+				Index:        chapter.Index,
+				Start:        parsedChapter.Start,
+				End:          parsedChapter.End,
+				CachePath:    chapter.CachePath,
+				ResourcePath: chapter.ResourcePath,
+			})
 		}
-		if archive.SourceFile != "" {
-			source := engine.ArchivedBookSource{
-				BookURL:            book.OriginalFile,
-				Origin:             "loc_book",
-				OriginName:         book.OriginalFile,
-				Type:               0,
-				Name:               book.Title,
-				Author:             book.Author,
-				LatestChapterTitle: book.LastChapter,
-				TOCURL:             book.TOCFile,
-				Time:               0,
-				OriginOrder:        0,
-			}
-			if err := engine.WriteBookSource(s.cfg.LibraryDir, archive, source); err != nil {
-				return err
-			}
-		}
-		return nil
+		return stage.stageArchiveMetadata(s.cfg.LibraryDir, archive, archivedChapters, engine.ArchivedBookSource{
+			BookURL:            book.OriginalFile,
+			Origin:             "loc_book",
+			OriginName:         book.OriginalFile,
+			Type:               0,
+			Name:               book.Title,
+			Author:             book.Author,
+			LatestChapterTitle: book.LastChapter,
+			TOCURL:             book.TOCFile,
+			Time:               0,
+			OriginOrder:        0,
+		})
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh local book"})
 		return
 	}
-
-	for index, chapterID := range newChapterIDs {
-		_ = s.db.Model(&models.ReadingProgress{}).
-			Where("user_id = ? AND book_id = ? AND chapter_index = ?", userID, book.ID, index).
-			Update("chapter_id", chapterID).Error
-		_ = s.db.Model(&models.Bookmark{}).
-			Where("user_id = ? AND book_id = ? AND chapter_index = ?", userID, book.ID, index).
-			Update("chapter_id", chapterID).Error
+	if err := stage.promote(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to publish local refreshed content"})
+		return
 	}
+	s.pruneSupersededLocalDerivedContent(book, archiveRoot, supersededCachePaths)
+
 	c.JSON(http.StatusOK, gin.H{"book": s.broadcastBookShelfUpdate(userID, book), "chapterCount": len(parsed)})
 }
 
@@ -1319,7 +1339,8 @@ func (s *Server) cacheBookContent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list chapters"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"cached": cached, "requested": requested, "book": s.bookShelfListItem(userID, book)})
+	item := s.broadcastBookShelfUpdate(userID, book)
+	c.JSON(http.StatusOK, gin.H{"cached": cached, "requested": requested, "book": item})
 }
 
 func (s *Server) cacheBookChapters(book models.Book, chapterIndex *int, all bool, count int) (int, int, error) {
@@ -1351,59 +1372,6 @@ func (s *Server) cacheBookChapters(book models.Book, chapterIndex *int, all bool
 		}
 	}
 	return cached, len(chapters), nil
-}
-
-func (s *Server) clearBookCache(bookID uint) (int, error) {
-	var book models.Book
-	if err := s.db.Select("id", "source_id").First(&book, bookID).Error; err != nil {
-		return 0, err
-	}
-	if book.SourceID == 0 {
-		return 0, nil
-	}
-
-	var chapters []models.Chapter
-	if err := s.db.Where("book_id = ? AND cache_path <> ''", bookID).Find(&chapters).Error; err != nil {
-		return 0, err
-	}
-
-	cleared := 0
-	for i := range chapters {
-		if s.deleteCacheFile(chapters[i].CachePath) {
-			cleared++
-		}
-		chapters[i].CachePath = ""
-		if err := s.db.Save(&chapters[i]).Error; err != nil {
-			return cleared, err
-		}
-	}
-	return cleared, nil
-}
-
-func (s *Server) deleteCacheFile(cachePath string) bool {
-	cachePath = strings.TrimSpace(cachePath)
-	if cachePath == "" {
-		return false
-	}
-	fullPath := cachePath
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(s.cfg.CacheDir, cachePath)
-	}
-	cleanPath, err := filepath.Abs(fullPath)
-	if err != nil {
-		return false
-	}
-	cleanCacheDir, err := filepath.Abs(s.cfg.CacheDir)
-	if err != nil {
-		return false
-	}
-	if cleanPath != cleanCacheDir && !strings.HasPrefix(cleanPath, cleanCacheDir+string(os.PathSeparator)) {
-		return false
-	}
-	if err := os.Remove(cleanPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false
-	}
-	return true
 }
 
 func deleteBookRecords(tx *gorm.DB, userID, bookID uint, book *models.Book) error {
@@ -1885,22 +1853,23 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		return
 	}
 
+	var supersededCachePaths []string
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("book_id = ?", bookID).Delete(&models.Chapter{}).Error; err != nil {
-			return err
-		}
+		nextChapters := make([]models.Chapter, 0, len(newChapters))
 		for _, ch := range newChapters {
-			chapter := models.Chapter{
+			nextChapters = append(nextChapters, models.Chapter{
 				BookID:   bookID,
 				Index:    ch.Index,
 				Title:    ch.Title,
 				URL:      ch.URL,
 				IsVolume: ch.IsVolume,
 				Tag:      ch.Tag,
-			}
-			if err := tx.Create(&chapter).Error; err != nil {
-				return err
-			}
+			})
+		}
+		var err error
+		supersededCachePaths, _, err = s.replaceBookChapterRows(tx, userID, bookID, nextChapters)
+		if err != nil {
+			return err
 		}
 		book.SourceID = req.SourceID
 		book.Type = newSource.SourceType
@@ -1931,6 +1900,7 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to change source"})
 		return
 	}
+	s.pruneUnreferencedRemoteCachePaths(supersededCachePaths)
 
 	c.JSON(http.StatusOK, s.broadcastBookShelfUpdate(userID, book))
 }
