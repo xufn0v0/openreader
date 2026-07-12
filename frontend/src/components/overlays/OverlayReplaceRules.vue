@@ -1,11 +1,13 @@
 <template>
-  <el-drawer
+  <el-dialog
     v-model="overlay.replaceRulesVisible"
     title="替换规则"
-    :direction="direction"
-    :size="size"
-    class="global-replace-drawer"
+    width="min(1120px, calc(100vw - 48px))"
+    :fullscreen="isMobile"
+    class="global-replace-dialog"
+    destroy-on-close
     @open="loadReplaceRules"
+    @closed="resetManager"
   >
     <section class="replace-overlay">
       <header class="file-overlay-head">
@@ -99,13 +101,14 @@
       </div>
       <el-empty v-if="!replaceRulesLoading && !replaceRules.length" description="暂无全局替换规则" />
     </section>
-  </el-drawer>
+  </el-dialog>
 
   <el-dialog
     v-model="replaceRuleDialog"
     :title="editingReplaceRuleId ? '编辑替换规则' : '新增替换规则'"
     width="520px"
     :fullscreen="isMobile"
+    @closed="overlay.clearReplaceRuleEditor()"
   >
     <el-form label-position="top">
       <el-form-item label="名称">
@@ -148,7 +151,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Refresh, Upload } from '@element-plus/icons-vue'
 import * as replaceRulesApi from '../../api/replaceRules'
@@ -156,14 +159,6 @@ import { useOverlayReplaceRules } from '../../composables/useOverlayReplaceRules
 import { useOverlayStore } from '../../stores/overlay'
 
 defineProps({
-  direction: {
-    type: String,
-    default: 'rtl',
-  },
-  size: {
-    type: [String, Number],
-    default: '82%',
-  },
   isMobile: {
     type: Boolean,
     default: false,
@@ -186,6 +181,7 @@ const {
   testText: replaceRuleTestText,
   testResult: replaceRuleTestResult,
   load: loadReplaceRules,
+  resetManager,
   handleUpdated: handleReplaceRulesUpdated,
   clearRefresh: clearReplaceRulesRefreshTimer,
   changeSelection: onReplaceRuleSelectionChange,
@@ -220,6 +216,13 @@ onMounted(() => {
     handleReplaceRulesUpdated,
   )
 })
+
+watch(
+  () => overlay.replaceRuleEditorRequest,
+  request => {
+    if (request > 0) openReplaceRuleEditor(overlay.replaceRuleEditorDraft || {})
+  },
+)
 
 onBeforeUnmount(() => {
   window.removeEventListener(

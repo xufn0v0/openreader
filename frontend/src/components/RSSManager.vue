@@ -44,62 +44,70 @@
       </div>
     </article>
 
-    <article class="rss-panel">
-      <header class="rss-head">
-        <div>
-          <strong>文章</strong>
-          <span>{{ articleCountText }}</span>
-        </div>
-        <div class="rss-actions">
-          <el-select
-            v-if="selectedSortOptions.length > 1"
-            v-model="selectedSortURL"
-            size="small"
-            class="rss-sort-select"
-            @change="refreshSelectedSource"
-          >
-            <el-option v-for="option in selectedSortOptions" :key="option.value" :label="option.label" :value="option.value" />
-          </el-select>
-          <el-radio-group v-model="articleFilter" size="small" @change="loadArticles">
-            <el-radio-button value="all">全部</el-radio-button>
-            <el-radio-button value="unread">未读</el-radio-button>
-            <el-radio-button value="favorite">收藏</el-radio-button>
-          </el-radio-group>
-          <el-button size="small" :loading="refreshingSourceId === selectedSourceId" @click="refreshSelectedSource">刷新文章</el-button>
-        </div>
-      </header>
-      <div v-loading="articlesLoading" class="rss-article-list">
-        <article v-for="article in articles" :key="article.id" class="rss-article-row" :class="{ read: article.isRead }">
-          <button type="button" @click="openArticle(article)">
-            <span class="rss-article-info">
-              <strong>{{ article.title }}</strong>
-              <small>{{ articleDateText(article) }} · {{ article.author || '未知作者' }}</small>
-              <span>{{ stripHTML(article.summary || article.content || '无摘要') }}</span>
-            </span>
-            <span v-if="article.image" class="rss-article-image" @click.stop.prevent="openArticleListImagePreview(article)">
-              <img :src="article.image" alt="" loading="lazy" />
-            </span>
-          </button>
-          <span class="rss-article-tools">
-            <el-button size="small" text @click="toggleRead(article)">
-              {{ article.isRead ? '标未读' : '标已读' }}
-            </el-button>
-            <el-button
+    <el-dialog
+      v-model="articleListDialogVisible"
+      :title="selectedSource?.title || 'RSS 文章'"
+      width="min(900px, calc(100vw - 48px))"
+      :fullscreen="isMobile"
+      class="rss-article-list-dialog"
+    >
+      <article class="rss-panel rss-article-list-panel">
+        <header class="rss-head">
+          <div>
+            <strong>文章</strong>
+            <span>{{ articleCountText }}</span>
+          </div>
+          <div class="rss-actions">
+            <el-select
+              v-if="selectedSortOptions.length > 1"
+              v-model="selectedSortURL"
               size="small"
-              text
-              :type="article.favorite ? 'warning' : 'info'"
-              @click="toggleFavorite(article)"
+              class="rss-sort-select"
+              @change="handleSortChange"
             >
-              {{ article.favorite ? '已收藏' : '收藏' }}
-            </el-button>
-          </span>
-        </article>
-        <button v-if="articles.length || hasMoreArticles" type="button" class="load-more-rss" :disabled="!hasMoreArticles || articlesLoadingMore" @click="loadMoreArticles">
-          {{ hasMoreArticles ? (articlesLoadingMore ? '加载中...' : '加载更多') : '没有更多啦' }}
-        </button>
-        <el-empty v-if="!articlesLoading && !articles.length" description="暂无 RSS 文章" />
-      </div>
-    </article>
+              <el-option v-for="option in selectedSortOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+            <el-radio-group v-model="articleFilter" size="small" @change="loadArticles">
+              <el-radio-button value="all">全部</el-radio-button>
+              <el-radio-button value="unread">未读</el-radio-button>
+              <el-radio-button value="favorite">收藏</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" :loading="refreshingSourceId === selectedSourceId" @click="refreshSelectedSource">刷新文章</el-button>
+          </div>
+        </header>
+        <div v-loading="articlesLoading" class="rss-article-list">
+          <article v-for="article in articles" :key="article.id" class="rss-article-row" :class="{ read: article.isRead }">
+            <button type="button" @click="openArticle(article)">
+              <span class="rss-article-info">
+                <strong>{{ article.title }}</strong>
+                <small>{{ articleDateText(article) }} · {{ article.author || '未知作者' }}</small>
+                <span>{{ stripHTML(article.summary || article.content || '无摘要') }}</span>
+              </span>
+              <span v-if="article.image" class="rss-article-image" @click.stop.prevent="openArticleListImagePreview(article)">
+                <img :src="article.image" alt="" loading="lazy" />
+              </span>
+            </button>
+            <span class="rss-article-tools">
+              <el-button size="small" text @click="toggleRead(article)">
+                {{ article.isRead ? '标未读' : '标已读' }}
+              </el-button>
+              <el-button
+                size="small"
+                text
+                :type="article.favorite ? 'warning' : 'info'"
+                @click="toggleFavorite(article)"
+              >
+                {{ article.favorite ? '已收藏' : '收藏' }}
+              </el-button>
+            </span>
+          </article>
+          <button v-if="articles.length || hasMoreArticles" type="button" class="load-more-rss" :disabled="!hasMoreArticles || articlesLoadingMore" @click="loadMoreArticles">
+            {{ hasMoreArticles ? (articlesLoadingMore ? '加载中...' : '加载更多') : '没有更多啦' }}
+          </button>
+          <el-empty v-if="!articlesLoading && !articles.length" description="暂无 RSS 文章" />
+        </div>
+      </article>
+    </el-dialog>
 
     <el-dialog v-model="editorVisible" :title="editingSourceId ? '编辑 RSS 源' : '新增 RSS 源'" width="520px" :fullscreen="isMobile">
       <el-form label-position="top">
@@ -140,7 +148,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="articleDialogVisible" :title="selectedArticle?.title || 'RSS 文章'" width="720px" class="rss-reader-dialog" :fullscreen="isMobile">
+    <el-dialog v-model="articleDialogVisible" :title="selectedArticle?.title || 'RSS 文章'" width="720px" class="rss-article-content-dialog" :fullscreen="isMobile">
       <article v-if="selectedArticle" v-loading="articleContentLoading" class="rss-reader">
         <h2>{{ selectedArticle.title }}</h2>
         <small>{{ articleDateText(selectedArticle) }} · {{ selectedArticle.author || '未知作者' }}</small>
@@ -168,15 +176,19 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRSSSource, deleteRSSSource, getRSSArticleContent, listRSSArticles, listRSSSources, refreshRSSSource, updateRSSArticle, updateRSSSource } from '../api/rss'
 import { cacheFirstRequest, networkFirstRequest, removeBrowserCache } from '../utils/browserCache'
 import { currentUserScope } from '../utils/authScope'
 import { planRSSSourceImport } from '../utils/rssSourceImport'
 
-defineProps({
+const props = defineProps({
   isMobile: {
+    type: Boolean,
+    default: false,
+  },
+  visible: {
     type: Boolean,
     default: false,
   },
@@ -205,10 +217,12 @@ const articleFilter = ref('all')
 const articlePage = ref(1)
 const hasMoreArticles = ref(false)
 const sourceImportInput = ref(null)
+const articleListDialogVisible = ref(false)
 const articleImagePreviewVisible = ref(false)
 const articlePreviewImages = ref([])
 const articlePreviewIndex = ref(0)
 let rssReloadTimer
+let articleOpenRequest = 0
 
 const RSS_ADVANCED_FIELDS = [
   'singleUrl',
@@ -240,14 +254,57 @@ const selectedSortOption = computed(() => selectedSortOptions.value.find(option 
 
 onMounted(async () => {
   window.addEventListener('openreader:rss-updated', handleRSSUpdated)
-  await loadSources()
-  await loadArticles()
+  if (props.visible) await openRSSWorkspace()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('openreader:rss-updated', handleRSSUpdated)
   clearRSSReloadTimer()
 })
+
+watch(() => props.visible, async (visible) => {
+  if (visible) {
+    await openRSSWorkspace()
+    return
+  }
+  resetRSSWorkspace()
+})
+
+watch(articleListDialogVisible, (visible) => {
+  if (!visible) resetSourceArticleState({ resetSort: true })
+})
+
+async function openRSSWorkspace() {
+  await loadSources()
+}
+
+function resetSourceArticleState({ resetSort = false } = {}) {
+  articleOpenRequest += 1
+  articles.value = []
+  articlePage.value = 1
+  hasMoreArticles.value = false
+  articlesLoadingMore.value = false
+  if (resetSort) selectedSortURL.value = ''
+  articleDialogVisible.value = false
+  articleContentLoading.value = false
+  selectedArticle.value = null
+  articleImagePreviewVisible.value = false
+  articlePreviewImages.value = []
+  articlePreviewIndex.value = 0
+}
+
+function resetRSSWorkspace() {
+  clearRSSReloadTimer()
+  articleListDialogVisible.value = false
+  resetSourceArticleState({ resetSort: true })
+  sources.value = []
+  selectedSourceId.value = ''
+  articleFilter.value = 'all'
+  rssEditMode.value = false
+  editorVisible.value = false
+  editingSourceId.value = null
+  refreshingSourceId.value = null
+}
 
 async function loadSources() {
   sourcesLoading.value = true
@@ -276,6 +333,7 @@ async function refreshRSSSourcesCache() {
 }
 
 function applyRSSSources(data) {
+  if (!props.visible) return
   sources.value = Array.isArray(data) ? data : []
   if (!sources.value.length) rssEditMode.value = false
   if (!selectedSourceId.value && sources.value.length) selectedSourceId.value = sources.value[0].id
@@ -325,9 +383,18 @@ function clearRSSReloadTimer() {
 }
 
 async function selectSource(sourceId) {
+  resetSourceArticleState({ resetSort: true })
   selectedSourceId.value = sourceId
   syncSelectedSortURL(true)
+  articleListDialogVisible.value = true
   await loadArticles()
+  await refreshSelectedSource()
+}
+
+async function handleSortChange() {
+  resetSourceArticleState()
+  await loadArticles()
+  await refreshSelectedSource()
 }
 
 async function loadArticles() {
@@ -336,6 +403,7 @@ async function loadArticles() {
   try {
     const { data } = await listRSSArticles(articleParams(articlePage.value))
     const result = normalizeArticleResult(data, articlePage.value)
+    if (!props.visible) return
     articles.value = result.items
     hasMoreArticles.value = result.hasMore
   } catch (err) {
@@ -352,6 +420,7 @@ async function loadMoreArticles() {
     const nextPage = articlePage.value + 1
     const { data } = await listRSSArticles(articleParams(nextPage))
     const result = normalizeArticleResult(data, nextPage)
+    if (!props.visible) return
     const known = new Set(articles.value.map(article => article.id))
     const nextItems = result.items.filter(article => !known.has(article.id))
     articles.value = [...articles.value, ...nextItems]
@@ -565,20 +634,24 @@ async function removeSource(source) {
 }
 
 async function openArticle(article) {
+  const request = ++articleOpenRequest
   selectedArticle.value = article
   articleDialogVisible.value = true
   articleImagePreviewVisible.value = false
   articleContentLoading.value = true
   try {
     const { data } = await getRSSArticleContent(article.id)
+    if (request !== articleOpenRequest) return
     Object.assign(article, data)
     selectedArticle.value = article
   } catch (err) {
     ElMessage.error(readError(err, '加载 RSS 正文失败'))
   } finally {
-    articleContentLoading.value = false
+    if (request === articleOpenRequest) articleContentLoading.value = false
   }
-  if (!article.isRead) await updateArticleState(article, { isRead: true }, { silent: true })
+  if (request === articleOpenRequest && !article.isRead) {
+    await updateArticleState(article, { isRead: true }, { silent: true })
+  }
 }
 
 async function toggleFavorite(article) {
@@ -704,10 +777,7 @@ function syncSelectedSortURL(reset = false) {
 
 <style scoped>
 .rss-manager {
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 14px;
-  min-height: calc(100vh - 150px);
+  min-height: min(560px, calc(100vh - 180px));
 }
 
 .rss-panel {
@@ -717,6 +787,10 @@ function syncSelectedSortURL(reset = false) {
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-sm);
   background: rgba(255, 255, 255, 0.62);
+}
+
+.rss-article-list-panel {
+  min-height: min(560px, calc(100vh - 180px));
 }
 
 .rss-head {

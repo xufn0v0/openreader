@@ -358,7 +358,6 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api/client'
 import { refreshBook, refreshLocalBook } from '../api/books'
-import { createReplaceRule } from '../api/replaceRules'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
 import ReaderChapterContent from '../components/reader/ReaderChapterContent.vue'
@@ -425,6 +424,10 @@ import { clearBookBrowserChapterCache } from '../utils/bookChapterCache'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
+import {
+  captureReaderBookmarkExcerpt,
+  selectedTextBookmarkContext,
+} from '../utils/readerBookmarkContext'
 import { readerTTSBarVisible } from '../utils/readerTTS'
 import {
   readerScrollBehaviorForDuration,
@@ -483,6 +486,8 @@ const {
   getOffset: () => currentOffset(),
   getPercent: () => currentChapterPercent(),
   getExcerpt: currentVisibleExcerpt,
+  getSelectedTextContext: selectedBookmarkContextFromText,
+  onSelectedTextNotFound: () => ElMessage.error('选择1-2段整段文字才能定位段落'),
   openForm: (...args) => overlay.openBookmarkForm(...args),
 })
 const {
@@ -490,13 +495,8 @@ const {
 } = useReaderSelectedTextActions({
   getBook: () => book.value,
   confirm: (...args) => ElMessageBox.confirm(...args),
-  prompt: (...args) => ElMessageBox.prompt(...args),
   createBookmark: createBookmarkFromSelectedText,
-  createReplaceRule,
-  dispatchRulesUpdated: () => {
-    window.dispatchEvent(new CustomEvent('openreader:replace-rules-updated'))
-  },
-  onSuccess: message => ElMessage.success(message),
+  openReplaceRuleEditor: draft => overlay.openReplaceRuleEditor(draft),
 })
 const content = ref('')
 const chapterFormat = ref('text')
@@ -766,8 +766,24 @@ const chapterTextLength = computed(() => {
   return chapterBlockTextLength({ paragraphs: chapterParagraphs.value })
 })
 const isAudioChapter = computed(() => chapterFormat.value === 'audio')
+const ttsBarRequested = ref(false)
+const ttsConfigExpanded = ref(true)
+const isComicChapter = computed(() => (
+  makeChapterBlock(currentIndex.value, chapter.value, content.value).isComic === true
+))
+const ttsReadBarLayoutActive = computed(() => (
+  ttsBarRequested.value
+    && chapterFormat.value !== 'epub'
+    && !isAudioChapter.value
+    && !isComicChapter.value
+))
 const effectiveReaderMode = computed(() => (
-  readerEffectiveMode(reader.mode, chapterFormat.value === 'epub', isAudioChapter.value)
+  readerEffectiveMode(
+    reader.mode,
+    chapterFormat.value === 'epub',
+    isAudioChapter.value,
+    ttsReadBarLayoutActive.value,
+  )
 ))
 const effectiveReaderState = {
   get mode() {
@@ -913,6 +929,8 @@ const {
     query,
   }),
   loadChapter: (index, loadOptions) => loadChapter(index, 0, loadOptions),
+  canMatchBookmark: () => chapterFormat.value === 'text',
+  onBookmarkNotFound: () => ElMessage.error('无法定位内容所在段落'),
   flashParagraph,
   saveProgress: () => saveCurrentProgress(),
 })
@@ -1020,6 +1038,15 @@ const readerStyle = computed(() => ({
   '--reader-read-width': `${reader.columnWidth}px`,
   '--reader-bg-image': reader.customBgImage ? `url(${reader.customBgImage})` : '',
   '--reader-animate-duration': `${reader.animateDuration}ms`,
+  '--reader-tts-bottom-space': ttsReadBarLayoutActive.value
+    ? `${ttsConfigExpanded.value ? 280 : 80}px`
+    : '0px',
+  '--reader-content-bottom-space': ttsReadBarLayoutActive.value
+    ? `${ttsConfigExpanded.value ? 280 : 80}px`
+    : '180px',
+  '--reader-mobile-content-bottom-space': ttsReadBarLayoutActive.value
+    ? `${ttsConfigExpanded.value ? 280 : 80}px`
+    : '15px',
 }))
 
 const readerContentStyle = computed(() => ({
@@ -1253,6 +1280,7 @@ const {
   isAudio: isAudioChapter,
   autoReading,
   mobileChromeVisible,
+  ttsBarVisible: ttsBarRequested,
   scheduleSelectedTextOperation,
   suppressContentClick,
   consumeSuppressedContentClick,
@@ -1447,20 +1475,25 @@ const {
   notify: showReaderToast,
   isSlideRead: () => effectiveReaderMode.value === 'flip',
 })
-const ttsBarRequested = ref(false)
-const ttsConfigExpanded = ref(true)
 const ttsSupportedForChapter = computed(() => (
-  tts.state.supported && chapterFormat.value !== 'epub' && !isAudioChapter.value
+  tts.state.supported
+    && chapterFormat.value !== 'epub'
+    && !isAudioChapter.value
+    && !isComicChapter.value
 ))
 const ttsBarShown = computed(() => readerTTSBarVisible({
   requested: ttsBarRequested.value,
   supported: tts.state.supported,
   chapterFormat: chapterFormat.value,
   audio: isAudioChapter.value,
+  comic: isComicChapter.value,
 }))
 function toggleTTSBar() {
   if (!ttsSupportedForChapter.value) return
   ttsBarRequested.value = !ttsBarRequested.value
+  if (ttsBarRequested.value && isMobileReader.value) {
+    mobileChromeVisible.value = false
+  }
 }
 function closeTTSBar() {
   ttsBarRequested.value = false
@@ -1472,8 +1505,8 @@ function openReaderPrimaryTool(name, open) {
   return openDesktopToolPanel(name, open)
 }
 
-watch(chapterFormat, format => {
-  if (format === 'epub' || format === 'audio') {
+watch([chapterFormat, isComicChapter], ([format, comic]) => {
+  if (format === 'epub' || format === 'audio' || comic) {
     ttsBarRequested.value = false
     ttsStop()
     if (autoReading.value) stopAutoReading()
@@ -1518,7 +1551,7 @@ useReaderRouteSync({
   bookId,
   currentIndex,
   positionQuery: () => [route.query.chapter, route.query.offset, route.query.percent],
-  searchQuery: () => [route.query.line, route.query.match, route.query.q],
+  searchQuery: () => [route.query.line, route.query.match, route.query.q, route.query.bookmark],
   loadBook: () => loadReaderBook(),
   loadChapter: (index, offset, options) => loadChapter(index, offset, options),
   jumpToRouteLine,
@@ -1743,9 +1776,30 @@ function currentVisibleExcerpt() {
     return chapter.value?.title || book.value?.title || ''
   }
   const paragraph = currentVisibleParagraph()
-  const text = paragraph?.textContent?.replace(/\s+/g, ' ').trim()
-  if (text) return text.slice(0, 140)
+  const paragraphs = readerBookmarkParagraphs()
+  const index = paragraphs.findIndex(item => item.element === paragraph)
+  if (index >= 0) {
+    const excerpt = captureReaderBookmarkExcerpt(paragraphs, index)
+    if (excerpt) return excerpt
+  }
   return lines.value.slice(0, 2).join(' ').slice(0, 140)
+}
+
+function readerBookmarkParagraphs() {
+  const root = contentBody.value
+    ?.querySelector(`.chapter-content[data-index="${currentIndex.value}"]`)
+    || contentBody.value
+  return [...(root?.querySelectorAll('h3, p') || [])].map(element => ({
+    element,
+    text: element.innerText || element.textContent || '',
+  }))
+}
+
+function selectedBookmarkContextFromText(text) {
+  return selectedTextBookmarkContext({
+    selectedText: text,
+    paragraphs: readerBookmarkParagraphs(),
+  })
 }
 
 function currentAudioProgressPayload() {
@@ -1878,10 +1932,10 @@ function readError(err, fallback) {
   font-size: var(--reader-font-size);
   height: 100dvh; line-height: var(--reader-line-height);
   overflow-y: auto; overflow-x: hidden;
-  padding: 44px 65px 180px;
+  padding: 44px 65px var(--reader-content-bottom-space);
   width: 100%;
   box-sizing: border-box;
-  scroll-padding-bottom: 180px;
+  scroll-padding-bottom: var(--reader-content-bottom-space);
 }
 .reader-body { transition: transform var(--reader-animate-duration, 180ms) ease; }
 .reader-shell.scroll .reader-body::after,
@@ -1955,13 +2009,13 @@ function readError(err, fallback) {
     min-width: 0;
     font-size: var(--reader-font-size);
     padding: 0;
-    scroll-padding-bottom: calc(15px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(var(--reader-mobile-content-bottom-space) + env(safe-area-inset-bottom));
     touch-action: pan-y pinch-zoom;
   }
   .reader-body {
     margin-top: calc(30px + env(safe-area-inset-top));
     padding-top: 15px;
-    padding-bottom: calc(15px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--reader-mobile-content-bottom-space) + env(safe-area-inset-bottom));
     text-align: justify;
   }
   .reader-mobile-primary-popover-body {

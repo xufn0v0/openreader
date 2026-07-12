@@ -45,6 +45,10 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func setupTestServer(t *testing.T) (*gin.Engine, *Server) {
+	return setupTestServerWithConfig(t, nil)
+}
+
+func setupTestServerWithConfig(t *testing.T, configure func(*config.Config)) (*gin.Engine, *Server) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -55,6 +59,9 @@ func setupTestServer(t *testing.T) (*gin.Engine, *Server) {
 		DatabasePath:  t.TempDir() + "/test.db",
 		JWTSecret:     "test-secret",
 		LocalStoreDir: t.TempDir() + "/localStore",
+	}
+	if configure != nil {
+		configure(&cfg)
 	}
 
 	database, err := readerdb.Open(cfg)
@@ -4083,7 +4090,7 @@ func TestUpdateBookmark(t *testing.T) {
 	if err := server.db.Create(&book).Error; err != nil {
 		t.Fatal(err)
 	}
-	bookmark := models.Bookmark{UserID: user.ID, BookID: book.ID, ChapterIndex: 0, Title: "旧标题"}
+	bookmark := models.Bookmark{UserID: user.ID, BookID: book.ID, ChapterIndex: 0, Title: "旧标题", Excerpt: "旧摘录"}
 	if err := server.db.Create(&bookmark).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -4102,8 +4109,8 @@ func TestUpdateBookmark(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Title != "新标题" || updated.Excerpt != "新摘录" || updated.Note != "新笔记" {
-		t.Fatalf("unexpected bookmark: %+v", updated)
+	if updated.Title != "旧标题" || updated.Excerpt != "旧摘录" || updated.Note != "新笔记" {
+		t.Fatalf("bookmark edit must preserve the read-only reader context: %+v", updated)
 	}
 }
 
@@ -4126,7 +4133,7 @@ func TestBatchCreateAndDeleteBookmarks(t *testing.T) {
 
 	body := `[
 		{"chapterIndex":1,"offset":12,"percent":0.25,"title":"第一条","excerpt":"摘录一"},
-		{"chapterIndex":2,"offset":24,"percent":0.5,"note":"笔记二"}
+		{"chapterIndex":2,"offset":24,"percent":0.5,"excerpt":"摘录二","note":"笔记二"}
 	]`
 	req := httptest.NewRequest(http.MethodPost, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/bookmarks/batch", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -4361,7 +4368,7 @@ func TestChapterContentRebuildsMissingLocalBookCacheFromSourceFile(t *testing.T)
 	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(sourcePath, []byte("第一章 起\n第一章正文。\n第二章 承\n第二章正文。"), 0o644); err != nil {
+	if err := os.WriteFile(sourcePath, []byte("第一章 起\n这是第一章的内容。\n第二章 承\n这是第二章的内容。"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4395,7 +4402,7 @@ func TestChapterContentRebuildsMissingLocalBookCacheFromSourceFile(t *testing.T)
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Content != "第二章正文。" {
+	if resp.Content != "这是第二章的内容。" {
 		t.Fatalf("unexpected rebuilt content %q", resp.Content)
 	}
 
@@ -4900,7 +4907,7 @@ func TestReplaceRuleCRUDAndChapterContentAppliesRules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules", strings.NewReader(`{"name":"去广告","pattern":"广告[0-9]+","replacement":"","enabled":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules", strings.NewReader(`{"name":"去广告","pattern":"广告[0-9]+","replacement":"","scope":"*","isRegex":true,"enabled":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
 	w := httptest.NewRecorder()
@@ -5963,7 +5970,7 @@ func TestLocalStoreImportAcceptsCategory(t *testing.T) {
 	if err := os.MkdirAll(server.cfg.LocalStoreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(server.cfg.LocalStoreDir, "store.txt"), []byte("第一章 开始\n正文"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(server.cfg.LocalStoreDir, "store.txt"), []byte("第一章 开始\n这是正文内容"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -6236,6 +6243,94 @@ func TestDirectImportReusesStagedUploadForReparseAndImport(t *testing.T) {
 	}
 	if _, err := os.Stat(metadataPath); !os.IsNotExist(err) {
 		t.Fatalf("staged metadata should be removed after import, got %v", err)
+	}
+}
+
+func TestDirectTXTPreviewRetainsStageWhenExplicitRuleFindsNoChapters(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	request := func(path string, fields map[string]string, withFile bool) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if withFile {
+			part, err := writer.CreateFormFile("file", "retry-rule.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := part.Write([]byte("== 第一章 ==\n正文内容。")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for key, value := range fields {
+			if err := writer.WriteField(key, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	first := request("/api/imports/books/preview", nil, true)
+	if first.Code != http.StatusOK {
+		t.Fatalf("automatic preview: expected 200, got %d: %s", first.Code, first.Body.String())
+	}
+	var firstPreview struct {
+		ImportToken string `json:"importToken"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstPreview); err != nil {
+		t.Fatal(err)
+	}
+	if !validLocalImportToken(firstPreview.ImportToken) {
+		t.Fatalf("automatic preview must stage retryable input, got %+v", firstPreview)
+	}
+	dataPath, metadataPath := localImportStagePaths(server.localImportStageDir(1), firstPreview.ImportToken)
+
+	failed := request("/api/imports/books/preview", map[string]string{
+		"importToken": firstPreview.ImportToken,
+		"tocRule":     `^不存在的目录$`,
+	}, false)
+	if failed.Code != http.StatusBadRequest {
+		t.Fatalf("explicit nonmatching rule: expected 400, got %d: %s", failed.Code, failed.Body.String())
+	}
+	var failure struct {
+		Error       string `json:"error"`
+		ImportToken string `json:"importToken"`
+	}
+	if err := json.Unmarshal(failed.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(failure.Error, "no readable chapters") || failure.ImportToken != firstPreview.ImportToken {
+		t.Fatalf("failed reparse must retain token and clear error, got %+v", failure)
+	}
+	if _, err := os.Stat(dataPath); err != nil {
+		t.Fatalf("failed reparse must retain staged data: %v", err)
+	}
+	if _, err := os.Stat(metadataPath); err != nil {
+		t.Fatalf("failed reparse must retain staged metadata: %v", err)
+	}
+
+	retry := request("/api/imports/books/preview", map[string]string{
+		"importToken": firstPreview.ImportToken,
+		"tocRule":     `^== .+ ==$`,
+	}, false)
+	if retry.Code != http.StatusOK || !strings.Contains(retry.Body.String(), `"chapterCount":1`) {
+		t.Fatalf("valid retry must reparse staged data: got %d: %s", retry.Code, retry.Body.String())
+	}
+
+	imported := request("/api/imports/books", map[string]string{
+		"importToken": firstPreview.ImportToken,
+		"tocRule":     `^== .+ ==$`,
+	}, false)
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("valid staged import: expected 201, got %d: %s", imported.Code, imported.Body.String())
 	}
 }
 
@@ -6928,8 +7023,10 @@ func TestLocalStoreImportRootRecursively(t *testing.T) {
 
 func TestWebDAVPutListGetAndDelete(t *testing.T) {
 	router, _ := setupTestServer(t)
+	auth := authHeader(t, router)
 
 	req := httptest.NewRequest(http.MethodPut, "/webdav/backups/sample.txt", strings.NewReader("hello webdav"))
+	req.Header.Set("Authorization", auth)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -6937,6 +7034,7 @@ func TestWebDAVPutListGetAndDelete(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/webdav/backups", nil)
+	req2.Header.Set("Authorization", auth)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusMultiStatus || !strings.Contains(w2.Body.String(), "sample.txt") {
@@ -6947,6 +7045,7 @@ func TestWebDAVPutListGetAndDelete(t *testing.T) {
 	}
 
 	req3 := httptest.NewRequest(http.MethodGet, "/webdav/backups/sample.txt", nil)
+	req3.Header.Set("Authorization", auth)
 	w3 := httptest.NewRecorder()
 	router.ServeHTTP(w3, req3)
 	if w3.Code != http.StatusOK || strings.TrimSpace(w3.Body.String()) != "hello webdav" {
@@ -6954,6 +7053,7 @@ func TestWebDAVPutListGetAndDelete(t *testing.T) {
 	}
 
 	req4 := httptest.NewRequest(http.MethodDelete, "/webdav/backups/sample.txt", nil)
+	req4.Header.Set("Authorization", auth)
 	w4 := httptest.NewRecorder()
 	router.ServeHTTP(w4, req4)
 	if w4.Code != http.StatusNoContent {
@@ -6963,8 +7063,10 @@ func TestWebDAVPutListGetAndDelete(t *testing.T) {
 
 func TestWebDAVMkcolAndMove(t *testing.T) {
 	router, _ := setupTestServer(t)
+	auth := authHeader(t, router)
 
 	req := httptest.NewRequest("MKCOL", "/webdav/books", nil)
+	req.Header.Set("Authorization", auth)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -6972,6 +7074,7 @@ func TestWebDAVMkcolAndMove(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodPut, "/webdav/books/a.txt", strings.NewReader("hello"))
+	req2.Header.Set("Authorization", auth)
 	w2 := httptest.NewRecorder()
 	router.ServeHTTP(w2, req2)
 	if w2.Code != http.StatusCreated {
@@ -6979,6 +7082,7 @@ func TestWebDAVMkcolAndMove(t *testing.T) {
 	}
 
 	req3 := httptest.NewRequest("MOVE", "/webdav/books/a.txt", nil)
+	req3.Header.Set("Authorization", auth)
 	req3.Header.Set("Destination", "/webdav/books/b.txt")
 	w3 := httptest.NewRecorder()
 	router.ServeHTTP(w3, req3)
@@ -6987,6 +7091,7 @@ func TestWebDAVMkcolAndMove(t *testing.T) {
 	}
 
 	req4 := httptest.NewRequest(http.MethodGet, "/webdav/books/b.txt", nil)
+	req4.Header.Set("Authorization", auth)
 	w4 := httptest.NewRecorder()
 	router.ServeHTTP(w4, req4)
 	if w4.Code != http.StatusOK || strings.TrimSpace(w4.Body.String()) != "hello" {
@@ -6996,8 +7101,10 @@ func TestWebDAVMkcolAndMove(t *testing.T) {
 
 func TestWebDAVRejectsEscapedPath(t *testing.T) {
 	router, _ := setupTestServer(t)
+	auth := authHeader(t, router)
 
 	req := httptest.NewRequest(http.MethodDelete, "/webdav/../outside.txt", nil)
+	req.Header.Set("Authorization", auth)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
@@ -7378,7 +7485,7 @@ func TestRestoreOpenReaderBackupImportsUserData(t *testing.T) {
 	if err := server.db.Where("user_id = ? AND pattern = ?", user.ID, "foo").First(&rule).Error; err != nil {
 		t.Fatal(err)
 	}
-	if rule.Replacement != "bar" || !rule.Enabled {
+	if rule.Replacement != "bar" || !rule.Enabled || rule.Scope != "*" || rule.IsRegex == nil || *rule.IsRegex {
 		t.Fatalf("unexpected restored replace rule: %+v", rule)
 	}
 	var rssSource models.RSSSource
@@ -7490,7 +7597,7 @@ func TestCreateReplaceRuleRespectsEnabledFlag(t *testing.T) {
 	router, _ := setupTestServer(t)
 	token := authHeader(t, router)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules", strings.NewReader(`{"name":"停用规则","pattern":"广告","replacement":"","enabled":false}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/replace-rules", strings.NewReader(`{"name":"停用规则","pattern":"广告","replacement":"","scope":"*","isRegex":false,"enabled":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", token)
 	w := httptest.NewRecorder()
@@ -9040,7 +9147,7 @@ func TestImportFromWebDAVImportsBook(t *testing.T) {
 	if err := os.MkdirAll(webdavDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(webdavDir, "webdav-book.txt"), []byte("第一章 开始\n正文内容"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(webdavDir, "webdav-book.txt"), []byte("第一章 开始\n这是正文内容"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

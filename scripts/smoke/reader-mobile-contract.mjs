@@ -56,6 +56,7 @@ async function installApiMocks(page) {
     excerpt: '用于验证根级书签表单的摘录。',
     note: '原笔记',
   }]
+  let nextBookmarkId = 102
   await page.route(/^https?:\/\/[^/]+\/ws\/sync.*$/, route => route.abort())
   await page.route(/^https?:\/\/[^/]+\/api\/.*$/, async (route) => {
     const request = route.request()
@@ -116,8 +117,26 @@ async function installApiMocks(page) {
         ].join('\n'),
       }))
     }
-    if (path === '/books/1/bookmarks') {
+    if (path === '/books/1/bookmarks' && method === 'GET') {
       return route.fulfill(json(bookmarks))
+    }
+    if (path === '/books/1/bookmarks' && method === 'POST') {
+      const bookmark = { id: nextBookmarkId++, ...request.postDataJSON() }
+      bookmarks.push(bookmark)
+      return route.fulfill(json(bookmark, 201))
+    }
+    if (path === '/books/1/bookmarks/batch' && method === 'POST') {
+      const created = request.postDataJSON().map(payload => ({ id: nextBookmarkId++, ...payload }))
+      bookmarks.push(...created)
+      return route.fulfill(json(created, 201))
+    }
+    if (path === '/books/1/bookmarks/batch-delete' && method === 'POST') {
+      const ids = new Set(request.postDataJSON().ids)
+      const deletedIds = bookmarks.filter(bookmark => ids.has(bookmark.id)).map(bookmark => bookmark.id)
+      for (let index = bookmarks.length - 1; index >= 0; index -= 1) {
+        if (ids.has(bookmarks[index].id)) bookmarks.splice(index, 1)
+      }
+      return route.fulfill(json({ deletedIds }))
     }
     if (path === '/bookmarks/101' && method === 'PUT') {
       const payload = request.postDataJSON()
@@ -223,6 +242,97 @@ async function closeGlobalReaderDialog(page, selector) {
   await dialog.waitFor({ state: 'hidden', timeout: 10000 })
 }
 
+async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen }) {
+  const paragraph = page.locator('.reader-body p').first()
+  const selectedText = (await paragraph.textContent())?.trim() || ''
+  assert(selectedText, `${viewport.width}: reader fixture must include selectable text`)
+  await paragraph.evaluate((node) => {
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+  })
+
+  const chooser = page.locator('.el-message-box').last()
+  await chooser.getByRole('button', { name: '添加过滤规则', exact: true }).click()
+
+  const editor = page.locator('.el-dialog').filter({ hasText: '新增替换规则' }).last()
+  await editor.waitFor({ state: 'visible', timeout: 10000 })
+  assert(await page.locator('.global-replace-dialog').count() === 0, `${viewport.width}: selected text must open only the direct editor, not the rule manager`)
+
+  const pattern = editor.locator('.el-form-item').filter({ hasText: '匹配正则或文本' }).locator('input')
+  const scope = editor.locator('.el-form-item').filter({ hasText: '替换范围' }).locator('input')
+  assert(await pattern.inputValue() === selectedText, `${viewport.width}: direct editor must retain the exact selected text`)
+  assert((await scope.inputValue()).startsWith('移动阅读契约测试;'), `${viewport.width}: direct editor must retain the active book scope`)
+
+  const geometry = await editor.evaluate((node) => {
+    const rect = node.getBoundingClientRect()
+    return { width: Math.round(rect.width), height: Math.round(rect.height) }
+  })
+  if (fullscreen) {
+    assert(geometry.width === viewport.width && geometry.height === viewport.height, `${viewport.width}: selected-text editor must be fullscreen on mobile`)
+    assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: selected-text editor must preserve the reader toolbar`)
+    await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
+    assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: selected-text editor click must not pass through to reader chrome`)
+  } else {
+    assert(geometry.width >= 500 && geometry.width <= 540, `desktop: selected-text editor width ${geometry.width}`)
+    assert(await page.locator('.reader-left-rail').count() === 1, 'desktop: selected-text editor must preserve reader rails')
+  }
+
+  await editor.getByRole('button', { name: '取消', exact: true }).click()
+  await editor.waitFor({ state: 'hidden', timeout: 10000 })
+  assert(await page.locator('.global-replace-dialog').count() === 0, `${viewport.width}: closing the direct editor must not reveal a manager`)
+}
+
+async function assertReaderBookInfoDialog(page, viewport, { fullscreen }) {
+  const selector = '.book-info-dialog'
+  await page.waitForSelector(selector, { timeout: 10000 })
+  const state = await page.evaluate((target) => {
+    const dialog = document.querySelector(target)
+    const rect = dialog?.getBoundingClientRect()
+    const text = dialog?.innerText || ''
+    const visibleDrawers = Array.from(document.querySelectorAll('.el-drawer')).filter((element) => {
+      const drawerRect = element.getBoundingClientRect()
+      const style = window.getComputedStyle(element)
+      return drawerRect.width > 0 && drawerRect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+    }).length
+    return {
+      topTools: document.querySelectorAll('.reader-mobile-top.visible').length,
+      leftRailVisible: Boolean(document.querySelector('.reader-left-rail')),
+      width: Math.round(rect?.width || 0),
+      height: Math.round(rect?.height || 0),
+      workspaceCount: document.querySelectorAll('.reader-mobile-workspace').length,
+      visibleDrawers,
+      text,
+    }
+  }, selector)
+  assert(state.workspaceCount === 0, `${viewport.width}: BookInfo must remain a root dialog, not a reader workspace`)
+  assert(state.visibleDrawers === 0, `${viewport.width}: BookInfo must not use a drawer`)
+  assert(state.text.includes('书籍信息'), `${viewport.width}: BookInfo dialog title missing`)
+  assert(state.text.includes('移动阅读契约测试'), `${viewport.width}: BookInfo dialog missing active book title`)
+  assert(state.text.includes('OpenReader'), `${viewport.width}: BookInfo dialog missing active book author`)
+  if (fullscreen) {
+    assert(state.topTools === 1, `${viewport.width}: BookInfo must preserve mobile reader chrome`)
+    assert(state.width === viewport.width, `${viewport.width}: BookInfo fullscreen width ${state.width}`)
+    assert(state.height === viewport.height, `${viewport.width}: BookInfo fullscreen height ${state.height}`)
+  } else {
+    assert(state.leftRailVisible, 'desktop: BookInfo must preserve the reader left rail')
+    assert(state.width >= 460 && state.width <= 520, `desktop: BookInfo dialog width ${state.width}`)
+  }
+  await page.locator(`${selector} .book-info-main`).click()
+  if (fullscreen) {
+    assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: BookInfo click must not pass through and toggle reader chrome`)
+  }
+}
+
+async function closeReaderBookInfoDialog(page) {
+  const dialog = page.locator('.book-info-dialog')
+  await dialog.locator('.el-dialog__headerbtn').click()
+  await dialog.waitFor({ state: 'hidden', timeout: 10000 })
+}
+
 async function assertInlineMobileCacheZone(page, viewport) {
   await page.waitForSelector('.reader-mobile-bottom.visible .mobile-cache-zone.reader-cache-zone', { timeout: 10000 })
   const state = await page.evaluate(() => {
@@ -275,7 +385,7 @@ async function assertDesktopReaderDialog(page, selector, label) {
   assert(state.settingsOpen === 1, `desktop: ${label} must not close the active settings workspace`)
 }
 
-async function assertBookmarkFormContext(page, viewport, { fullscreen }) {
+async function assertBookmarkFormContext(page, viewport, { fullscreen, excerpt = '用于验证根级书签表单的摘录。' }) {
   const selector = '.global-bookmark-form-dialog'
   await page.waitForSelector(selector, { timeout: 10000 })
   const state = await page.evaluate((target) => {
@@ -298,7 +408,7 @@ async function assertBookmarkFormContext(page, viewport, { fullscreen }) {
   assert(state.readonlyValues.includes('移动阅读契约测试'), `${viewport.width}: bookmark form missing readonly book title`)
   assert(state.readonlyValues.includes('OpenReader'), `${viewport.width}: bookmark form missing readonly author`)
   assert(state.readonlyValues.includes('第一章'), `${viewport.width}: bookmark form missing readonly chapter`)
-  assert(state.readonlyValues.includes('用于验证根级书签表单的摘录。'), `${viewport.width}: bookmark form missing readonly excerpt`)
+  assert(state.readonlyValues.some(value => value.includes(excerpt)), `${viewport.width}: bookmark form missing readonly excerpt`)
   if (fullscreen) {
     assert(state.width === viewport.width, `${viewport.width}: bookmark form fullscreen width ${state.width}`)
     assert(state.height === viewport.height, `${viewport.width}: bookmark form fullscreen height ${state.height}`)
@@ -308,11 +418,76 @@ async function assertBookmarkFormContext(page, viewport, { fullscreen }) {
 }
 
 async function editBookmarkWithGlobalForm(page, viewport, { fullscreen }) {
-  await page.locator('.global-bookmark-dialog').getByRole('button', { name: '编辑', exact: true }).click()
+  await page.locator('.global-bookmark-dialog .el-table__body-wrapper tbody tr').first()
+    .getByRole('button', { name: '编辑', exact: true }).click()
   await assertBookmarkFormContext(page, viewport, { fullscreen })
   await page.locator('.global-bookmark-form-dialog textarea').last().fill('已通过根级表单更新')
   await page.locator('.global-bookmark-form-dialog').getByRole('button', { name: '确定', exact: true }).click()
   await page.locator('.global-bookmark-form-dialog').waitFor({ state: 'hidden', timeout: 10000 })
+}
+
+async function createBookmarkFromSelectedText(page, viewport, { fullscreen }) {
+  const paragraph = page.locator('.reader-body p').first()
+  const selectedText = (await paragraph.textContent())?.trim() || ''
+  assert(selectedText, `${viewport.width}: reader fixture must include bookmark-selectable text`)
+  await paragraph.evaluate((node) => {
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+  })
+
+  const chooser = page.locator('.el-message-box').last()
+  await chooser.getByRole('button', { name: '添加书签', exact: true }).click()
+  await assertBookmarkFormContext(page, viewport, { fullscreen, excerpt: selectedText })
+  const form = page.locator('.global-bookmark-form-dialog')
+  await form.locator('textarea').last().fill('选中文字创建')
+  await form.getByRole('button', { name: '确定', exact: true }).click()
+  await form.waitFor({ state: 'hidden', timeout: 10000 })
+  return selectedText
+}
+
+async function exerciseBookmarkManager(page, viewport, { fullscreen, selectedText }) {
+  const dialog = page.locator('.global-bookmark-dialog')
+  await editBookmarkWithGlobalForm(page, viewport, { fullscreen })
+
+  await dialog.locator('.bookmark-file-input').setInputFiles({
+    name: 'bookmarks.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify([
+      { chapterIndex: 0, offset: 3, percent: 0.1, title: '第一章', excerpt: '导入正文三', note: '导入三' },
+      { chapterIndex: 0, offset: 4, percent: 0.2, title: '第一章', excerpt: '导入正文四', note: '导入四' },
+    ])),
+  })
+  await page.locator('.el-message-box').last().getByRole('button', { name: '确定', exact: true }).click()
+  await dialog.getByText('导入四', { exact: true }).waitFor({ state: 'visible', timeout: 10000 })
+
+  const rowTexts = await dialog.locator('.el-table__body-wrapper tbody tr').evaluateAll(rows => rows.map(row => row.innerText))
+  const orderedNotes = ['已通过根级表单更新', '选中文字创建', '导入三', '导入四']
+  let previous = -1
+  for (const note of orderedNotes) {
+    const index = rowTexts.findIndex((text, rowIndex) => rowIndex > previous && text.includes(note))
+    assert(index > previous, `${viewport.width}: bookmark manager must append ${note} in creation order before a sync reload`)
+    previous = index
+  }
+
+  const importedRow = dialog.locator('.el-table__body-wrapper tbody tr').filter({ hasText: '导入三' }).first()
+  await importedRow.locator('.el-checkbox').click()
+  await dialog.getByRole('button', { name: '批量删除', exact: true }).click()
+  await page.locator('.el-message-box').last().getByRole('button', { name: '确定', exact: true }).click()
+  await dialog.getByText('导入三', { exact: true }).waitFor({ state: 'hidden', timeout: 10000 })
+
+  const selectedBookmarkRow = dialog.locator('.el-table__body-wrapper tbody tr').filter({ hasText: '选中文字创建' }).first()
+  await selectedBookmarkRow.getByRole('button', { name: '跳转', exact: true }).click()
+  await dialog.waitFor({ state: 'hidden', timeout: 10000 })
+  const query = await page.evaluate(() => Object.fromEntries(new URLSearchParams(location.search)))
+  assert(
+    query.chapter === '0' && Number.isFinite(Number(query.offset)) && Number(query.offset) >= 0 && Number.isFinite(Number(query.percent)),
+    `${viewport.width}: bookmark jump must preserve a valid saved chapter and position, got ${JSON.stringify(query)}`,
+  )
+  assert(String(query.bookmark || '').includes(selectedText), `${viewport.width}: bookmark jump must retain paragraph context for stale-offset recovery`)
 }
 
 async function assertInlineDesktopCacheZone(page) {
@@ -494,6 +669,8 @@ async function runDesktopViewport(browser) {
   await installApiMocks(page)
   await page.goto(readerUrl, { waitUntil: 'networkidle' })
   await page.waitForSelector('.reader-body p', { timeout: 10000 })
+  await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: false })
+  const selectedBookmarkText = await createBookmarkFromSelectedText(page, viewport, { fullscreen: false })
   await page.locator('.reader-left-rail button[title="设置"]').click()
   await page.waitForSelector('.reader-desktop-workspace .settings-body', { timeout: 10000 })
   await page.locator('.theme-custom-button').click()
@@ -507,11 +684,13 @@ async function runDesktopViewport(browser) {
   assert(await page.locator('.reader-right-rail button[title="日间模式"]').count() === 1, 'desktop: semantic night mode must update the rail toggle')
   await page.locator('.reader-right-rail button[title="书签"]').click()
   await assertDesktopReaderDialog(page, '.global-bookmark-dialog', '书签')
-  await editBookmarkWithGlobalForm(page, { width: 1440, height: 900 }, { fullscreen: false })
-  await closeGlobalReaderDialog(page, '.global-bookmark-dialog')
+  await exerciseBookmarkManager(page, viewport, { fullscreen: false, selectedText: selectedBookmarkText })
   await page.locator('.reader-right-rail button[title="搜索正文"]').click()
   await assertDesktopReaderDialog(page, '.global-content-search-dialog', '搜索正文')
   await closeGlobalReaderDialog(page, '.global-content-search-dialog')
+  await page.locator('.reader-right-rail button[title="书籍信息"]').click()
+  await assertReaderBookInfoDialog(page, viewport, { fullscreen: false })
+  await closeReaderBookInfoDialog(page)
   await page.locator('.reader-page-control .progress-box').click()
   await assertInlineDesktopCacheZone(page)
   await page.locator('.reader-page-control .progress-box').click()
@@ -549,6 +728,8 @@ async function runViewport(browser, viewport) {
     throw new Error(`${error.message}\nState: ${JSON.stringify(state, null, 2)}\nFailures: ${failures.join('\n')}`)
   }
   await page.waitForSelector('.reader-body p', { timeout: 10000 })
+  await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: true })
+  const selectedBookmarkText = await createBookmarkFromSelectedText(page, viewport, { fullscreen: true })
 
   const initialTopVisible = await page.locator('.reader-mobile-top.visible').count()
   assert(initialTopVisible === 1, `${viewport.width}: mobile toolbar should be visible by default`)
@@ -578,11 +759,13 @@ async function runViewport(browser, viewport) {
   await closeWorkspace(page, 'settings-toggle')
   await page.locator('.reader-mobile-float-left.visible button[title="书签"]').click()
   await assertGlobalReaderDialog(page, viewport, '.global-bookmark-dialog', '书签')
-  await editBookmarkWithGlobalForm(page, viewport, { fullscreen: true })
-  await closeGlobalReaderDialog(page, '.global-bookmark-dialog')
+  await exerciseBookmarkManager(page, viewport, { fullscreen: true, selectedText: selectedBookmarkText })
   await page.locator('.reader-mobile-float-left.visible button[title="搜索正文"]').click()
   await assertGlobalReaderDialog(page, viewport, '.global-content-search-dialog', '搜索正文')
   await closeGlobalReaderDialog(page, '.global-content-search-dialog')
+  await page.locator('.reader-mobile-float-left.visible button[title="书籍信息"]').click()
+  await assertReaderBookInfoDialog(page, viewport, { fullscreen: true })
+  await closeReaderBookInfoDialog(page)
   await page.locator('.reader-mobile-bottom.visible button[title="缓存章节"]').click()
   await assertInlineMobileCacheZone(page, viewport)
   await page.locator('.reader-mobile-bottom.visible button[title="缓存章节"]').click()

@@ -34,10 +34,38 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Import | `/api/imports/books/preview`, `/api/imports/books`, `/api/imports/txt` | Preview may return `importToken`; import must be able to reuse staged content. |
 | Uploads | `/api/uploads` | Uploaded assets must be validated and rooted under data uploads. |
 | Cache | `/api/cache/stats`, `/api/cache`, `/api/books/:id/cache` | Cache operations must not delete unrelated user data. |
-| Replace rules | `/api/replace-rules*` | Batch and test semantics should match upstream-visible replacement behavior. |
+| Replace rules | `/api/replace-rules*` | See the P2 replace-rule contract below: stable name-upsert order and upstream-visible plain/regex/scope semantics. |
 | RSS | `/api/rss/sources`, `/api/rss/articles` | Remote fetch limits and parser safety apply. |
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
+
+## P0 local TXT preview and staged-reparse contract
+
+Status: implemented and backend/frontend-tested on 2026-07-11 against reader-dev `BookController.kt`, `LocalBook.kt` and `TextFile.kt`. OpenReader retains its JWT/JSON staging adaptation while restoring the upstream distinction between automatic no-TOC fallback and an explicit rule that found no headings.
+
+| Method / path | Request | Success and side effects | Errors / retry contract |
+|---|---|---|---|
+| `POST /api/imports/books/preview` | Multipart `file`, optional `title`, `author`, `tocRule`, or an existing `importToken` instead of `file`. JWT required. | A new upload creates a caller-scoped immutable stage before parsing. Successful response is `200` with `{title,author,chapterCount,chapters,importToken}`. An empty `tocRule` uses the automatic first-512,000-byte probe and may return pseudo chapters for text without a TOC. | Unsupported/invalid input and an explicit `tocRule` that finds no chapters return `400` `{error,importToken}`. The token is retained for the caller to submit another preview rule; no book rows/cache files are created. |
+| `POST /api/imports/books` | Same multipart/token fields plus existing category fields. JWT required. | `201` creates the book only from the staged bytes or submitted upload. A consumed staged token is deleted only after a successful import. | `400` for unsupported/parse/no-readable-chapter errors; failed parse/import leaves an existing stage reusable until normal expiry. |
+| `POST /api/local-store/import-preview`, `POST /api/webdav/import-preview` | JSON `{paths}` or `{items:[{path,title,author,tocRule}]}`. JWT/store permission required. | `200 {items}`. Each readable item is copied once to a caller-scoped immutable stage; success item contains `{path,book,importToken}`. | A parser failure remains an item-level `{path,error,importToken}` in the `200` envelope. The token remains valid for a later `{items:[{path,importToken,tocRule}]}` preview/import; mounted-file mutation/removal cannot affect that retry. |
+| `POST /api/local-store/import`, `POST /api/webdav/import` | Existing paths/items/category body. | Successful staged item uses the original preview bytes and deletes its token after durable import. | Item-level parser failures retain the staged token and do not create book/cache rows. A container response does not expose paths outside the caller's scoped store. |
+
+This API shape is an allowed Go/JWT adaptation: reader-dev returns an empty chapter list in its controller response for a local `TocEmptyException`; OpenReader preserves deployed REST paths and reports the direct-preview failure as a `400`, but must preserve the retryable staged context in both direct and storage-backed flows.
+
+## P2 replace-rule API contract
+
+Status: extracted 2026-07-11 from fixed `reader-dev` `ReplaceRuleController.kt`, `ReplaceRule.vue`, `ReplaceRuleForm.vue`, and `Reader.vue`. OpenReader keeps REST/SQLite/JWT routes but must preserve the user-visible rule pipeline.
+
+| Method / path | Request and validation | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `GET /api/replace-rules` | None. | Returns only the caller's rules in stable insertion order (`id ASC`), never update-time order. Compatibility output retains `enabled` plus legacy-readable `isEnabled`. | JWT required; `500` only for a read failure. |
+| `POST /api/replace-rules` | `{name, pattern, replacement, scope, isRegex, enabled|isEnabled}`. Name, pattern and scope are required; a missing `isRegex` means plain text; regex must compile under the reader-compatible case-insensitive mode. | Current-user name-upsert. Appending returns `201`; replacing the existing same-name row in place returns `200`, without moving pipeline order. Emits `replace_rules_update` after commit. | JWT required; `400` for missing fields/invalid regex; no cross-user lookup. |
+| `PUT /api/replace-rules/:id` | Same validated fields. | Updates only the owned ID and does not change its stable position. Emits one post-commit update event. | JWT required; `400` invalid body/regex, `404` missing/foreign ID, `409` when renaming to another existing current-user name. |
+| `POST /api/replace-rules/batch` | JSON array. Blank name/pattern rows retain the upstream-compatible `skipped` result. Every accepted rule must have a scope and valid plain/regex mode before any accepted row is written. | Transactional current-user name-upsert in input order, returning `{rules,created,updated,skipped}`. A malformed regex rejects the batch without a partial accepted-row write. | JWT required; `400` malformed array/regex/scope, `500` before a failed transaction can mutate state. |
+| `POST /api/replace-rules/test` | `{pattern,replacement,isRegex,text}` using the same compiler/mode as real Reader content. | Returns `{input,output,changed}` only; no persistence or sync event. | JWT required; `400` invalid regex or missing pattern/text. |
+| `DELETE /api/replace-rules/:id`, `POST /api/replace-rules/batch-delete` | Existing ID paths/payload. | Delete only owned rows, retain ordered `deletedIds`, and emit after durable deletion. | JWT required; single missing/foreign ID is `404`; invalid empty batch is `400`. |
+
+Reader content applies enabled matching rules only to text chapters, in the same listed order: plain text changes the first occurrence; regex changes every case-insensitive occurrence. EPUB and audio content bypass the pipeline. A legacy persisted empty scope remains global only to avoid breaking existing OpenReader data; any successful edit/import writes an explicit non-empty scope.
 
 ## P1-D4 shelf-operation API contract
 
@@ -49,6 +77,7 @@ Status: extracted 2026-07-10. These routes retain their OpenReader paths while m
 | `POST /api/books/batch` | `{ "action": "delete"\|"category"\|"category-add"\|"category-remove"\|"cache"\|"clear-cache", "bookIds": number[], ... }` | Category and delete actions are transactional. Delete removes category links, chapters, bookmarks, progress, scoped browser-cache references and post-commit derived files; category actions emit one scoped `bookshelf_update`. Cache actions keep bounded request limits and emit affected shelf items only after durable cache state. | Owner only. Invalid/foreign category ids fail without mutation. Foreign book ids never expose or mutate another user's record; the response must distinguish an empty owned selection from a successful cross-user mutation. |
 | `DELETE /api/books/:id` | None | Removes the caller's book rows in one transaction, broadcasts `bookshelf_delete` after commit, then prunes only that book's unreferenced remote cache files and private imported archive directory. | Owner only; `404` for another user's id. Failure before commit leaves all rows/files unchanged. Post-commit derived-cache cleanup is idempotent and must not delete another user's/shared path. |
 | `POST /api/books/:id/cache` | `{ "chapterIndex"?: number, "all"?: boolean, "count"?: number }` | Remote books cache a bounded chapter window and return `{ cached, requested, book }`; local books return the existing no-server-cache result. A completed mutation publishes the refreshed shelf item. | Owner only; malformed payload `400`, missing book `404`. Count is bounded to protect server resources. |
+| `POST /api/books/:id/cache/stream` | Same bounded cache body as `/cache`; authenticated `fetch` request with a readable response body. | Returns `text/event-stream`: each `message` event carries `{ bookId, cached, requested, total, chapterIndex, failed }`; terminal `end` carries `{ bookId, cached, requested, failed, book }`; a terminal `error` carries a client-safe error. Aborting the authenticated request is the cancellation action: the server stops scheduling further chapter fetches and does not send a shelf update for an incomplete job. The client must not put a JWT in a query string. | Owner only. Validation failures are ordinary JSON `400`/`404` before the stream opens. A disconnected/cancelled request is not an API error and leaves already-written bounded cache entries usable. |
 | `GET /api/cache/stats` | None | Returns only the authenticated user's remote cache counts/size. The response never includes an absolute host cache path. | JWT required; it must not reveal another user's chapter count, filename, or root. |
 | `DELETE /api/cache` | None | Clears only the authenticated user's remote chapter-cache references in a transaction, then removes only cache files left unreferenced by all chapter rows; emits a current-user shelf refresh after commit. | JWT required; no other user's database cache state or still-referenced file may be removed. |
 | `POST /api/books/export` | `{ "bookIds": number[], "format": "txt"\|"epub"\|"json" }` | A single local book returns its archived original file. Remote books retain TXT/EPUB export. JSON and multi-book ZIP are explicit OpenReader extensions and remain user-scoped/bounded. | JWT required. Empty/foreign-only selections are client errors; safe `Content-Disposition` names must not expose host paths. |
@@ -267,7 +296,32 @@ Implementation tests must cover:
 | `MOVE` | `/webdav/*path` | Rename/move. |
 | `DELETE` | `/webdav/*path` | Delete. |
 
-WebDAV paths must be normalized, rooted, and protected from traversal.
+WebDAV paths must be normalized, rooted, and protected from traversal. Every raw WebDAV method requires the standard `Authorization: Bearer <JWT>` header: missing/invalid credentials return `401` before filesystem access; an authenticated user whose `canAccessStore` is false receives `403` before path parsing or file mutation. The browser uses header-based authenticated requests and must never append a JWT to a download URL.
+
+## Workspace storage access contract
+
+`/api/local-store*`, `/api/webdav/import*`, and `/api/backup/*` require the same authenticated `canAccessStore` capability. A missing/invalid token returns `401`; a disabled capability returns `403`; handlers must perform that check before validating a supplied path, parsing a multipart body, reading an archive, or creating a backup.
+
+Storage resolves without destructive migration: administrators continue to use the existing LocalStore/WebDAV roots so mounted legacy files remain readable; regular users resolve below `users/<safe-username>/` within the same mounts. Generated backup list/download/restore follows that same scope, and scheduled backups are generated per user. Direct LocalStore/WebDAV imports may carry a user-scoped `importToken` returned by preview; on confirmation it authoritatively selects the immutable staged bytes rather than rereading the mutable storage path.
+
+## Bookmark contract
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `GET /api/books/:id/bookmarks` | None | Lists the caller-owned book's independent bookmarks in stable `id ASC` creation order. | JWT and book ownership required; foreign/missing book is `404`. |
+| `POST /api/books/:id/bookmarks` | Reader location plus non-empty `excerpt`/paragraph context and optional `chapterId`. | Creates one immutable location/context record and broadcasts after the durable write. Numeric position fields are normalized. | JWT/current-book required; empty context, oversize data, and a chapter belonging to another book are `400`. |
+| `POST /api/books/:id/bookmarks/batch` | Array of the same payload shape. | Validates every row before one transaction; request order becomes creation order and a bad row leaves no valid prefix behind. | JWT/current-book required; empty/malformed batches or any invalid row return `400`. |
+| `PUT /api/bookmarks/:id` | `{ "note": string }` | Edits the note only; the original book, chapter, offset, title, and paragraph context remain unchanged. | JWT/current-user required; absent row `404`, oversize note `400`. |
+| Backup / restore `bookmarks.json` | Existing JSON shape, including `bookTitle` and `bookUrl`. | Exports ID/creation order; restores modern timestamped rows idempotently without merging independent same-location bookmarks, and remaps a matching destination chapter by index. | Per-user restore scope applies. Legacy rows without timestamps remain readable through the narrow fallback identity. |
+
+## Reader book-content search contract
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `GET /api/books/:id/search` | `q` (or legacy `keyword`), optional `paged`, `lastIndex`, `chapterLimit`, `matchLimit`, `scanUntilMatch`, and local/remote work bounds. | Lists caller-owned book matches in source chapter order. A cursor always represents the last fully scanned chapter: all matches from that final chapter are returned before a later request can start at its successor. Response preserves `{ list, lastIndex, hasMore, total }` and additionally reports explicit `incomplete`, `unavailableChapters`, and `truncated` states. | JWT/current-book required; blank query `400`, foreign/missing book `404`. Request cancellation stops remote fetch scheduling without writing a false successful result. A returned incomplete page is `200` with a client-safe state, not a host/source error. |
+| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, `keyword`, `lastIndex`, `size` aliases. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Additive `incomplete`, `unavailableChapters`, and `truncated` data fields expose a safety-bound partial scan without breaking existing clients. | JWT required; legacy validation errors remain `isSuccess: false` messages for deployed Reader3 clients. |
+
+OpenReader retains bounded remote/local scanning and case-insensitive normalized matching as runtime/security adaptations. A bound may never silently advance `lastIndex` past omitted same-chapter matches: it must set `truncated: true`, and the UI must say that results are incomplete. Unavailable remote content is likewise surfaced by `incomplete/unavailableChapters` rather than as a false “没有匹配内容”.
 
 ## Compatibility rule
 

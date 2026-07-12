@@ -18,36 +18,31 @@
   <OverlayBookmarkForm :is-mobile="isMobileOverlay" />
 
   <OverlayLocalStore
-    :direction="wideDrawerDirection"
-    :size="wideDrawerSize"
+    :is-mobile="isMobileOverlay"
   />
 
   <OverlayWebDAV
-    :direction="wideDrawerDirection"
-    :size="wideDrawerSize"
     :is-mobile="isMobileOverlay"
   />
 
   <OverlayBackups
+    :is-mobile="isMobileOverlay"
+  />
+
+  <OverlayWorkspaceSettings
     :direction="wideDrawerDirection"
     :size="wideDrawerSize"
   />
 
   <OverlayUserManagement
-    :direction="wideDrawerDirection"
-    :size="wideDrawerSize"
     :is-mobile="isMobileOverlay"
   />
 
   <OverlayReplaceRules
-    :direction="wideDrawerDirection"
-    :size="wideDrawerSize"
     :is-mobile="isMobileOverlay"
   />
 
   <OverlayRSS
-    :direction="wideDrawerDirection"
-    :size="wideDrawerSize"
     :is-mobile="isMobileOverlay"
   />
 </template>
@@ -74,6 +69,7 @@ import OverlayRSS from './overlays/OverlayRSS.vue'
 import OverlaySources from './overlays/OverlaySources.vue'
 import OverlayUserManagement from './overlays/OverlayUserManagement.vue'
 import OverlayWebDAV from './overlays/OverlayWebDAV.vue'
+import OverlayWorkspaceSettings from './overlays/OverlayWorkspaceSettings.vue'
 
 const reader = useReaderStore()
 const windowWidth = ref(currentViewportWidth())
