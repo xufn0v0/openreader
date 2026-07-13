@@ -39,6 +39,19 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
 
+## P2-Parser-3A source-script error contract
+
+Status: implemented and verified on 2026-07-13 against fixed reader-dev `BaseSource.kt`, `AnalyzeUrl.kt` and `WebBook.kt`. This is a Go/JWT security adaptation, not a route redesign.
+
+| Affected existing route family | Trigger | Required response and side effect |
+| --- | --- | --- |
+| Search and explore (`/api/search`, `/api/explore/*`) | Source `header` starts with `@js:`/`<js>` or `loginCheckJs` is non-blank. | Keep the route's current status and top-level `error`; append `code: "source_rule_unsupported"` and `stage: "search"` or `"explore"`. Reject before any remote request and do not create a source-failure cache row. |
+| Remote add/refresh/change-source and reader catalogue | The same source-script trigger. | Keep existing route status and `error`; append `code: "source_rule_unsupported"`, `stage: "book_info"`. No remote request, cache mutation or source-failure row. |
+| Reader chapter content | The same source-script trigger. | Keep the existing `502` response and `error`; append `code: "source_rule_unsupported"`, `stage: "content"`. No remote request, chapter-cache write or source-failure row. |
+| Source debug (`/api/sources/:id/test*`) | The same source-script trigger. | Retain authenticated `200` debug envelopes with their existing result field plus redacted `error`, `code: "source_rule_unsupported"` and the relevant stage. No remote request and no source-failure row. |
+
+The response must never contain the script, source header, cookie, URL query, remote response body or a host path. Static JSON headers remain supported. `preUpdateJs`, `content.webJs`, option `webJs`, and `sourceRegex` are preserved but are not included in this trigger because the fixed upstream call graph does not consume them; a later implementation needs a fresh contract.
+
 ## P2 invalid-source cache API contract
 
 Status: implemented and tested on 2026-07-12 from fixed reader-dev `BookController.kt`, `Index.vue` and `vuex.js`. See [source-failure-cache.md](source-failure-cache.md) for data and state details.
@@ -363,3 +376,24 @@ OpenReader retains bounded remote/local scanning and case-insensitive normalized
 ## Compatibility rule
 
 If a refactor changes frontend routes, API paths should stay stable unless an old path is kept as a redirect/shim. Document removals before deleting compatibility behavior.
+
+## P2 parser structured-error contract (P2-Parser-2A implemented)
+
+Status: implemented and API-tested on 2026-07-13. Reader-dev has no equivalent REST envelope, so OpenReader preserves deployed transport semantics while making parser failures machine-readable and safe. This remains independent from the separately implemented P2-Parser-1G persistent-variable migration.
+
+| Path family | Existing stable behavior | Additive contract |
+|---|---|---|
+| `GET /api/books/:id/chapters/:index/content` | Remote failure remains `502 {"error":"failed to load chapter content"}`. | Implemented optional `code` (`source_rule_invalid`, `source_rule_unsupported`, `source_request_failed`, `content_unavailable`) and `stage: "content"`. |
+| `POST /api/search` (single paged source), `GET /api/explore/:sourceId`, `POST /api/books/remote`, source change/refresh | Existing status and top-level `error` remain stable. | Implemented stable `error` text plus optional `code`/`stage` (`search`, `explore`, `book_info`); raw Go/source-request detail is never serialized. |
+| `/api/sources/:id/test*` and batch test | Existing authenticated `200` shape includes its result payload plus `error`/`message`. | Implemented optional `code`/`stage` (`search`, `toc`, `content`) without changing `200` or result fields. Debug messages never include variable values, rule source, request URL query, response body, cookie, authorization header, JWT, WebDAV secret or filesystem path. |
+
+`code` and `stage` are optional additive fields. Legacy frontend paths continue to use `error`; no parser error becomes an authentication failure, and only `engine.IsSourceRequestError` may enter `source_failures`. `backend/api/source_error_contract_test.go` proves remote request failures are redacted for paged search, explore, source debug and remote-book creation, while an invalid content rule keeps its existing `502` text and receives `source_rule_invalid` / `content`.
+
+## P2 parser persistent-variable contract (P2-Parser-1G implemented)
+
+| Path / payload | Additive behavior | Compatibility and safety |
+| --- | --- | --- |
+| Search / explore result | Result objects may include opaque `variable` JSON. | Existing consumers may ignore it. The frontend forwards it only through the existing add-remote-book payload; it is never rendered as HTML or interpreted by JavaScript. |
+| `POST /api/books/remote` | Optional `variable` accepts the bounded JSON string map and seeds BookInfo/TOC parsing. Returned book keeps normal shape with optional `variable`. | Omitted values remain empty. Malformed/non-string/oversized maps return existing-style `400` with safe `error`/`code`/`stage`, before a remote request. |
+| Remote refresh/change-source and chapter content | The server reads/writes optional Book/Chapter variables around existing parser calls. Chapter content stores the returned Book/Chapter map atomically with its cache path. | Existing paths and successful response bodies do not change. A source semantics change clears obsolete state rather than translating or exposing it. |
+| Backup restore | `bookshelf.json.variable` and optional `chapterVariables.json` are accepted. | Old archives need neither field. New maps are fully validated before restore mutation and target only the authenticated destination user's source-name-resolved book/chapters; source/book/chapter database IDs are never variable identity. |
