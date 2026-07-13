@@ -1,11 +1,11 @@
-name: Build and Push Docker Image (amd64)
+name: Build OpenReader amd64
 
 on:
   push:
-    branches: \[ main \]
-    tags: \[ v\* \]
-  pull\_request:
-    branches: \[ main \]
+    branches: [ main ]
+    tags: [ v* ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -25,19 +25,19 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.repository\_owner }}
-          password: ${{ secrets.GITHUB\_TOKEN }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & Push amd64
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event\_name != 'pull\_request' }}
+          push: ${{ github.event_name != 'pull_request' }}
           platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository\_owner }}/openreader:latest
-            ghcr.io/${{ github.repository\_owner }}/openreader:amd64
+            ghcr.io/${{ github.repository_owner }}/openreader:latest
+            ghcr.io/${{ github.repository_owner }}/openreader:amd64
           build-args: |
-            BUILD\_DATE=${{ github.event.head\_commit.timestamp }}
-            VCS\_REF=${{ github.sha }}
-            VERSION=${{ github.ref\_name }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
