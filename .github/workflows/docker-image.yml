@@ -43,9 +43,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
             latest
-          labels: |
-            org.opencontainers.image.title=OpenReader
-            org.opencontainers.image.description=开源阅读软件
 
       - name: Build and push AMD64 Docker image
         uses: docker/build-push-action@v6
@@ -57,7 +54,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BUILD_DATE=${{ fromJSON('{"date":"'}${ { github.event.head_commit.timestamp || 'unknown' } }{'"}').date }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp || 'unknown' }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ github.ref_name }}
           cache-from: type=gha
