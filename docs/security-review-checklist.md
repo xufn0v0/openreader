@@ -42,6 +42,15 @@ Use this checklist for security-sensitive changes and release reviews.
 - [ ] Source pagination has a stop condition.
 - [ ] A bad source cannot block unrelated searches indefinitely.
 
+## P2 invalid-source cache follow-up
+
+- [x] Failure records are scoped by authenticated user and source ID; a global source failure never leaks to another user.
+- [x] Cached error messages are bounded and client-safe: no JWT, cookie, authorization header, WebDAV credential, full URL query, response body or host path is stored or returned.
+- [x] Expiry, source edit and source delete make stale rows ineligible before normal-source suppression or failed-only UI rendering.
+- [x] Client cancellation and empty source results do not create a cache entry that could suppress a healthy source.
+
+Evidence: `backend/api/source_failure_contract_test.go`, `frontend/tests/sourceFailureCacheContract.test.mjs`, and three-viewport `scripts/smoke/source-workspace-contract.mjs`.
+
 ## Release note
 
 For each release, record which checklist sections were relevant and which tests/probes covered them.
@@ -56,6 +65,25 @@ For each release, record which checklist sections were relevant and which tests/
 - [ ] Archive entry/expanded-size and parser-work limits still need explicit bounds; stage cleanup must also run without a later user request.
 
 Evidence for the checked items: `backend/api/workspace_storage_access_contract_test.go`, `backend/api/workspace_import_stage_contract_test.go`, `backend/api/import_size_contract_test.go`, `frontend/tests/webdavAuthContract.test.mjs`, full Go/frontend test suites and production frontend build. This remains not a storage/backup release approval.
+
+## P2 import parser and staged-preview follow-up
+
+- [x] Initial EPUB parsing now validates ZIP paths/symlinks/duplicates/count/per-entry/expanded-size before local import work; every archive-member read is bounded.
+- [x] Initial CBZ parsing retains its existing safe checks while using the same local-import limit policy.
+- [x] UMD chapter-table arithmetic and declared count are bounded before allocation; PDF page count and extracted text have explicit parser limits.
+- [x] Expired and orphaned preview tokens are cleaned from every user directory at startup and hourly, without touching active previews or any mounted source/library data.
+- [x] Backup ZIP restore now receives a separately tested compressed/entry/expanded-size budget; it remains a distinct compatibility slice from parser/stage handling.
+
+Evidence: `backend/engine/import_limits_contract_test.go`, `backend/services/localbook/importer_test.go`, `backend/api/workspace_import_stage_contract_test.go`, `backend/config/config_test.go`, and full `go test ./...`. Docker mounted-volume/backup validation remains required before this slice is released.
+
+## P2 backup restore follow-up
+
+- [x] Multipart and WebDAV backup restore enforce one compressed input bound before an allocation or restore mutation.
+- [x] ZIP member paths, duplicate canonical names, count, per-member bytes and cumulative expanded bytes are validated before restore dispatch; restore dispatch receives only the bounded preflight data.
+- [x] Backend accepts only normalized `.zip` WebDAV restore targets and does not disclose a mounted path or archive member in client errors.
+- [x] Structural archive failure has no user-data mutation; valid reader-dev/Legado/OpenReader formats preserve count/event compatibility.
+
+Evidence: `backend/api/backup_restore_contract_test.go`, existing reader-dev/Legado/OpenReader backup fixtures in `backend/api/api_test.go`, and bookmark restore fixtures. Mounted-volume Docker smoke remains mandatory before release.
 
 ## P2 replace-rule review
 
