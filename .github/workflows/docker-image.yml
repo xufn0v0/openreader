@@ -1,9 +1,8 @@
-name: Build OpenReader amd64
-
+name: Build OpenReader amd64 (Fork Fix)
 on:
   push:
     branches: [ main ]
-    tags: [ v* ]
+    tags: ["v*"]
   pull_request:
     branches: [ main ]
 
@@ -15,10 +14,10 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout source
+      - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Setup Buildx
+      - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login GHCR
@@ -28,7 +27,7 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Push amd64
+      - name: Build & Push amd64 image
         uses: docker/build-push-action@v6
         with:
           context: .
