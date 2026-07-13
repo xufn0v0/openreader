@@ -63,6 +63,16 @@ docker buildx imagetools inspect ghcr.io/changshengyu/openreader:latest
 
 脚本会把 `VERSION`、`VCS_REF` 和 `BUILD_DATE` 写入 Go 二进制和 OCI 镜像标签，设置页显示的构建信息不再是 `unknown`。
 
+为保证本地构建可复现，脚本会在 Docker 构建前从宿主机 Go 模块缓存生成临时 vendor 上下文。因此构建容器无需自行下载 Go 依赖，适用于 OrbStack 虚拟机网络与宿主机网络不同的情况。临时目录会在结束时自动删除，不会提交进仓库；只有在需要检查或复用该上下文时才设置 `GO_VENDOR_DIR=/绝对路径`，本地构建排障时可通过 `BUILD_PROGRESS=plain` 输出 Buildx 详细日志。
+
+正式的 `RELEASE=1` 构建会自动使用宿主机网络 OCI 上传器：部分 OrbStack/Docker 的 `buildx --push` 会完成本机构建却未在 GHCR 留下 manifest。该路径仍只在本机构建，凭据仅由本机 Docker credential helper 在内存中读取，不会写入日志或仓库。非正式发布仍保持 Docker 原有推送路径，需要时可显式启用：
+
+```bash
+HOST_OCI_PUSH=1 ./scripts/docker-build-push.sh
+```
+
+OCI 上传器会输出 blob/manifest 进度；每个 registry 请求默认 45 秒超时，并对临时网络/5xx 错误重试三次。慢速网络可通过 `OPENREADER_OCI_REQUEST_TIMEOUT_MS` 与 `OPENREADER_OCI_REQUEST_ATTEMPTS` 调整；仅在明确需要 Docker buildx registry 推送且网络稳定时才使用 `HOST_OCI_PUSH=0 RELEASE=1`，凭据仍不会输出。
+
 ### 本地开发
 
 **后端：**

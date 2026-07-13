@@ -157,6 +157,83 @@ func TestInvalidSourceCacheIncludesExplicitHealthFailuresOnly(t *testing.T) {
 	}
 }
 
+func TestInvalidSourceCacheDoesNotSuppressUnsupportedParserRules(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := registerSourceFailureUser(t, router, "failure-rule-user")
+	source := models.BookSource{Name: "脚本规则源", BaseURL: "https://rule-failure.example", Enabled: true, Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		SearchURL:    "https://rule-failure.example/search?q={keyword}",
+		BookListRule: "@js:result",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`<html></html>`)),
+				Header:     make(http.Header),
+				Request:    request,
+			}, nil
+		}),
+	})
+	defer restoreHTTPClient()
+
+	callSourceFailureSearch(t, router, token, source.ID)
+	if rows := getInvalidSourceRows(t, router, token); len(rows) != 0 {
+		t.Fatalf("unsupported parser rule must not suppress a source: %#v", rows)
+	}
+}
+
+func TestSourceDebugDoesNotCacheLocalParserRuleErrors(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := registerSourceFailureUser(t, router, "failure-debug-rule-user")
+
+	for index, rule := range []string{
+		"@CSS:.name@text##[",
+		`@put:{"token":1}@CSS:.name@text`,
+	} {
+		source := models.BookSource{Name: "本地规则错误源", BaseURL: "https://local-rule-error.example", Enabled: true, Charset: "utf-8"}
+		if err := source.SetRules(models.BookSourceRule{
+			SearchURL:    "https://local-rule-error.example/search?q={keyword}",
+			BookListRule: ".book",
+			BookNameRule: rule,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := server.db.Create(&source).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		restoreHTTPClient := engine.SetHTTPClient(&http.Client{
+			Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`<article class="book"><span class="name">测试书</span></article>`)),
+					Header:     make(http.Header),
+					Request:    request,
+				}, nil
+			}),
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/sources/"+uintString(source.ID)+"/test", strings.NewReader(`{"keyword":"测试"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+		writer := httptest.NewRecorder()
+		router.ServeHTTP(writer, req)
+		restoreHTTPClient()
+		if writer.Code != http.StatusOK || !strings.Contains(writer.Body.String(), "book source rule") {
+			t.Fatalf("local rule %d response = %d %s", index, writer.Code, writer.Body.String())
+		}
+		if rows := getInvalidSourceRows(t, router, token); len(rows) != 0 {
+			t.Fatalf("local parser rule %d must not create failure cache: %#v", index, rows)
+		}
+	}
+}
+
 func sourceFailureTestSource(t *testing.T, name, baseURL string) models.BookSource {
 	t.Helper()
 	source := models.BookSource{Name: name, BaseURL: baseURL, Enabled: true, Charset: "utf-8"}

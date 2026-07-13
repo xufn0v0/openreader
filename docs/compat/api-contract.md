@@ -24,9 +24,9 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Group | Representative paths | Contract notes |
 |---|---|---|
 | User/settings/admin | `/api/me`, `/api/settings/:key`, `/api/admin/users` | Settings are per user. Admin endpoints require admin role. |
-| Sources | `/api/sources`, `/api/sources/import`, `/api/sources/:id/test*` | Preserve reader3-compatible source fields and parser semantics. |
+| Sources | `/api/sources`, `/api/sources/import`, `/api/sources/:id/test*` | Preserve reader3-compatible source fields and parser semantics. Test endpoints keep their existing authenticated `200` response shape (`results`/`chapters`/`content` plus `error`), but may write `source_failures` only for remote request errors. Local unsupported or invalid parser rules remain visible in `error` and never suppress the source. |
 | Bookshelf | `/api/books`, `/api/books/:id`, `/api/books/batch`, `/api/books/export` | Book operations must not cross user boundaries. |
-| Reader content | `/api/books/:id/chapters`, `/api/books/:id/chapters/:index/content` | Content fetch should use cache when valid and return stable chapter data. |
+| Reader content | `/api/books/:id/chapters`, `/api/books/:id/chapters/:index/content` | Content fetch uses a valid cache first and returns stable chapter data. On a remote cache miss, one single `nextContentUrl` that resolves to the adjacent catalog chapter is a chapter boundary, not continuation content. A blank text `contentRule` remains the existing client-safe `502` response but must not cache page HTML or create a `source_failures` row; audio sources retain their approved blank-rule media-URL behavior. |
 | Reader legacy search | `/api/reader3/searchBookContent` | Compatibility endpoint; keep until old clients/routes no longer need it. |
 | Progress | `/api/progress/:bookID`, `/api/progress` | Progress writes must be conflict-safe and user scoped. |
 | Bookmarks | `/api/books/:id/bookmarks`, `/api/bookmarks/:id` | Bookmark CRUD and batch operations remain user/book scoped. |
@@ -48,7 +48,7 @@ Status: implemented and tested on 2026-07-12 from fixed reader-dev `BookControll
 | `GET /api/sources/invalid` | None. | Returns `[]` or current-user, unexpired source records merged with `{errorMessage,failedAt,expiresAt}`. It never starts a source request. Expired/deleted/edited-source rows are pruned/ignored. | JWT required. `401` invalid/missing session; `500` only before a database read can complete. No source credentials, query string, remote response body, host path or internal error appears in `errorMessage`. |
 | `POST /api/reader3/getInvalidBookSources` | No body. | Compatibility adapter for the same caller-scoped 600-second failures; no new frontend flow may depend on this legacy path. | JWT required and same isolation/error rules as the canonical route. |
 
-Source-facing routes retain their current response schemas. A real source request failure may create/update exactly one current-user failure cache row after its request has failed; a blank result and a client-cancelled context do not. During its 600-second TTL the same caller's normal multi-source search/candidate flow skips that source, while an explicit health check may still probe it.
+Source-facing routes retain their current response schemas. Only a real remote source-request failure may create/update exactly one current-user failure cache row after its request has failed; a blank result, a rule syntax/unsupported-rule/configuration error, and a client-cancelled context do not. During its 600-second TTL the same caller's normal multi-source search/candidate flow skips that source, while an explicit health check may still probe it and may record a configuration failure for its health result.
 
 ## P2 backup restore archive contract
 

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -77,6 +79,46 @@ func TestParseTOCFollowsNextPagesWithoutLoopsOrDuplicates(t *testing.T) {
 	}
 	if strings.Join(requested, ",") != "/catalog/1,/catalog/2,/catalog/3" {
 		t.Fatalf("expected each toc page once in source order, got %+v", requested)
+	}
+}
+
+func TestParseTOCOnlyUsesFirstLevelWhenRuleReturnsMultipleNextPages(t *testing.T) {
+	pages := map[string]string{
+		"/branch-root.html": sourceCompatFixture(t, "branch-root.html"),
+		"/branch-a.html":    sourceCompatFixture(t, "branch-a.html"),
+		"/branch-b.html":    sourceCompatFixture(t, "branch-b.html"),
+		"/branch-c.html":    sourceCompatFixture(t, "branch-c.html"),
+	}
+	requested := make([]string, 0, 4)
+	restore := SetHTTPClient(&http.Client{Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requested = append(requested, request.URL.Path)
+		body, ok := pages[request.URL.Path]
+		if !ok {
+			t.Fatalf("unexpected toc branch page: %s", request.URL.String())
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: request}, nil
+	})})
+	defer restore()
+
+	source := models.BookSource{Name: "目录分叉源", BaseURL: "https://source.example", Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		TOCURLRule:      "/branch-root.html",
+		ChapterListRule: ".chapter",
+		ChapterNameRule: "a|text",
+		ChapterURLRule:  "a|attr:href",
+		NextTOCURLRule:  ".toc-next|attr:href",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chapters, err := ParseTOC("/book", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 3 || chapters[0].Title != "目录首页" || chapters[1].Title != "目录 A" || chapters[2].Title != "目录 B" {
+		t.Fatalf("multi-next toc must retain only first-level branches: %+v", chapters)
+	}
+	if got := strings.Join(requested, ","); got != "/branch-root.html,/branch-a.html,/branch-b.html" {
+		t.Fatalf("multi-next toc requests = %s", got)
 	}
 }
 
@@ -228,6 +270,123 @@ func TestFetchChapterContentFollowsNextPagesInOrder(t *testing.T) {
 	}
 	if len(requested) != 3 {
 		t.Fatalf("expected three content requests without loops, got %+v", requested)
+	}
+}
+
+func TestFetchChapterContentOnlyUsesFirstLevelWhenRuleReturnsMultipleNextPages(t *testing.T) {
+	pages := map[string]string{
+		"/branch-root.html": sourceCompatFixture(t, "branch-root.html"),
+		"/branch-a.html":    sourceCompatFixture(t, "branch-a.html"),
+		"/branch-b.html":    sourceCompatFixture(t, "branch-b.html"),
+		"/branch-c.html":    sourceCompatFixture(t, "branch-c.html"),
+	}
+	requested := make([]string, 0, 4)
+	restore := SetHTTPClient(&http.Client{Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requested = append(requested, request.URL.Path)
+		body, ok := pages[request.URL.Path]
+		if !ok {
+			t.Fatalf("unexpected content branch page: %s", request.URL.String())
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: request}, nil
+	})})
+	defer restore()
+
+	source := models.BookSource{Name: "正文分叉源", BaseURL: "https://source.example", Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{
+		ContentRule:        ".content",
+		NextContentURLRule: ".content-next|attr:href",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	content, err := FetchChapterContentContextWithNextChapter(context.Background(), "/branch-root.html", "/branch-b.html", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "正文首页\n正文 A\n正文 B" {
+		t.Fatalf("multi-next content must retain only first-level branches: %q", content)
+	}
+	if got := strings.Join(requested, ","); got != "/branch-root.html,/branch-a.html,/branch-b.html" {
+		t.Fatalf("multi-next content requests = %s", got)
+	}
+}
+
+func TestFetchChapterContentStopsBeforeNextCatalogChapter(t *testing.T) {
+	t.Run("matching next chapter is not fetched", func(t *testing.T) {
+		requested := make([]string, 0, 2)
+		restore := SetHTTPClient(&http.Client{Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			requested = append(requested, request.URL.Path)
+			if request.URL.Path != "/chapter/1" {
+				t.Fatalf("next catalog chapter must not be requested: %s", request.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`<main class="content">第一章正文</main><a class="next" href="/chapter/2">下一页</a>`)),
+				Header:     make(http.Header),
+				Request:    request,
+			}, nil
+		})})
+		defer restore()
+
+		source := models.BookSource{Name: "章节边界源", BaseURL: "https://source.example", Charset: "utf-8"}
+		if err := source.SetRules(models.BookSourceRule{ContentRule: ".content", NextContentURLRule: ".next|attr:href"}); err != nil {
+			t.Fatal(err)
+		}
+		content, err := FetchChapterContentContextWithNextChapter(context.Background(), "https://source.example/chapter/1", "/chapter/2", source)
+		if err != nil || content != "第一章正文" {
+			t.Fatalf("next chapter boundary content = %q, %v", content, err)
+		}
+		if got := strings.Join(requested, ","); got != "/chapter/1" {
+			t.Fatalf("next chapter boundary requests = %s", got)
+		}
+	})
+
+	t.Run("different or absent next chapter keeps the single-page chain", func(t *testing.T) {
+		for _, nextChapterURL := range []string{"", "https://source.example/chapter/3"} {
+			requested := make([]string, 0, 2)
+			restore := SetHTTPClient(&http.Client{Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				requested = append(requested, request.URL.Path)
+				switch request.URL.Path {
+				case "/chapter/1":
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`<main class="content">第一页</main><a class="next" href="/appendix">下一页</a>`)), Header: make(http.Header), Request: request}, nil
+				case "/appendix":
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`<main class="content">第二页</main>`)), Header: make(http.Header), Request: request}, nil
+				default:
+					t.Fatalf("unexpected content page: %s", request.URL.String())
+					return nil, nil
+				}
+			})})
+
+			source := models.BookSource{Name: "章节边界延续源", BaseURL: "https://source.example", Charset: "utf-8"}
+			if err := source.SetRules(models.BookSourceRule{ContentRule: ".content", NextContentURLRule: ".next|attr:href"}); err != nil {
+				restore()
+				t.Fatal(err)
+			}
+			content, err := FetchChapterContentContextWithNextChapter(context.Background(), "https://source.example/chapter/1", nextChapterURL, source)
+			restore()
+			if err != nil || content != "第一页\n第二页" {
+				t.Fatalf("next chapter %q content = %q, %v", nextChapterURL, content, err)
+			}
+			if got := strings.Join(requested, ","); got != "/chapter/1,/appendix" {
+				t.Fatalf("next chapter %q requests = %s", nextChapterURL, got)
+			}
+		}
+	})
+}
+
+func TestFetchChapterContentRejectsBlankTextContentRule(t *testing.T) {
+	restore := SetHTTPClient(&http.Client{Transport: contextRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		t.Fatalf("blank text content rule must fail before fetching: %s", request.URL.String())
+		return nil, nil
+	})})
+	defer restore()
+
+	source := models.BookSource{Name: "空正文规则文本源", BaseURL: "https://source.example", Charset: "utf-8"}
+	if err := source.SetRules(models.BookSourceRule{}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := FetchChapterContent("https://source.example/chapter/1", source)
+	if !errors.Is(err, ErrInvalidSourceRule) {
+		t.Fatalf("blank text content rule error = %v, want ErrInvalidSourceRule", err)
 	}
 }
 

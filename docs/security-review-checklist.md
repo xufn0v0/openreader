@@ -51,6 +51,18 @@ Use this checklist for security-sensitive changes and release reviews.
 
 Evidence: `backend/api/source_failure_contract_test.go`, `frontend/tests/sourceFailureCacheContract.test.mjs`, and three-viewport `scripts/smoke/source-workspace-contract.mjs`.
 
+## P2 online-source evaluator review (partial)
+
+- [x] CSS, JSONPath, XPath and regex evaluation for search, explore, details, TOC and content continue to use the existing bounded source-request path; a parser error cannot enter the user-scoped invalid-source cache and suppress a source that may be repaired locally.
+- [x] JavaScript/WebJS rules are preserved but fail explicitly with `ErrUnsupportedSourceRule` at details, TOC and content as well as search; no user-supplied script executes in the Go process, browser, filesystem or server network context.
+- [x] Rule-level `##regex##replacement[##first]` transforms compile with Go RE2 after selector evaluation; invalid patterns are `ErrInvalidSourceRule`, and neither invalid nor unsupported local rules are written to `source_failures`, including source-manager test endpoints.
+- [x] `@put:`/`@get:` use a bounded request-scoped runtime only: JSON string-map writes, key/value/count/byte/depth limits, cloned search-result and multi-branch maps, no persistence, and literal-only reads. `{{ }}` remains `ErrUnsupportedSourceRule`; no variable can acquire cookie, filesystem or server-network access.
+- [x] The raw `//` XPath shorthand is recognized, while an ordinary relative URL is never reinterpreted as XPath.
+- [x] A single next-content URL is compared to the adjacent catalog chapter after final-URL normalization; a matching URL stops the current chapter before any next-chapter request. Empty text content rules fail locally without page-cache or failure-cache writes.
+- [ ] Broader rule size/chain limits, persistent variable migration design and structured client error categories remain in subsequent parser slices. `{{...}}` remains outside the bounded runtime and must stay disabled without an isolated JS sandbox.
+
+Evidence: `backend/engine/source_rule_evaluator_test.go`, `backend/api/source_failure_contract_test.go`, and the full backend suite required before release.
+
 ## Release note
 
 For each release, record which checklist sections were relevant and which tests/probes covered them.
@@ -151,3 +163,9 @@ Evidence for the checked EPUB items:
 - Backend tests: `go test ./services/epubreader ./api ./db ./engine ./services/localbook` and full `go test ./...`.
 - Frontend tests: `npm test`.
 - Browser test: `scripts/smoke/reader-epub-contract.mjs` against 1440×900, 390×844, and 360×800.
+
+# 2026-07-13 Docker OCI fallback
+
+- [x] The host-network OCI fallback reads registry credentials only through Docker's configured credential helper or the existing Docker config, retains the credential only in memory, and never logs an authorization header, password, or token.
+- [x] OCI archive extraction rejects every path except the fixed OCI layout paths, verifies every SHA-256 descriptor before upload, and removes only its own `mkdtemp` workspace (and its opt-in temporary archive).
+- [x] Uploads are limited to the explicit image/repository/tag arguments produced by the local release command; it never derives an arbitrary registry target from an archive.
