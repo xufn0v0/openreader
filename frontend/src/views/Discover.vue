@@ -1,31 +1,20 @@
 <template>
-  <section class="app-page discover-page" :class="{ 'workspace-result-page': embedded }">
-    <header v-if="embedded" class="workspace-result-head">
+  <section class="app-page discover-page workspace-result-page">
+    <header class="workspace-result-head">
       <div>
         <h1 class="app-page-title">探索 ({{ books.length }})</h1>
         <p class="workspace-result-subtitle">{{ activeSource ? `${activeSource.name} · ${activeExploreName || '默认'}` : '选择书源入口开始探索' }}</p>
       </div>
       <div class="workspace-result-actions">
+        <button
+          v-if="books.length || hasMore"
+          type="button"
+          :disabled="loadingMore || !hasMore"
+          @click="loadMoreBooks"
+        >{{ loadingMore ? '加载中...' : (hasMore ? '加载更多' : '没有更多了') }}</button>
         <button type="button" @click="backToShelf">书架</button>
       </div>
     </header>
-
-    <header v-else class="discover-head">
-      <div>
-        <h1 class="app-page-title">书海</h1>
-        <p class="discover-subtitle">{{ sourceCountText }}</p>
-      </div>
-      <el-button :icon="Refresh" :loading="loadingSources" @click="loadSources">刷新书源</el-button>
-    </header>
-
-    <section v-if="!embedded" class="discover-toolbar app-panel">
-      <el-select v-model="targetCategoryIds" placeholder="加入书架分组（可多选）" multiple collapse-tags collapse-tags-tooltip clearable>
-        <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
-      </el-select>
-      <span v-if="activeSource" class="source-status">
-        {{ activeSource.name }} · {{ activeExploreName || '默认' }} · 第 {{ page }} 页
-      </span>
-    </section>
 
     <section v-if="sourceGroups.length" class="source-group-tabs">
       <button
@@ -64,15 +53,9 @@
       </aside>
 
       <section>
-        <div v-loading="loadingBooks" class="discover-results">
-          <RemoteBookResultGroups v-if="books.length" :groups="exploreResultGroups" @preview="openPreview" />
+        <div ref="discoverResults" v-loading="loadingBooks" class="discover-results">
+          <RemoteBookResultGroups v-if="books.length" :groups="exploreResultGroups" @preview="openPreview" @read="openRemoteReader" />
           <el-empty v-if="!loadingBooks && !books.length" :description="sources.length ? '选择左侧书源入口开始探索' : '没有配置 exploreUrl 的书源'" />
-        </div>
-
-        <div v-if="books.length" class="load-more-row">
-          <el-button :loading="loadingMore" :disabled="!hasMore" @click="loadMoreBooks">
-            {{ hasMore ? '加载更多' : '没有更多结果' }}
-          </el-button>
         </div>
       </section>
     </div>
@@ -81,42 +64,31 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
-import { createRemoteBook } from '../api/books'
+import { createRemoteReaderSession } from '../api/remoteReader'
 import { exploreBooks, listExploreSources } from '../api/explore'
 import RemoteBookResultGroups from '../components/RemoteBookResultGroups.vue'
 import { useBookshelfStore } from '../stores/bookshelf'
 import { useOverlayStore } from '../stores/overlay'
-import { useReaderStore } from '../stores/reader'
 import { useIndexWorkspaceStore } from '../stores/indexWorkspace'
-import { useBookInfoAddToShelf } from '../composables/useBookInfoAddToShelf'
 import {
-  buildBookInfoReadActions,
-  buildBookInfoStartReadActions,
-  buildSearchAddBookActions,
-  buildSearchExistingBookActions,
-} from '../utils/bookInfoOverlayActions'
-import { newestBookProgress } from '../utils/bookOrder'
-import { readerRouteQueryFromBook } from '../utils/readerRoute'
-import {
-  remoteBookCreatePayload,
-  remoteBookKey,
+  remoteBookReaderPayload,
   remoteBookSourceId,
   remoteBookSourceName,
-  remoteBookUrl,
 } from '../utils/remoteBookResult'
+import {
+  captureWorkspaceRequest,
+  createAsyncRequestGate,
+  isWorkspaceRequestCurrent,
+  mergeRemoteSearchResults,
+} from '../utils/workspaceContinuation.js'
 
 const router = useRouter()
-const props = defineProps({
-  embedded: { type: Boolean, default: false },
-})
 const emit = defineEmits(['back-to-shelf'])
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
-const reader = useReaderStore()
 const workspace = useIndexWorkspaceStore()
 const sources = ref([])
 const books = ref([])
@@ -124,30 +96,17 @@ const selectedSourceId = ref('')
 const selectedGroup = ref('')
 const activeExploreUrl = ref('')
 const activeExploreName = ref('')
-const targetCategoryIds = ref([])
 const loadingSources = ref(false)
 const loadingBooks = ref(false)
-const addToShelf = useBookInfoAddToShelf({
-  selectCategories: initialCategoryIds => overlay.selectBookAddCategories(initialCategoryIds),
-  buildPayload: (book, categoryIds, context) => remoteBookCreatePayload(book, categoryIds, context),
-  createRemoteBook,
-  upsertBook: book => bookshelf.upsertBook(book),
-  onSuccess: message => ElMessage.success(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
-const addingBook = addToShelf.addingBookKey
 const page = ref(1)
 const hasMore = ref(false)
 const loadingMore = ref(false)
 const expandedSources = ref('')
-const embeddedExploreReady = ref(false)
+const workspaceExploreReady = ref(false)
+const discoverResults = ref(null)
+const exploreRequestGate = createAsyncRequestGate()
 
 const activeSource = computed(() => sources.value.find(source => source.id === selectedSourceId.value))
-const sourceCountText = computed(() => {
-  if (!sources.value.length) return '暂无可用书源'
-  if (!selectedGroup.value) return `共 ${sources.value.length} 个可用书源`
-  return `${selectedGroup.value} · ${filteredSources.value.length} / ${sources.value.length} 个可用书源`
-})
 const exploreResultGroups = computed(() => {
   const groups = new Map()
   for (const book of books.value) {
@@ -186,7 +145,7 @@ const filteredSources = computed(() => {
 })
 
 onMounted(async () => {
-  if (props.embedded) applyWorkspaceExploreIntent()
+  applyWorkspaceExploreIntent()
   const [sourcesResult, shelfResult] = await Promise.allSettled([
     loadSources(),
     warmDiscoverShelf(),
@@ -197,16 +156,20 @@ onMounted(async () => {
   if (sourcesResult.status === 'rejected') {
     ElMessage.warning(readError(sourcesResult.reason, '加载探索书源失败'))
   }
-  embeddedExploreReady.value = true
+  workspaceExploreReady.value = true
   if (selectedSourceId.value) await loadBooks()
+})
+
+onBeforeUnmount(() => {
+  exploreRequestGate.invalidate()
 })
 
 watch(
   () => [workspace.mode, workspace.exploreRevision],
   () => {
-    if (!props.embedded || workspace.mode !== 'explore') return
+    if (workspace.mode !== 'explore') return
     applyWorkspaceExploreIntent()
-    if (embeddedExploreReady.value && selectedSourceId.value) loadBooks()
+    if (workspaceExploreReady.value && selectedSourceId.value) loadBooks()
   },
 )
 
@@ -291,58 +254,88 @@ function loadBooksFromEntry(source, entry) {
 async function loadBooks() {
   ensureActiveEntry()
   if (!selectedSourceId.value || !activeExploreUrl.value) return
-  workspace.showExploreResults([], exploreWorkspaceIntent())
+  const requestToken = exploreRequestGate.begin()
+  const workspaceStamp = captureWorkspaceRequest(workspace, 'explore')
+  const intent = exploreWorkspaceIntent({ page: 1, hasMore: false })
+  workspace.showExploreResults([], intent)
   workspace.setResultLoading(true)
   loadingBooks.value = true
   try {
-    page.value = 1
-    const { data } = await exploreBooks(selectedSourceId.value, { page: page.value, url: activeExploreUrl.value })
-    const result = normalizeExploreResult(data, page.value)
+    const { data } = await exploreBooks(intent.sourceId, { page: 1, url: intent.url })
+    if (!isActiveExploreRequest(requestToken, workspaceStamp)) return
+    const result = normalizeExploreResult(data, 1)
     books.value = result.items
+    page.value = result.page
     hasMore.value = result.hasMore
-    workspace.showExploreResults(books.value, exploreWorkspaceIntent())
+    workspace.showExploreResults(books.value, exploreWorkspaceIntent({ page: page.value, hasMore: hasMore.value }))
   } catch (err) {
-    ElMessage.error(readError(err, '加载探索结果失败'))
+    if (isActiveExploreRequest(requestToken, workspaceStamp)) {
+      ElMessage.error(readError(err, '加载探索结果失败'))
+    }
   } finally {
-    loadingBooks.value = false
-    workspace.setResultLoading(false)
+    if (isActiveExploreRequest(requestToken, workspaceStamp)) {
+      loadingBooks.value = false
+      workspace.setResultLoading(false)
+    }
   }
 }
 
 async function loadMoreBooks() {
-  if (!selectedSourceId.value || !activeExploreUrl.value || loadingMore.value || !hasMore.value) return
+  if (!selectedSourceId.value || !activeExploreUrl.value || loadingMore.value) return
+  if (!hasMore.value) {
+    ElMessage.info('没有更多了')
+    return
+  }
+  const requestToken = exploreRequestGate.begin()
+  const workspaceStamp = captureWorkspaceRequest(workspace, 'explore')
+  const nextPage = page.value + 1
+  const intent = exploreWorkspaceIntent({ page: nextPage, hasMore: hasMore.value })
+  workspace.rememberResultScroll(discoverResults.value?.scrollTop || 0)
   loadingMore.value = true
   workspace.setResultLoading(true)
   try {
-    const nextPage = page.value + 1
-    const { data } = await exploreBooks(selectedSourceId.value, { page: nextPage, url: activeExploreUrl.value })
+    const { data } = await exploreBooks(intent.sourceId, { page: nextPage, url: intent.url })
+    if (!isActiveExploreRequest(requestToken, workspaceStamp)) return
     const result = normalizeExploreResult(data, nextPage)
-    const known = new Set(books.value.map(book => activeRemoteKey(book)))
-    const nextItems = result.items.filter(book => !known.has(activeRemoteKey(book)))
-    books.value = [...books.value, ...nextItems]
+    const previousLength = books.value.length
+    const { rows, added } = mergeRemoteSearchResults(books.value, result.items, intent.sourceId)
+    books.value = rows
     page.value = result.page || nextPage
-    hasMore.value = result.hasMore && nextItems.length > 0
-    workspace.appendResultRows(nextItems, exploreWorkspaceIntent())
+    hasMore.value = result.hasMore
+    workspace.appendResultRows(rows.slice(previousLength), exploreWorkspaceIntent({ page: page.value, hasMore: hasMore.value }))
+    if (!added) {
+      ElMessage.info(hasMore.value ? '本批没有新增结果，仍可继续加载' : '没有更多了')
+    }
   } catch (err) {
-    ElMessage.error(readError(err, '加载更多失败'))
+    if (isActiveExploreRequest(requestToken, workspaceStamp)) {
+      ElMessage.error(readError(err, '加载更多失败'))
+    }
   } finally {
-    loadingMore.value = false
-    workspace.setResultLoading(false)
+    if (isActiveExploreRequest(requestToken, workspaceStamp)) {
+      loadingMore.value = false
+      workspace.setResultLoading(false)
+    }
   }
 }
 
-function exploreWorkspaceIntent() {
+function isActiveExploreRequest(requestToken, workspaceStamp) {
+  return exploreRequestGate.isCurrent(requestToken)
+    && isWorkspaceRequestCurrent(workspace, workspaceStamp)
+}
+
+function exploreWorkspaceIntent(values = {}) {
   return {
     sourceId: selectedSourceId.value,
     sourceGroup: activeSource.value?.group || selectedGroup.value,
     url: activeExploreUrl.value,
     name: activeExploreName.value,
-    page: page.value,
-    hasMore: hasMore.value,
+    page: values.page ?? page.value,
+    hasMore: values.hasMore ?? hasMore.value,
   }
 }
 
 function backToShelf() {
+  exploreRequestGate.invalidate()
   workspace.backToShelf()
   emit('back-to-shelf')
 }
@@ -359,52 +352,24 @@ function normalizeExploreResult(data, fallbackPage) {
 }
 
 function openPreview(book) {
-  const existing = findExistingBook(book)
   overlay.openBookInfo(book, {
     sourceName: activeRemoteSourceName(book),
-    statusLabel: existing ? '已在书架' : '探索结果',
-    statusType: existing ? 'warning' : 'success',
-    progress: existingProgress(existing)?.percent || 0,
-    actions: existing
-      ? buildSearchExistingBookActions({
-          openInfo: () => openExistingInfo(existing, activeRemoteSourceName(book)),
-          read: () => openExistingReader(existing),
-        })
-      : buildSearchAddBookActions({
-          add: () => addRemoteBook(book, false),
-          addAndRead: () => addRemoteBook(book, true),
-          loading: addingBook.value === activeRemoteKey(book),
-        }),
+    statusLabel: '探索结果',
+    statusType: 'info',
   })
 }
 
-async function addRemoteBook(book, shouldRead) {
-  const data = await addToShelf.addRemoteBook(book, {
-    key: activeRemoteKey(book),
-    categoryIds: targetCategoryIds.value,
-    sourceId: activeRemoteSourceId(book),
-    sourceName: activeRemoteSourceName(book),
-  })
-  if (!data) return
-  if (shouldRead) {
-    overlay.closeBookInfo()
-    router.push({ name: 'reader', params: { id: data.id } })
-    return
+async function openRemoteReader(book) {
+  try {
+    const { data } = await createRemoteReaderSession(remoteBookReaderPayload(book, {
+      sourceId: activeRemoteSourceId(book),
+      sourceName: activeRemoteSourceName(book),
+    }))
+    if (!data?.id) throw new Error('远程阅读会话无效')
+    router.push({ name: 'remote-reader', params: { sessionId: data.id }, query: { chapter: 0 } })
+  } catch (error) {
+    ElMessage.error(readError(error, '打开临时阅读失败'))
   }
-  overlay.openBookInfo(data, {
-    sourceName: activeRemoteSourceName(book),
-    statusLabel: '已加入书架',
-    statusType: 'success',
-    progress: 0,
-    actions: buildBookInfoStartReadActions({ read: () => openExistingReader(data) }),
-  })
-}
-
-function findExistingBook(book) {
-  return bookshelf.books.find(item => (
-    Number(item.sourceId || 0) === Number(activeRemoteSourceId(book) || 0)
-    && String(item.url || item.bookUrl || '') === String(remoteBookUrl(book) || '')
-  )) || null
 }
 
 function activeRemoteSourceId(book) {
@@ -415,32 +380,6 @@ function activeRemoteSourceName(book) {
   return remoteBookSourceName(book, activeSource.value?.name)
 }
 
-function activeRemoteKey(book) {
-  return remoteBookKey(book, activeRemoteSourceId(book))
-}
-
-function openExistingInfo(book, sourceName = '') {
-  overlay.openBookInfo(book, {
-    sourceName,
-    statusLabel: '已在书架',
-    statusType: 'warning',
-    progress: existingProgress(book)?.percent || 0,
-    actions: buildBookInfoReadActions({ read: () => openExistingReader(book) }),
-  })
-}
-
-function openExistingReader(book) {
-  overlay.closeBookInfo()
-  router.push({ name: 'reader', params: { id: book.id }, query: readerRouteQuery(book) })
-}
-
-function readerRouteQuery(book) {
-  return readerRouteQueryFromBook(book, existingProgress(book))
-}
-
-function existingProgress(book) {
-  return newestBookProgress(book, reader.progressByBook)
-}
 
 function readError(err, fallback) {
   return err?.response?.data?.error?.message || err?.response?.data?.error || fallback

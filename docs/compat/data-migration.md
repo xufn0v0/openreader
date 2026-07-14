@@ -105,6 +105,18 @@ Required evidence: malformed EPUB/UMD/PDF fixtures; valid-format regression fixt
 
 Implementation evidence: parser-limit environment values are additive and defaulted; only newly previewed/imported/reparsed bytes use them. The cleanup worker removes only expired/invalid preview pairs and aged orphaned stage files under the existing derived cache root. `backend/engine/import_limits_contract_test.go`, `backend/services/localbook/importer_test.go`, `backend/api/workspace_import_stage_contract_test.go`, `backend/config/config_test.go`, and full `go test ./...` pass. The backup ZIP reader below retains every JSON format and shares the pending Docker mounted-volume smoke.
 
+### UMD reader-dev binary parser follow-up (audited 2026-07-13)
+
+The current UMD parser recognizes an early OpenReader-only `#TEXTNOV` layout, whereas the fixed reader-dev upstream writes and reads the segmented `0xde9a9b89` UMD format with UTF-16LE metadata/content and zlib body chunks. This is an import/parser compatibility correction, not a data migration.
+
+- No startup scan, SQLite schema change, cache rewrite, library move or backup-format change is authorized. Existing imported books continue reading their archived chapter/cache files unchanged.
+- Newly staged or explicitly refreshed `.umd` inputs must first use the bounded reader-dev parser. A narrowly isolated legacy fallback may remain only for an actual `#TEXTNOV` input, so historical OpenReader pseudo-UMD files are not made unreadable by the correction.
+- The standard parser must cap segment count, declared chapter count, section lengths and total decompressed bytes before materializing title/offset/content arrays. Any failure occurs before `ArchiveImportedBook`, chapter rows, category writes, sync broadcasts or staged-token consumption.
+- Direct upload, LocalStore and WebDAV retries continue to reuse the same immutable, caller-scoped staged bytes. Parsing never consults the original mounted path after staging, so observed catalogue failures cannot depend on network speed or later source-file changes.
+- Required migration evidence is an existing-volume regression containing cached local books plus an unconsumed staged `.umd` preview: upgrade leaves the cached books intact, the staged standard UMD can be previewed/imported, and a failed reparse retains only its caller's retry token.
+
+Implementation evidence: the runtime now recognizes the standard segmented reader-dev UMD stream first, parses its bounded UTF-16LE/zlib sections and retains the previous OpenReader-only prefix only as an isolated fallback. No model, schema, mounted-root, archive-path or backup-format write changed. `backend/engine/umd_parser_contract_test.go` verifies actual upstream writer framing (`F1` separators and final `81` table included); `backend/api/umd_import_contract_test.go` verifies direct staged upload plus LocalStore/WebDAV preview→confirm after the original mounted UMD has been deleted. Corrupted compressed input retains only its scoped retry stage and returns no host path. Full Go tests, frontend tests and build pass; the existing-volume Docker/backup smoke is the release evidence for this correction.
+
 ## P2 backup ZIP restore compatibility and bounds
 
 Status: implemented; release validation pending. Existing backup formats, SQLite rows and mounted roots remain readable.
@@ -163,6 +175,30 @@ Status: extracted 2026-07-10; implementation must not add a destructive schema m
 - No table, column, or mounted root changes. Existing `data/`, `cache/`, and `library/` volumes remain compatible.
 - Backup/restore remains sufficient because original local imports and SQLite rows retain their existing paths/fields. Derived remote cache files need not be backed up.
 - The release gate requires API fixtures for cross-user cache/delete isolation and `scripts/docker-volume-backup-smoke.sh` to prove a mounted volume survives restart after the cleanup changes.
+
+## P1-B search preference compatibility
+
+Status: extracted on 2026-07-13; implementation is pending. This is a JSON-setting read/write compatibility shim only. It does not add a table or modify mounted `data/`, `cache/`, or `library/` files.
+
+### Existing representation
+
+- The per-user SQLite `user_settings` row with `key = "search"` stores JSON unchanged; browser Pinia persistence and legacy `openreader_sidebar_search` also contain the same logical fields.
+- Existing OpenReader payloads use `{searchType:"all"|"group"|"single", group, sourceId, concurrent}` and may contain `8`, `16`, `32`, or `60`.
+- Existing backup restore deliberately preserves a `concurrent:32` payload; startup and restore must not rewrite that row.
+
+### Read and write compatibility
+
+- Missing, malformed, zero or negative concurrency reads as the upstream new-user default `24`.
+- Canonical upstream values `12/18/24/30/36/42/48/54/60` are retained unchanged.
+- Historical OpenReader values `8/16/32` remain readable and selectable as explicitly labelled legacy values. They are not silently reset; the first user-selected canonical value replaces them through the normal setting-write and conflict mechanism.
+- `all`, `group`, and `single` remain stored because they are the deployed source-ID adapter for upstream multi/group/single selection. No migration changes `sourceId` or attempts to resolve a historical source URL at startup.
+- No background update, Docker upgrade, backup restore, scope switch, or login is allowed to write a new search preference merely because it was read. Only the existing explicit user preference save path writes normalized JSON.
+
+### Required evidence
+
+- Frontend tests must cover defaults, canonical values, legacy 8/16/32 preservation, server preference loading and explicit replacement.
+- Existing backup restore tests retain `concurrent:32`; an added test verifies loading that restored setting does not reset it.
+- The release gate runs the existing Docker volume/backup smoke to confirm the unchanged `user_settings` and mounted volume survive restart.
 
 ## Reader `themeType` persisted-setting compatibility
 

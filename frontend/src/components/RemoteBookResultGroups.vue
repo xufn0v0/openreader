@@ -10,9 +10,9 @@
           v-for="item in group.items || []"
           :key="bookKey(item, group)"
           class="result-card app-panel"
-          @click="$emit('preview', item)"
+          @click="$emit('read', item)"
         >
-          <BookCover :book="item" />
+          <BookCover :book="item" @click.stop="$emit('preview', item)" />
           <div class="result-main">
             <div class="result-title">
               <h3>{{ remoteBookTitle(item) }}</h3>
@@ -23,9 +23,6 @@
             <p v-if="remoteBookUpdateTime(item)" class="update-time">更新：{{ remoteBookUpdateTime(item) }}</p>
             <p v-if="remoteBookKind(item) || remoteBookWordCount(item)">{{ [remoteBookKind(item), remoteBookWordCount(item)].filter(Boolean).join(' · ') }}</p>
             <p class="result-intro">{{ remoteBookIntro(item) || '暂无简介' }}</p>
-          </div>
-          <div class="result-actions" @click.stop>
-            <el-button type="primary" size="small" @click="$emit('preview', item)">查看信息</el-button>
           </div>
         </article>
       </div>
@@ -51,7 +48,7 @@ defineProps({
   groups: { type: Array, default: () => [] },
 })
 
-defineEmits(['preview'])
+defineEmits(['preview', 'read'])
 
 function bookKey(item, group) {
   return remoteBookKey(item, group?.sourceId)
@@ -136,11 +133,6 @@ function bookKey(item, group) {
   -webkit-line-clamp: 2;
 }
 
-.result-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
 @media (max-width: 750px) {
   .source-result-list {
     gap: 10px;
@@ -154,15 +146,6 @@ function bookKey(item, group) {
     grid-template-columns: 42px minmax(0, 1fr);
     gap: 10px;
     padding: 10px;
-  }
-
-  .result-actions {
-    grid-column: 2;
-    justify-content: flex-start;
-  }
-
-  .result-actions :deep(.el-button) {
-    min-height: 32px;
   }
 
   .result-title h3 {

@@ -19,7 +19,7 @@ The current risk is not framework selection. The risk is implementing from an ab
 
 | Module | reader-dev original behavior/files | OpenReader current behavior/files | Difference/risk | Status | Recommended tests |
 |---|---|---|---|---|---|
-| Frontend scene structure | `web/src/views/Index.vue`, `web/src/views/Reader.vue`; router has `/` and `/reader`. | `frontend/src/router/index.js` splits `/`, `/search`, `/discover`, `/local-store`, `/sources`, `/settings`, `/books/:id`, `/books/:id/read`. | Current route/page split fragments upstream workspace flows. Old URLs may stay as redirects, but product structure should converge to Index + Reader. | `must-fix` for P1 | Router redirect tests; browser flow search → BookInfo → read. |
+| Frontend scene structure | `web/src/views/Index.vue`, `web/src/views/Reader.vue`; router has `/` and `/reader`. | Canonical Index work stays at `/`; historical search/discover/source/settings/storage/detail URLs now preserve their intent through root-workspace redirects/overlays, while Reader remains a separate scene. | Vue Router has more compatibility routes than upstream, but they no longer create independent product pages. | `aligned` for extracted P1 scene convergence | Router redirect tests; browser flow search → BookInfo → read. |
 | Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar, with a read-aloud-bar exception. | `frontend/src/views/Reader.vue` uses `mobileChromeVisible = ref(true)`; primary panels/global dialogs retain it, while TTS opening hides it and TTS center taps do not retoggle it. | Default-visible toolbar, panel/dialog coexistence and the extracted TTS exception are implemented. | `aligned` for Reader P0 tool-layer states | Unit contracts plus `reader-mobile-contract.mjs` and `reader-tts-contract.mjs` at desktop/390/360. |
 | Reader mobile panel structure | Primary shelf/source/catalog/settings use Element popovers; bookmarks/search-content are App-level dialogs; cache is an inline read-bar zone. | OpenReader uses `ReaderMobileWorkspacePanel.primary` for the four primary panels, shared root dialogs for bookmark/search/BookInfo, and an inline cache zone. | The Vue/Element structure differs but ownership, geometry, coexistence and click protection are verified. | `technical-stack-equivalent` | `reader-mobile-contract.mjs` covers all branches at desktop/390/360. |
 | Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Base geometry is implemented; acceptance requires actual rendered paragraph left/right gap checks, not only CSS value checks. | `aligned` for base P0 | DOM geometry probe for page/body/paragraph left/right gaps within 1px across 390×844 and 360×800; ensure toolbar show/hide does not shift content. |
@@ -28,13 +28,13 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, read-aloud, and cross-chapter behavior. | Current `ReaderChapterContent.vue` handles text/images/volume blocks, CBZ image resources, EPUB iframe resources, a dedicated audio branch for `type === 1` chapters, and the extracted TTS/read-bar state machine. | EPUB, image/CBZ rendering/import/resource serving, continuous cross-chapter behavior, audio playback/capabilities and the TTS state branch are implemented; remaining risk is periodic whole-suite regression rather than an identified missing Reader format. | `aligned` for extracted Reader formats | Keep EPUB/image/CBZ/continuous/audio/TTS browser contracts in every release candidate. |
 | BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent `BookDetail.vue` route structure has been removed from the product path; search/discover/route actions are centralized; Reader opens plain BookInfo without injecting toolbar shortcut actions. Remaining P1 work is Index-scene placement and search/discover/source flow convergence. | `partial` for P1 | Single BookInfo action contract; search/shelf/reader reuse tests. |
 | Bookshelf/BookManage/BookGroup | Upstream: `BookShelf.vue`, `BookManage.vue`, `BookGroup.vue` under Index workspace. | Current: `Home.vue`, overlay management components, categories/store utilities. | Some enhancements may be valid, but workflow and mobile sidebar behavior need upstream comparison. | `unknown` | Workspace browser flows; category/order tests. |
-| Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons must be extracted from `Index.vue` and related CSS. | Current `AppLayout.vue` and mobile navigation had reported drag/fixed-button mismatch. | User-visible mismatch: GitHub/day-night buttons should not slide with drawer content. | `must-fix` for P1 | Mobile drag smoke; fixed-bottom button geometry probe. |
-| Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Current has separate `Search.vue`, `Discover.vue`, `Sources.vue` pages. | Flow fragmentation can change API order, panel state, and back behavior. | `must-fix` for P1 | Search → result group → BookInfo → add/read browser test. |
-| Online source parsing | Upstream reader3-compatible source semantics live across `AnalyzeRule` plus `BookList/BookInfo/BookChapterList/BookContent`. | Current Go parser executes the extracted CSS/JSONPath/XPath/regex/composite/replace/pagination subsets, bounded `@put`/`@get`, and persisted bounded book/chapter variables; rule-level JS/templates already fail explicitly. | P2-Parser-1G delivered user-scoped SQLite/backup variable persistence and P2-Parser-2A supplies redacted additive parser `code`/`stage` errors without changing legacy statuses or `error`. The 2026-07-13 script-entry audit found a remaining correctness gap: dynamic `Header` and `loginCheckJs` are active upstream script entry points but Go silently ignores them. `{{...}}` JavaScript remains a security-gated difference, never a silent empty result. | `partial` for P2 parser | Dynamic-header/login-check rejection before fetch, request/user isolation tests, source-debug/error-redaction tests, browser source flow. |
+| Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons are defined by `Index.vue` and related CSS. | `AppLayout.vue` and `useAppMobileNavigation.js` now separate 260px visual width from the 270px gesture window, with bottom controls outside the scroll container. | The user-requested stable bottom controls during drag are an explicit OpenReader UX adaptation; the extracted upstream interaction contract is browser-validated. | `aligned` for extracted P1 sidebar slice | Mobile drag/fixed-bottom/shelf-geometry smoke at 390×844 and 360×800. |
+| Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Root workspace owns Search/Explore bodies and source overlays; historical URLs are compatibility intents, and shared BookInfo owns the handoff. | API clients and OpenReader multi-user extensions remain, but no separate page flow remains. | `aligned` for extracted P1 scene convergence | Search → result group → BookInfo → add/read browser test. |
+| Online source parsing | Upstream reader3-compatible source semantics live across `AnalyzeRule` plus `BookList/BookInfo/BookChapterList/BookContent`. | Current Go parser executes the extracted CSS/JSONPath/XPath/regex/composite/replace/pagination subsets, bounded persisted `@put`/`@get` variables, and redacted parser errors. Dynamic headers and `loginCheckJs` now fail before any request rather than being silently ignored. | `{{...}}`/arbitrary JavaScript remain explicit security-gated unsupported behavior; this is not a silent parsing gap. | `aligned` for extracted P2 parser + explicit security difference | Parser/request-isolation and source-debug/error-redaction contracts; browser source flow. |
 | Local import catalog parsing | Upstream `BookController.kt` imports local files through `Book.initLocalBook(...)` and `LocalBook.getChapterList(...)`; TXT parsing uses `TextFile.kt` with a 512-KiB detection probe, enabled-rule reverse scoring with a one-match threshold, direct Java multiline matching, `前言`, and deterministic 10-KiB no-TOC pseudo chapters. | Go now probes the first 512 KiB, applies the enabled-rule reverse scoring/one-match semantics, preserves matching custom titles and `前言`, creates upstream-style no-TOC pseudo chapters, and makes upload/LocalStore/WebDAV rule retries reuse immutable user-scoped staged bytes. | Materialized per-chapter cache remains an allowed Go/multi-user adaptation; TXT parsing behavior is aligned for the extracted slice. | `aligned` for TXT P0; `partial` for non-TXT parser audit | Engine/import/API fixtures, frontend retry-state contract, full backend/frontend tests, and mounted-volume smoke before release. |
 | Replace rules/content cleanup | Upstream `ReplaceRule.vue`, `ReplaceRuleForm.vue`, `Reader.vue`, `ReplaceRuleController.kt`. | Current Go endpoints and overlays exist. | Default-mode, list/application order, regex flags/failure handling, form validation, manager shell and selected-text editor flow have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Rule-semantics API tests; selected-text editor contract; browser manager/editor smoke. |
 | Bookmarks | Upstream `Bookmark.vue`, `BookmarkForm.vue`, `Reader.vue`, `BookmarkController.kt`. | Current ID-backed bookmark APIs and root overlays exist. | Form/manager ownership, paragraph context, stale-offset fallback, creation order and request validation have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Bookmark context/jump/API contracts; three-viewport dialog smoke. |
-| RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current `RSSManager.vue`, overlays, Go RSS parser. | UI and parser semantics need mapping. | `unknown` | RSS fixture parser tests; source/article browser smoke. |
+| RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition, reset/refresh ordering and compact fullscreen behavior have been rebuilt; persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | RSS fixture/parser tests; source/article browser smoke. |
 | WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P2 storage UI/import audit found CBZ reachability and LocalStore result-gate differences despite the prior path/security alignment. | `partial` | Storage UI/import contract, path traversal tests, upload/list/import browser smoke, Docker volume smoke. |
 | Backup/restore | Upstream backup flows and reader-dev formats require extraction. | Current OpenReader backup service and Legado restore exist. | Must preserve OpenReader data and document reader-dev/Legado import semantics. | `unknown` | Restore testdata; backup list/download/restore tests. |
 | Auth/user management | Upstream user management components include `AddUser.vue`, `UserManage.vue`; OpenReader adds JWT. | Current JWT/multi-user/admin endpoints are intentional runtime adaptation. | Root dialog, ordinary-user creation, protected-account controls, time metadata and direct legacy-intent behavior have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 + intentional runtime redesign | Auth dialog and admin/non-admin browser smoke; protected-account API tests. |
@@ -79,7 +79,7 @@ This slice changed only TXT automatic detection, matcher gating, preface/fallbac
 
 ## Immediate P1 contract: Index mobile sidebar and workspace shell
 
-Status: extracted on 2026-07-07 before implementation.
+Status: implemented and browser-revalidated on 2026-07-13 for the extracted sidebar and mobile-shelf slice. The larger Index-scene convergence is recorded separately below.
 
 This contract is tied to `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`, primarily `web/src/views/Index.vue`.
 
@@ -118,23 +118,23 @@ This contract is tied to `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e
 
 | Layer | Current evidence | Difference | Classification |
 |---|---|---|---|
-| Title spacing/scale | `Home.vue` mobile CSS uses `padding: 22px 16px 10px`, and narrower breakpoints override to `18px 14px 0`; title font is 30px/28px. | Too large and too narrow compared with upstream 20px title and 24px side inset. | `must-fix` |
-| Group wrapper | Mobile `.book-group-wrapper` has `margin-left: 0`, `margin-right: 0`, and later `padding: 5px 0`. | Groups span edge-to-edge instead of upstream 24px margins. | `must-fix` |
-| Book rows | Mobile `.book-row` uses viewport-clamped cover columns, 14/16px or 12/clamped padding, and no fixed 84×112 cover. | Visible row geometry differs from upstream and can drift across 360/390px screens. | `must-fix` |
+| Title spacing/scale | Real-browser computed style is 24px left/right padding and 20px title font at both 390px and 360px viewports. | Matches the extracted upstream mobile geometry. | `aligned` |
+| Group wrapper | Real-browser group bounds retain 24px left and right insets at both target mobile widths. | Matches the extracted upstream group geometry. | `aligned` |
+| Book rows | Real-browser computed style is 20px horizontal row padding with an 84×112 cover at both target mobile widths. | Matches the extracted upstream visible geometry without horizontal overflow. | `aligned` |
 | Layout model | OpenReader uses CSS grid/list rows and chip buttons instead of Element tabs/desktop `.book` flex. | Acceptable only if visible geometry and operations remain upstream-compatible. | `technical-stack-equivalent` |
 | Empty/loading rows | OpenReader adds skeleton/empty states. | Acceptable enhancement; must not alter normal loaded shelf geometry. | `acceptable-change` |
 
-Required implementation gates for this shelf-geometry slice:
+### Completed verification gates for this shelf-geometry slice
 
-1. Change mobile Home CSS to upstream insets and dimensions: title 24px side inset, compact 20px title, group 24px side margins, rows `10px 20px`, covers `84px × 112px`, info margin/gap equivalent to 20px.
-2. Add source-level CSS tests for these constants so future refactors do not drift back.
-3. Extend the Index mobile browser smoke to verify at 390×844 and 360×800:
+1. Mobile Home CSS resolves to the upstream insets and dimensions: title 24px side inset, compact 20px title, group 24px side margins, rows `10px 20px`, and `84px × 112px` covers.
+2. The browser contract locks these rendered values, guarding future visual drift without tying assertions to one CSS implementation.
+3. The Index mobile browser smoke verifies at 390×844 and 360×800:
    - title left/right insets are approximately 24px;
    - group wrapper side insets are approximately 24px;
    - first book row left/right padding is approximately 20px;
    - cover box is approximately 84×112;
    - no horizontal overflow.
-4. Keep the larger Index scene convergence and BookInfo consolidation as separate P1 slices.
+4. The larger Index scene convergence and BookInfo consolidation remain separate P1 slices.
 
 ### Current OpenReader evidence and classification
 
@@ -143,29 +143,39 @@ Required implementation gates for this shelf-geometry slice:
 | Sidebar frame | `frontend/src/layouts/AppLayout.vue` uses `.app-sidebar` fixed left, width `var(--app-sidebar-width)`, and `.app-sidebar-scroll` for the scrollable content. | Structurally capable of matching upstream. Need assert width source and mobile transitions. | `technical-stack-equivalent` |
 | Bottom icons | `sidebar-bottom-icons` is outside `.app-sidebar-scroll`, so scroll does not move it. | This is already aligned with the upstream fixed-bottom structure, but tests should lock it so future edits do not regress. | `aligned` |
 | Bottom icon drag behavior | Mobile CSS applies a counter-transform using `--mobile-nav-drag-offset`. | Upstream moves the whole navigation frame during drag, but the user explicitly requested GitHub/day-night controls not to slide with side-panel dragging. Keep this as a documented OpenReader UX difference. | `acceptable-change` |
-| Gesture width | `useAppMobileNavigation.js` uses `navigationWidth = 260` for both CSS width and drag clamp. | Upstream drag window is 270px while the sidebar width is 260px. | `must-fix` |
-| Drag style | Current opening drag style uses `marginLeft: moveX - width`, producing `-180px` for an 80px drag from hidden state. | Upstream uses `moveX - 270`; after changing only the drag bound, an 80px drag should be `-190px`. | `must-fix` |
+| Gesture width | `useAppMobileNavigation.js` uses `navigationWidth = 260` and a separate `dragLimit = 270`. | Upstream drag window and visual sidebar width are independently preserved. | `aligned` |
+| Drag style | Hidden + 80px drag yields `marginLeft: -190px`; the 270px endpoint yields `0px`. | Matches upstream `moveX - 270` behavior. | `aligned` |
 | Touch guards | Current composable keeps the 20px edge guard and vertical-dominance passthrough. | Aligned and should be retained. | `aligned` |
 | Route/action close | `runNavAction()` and sidebar search navigation close mobile sidebar after every route/action. | Upstream Index does not navigate between separate pages for these workspace panels, but shelf click does close the sidebar. This is part of the larger P1 scene-convergence work; for this slice, do not add new closures beyond the existing workspace click behavior. | `partial` |
 | Workspace click close | `.app-workspace @click="closeMobileNavigation"` mirrors upstream shelf click close. | Keep, but make sure sidebar controls/bottom buttons do not pass the click into workspace. | `aligned` |
-| Tests | `frontend/tests/appMobileNavigation.test.mjs` currently asserts 260px drag clamp/style. | Tests encode the wrong drag contract and must be updated to upstream 270px gesture semantics while preserving 260px visual width. | `must-fix` |
+| Tests | `frontend/tests/appMobileNavigation.test.mjs` asserts 260px visual width, 270px gesture boundary, -190px at 80px opening drag, and edge/vertical guards. | `scripts/smoke/index-mobile-sidebar-contract.mjs` verifies rendered geometry and interactions at 390×844 and 360×800. | `aligned` |
 
-### Required implementation gates
+### Completed sidebar verification gates
 
-1. Split the mobile sidebar visual width (260px) from the upstream gesture window (270px).
-2. Update `useAppMobileNavigation` drag style and clamp tests:
+1. The mobile sidebar visual width (260px) is separated from the upstream gesture window (270px).
+2. `useAppMobileNavigation` drag style and clamp tests assert:
    - static `navigationStyle` keeps `--mobile-nav-width: 260px`;
    - hidden + 80px right-drag yields `marginLeft: -190px`;
    - hidden + 270px right-drag is accepted;
    - hidden + 271px right-drag is ignored/clamped according to the upstream window;
    - open + 270px left-drag is accepted.
-3. Add a source/DOM-level test locking `.sidebar-bottom-icons` outside `.app-sidebar-scroll`, with fixed/absolute positioning and child pointer events.
-4. Add or update a real-browser mobile smoke that:
+3. DOM/CSS structure keeps `.sidebar-bottom-icons` outside `.app-sidebar-scroll`, with absolute fixed-bottom positioning and interactive children.
+4. The real-browser mobile smoke verifies that it:
    - opens the sidebar by menu and by drag at 390×844;
    - verifies content scrolling does not move GitHub/day-night buttons relative to the sidebar frame;
    - verifies workspace tap closes the sidebar;
    - verifies bottom icon click does not close the sidebar by propagation.
-5. Keep this as an incremental P1 shell-alignment slice. Larger Index convergence remains pending: merging Search/Discover/Sources/Settings into the upstream single workspace scene and consolidating BookInfo.
+5. This remains an incremental P1 shell-alignment slice. Larger Index convergence is separately tracked.
+
+### 2026-07-13 sidebar revalidation
+
+This review revisited the fixed upstream `Index.vue` touch handler and CSS, then compared it with `useAppMobileNavigation.js`, `AppLayout.vue`, `appMobileNavigation.test.mjs`, and the real-browser sidebar contract. The earlier `must-fix` evidence above was historical: the implementation and its tests already contain the required separation of a 260px sidebar from the 270px gesture window.
+
+- Unit contract: all five navigation tests pass, including `80px → -190px`, acceptance at 270px, rejection beyond the range, the 20px edge guard, and vertical-scroll passthrough.
+- Browser contract: `index-mobile-sidebar-contract.mjs` passed at 390×844 and 360×800. It confirms default `-260px` hidden state, 260px rendered width, 270px drag endpoint, workspace close behavior, zero scroll movement for bottom controls, and no click-through from the theme button.
+- Allowed difference: OpenReader counter-transforms the bottom GitHub/theme controls during a drawer drag so they remain visually fixed. This follows the user's explicit request and does not alter their fixed-bottom/independent-scroll relationship to the sidebar.
+
+This is verification only; it does not create a new Docker candidate because no production code changed.
 
 ## Immediate P1 contract: shared BookInfo and old detail URL compatibility
 
@@ -533,6 +543,22 @@ Fixed upstream authority: `web/src/views/Index.vue` and the root dialogs in `web
 - Real-browser execution passed: `index-workspace-contract.mjs` covered old-link redirects, a second sidebar search in the same scene, BookInfo → add-and-read, Explore, shelf return, and horizontal-overflow checks at 1440×900, 390×844, and 360×800. The existing `index-mobile-sidebar-contract.mjs` also passed at 390×844 and 360×800, confirming the 260px width, 270px drag range, fixed bottom controls, and shelf geometry remain intact.
 - P1-B is therefore suitable for a local Docker release and user verification. P1-C/P1-D remain separate work: canonical source, local-store, WebDAV, user-space, and settings overlays have not yet been converged.
 
+### P1-B follow-up inventory: retire unreachable standalone result shells (2026-07-13)
+
+The route and overlay work completed after the original P1-B record means several rows in the initial matrix are now historical evidence, not outstanding work: `/search` and `/discover` already redirect to the root workspace; `/sources`, `/settings`, `/local-store`, and `/books/:id` likewise resolve to root workspace overlay/intents; and the shared `OverlayBookInfo` remains the only BookInfo owner.
+
+The remaining structural gap is narrower but real. `Search.vue` and `Discover.vue` are now mounted only by `Home.vue` as root-workspace result bodies, yet both still carry their former `embedded` / non-embedded templates, route watchers, and page-only controls. Those branches are unreachable from the product router and preserve an incorrect second-page architecture that can drift from `Index.vue`.
+
+| Concern | Upstream contract | Current evidence | Classification | Required test before code |
+|---|---|---|---|---|
+| Result-body ownership | `Index.vue` owns search and Explore as in-place shelf replacements; no standalone result product page exists. | `Home.vue` is canonical, and `Search.vue` / `Discover.vue` are only imported there, but both expose an obsolete optional standalone mode. | `must-fix` | Static contract: neither result body accepts an `embedded` prop, renders a `!embedded` branch, nor observes legacy page-route queries. |
+| Legacy links | Old URLs may survive only as redirects preserving query intent. | Router already redirects `/search` and `/discover` to `/?workspace=…`; sidebar calls the workspace state directly. | `aligned` | Retain redirect and root-body assertions; prove no result component needs a route scene to initialize. |
+| Result behavior | Search, local search, Explore, pagination, BookInfo/add/read, and return-to-shelf stay in the one Index scene. | The shared Pinia workspace state already supplies those transitions. | `aligned` pending cleanup | Existing state/route contracts plus the P1-B browser smoke must continue to pass after deletion. |
+
+Allowed difference: the Vue 3 components remain separate implementation files for maintainability, but they are strictly root-workspace result bodies, not routable pages. No API, data, parser, user preference, or reader-route behavior changes in this cleanup.
+
+Implementation record: completed on 2026-07-13. `Home.vue` now mounts the two result bodies without an `embedded` compatibility prop. `Search.vue` and `Discover.vue` always initialize from `indexWorkspace`, render only the root-workspace header/body structure, and no longer retain legacy route-query watchers or standalone page controls. The dead local-result bulk-selection widgets were removed with that unreachable page shell; the still-supported per-book import action remains. Static contracts protect the no-prop/no-standalone/no-route-query boundary. Validation passed: backend `go test ./...`, frontend 360-test suite, production build, and `index-workspace-contract.mjs` against real Chrome at 1440×900, 390×844, and 360×800 (legacy redirects, repeated sidebar search, BookInfo group confirmation, Explore, shelf return, and overflow).
+
 ## P1-C full audit: source-management workspace convergence
 
 Status: audit completed on 2026-07-10. This section is an implementation gate: no source-management application code changes are allowed until the listed state, route, and browser contracts are added.
@@ -768,12 +794,12 @@ Status: implemented and parser/API-validated on 2026-07-11.
 
 ### P1-D4-B3 implementation record: streaming cache progress and cancellation
 
-Status: implemented and contract-tested on 2026-07-11; the three-viewport browser rerun with the new SSE click path is pending because the local browser-runner authorization disconnected during launch.
+Status: implemented and browser-validated on 2026-07-13.
 
 - **Authenticated stream contract.** `POST /books/:id/cache/stream` validates the same owner/bounded request as the legacy REST cache endpoint before opening `text/event-stream`. It emits a per-chapter `message`, terminal `end`, or client-safe terminal `error`. The legacy `/cache` endpoint remains for deployed clients and bounded batch cache operations remain an explicit OpenReader extension.
 - **Cancellation boundary.** The stream's request context is propagated into source content fetch and pagination. Browser `AbortController` cancellation or a client disconnect stops before scheduling another chapter fetch, retains only already completed cache files, and deliberately skips a final shelf-update broadcast for the incomplete operation.
 - **BookManage interaction.** The current remote book's cache button now becomes `停止 n/total`; activating it a second time aborts only that book's stream. Vue uses authenticated `fetch` SSE parsing rather than `EventSource`, so the JWT is never placed in a URL. A terminal stream error is surfaced through the existing BookManage error path; successful completion merges the returned shelf item.
-- **Evidence.** Go contracts cover success/progress/end, owner rejection before stream opening, total source failure/error and cancellation without next-chapter scheduling. Frontend contracts cover SSE framing/error handling plus active-book progress and stop behavior. Full backend, frontend unit and production build gates passed before the browser-runner transport interruption.
+- **Evidence.** Go contracts cover success/progress/end, owner rejection before stream opening, total source failure/error and cancellation without next-chapter scheduling. Frontend contracts cover SSE framing/error handling plus active-book progress and stop behavior. The real-Chrome `book-management-dialog-contract.mjs` passed at 1440×900, 390×844 and 360×800: streamed completion reaches `已缓存 2/2 章`, BookManage remains mounted while BookInfo/BookGroup coexist, compact dialogs are fullscreen, panel clicks do not close the mobile sidebar, and no horizontal overflow is present.
 
 ## P1-E pre-implementation audit: remaining Index operation routes
 
@@ -910,6 +936,29 @@ Planned delivery order: (A) common import-parser limits, EPUB/UMD/PDF guards and
 
 The backup ZIP reader/restore path was kept as the next separate data-contract submodule; its existing formats remain unchanged by this parser/staged-preview implementation.
 
+### 2026-07-13 P2 local-import UMD binary compatibility audit
+
+This audit directly compares the fixed upstream `LocalBook.kt`, `UmdFile.kt`, `me/ag2s/umdlib/umd/UmdReader.java`, `UmdChapters.java`, `UmdHeader.java`, and `UmdUtils.java` with OpenReader's `backend/engine/umd_parser.go`. It supersedes the earlier limits-only UMD assessment: current limits protect allocation, but the parser does not recognize the reader-dev UMD wire format at all.
+
+| Concern | reader-dev fixed behavior | Current OpenReader behavior | Classification / required result |
+| --- | --- | --- | --- |
+| File signature | `UmdHeader.buildHeader()` writes little-endian `0xde9a9b89` (`89 9b 9a de`), followed by `#` sections. | `ParseUMDWithLimits` requires the unrelated ASCII prefix `#TEXTNOV`. | `must-fix`: standard reader-dev UMD files fail before catalogue parsing. Detect the upstream signature first. |
+| Header and chapters | `UmdReader` walks `#` sections and `$` additional sections; type `0x83` carries chapter byte offsets, type `0x84` carries UTF-16LE titles plus zlib-compressed UTF-16LE content chunks. `UmdFile` exposes every title by index and obtains chapter text from the decompressed concatenated body. | Current parser treats following bytes as one flat offset/title/content table, decodes GBK, and never processes sections or zlib chunks. | `must-fix`: reproduce the upstream text-UMD catalogue/content contract, including `U+2029 → \n`; reject unsupported image UMD rather than returning invented chapters. |
+| Bounded work | Upstream has no service-side bounds. | Current `LocalBookParseLimits` already bounds declared chapters, input bytes and parsed text policy, but it has no bound for accumulated decompressed UMD chunks. | `required security adaptation`: validate every section/additional length, count and offset before allocation; stream zlib with a total decoded-byte budget; malformed/truncated/compressed-over-budget input returns `ErrLocalBookParseLimit`/a safe parse error before staging consumption, archive writes or SQLite rows. |
+| Existing imports | Existing OpenReader books normally read materialized chapter cache and must not be reparsed during upgrade. An early OpenReader-only `#TEXTNOV` parser may have produced old archives, although it is not reader-dev compatible. | Replacing the parser must not rewrite `data/`, `cache/`, `library/`, SQLite rows or existing chapter files. | `data-compatible`: leave persisted books untouched; use the standard parser for new preview/import and explicit refresh, with the old parser retained only as a documented fallback for legacy OpenReader pseudo-UMD input if it is still encountered. |
+| Fixture evidence | The upstream checkout contains its UMD writer, but no committed `.umd` sample fixture. | Current tests prove only a malicious declared-count rejection, not successful reader-dev UMD import. | `must-fix before implementation`: add a deterministic byte fixture builder that follows the upstream writer (header, offsets, titles, one/multiple compressed chunks), and golden expected title/content output. |
+
+Required test gate before changing application code:
+
+1. Standard upstream-style UMD fixture imports through direct upload, LocalStore preview and WebDAV preview without any later network read; its title, author, ordered chapter titles and `U+2029`-normalized content are exact.
+2. A multi-chunk body preserves ordered content across the zlib chunk boundary; offset/title count disagreement, malformed sections, truncated `$` payloads, bad zlib and an image-type UMD fail deterministically without a partial book.
+3. A decompression bomb and excessive offset/title count fail before unbounded allocation or archive/database write. Error responses retain a retryable staged import token but reveal neither filesystem paths nor raw binary data.
+4. Existing legacy local-book rows/cache remain readable without a migration; an explicit refresh uses the chosen standard/fallback parser and cannot cross user-scoped staged bytes.
+
+Implementation sequence: add test-only upstream-compatible UMD fixture builder and failing golden/API contracts; implement a bounded section reader plus zlib accumulator; retain a narrow `#TEXTNOV` compatibility fallback only after the standard signature check; then run parser, API, storage-preview, full backend/frontend/browser and Docker-volume gates before an image release.
+
+Implementation record (2026-07-13): `ParseUMDWithLimits` now detects the reader-dev `89 9b 9a de` signature before the narrowly retained legacy prefix, reads `#`/`$` segments, accepts writer-produced `F1` chunk separators and the terminal `81` check table, decodes UTF-16LE metadata/titles/content, and normalizes `U+2029` to a newline. It rejects image UMD, malformed/truncated segments, inconsistent offsets/titles, invalid zlib and bounded decoded-content overflow before importer persistence. `backend/engine/umd_parser_contract_test.go` builds the exact upstream writer structure, including multi-chunk bodies, while `backend/api/umd_import_contract_test.go` proves direct upload, LocalStore and WebDAV preview/confirm all import the same staged byte snapshot even after the mounted source file is removed. The failed direct-preview contract keeps only a caller-scoped retry token and does not expose a host path. The isolated `#TEXTNOV` fallback remains covered for existing OpenReader pseudo-UMD inputs; it is an explicit data-compatibility allowance, not an upstream format claim. Full Go tests, frontend tests and production build pass; mounted-volume/Docker publication is the remaining release gate.
+
 ### 2026-07-12 P2 backup restore data/safety re-audit
 
 Status: contract extracted from upstream `Index.vue#backupToWebdav`, `WebDAV.vue#restoreFromWebdav`, `WebdavController.kt`, and OpenReader's backup/restore paths; implemented and awaiting Docker-volume release validation.
@@ -939,7 +988,7 @@ Status: audited on 2026-07-11 from the fixed upstream baseline `changshengyu/rea
 
 | Upstream authority | Required behavior | Current OpenReader evidence | Difference / priority |
 |---|---|---|---|
-| `web/src/views/Index.vue` (`showLocalStoreManageDialog`, `showWebDAVManageDialog`, `backupToWebdav`, user-space/cache/RSS entries) | All operations remain in the Index scene. Opening storage or an operation dialog does not replace the shelf scene; backup asks for confirmation; user-management entries are only visible in manager mode. | P1-E now owns the root overlay route intents, but the normal-user sidebar still exposes “加载用户空间”, then lets the protected admin API fail. | `must-fix P1`: gate manager-only entries from `profile.role`; retain backend 403 as the authority. |
+| `web/src/views/Index.vue` (`showLocalStoreManageDialog`, `showWebDAVManageDialog`, `backupToWebdav`, user-space/cache/RSS entries) | All operations remain in the Index scene. Opening storage or an operation dialog does not replace the shelf scene; backup asks for confirmation; user-management entries are only visible in manager mode. | P1-E owns root overlay route intents; `AppLayout.vue` exposes “管理用户空间” only when `profile.role === 'admin'`, while pasted legacy intents still meet the authoritative backend `403`. | `aligned security adaptation`: explicit role-gated visibility plus backend authorization preserve the manager-only contract. |
 | `web/src/components/LocalStore.vue` | Open resets to the root folder; list only the current directory, navigates directories, caps a large result until “加载更多”, supports search, selected delete/import, upload and then opens the shared book-import preview. Importable upstream extensions are TXT/EPUB/UMD/CBZ. | `LocalStore.vue` is an embedded root overlay with breadcrumbs, current-directory default, preview-before-write and a 100 item display cap. Direct unsupported files return a predictable item error; every successful preview stores an immutable user-scoped input token for confirmation. | P1 current-directory and deterministic P2 preview are implemented. `.text/.md/.pdf` remain documented user-requested runtime extensions. Upload/parser byte limits and automatic expiry cleanup are still required. |
 | `web/src/components/WebDAV.vue` | Same Index-owned dialog pattern as LocalStore: root on open, current-directory list, directory navigation, selected delete/import/upload, ZIP restore confirmation, and preview-before-add-to-shelf. | `WebDAVBrowser.vue` preserves the browser workflow, directory breadcrumbs, ZIP restore, preview-before-write and richer metadata/mobile layout. Raw `/webdav/*` requires JWT plus `CanAccessStore`; regular users resolve only inside their private WebDAV root and previews use immutable staged input tokens. | P0 security and P2 private-data/preview semantics are implemented. WebDAV upload byte limits and operation browser smoke remain required. |
 | `Index.vue#backupToWebdav`, `WebDAV.vue#restoreFromWebdav` | Backup warns before overwrite; recovery asks for confirmation and refreshes the Index data afterwards. | `/api/backup/*` is authenticated, restore is user-scoped at the database layer and `applyRestoreResult` refreshes store/settings/events. Generated files/list/download are now private for regular users; scheduled generation runs per user while the administrator keeps the legacy backup root. | `aligned` for scoped backup storage, with a pending Docker volume/backup gate. |
@@ -1733,3 +1782,46 @@ Implementation status:
 4. Implement OpenReader changes.
 5. Run module gate and record allowed differences.
 6. Publish Git commits promptly. Publish Docker after any coherent, fully verified slice suitable for user validation; a complete module boundary remains preferred.
+## 2026-07-13 BookInfo action-state audit (historical pre-fix baseline)
+
+Upstream authority is `reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`
+`web/src/components/BookInfo.vue`. Its `isInShelf` computed value compares the
+active book URL to the shelf list and is the sole action predicate. `Index.vue`
+and `Reader.vue` only select the book then open the same global BookInfo dialog.
+
+| Behavior | Upstream contract | Pre-fix OpenReader | Classification at audit time |
+|---|---|---|---|
+| Existing shelf book | Shows existing shelf properties (cover update, follow update, group/local actions); no read/detail action in the dialog. | Search/Discover and legacy detail hydration inject read/detail action arrays. | `must-fix` |
+| Unshelved result | The BookInfo property area shows only `加入书架`; it is not a “join and read” menu. | Search/Discover inject `加入书架` and `加入并阅读`; temporary Reader lacks the same shared add path. | `must-fix` |
+| Add success | The saved shelf record becomes the new BookInfo state without changing the current scene. | Each source screen reopens a separate BookInfo configuration with `开始阅读`. | `must-fix` |
+| Reader entry | Merges current reading book with matching shelf record then opens the global dialog; no Reader route/tool state change. | Saved Reader is close; temporary Reader must receive the same unshelved add branch. | `must-fix` |
+| `/books/:id` | No upstream route exists. | OpenReader redirect is required compatibility, but its injected `开始阅读` action is not. | `acceptable-change` |
+
+The implemented result and verification are recorded in section 10 of
+`docs/compat/index-search-p1b-contract.md` and in the following browser inventory.
+
+## 2026-07-13 P1-B BookInfo five-entry browser inventory and result
+
+Upstream evidence was rechecked before changing the current browser contracts:
+
+- `reader-dev/web/src/views/Index.vue#toDetail` sends a result card's non-cover
+  area into Reader, while the cover uses `@click.stop="showBookInfoDialog(book)"`.
+  `Index.vue#showBookInfoDialog` only opens the shared dialog.
+- `reader-dev/web/src/views/Reader.vue#showReadingBookInfo` merges the current
+  reading book with the same-URL shelf book, then opens that same dialog without
+  changing the Reader route or tool layer.
+- `reader-dev/web/src/components/BookInfo.vue#isInShelf` is the only action
+  predicate; the unshelved property area contains a single `加入书架` action.
+
+| Entry / contract | Implemented OpenReader evidence | Classification | Verification |
+|---|---|---|---|
+| Search and explore result card | `RemoteBookResultGroups.vue` now has only cover `preview` and card `read`; the non-upstream `查看信息` button is removed. | `resolved must-fix` | `remoteReaderEntryContract` plus `index-workspace-contract` click the cover for BookInfo and the body for temporary Reader. |
+| Search BookInfo add | `OverlayBookInfo` remains the only transaction owner; the workspace smoke now checks cancel = zero write, confirm = one write, shelf-state replacement and no Reader navigation. | `resolved must-fix` | 1440×900, 390×844, 360×800. |
+| Explore BookInfo | The explore smoke opens the cover's shared BookInfo and checks no secondary action and no route change on close. | `resolved must-fix` | 1440×900, 390×844, 360×800. |
+| Saved Reader BookInfo | `reader-mobile-contract.mjs` supplies a same-URL shelf row and checks no `加入书架` or navigation action while preserving reader UI. | `resolved must-fix` | Desktop, 390×844, 360×800. |
+| Temporary Reader BookInfo | `remote-reader-contract.mjs` opens BookInfo from the temporary Reader before persistence, verifies the single add action and unchanged temporary route/tool state. | `resolved must-fix` | 1440×900, 390×844, 360×800. |
+| Legacy `/books/:id` | The mobile sidebar contract now closes BookInfo, verifies `bookInfo` query removal and checks no injected read action. | `resolved must-fix` | 390×844, 360×800. |
+
+Allowed differences remain limited to the compatibility redirect and the user-approved
+multi-category confirmation. This inventory and its real-browser contracts are the
+completion evidence for the P1-B BookInfo five-entry slice.

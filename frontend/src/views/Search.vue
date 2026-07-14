@@ -1,101 +1,27 @@
 <template>
-  <section class="app-page search-page" :class="{ 'workspace-result-page': embedded }">
-    <header v-if="embedded" class="workspace-result-head">
+  <section class="app-page search-page workspace-result-page">
+    <header class="workspace-result-head">
       <div>
         <h1 class="app-page-title">搜索 ({{ searchMode === 'local' ? shownLocalResults.length : results.length }})</h1>
         <p class="workspace-result-subtitle">{{ searchMode === 'local' ? '本地书籍' : '书源搜索' }}</p>
       </div>
       <div class="workspace-result-actions">
+        <button
+          v-if="searchMode === 'remote' && searched"
+          type="button"
+          :disabled="loadingMore || !remoteHasMore"
+          @click="loadMoreRemote"
+        >{{ loadingMore ? '加载中...' : (remoteHasMore ? '加载更多' : '没有更多了') }}</button>
         <button type="button" @click="backToShelf">书架</button>
       </div>
     </header>
 
-    <header v-else class="search-head">
-      <div>
-        <h1 class="app-page-title">{{ searchMode === 'local' ? '搜索本地书籍' : '搜索书源书籍' }}</h1>
-      </div>
-      <el-button :icon="searchMode === 'local' ? FolderOpened : Connection" @click="searchMode === 'local' ? router.push({ name: 'local-store' }) : router.push({ name: 'sources' })">
-        {{ searchMode === 'local' ? '本地书仓' : '书源管理' }}
-      </el-button>
-    </header>
-
-    <section v-if="!embedded" class="search-console app-panel">
-      <el-radio-group v-model="searchMode" size="large" class="mode-switch" @change="switchSearchMode">
-        <el-radio-button value="remote">书源搜索</el-radio-button>
-        <el-radio-button value="local">本地书籍</el-radio-button>
-      </el-radio-group>
-
-      <el-input v-model="keyword" :placeholder="searchMode === 'local' ? '输入本地文件名或路径，留空显示全部可导入文件' : '输入书名或作者'" size="large" clearable @keyup.enter="doSearch">
-        <template #prefix><el-icon><SearchIcon /></el-icon></template>
-      </el-input>
-      <el-button type="primary" size="large" :loading="searching" @click="doSearch">搜索</el-button>
-
-      <div v-if="searchMode === 'remote'" class="search-options">
-        <el-radio-group v-model="searchType" size="small" @change="syncSelection">
-          <el-radio-button value="all">全部书源</el-radio-button>
-          <el-radio-button value="group">按分组</el-radio-button>
-          <el-radio-button value="single">单个书源</el-radio-button>
-          <el-radio-button value="custom">自选</el-radio-button>
-        </el-radio-group>
-
-        <el-select v-if="searchType === 'group'" v-model="selectedGroup" placeholder="选择分组" size="small" @change="syncSelection">
-          <el-option v-for="group in sourceGroups" :key="group.value" :label="`${group.label} (${group.count})`" :value="group.value" />
-        </el-select>
-
-        <el-select v-if="searchType === 'single'" v-model="singleSourceId" placeholder="选择书源" filterable size="small" @change="syncSelection">
-          <el-option v-for="source in enabledSources" :key="source.id" :label="source.name" :value="source.id" />
-        </el-select>
-
-        <el-select v-if="searchType !== 'single'" v-model="concurrentCount" placeholder="并发线程" size="small">
-          <el-option v-for="count in concurrentOptions" :key="count" :label="`${count}并发线程`" :value="count" />
-        </el-select>
-
-        <el-select v-model="targetCategoryIds" placeholder="加入书架分组（可多选）" multiple collapse-tags collapse-tags-tooltip clearable size="small">
-          <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
-        </el-select>
-      </div>
-
-      <div v-else class="search-options local-search-options">
-        <el-select v-model="targetCategoryIds" placeholder="导入到书架分组（可多选）" multiple collapse-tags collapse-tags-tooltip clearable size="small">
-          <el-option v-for="category in bookshelf.categories" :key="category.id" :label="category.name" :value="String(category.id)" />
-        </el-select>
-        <el-switch v-model="localRecursiveScan" inline-prompt active-text="子目录" inactive-text="当前层" />
-        <el-button size="small" :disabled="!checkedLocalPaths.length || importingLocal" :loading="importingLocal" @click="importSelectedLocal">
-          导入选中 {{ checkedLocalPaths.length }}
-        </el-button>
-        <el-button size="small" :disabled="!shownLocalImportablePaths.length || importingLocal" :loading="importingLocal" @click="importShownLocal">
-          导入命中 {{ shownLocalImportablePaths.length }}
-        </el-button>
-      </div>
-
-      <el-collapse v-if="searchMode === 'remote' && searchType === 'custom'" class="source-collapse">
-        <el-collapse-item :title="`自选书源（${selectedIds.length}/${enabledSources.length}）`">
-          <el-checkbox :model-value="allSelected" @change="toggleAll">全选</el-checkbox>
-          <el-checkbox-group v-model="selectedIds" class="source-checks">
-            <el-checkbox v-for="source in enabledSources" :key="source.id" :value="source.id" :label="source.name" />
-          </el-checkbox-group>
-        </el-collapse-item>
-      </el-collapse>
-    </section>
-
-    <section v-if="!embedded && searchMode === 'remote'" class="search-status">
-      <el-tag effect="plain">启用书源 {{ enabledSources.length }}</el-tag>
-      <el-tag effect="plain">本次搜索 {{ selectedIds.length }}</el-tag>
-      <el-tag v-if="searched" :type="results.length ? 'success' : 'info'" effect="plain">结果 {{ results.length }}</el-tag>
-    </section>
-      <section v-else-if="!embedded" class="search-status">
-      <el-tag effect="plain">本地书架 {{ localShelfBooks.length }}</el-tag>
-      <el-tag effect="plain">本地书仓 {{ localItems.length }}</el-tag>
-      <el-tag effect="plain">可导入文件 {{ localImportableCount }}</el-tag>
-      <el-tag effect="plain">已选 {{ checkedLocalPaths.length }}</el-tag>
-      <el-tag v-if="searched" :type="shownLocalResults.length ? 'success' : 'info'" effect="plain">命中 {{ shownLocalResults.length }}</el-tag>
-    </section>
-
-    <div v-loading="searching" class="result-area">
+    <div ref="resultArea" v-loading="searching" class="result-area">
       <RemoteBookResultGroups
         v-if="searchMode === 'remote' && groupedResults.length"
         :groups="groupedResults"
         @preview="openPreview"
+        @read="openRemoteReader"
       />
 
       <div v-else-if="searchMode === 'local' && shownLocalResults.length" class="local-result-list">
@@ -103,14 +29,7 @@
           v-for="item in shownLocalResults"
           :key="localResultKey(item)"
           class="local-result-card app-panel"
-          :class="{ selected: item.importable && checkedLocalPaths.includes(item.path) }"
         >
-          <el-checkbox
-            v-if="item.importable"
-            :model-value="checkedLocalPaths.includes(item.path)"
-            @change="value => toggleLocalPath(item.path, value)"
-          />
-          <span v-else class="local-result-spacer" />
           <el-icon class="local-file-icon"><Document /></el-icon>
           <div class="result-main">
             <div class="result-title">
@@ -134,21 +53,15 @@
       <el-empty v-else :description="searchMode === 'local' ? '输入关键词搜索本地书仓，或直接搜索显示全部可导入文件' : '输入关键词后开始搜索书源'" />
     </div>
 
-    <div v-if="searchMode === 'remote' && searched && (results.length || remoteHasMore)" class="load-more-row">
-      <el-button :loading="loadingMore" :disabled="!remoteHasMore" @click="loadMoreRemote">
-        {{ remoteHasMore ? '加载更多' : '没有更多' }}
-      </el-button>
-    </div>
-
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Connection, Document, FolderOpened, Search as SearchIcon } from '@element-plus/icons-vue'
-import { createRemoteBook } from '../api/books'
+import { Document } from '@element-plus/icons-vue'
+import { createRemoteReaderSession } from '../api/remoteReader'
 import { importFromLocalStore, listLocalStore } from '../api/localStore'
 import api from '../api/client'
 import RemoteBookResultGroups from '../components/RemoteBookResultGroups.vue'
@@ -157,29 +70,26 @@ import { useOverlayStore } from '../stores/overlay'
 import { useReaderStore } from '../stores/reader'
 import { usePreferencesStore } from '../stores/preferences'
 import { useIndexWorkspaceStore } from '../stores/indexWorkspace'
-import { useBookInfoAddToShelf } from '../composables/useBookInfoAddToShelf'
-import {
-  buildBookInfoReadActions,
-  buildBookInfoStartReadActions,
-  buildSearchAddBookActions,
-  buildSearchExistingBookActions,
-} from '../utils/bookInfoOverlayActions'
 import { newestBookProgress } from '../utils/bookOrder'
 import { isLocalBook, localBookSearchText, normalizeLocalBookSearch } from '../utils/localBook'
 import { readerRouteQueryFromBook } from '../utils/readerRoute'
 import {
-  remoteBookCreatePayload,
-  remoteBookKey,
+  DEFAULT_SEARCH,
+  normalizeSearchConcurrent,
+} from '../utils/searchPreference.js'
+import {
+  remoteBookReaderPayload,
   remoteBookSourceId,
   remoteBookSourceName,
-  remoteBookUrl,
 } from '../utils/remoteBookResult'
+import {
+  captureWorkspaceRequest,
+  createAsyncRequestGate,
+  isWorkspaceRequestCurrent,
+  mergeRemoteSearchResults,
+} from '../utils/workspaceContinuation.js'
 
-const route = useRoute()
 const router = useRouter()
-const props = defineProps({
-  embedded: { type: Boolean, default: false },
-})
 const emit = defineEmits(['back-to-shelf'])
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
@@ -188,15 +98,14 @@ const preferences = usePreferencesStore()
 const workspace = useIndexWorkspaceStore()
 
 const keyword = ref('')
-const searchMode = ref(route.query.mode === 'local' ? 'local' : 'remote')
+const searchMode = ref('remote')
 const sources = ref([])
 const selectedIds = ref([])
-const selectedGroup = ref(typeof route.query.group === 'string' ? route.query.group : preferences.search.group)
-const singleSourceId = ref(Number(route.query.sourceId || preferences.search.sourceId || 0) || null)
+const selectedGroup = ref(preferences.search.group)
+const singleSourceId = ref(Number(preferences.search.sourceId || 0) || null)
 const targetCategoryIds = ref([])
-const searchType = ref(['all', 'group', 'single', 'custom'].includes(route.query.searchType) ? route.query.searchType : preferences.search.searchType)
-const concurrentOptions = [8, 16, 32, 60]
-const concurrentCount = ref(concurrentOptions.includes(Number(route.query.concurrent)) ? Number(route.query.concurrent) : preferences.search.concurrent)
+const searchType = ref(preferences.search.searchType)
+const concurrentCount = ref(normalizeSearchConcurrent(preferences.search.concurrent))
 const results = ref([])
 const searching = ref(false)
 const loadingMore = ref(false)
@@ -207,23 +116,15 @@ const remoteHasMore = ref(false)
 const activeSearchKeyword = ref('')
 const activeSourceIds = ref([])
 const activeConcurrentCount = ref(1)
-const addToShelf = useBookInfoAddToShelf({
-  selectCategories: initialCategoryIds => overlay.selectBookAddCategories(initialCategoryIds),
-  buildPayload: (book, categoryIds, context) => remoteBookCreatePayload(book, categoryIds, context),
-  createRemoteBook,
-  upsertBook: book => bookshelf.upsertBook(book),
-  onSuccess: message => ElMessage.success(message),
-  onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
-})
-const addingBook = addToShelf.addingBookKey
+const activeSearchIsSingleSource = ref(false)
+const resultArea = ref(null)
+const remoteRequestGate = createAsyncRequestGate()
 const localItems = ref([])
-const checkedLocalPaths = ref([])
 const localRecursiveScan = ref(true)
 const importingLocal = ref(false)
-const embeddedSearchReady = ref(false)
+const workspaceSearchReady = ref(false)
 
 const enabledSources = computed(() => sources.value.filter(source => source.enabled))
-const allSelected = computed(() => enabledSources.value.length > 0 && selectedIds.value.length === enabledSources.value.length)
 const groupedResults = computed(() => {
   const groups = new Map()
   for (const item of results.value) {
@@ -240,16 +141,6 @@ const groupedResults = computed(() => {
   return [...groups.values()]
 })
 
-const sourceGroups = computed(() => {
-  const groups = new Map()
-  for (const source of enabledSources.value) {
-    const name = source.group || '默认分组'
-    groups.set(name, (groups.get(name) || 0) + 1)
-  }
-  return [...groups.entries()].map(([label, count]) => ({ label, value: label, count }))
-})
-
-const localImportableCount = computed(() => localItems.value.filter(item => item.importable).length)
 const localShelfBooks = computed(() => (bookshelf.books || []).filter(isLocalBook))
 const shownLocalResults = computed(() => {
   if (!searched.value || searchMode.value !== 'local') return []
@@ -273,10 +164,8 @@ const shownLocalResults = computed(() => {
     .map(item => ({ ...item, type: 'file' }))
   return [...shelfResults, ...storeResults]
 })
-const shownLocalImportablePaths = computed(() => shownLocalResults.value.filter(item => item.importable).map(item => item.path))
-
 onMounted(async () => {
-  if (props.embedded) applyWorkspaceSearchIntent()
+  applyWorkspaceSearchIntent()
   await warmSearchShelf()
   if (searchMode.value === 'remote') {
     try {
@@ -287,10 +176,13 @@ onMounted(async () => {
   } else {
     loadSources().catch(() => {})
   }
-  if (!props.embedded) keyword.value = route.query.q || ''
   syncSelection()
-  embeddedSearchReady.value = true
+  workspaceSearchReady.value = true
   if (keyword.value || searchMode.value === 'local') doSearch()
+})
+
+onBeforeUnmount(() => {
+  remoteRequestGate.invalidate()
 })
 
 async function warmSearchShelf() {
@@ -315,50 +207,13 @@ watch(searchType, () => {
   saveSearchPreference()
 })
 watch([selectedGroup, singleSourceId, concurrentCount], saveSearchPreference)
-watch(localRecursiveScan, () => {
-  if (searchMode.value === 'local') searchLocalBooks()
-})
-watch(() => route.query.mode, (mode) => {
-  if (props.embedded) return
-  const nextMode = mode === 'local' ? 'local' : 'remote'
-  if (nextMode !== searchMode.value) switchSearchMode(nextMode, false)
-})
-
 watch(
   () => [workspace.mode, workspace.searchRevision],
   () => {
-    if (!props.embedded || workspace.mode !== 'search') return
+    if (workspace.mode !== 'search') return
     applyWorkspaceSearchIntent()
-    if (!embeddedSearchReady.value) return
+    if (!workspaceSearchReady.value) return
     if (keyword.value || searchMode.value === 'local') doSearch()
-  },
-)
-
-watch(() => route.query.q, (value) => {
-  if (props.embedded) return
-  const next = typeof value === 'string' ? value : ''
-  if (next !== keyword.value) keyword.value = next
-  if (next && route.name === 'search') doSearch()
-})
-
-watch(
-  () => [route.query.searchType, route.query.group, route.query.sourceId],
-  ([type, group, sourceId]) => {
-    if (props.embedded) return
-    if (['all', 'group', 'single', 'custom'].includes(type)) searchType.value = type
-    selectedGroup.value = typeof group === 'string' ? group : selectedGroup.value
-    const nextSourceId = Number(sourceId || 0)
-    if (Number.isFinite(nextSourceId) && nextSourceId > 0) singleSourceId.value = nextSourceId
-    syncSelection()
-  },
-)
-
-watch(
-  () => route.query.concurrent,
-  (value) => {
-    if (props.embedded) return
-    const next = Number(value || 0)
-    if (concurrentOptions.includes(next)) concurrentCount.value = next
   },
 )
 
@@ -391,126 +246,127 @@ function saveSearchPreference() {
   })
 }
 
-function toggleAll() {
-  selectedIds.value = allSelected.value ? [] : enabledSources.value.map(source => source.id)
-}
-
-async function switchSearchMode(mode, updateRoute = true) {
-  searchMode.value = mode
-  searched.value = false
-  results.value = []
-  resetRemotePagination()
-  checkedLocalPaths.value = []
-  if (!props.embedded) workspace.beginSearch(searchWorkspaceIntent(mode))
-  if (mode === 'remote') {
-    if (!sources.value.length) {
-      loadSources()
-        .then(syncSelection)
-        .catch(err => ElMessage.error(readError(err, '加载书源失败')))
-    } else {
-      syncSelection()
-    }
-  }
-  if (updateRoute && !props.embedded) {
-    router.replace({
-      name: 'search',
-      query: {
-        ...route.query,
-        mode: mode === 'local' ? 'local' : undefined,
-      },
-    })
-  }
-  if (mode === 'local') {
-    await searchLocalBooks()
-  }
-}
-
 async function doSearch() {
   if (searchMode.value === 'local') {
+    remoteRequestGate.invalidate()
     await searchLocalBooks()
     return
   }
   const value = keyword.value.trim()
   if (!value) return
   if (!selectedIds.value.length) {
-    ElMessage.warning('请至少选择一个书源')
+    ElMessage.warning('未配置书源')
     return
   }
-  if (!props.embedded) workspace.beginSearch(searchWorkspaceIntent('remote'))
   workspace.setResultLoading(true)
   searching.value = true
   searched.value = false
   results.value = []
   resetRemotePagination()
+  const requestToken = remoteRequestGate.begin()
+  const workspaceStamp = captureWorkspaceRequest(workspace, 'search')
   activeSearchKeyword.value = value
   activeSourceIds.value = [...selectedIds.value]
   activeConcurrentCount.value = searchType.value === 'single' ? 1 : concurrentCount.value
+  activeSearchIsSingleSource.value = activeSourceIds.value.length === 1
   try {
-    const added = await requestRemoteSearch(false)
+    const { added, current } = await requestRemoteSearch({
+      append: false,
+      page: 1,
+      lastIndex: -1,
+      requestToken,
+      workspaceStamp,
+    })
+    if (!current) return
     searched.value = true
     ElMessage.success(added ? `找到 ${added} 条结果` : '没有找到相关书籍')
   } catch (err) {
-    ElMessage.error(readError(err, '搜索失败'))
+    if (isActiveRemoteRequest(requestToken, workspaceStamp)) {
+      ElMessage.error(readError(err, '搜索失败'))
+    }
   } finally {
-    searching.value = false
-    workspace.setResultLoading(false)
+    if (isActiveRemoteRequest(requestToken, workspaceStamp)) {
+      searching.value = false
+      workspace.setResultLoading(false)
+    }
   }
 }
 
 async function loadMoreRemote() {
-  if (loadingMore.value || !remoteHasMore.value) return
+  if (loadingMore.value) return
+  if (!remoteHasMore.value) {
+    ElMessage.info('没有更多了')
+    return
+  }
+  const requestToken = remoteRequestGate.begin()
+  const workspaceStamp = captureWorkspaceRequest(workspace, 'search')
+  const nextPage = searchPage.value + 1
+  const nextLastIndex = activeSearchIsSingleSource.value ? -1 : searchLastIndex.value
+  rememberResultScroll()
   loadingMore.value = true
   workspace.setResultLoading(true)
   try {
-    searchPage.value += 1
-    const added = await requestRemoteSearch(true)
+    const { added, current } = await requestRemoteSearch({
+      append: true,
+      page: nextPage,
+      lastIndex: nextLastIndex,
+      requestToken,
+      workspaceStamp,
+    })
+    if (!current) return
     if (!added) {
-      ElMessage.info(remoteHasMore.value ? '本批没有新增结果' : '没有更多了')
+      ElMessage.info(remoteHasMore.value ? '本批没有新增结果，仍可继续加载' : '没有更多了')
     }
   } catch (err) {
-    searchPage.value = Math.max(1, searchPage.value - 1)
-    ElMessage.error(readError(err, '加载更多失败'))
+    if (isActiveRemoteRequest(requestToken, workspaceStamp)) {
+      ElMessage.error(readError(err, '加载更多失败'))
+    }
   } finally {
-    loadingMore.value = false
-    workspace.setResultLoading(false)
+    if (isActiveRemoteRequest(requestToken, workspaceStamp)) {
+      loadingMore.value = false
+      workspace.setResultLoading(false)
+    }
   }
 }
 
-async function requestRemoteSearch(append) {
-  const { data } = await api.post('/search', {
+function isActiveRemoteRequest(requestToken, workspaceStamp) {
+  return remoteRequestGate.isCurrent(requestToken)
+    && isWorkspaceRequestCurrent(workspace, workspaceStamp)
+}
+
+function remoteSearchPayload(page, lastIndex) {
+  const payload = {
     keyword: activeSearchKeyword.value,
     sourceIds: activeSourceIds.value,
     concurrentCount: activeConcurrentCount.value,
-    page: searchPage.value,
-    lastIndex: searchLastIndex.value,
-    searchSize: 20,
-  })
+  }
+  if (activeSearchIsSingleSource.value) {
+    payload.page = page
+  } else {
+    payload.lastIndex = lastIndex
+    payload.searchSize = 20
+  }
+  return payload
+}
+
+async function requestRemoteSearch({ append, page, lastIndex, requestToken, workspaceStamp }) {
+  const { data } = await api.post('/search', remoteSearchPayload(page, lastIndex))
+  if (!isActiveRemoteRequest(requestToken, workspaceStamp)) {
+    return { added: 0, current: false }
+  }
   const incoming = Array.isArray(data) ? data : (data?.list || [])
-  const added = appendRemoteResults(incoming, append)
-  searchPage.value = Number(data?.page || searchPage.value)
-  searchLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : searchLastIndex.value
+  const { rows, added } = mergeRemoteSearchResults(append ? results.value : [], incoming)
+  results.value = rows
+  if (activeSearchIsSingleSource.value) {
+    searchPage.value = Number(data?.page || page)
+    searchLastIndex.value = -1
+  } else {
+    searchPage.value = page
+    searchLastIndex.value = Number.isInteger(data?.lastIndex) ? data.lastIndex : lastIndex
+  }
   remoteHasMore.value = Boolean(data?.hasMore)
   workspace.replaceResultRows(results.value, remoteWorkspaceContinuation())
-  return added
-}
-
-function appendRemoteResults(incoming, append) {
-  const next = append ? [...results.value] : []
-  const seen = new Set(next.map(remoteResultDedupKey).filter(Boolean))
-  let added = 0
-  for (const item of incoming) {
-    const key = remoteResultDedupKey(item)
-    if (key && seen.has(key)) continue
-    if (key) seen.add(key)
-    next.push(item)
-    added += 1
-  }
-  results.value = next
-  return added
-}
-
-function remoteResultDedupKey(item) {
-  return remoteBookUrl(item) || remoteBookKey(item)
+  return { added, current: true }
 }
 
 function resetRemotePagination() {
@@ -521,15 +377,18 @@ function resetRemotePagination() {
   activeSearchKeyword.value = ''
   activeSourceIds.value = []
   activeConcurrentCount.value = 1
+  activeSearchIsSingleSource.value = false
+}
+
+function rememberResultScroll() {
+  workspace.rememberResultScroll(resultArea.value?.scrollTop || 0)
 }
 
 async function searchLocalBooks() {
-  if (!props.embedded) workspace.beginSearch(searchWorkspaceIntent('local'))
   workspace.setResultLoading(true)
   searching.value = true
   searched.value = false
   results.value = []
-  checkedLocalPaths.value = []
   try {
     const [storeResult, shelfResult] = await Promise.allSettled([
       listLocalStore('', localRecursiveScan.value),
@@ -561,17 +420,6 @@ async function searchLocalBooks() {
   }
 }
 
-function searchWorkspaceIntent(mode = searchMode.value) {
-  return {
-    keyword: keyword.value,
-    mode,
-    searchType: searchType.value,
-    group: selectedGroup.value,
-    sourceId: singleSourceId.value || '',
-    concurrent: concurrentCount.value,
-  }
-}
-
 function remoteWorkspaceContinuation() {
   return {
     page: searchPage.value,
@@ -584,33 +432,18 @@ function applyWorkspaceSearchIntent() {
   const intent = workspace.search
   searchMode.value = intent.mode === 'local' ? 'local' : 'remote'
   keyword.value = intent.keyword || ''
-  searchType.value = ['all', 'group', 'single', 'custom'].includes(intent.searchType) ? intent.searchType : 'all'
+  searchType.value = ['all', 'group', 'single', 'custom'].includes(intent.searchType)
+    ? intent.searchType
+    : DEFAULT_SEARCH.searchType
   selectedGroup.value = intent.group || ''
   singleSourceId.value = Number(intent.sourceId || 0) || null
-  concurrentCount.value = concurrentOptions.includes(Number(intent.concurrent)) ? Number(intent.concurrent) : 60
+  concurrentCount.value = normalizeSearchConcurrent(intent.concurrent)
 }
 
 function backToShelf() {
+  remoteRequestGate.invalidate()
   workspace.backToShelf()
   emit('back-to-shelf')
-}
-
-function toggleLocalPath(path, checked) {
-  if (checked) {
-    if (!checkedLocalPaths.value.includes(path)) checkedLocalPaths.value.push(path)
-    return
-  }
-  checkedLocalPaths.value = checkedLocalPaths.value.filter(item => item !== path)
-}
-
-async function importSelectedLocal() {
-  if (!checkedLocalPaths.value.length) return
-  await importLocalPaths(checkedLocalPaths.value)
-}
-
-async function importShownLocal() {
-  if (!shownLocalImportablePaths.value.length) return
-  await importLocalPaths(shownLocalImportablePaths.value)
 }
 
 async function importLocalOne(item) {
@@ -628,7 +461,6 @@ async function importLocalPaths(paths) {
       if (item.book) bookshelf.upsertBook(item.book)
     })
     markImportedLocalItems(imported)
-    checkedLocalPaths.value = checkedLocalPaths.value.filter(path => !paths.includes(path))
     const success = imported.filter(item => item.book).length
     const failed = imported.filter(item => item.error).length
     ElMessage.success(`导入 ${success} 本` + (failed ? `，${failed} 本失败` : ''))
@@ -727,6 +559,19 @@ function openLocalShelfDetail(book) {
   })
 }
 
+async function openRemoteReader(item) {
+  try {
+    const { data } = await createRemoteReaderSession(remoteBookReaderPayload(item, {
+      sourceId: remoteBookSourceId(item),
+      sourceName: remoteBookSourceName(item),
+    }))
+    if (!data?.id) throw new Error('远程阅读会话无效')
+    router.push({ name: 'remote-reader', params: { sessionId: data.id }, query: { chapter: 0 } })
+  } catch (error) {
+    ElMessage.error(readError(error, '打开临时阅读失败'))
+  }
+}
+
 function formatSize(bytes) {
   if (!bytes) return '0 B'
   if (bytes < 1024) return `${bytes} B`
@@ -734,69 +579,12 @@ function formatSize(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-async function addRemoteBook(item, shouldRead) {
-  const key = remoteBookKey(item)
-  const data = await addToShelf.addRemoteBook(item, {
-    key,
-    categoryIds: targetCategoryIds.value,
-    sourceId: remoteBookSourceId(item),
-    sourceName: remoteBookSourceName(item),
-  })
-  if (!data) return
-  if (shouldRead) {
-    overlay.closeBookInfo()
-    router.push({ name: 'reader', params: { id: data.id } })
-    return
-  }
-  overlay.openBookInfo(data, {
-    sourceName: remoteBookSourceName(item),
-    statusLabel: '已加入书架',
-    statusType: 'success',
-    progress: 0,
-    actions: buildBookInfoStartReadActions({ read: () => openExistingReader(data) }),
-  })
-}
-
 function openPreview(item) {
-  const existing = findExistingBook(item)
   overlay.openBookInfo(item, {
     sourceName: remoteBookSourceName(item),
-    statusLabel: existing ? '已在书架' : '搜索结果',
-    statusType: existing ? 'warning' : 'success',
-    progress: readerProgressForBook(existing)?.percent || 0,
-    actions: existing
-      ? buildSearchExistingBookActions({
-          openInfo: () => openExistingInfo(existing, remoteBookSourceName(item)),
-          read: () => openExistingReader(existing),
-        })
-      : buildSearchAddBookActions({
-          add: () => addRemoteBook(item, false),
-          addAndRead: () => addRemoteBook(item, true),
-          loading: addingBook.value === remoteBookKey(item),
-        }),
+    statusLabel: '搜索结果',
+    statusType: 'info',
   })
-}
-
-function findExistingBook(item) {
-  return bookshelf.books.find(book => (
-    Number(book.sourceId || 0) === Number(remoteBookSourceId(item) || 0)
-    && String(book.url || book.bookUrl || '') === String(remoteBookUrl(item) || '')
-  )) || null
-}
-
-function openExistingInfo(book, sourceName = '') {
-  overlay.openBookInfo(book, {
-    sourceName,
-    statusLabel: '已在书架',
-    statusType: 'warning',
-    progress: readerProgressForBook(book)?.percent || 0,
-    actions: buildBookInfoReadActions({ read: () => openExistingReader(book) }),
-  })
-}
-
-function openExistingReader(book) {
-  overlay.closeBookInfo()
-  router.push({ name: 'reader', params: { id: book.id }, query: readerRouteQueryForLocalBook(book) })
 }
 
 function readError(err, fallback) {
