@@ -105,8 +105,8 @@ Status: implemented and backend/frontend-tested on 2026-07-11 against reader-dev
 
 | Method / path | Request | Success and side effects | Errors / retry contract |
 |---|---|---|---|
-| `POST /api/imports/books/preview` | Multipart `file`, optional `title`, `author`, `tocRule`, or an existing `importToken` instead of `file`. JWT required. | A new upload creates a caller-scoped immutable stage before parsing. Successful response is `200` with `{title,author,chapterCount,chapters,importToken}`. An empty `tocRule` uses the automatic first-512,000-byte probe and may return pseudo chapters for text without a TOC. | Unsupported/invalid input and an explicit `tocRule` that finds no chapters return `400` `{error,importToken}`. The token is retained for the caller to submit another preview rule; no book rows/cache files are created. |
-| `POST /api/imports/books` | Same multipart/token fields plus existing category fields. JWT required. | `201` creates the book only from the staged bytes or submitted upload. A consumed staged token is deleted only after a successful import. | `400` for unsupported/parse/no-readable-chapter errors; failed parse/import leaves an existing stage reusable until normal expiry. |
+| `POST /api/imports/books/preview` | Multipart `file`, optional `title`, `author`, `tocRule`, or an existing `importToken` instead of `file`. JWT required. | A new upload creates a caller-scoped immutable stage before parsing. Successful response is `200` with `{title,author,chapterCount,chapters,importToken}`. An empty `tocRule` uses the automatic first-512,000-byte probe and may return pseudo chapters for text without a TOC. An explicit TXT `tocRule` with no match is likewise a normal `200` empty catalogue, retaining the token for a rule refresh or empty-catalog confirmation. | Unsupported/invalid input remains `400` `{error,importToken}`. No book rows/cache files are created during preview. |
+| `POST /api/imports/books` | Same multipart/token fields plus existing category fields. JWT required. | `201` creates the book only from the staged bytes or submitted upload. A consumed staged token is deleted only after a successful import. A local TXT book with an explicit unmatched rule is allowed to persist with zero chapter rows, matching upstream local-book confirmation semantics. | `400` for unsupported/parse errors; failed parse/import leaves an existing stage reusable until normal expiry. |
 | `POST /api/local-store/import-preview`, `POST /api/webdav/import-preview` | JSON `{paths}` or `{items:[{path,title,author,tocRule}]}`. JWT/store permission required. | `200 {items}`. Each readable item is copied once to a caller-scoped immutable stage; success item contains `{path,book,importToken}`. | A parser failure remains an item-level `{path,error,importToken}` in the `200` envelope. The token remains valid for a later `{items:[{path,importToken,tocRule}]}` preview/import; mounted-file mutation/removal cannot affect that retry. |
 | `POST /api/local-store/import`, `POST /api/webdav/import` | Existing paths/items/category body. | Successful staged item uses the original preview bytes and deletes its token after durable import. | Item-level parser failures retain the staged token and do not create book/cache rows. A container response does not expose paths outside the caller's scoped store. |
 
@@ -170,8 +170,8 @@ The upstream uses namespace-specific JSON storage and SSE cache progress. OpenRe
 | Auth | Existing `Authorization: Bearer <jwt>` requirement. The book lookup remains scoped to the authenticated user. |
 | Request | Existing numeric book ID and zero-based chapter index. |
 | Text response | `200` JSON keeps `chapter` and `content`; adds `"format": "text"`. |
-| EPUB response | `200` JSON keeps `chapter` and searchable plain-text `content`; adds `"format": "epub"`, `resourceUrl`, and RFC3339 `resourceExpiresAt`. |
-| Side effects | For EPUB, may safely extract/rebuild a derived resource tree and backfill the chapter's canonical `resourcePath`. It must not alter the archived source EPUB. |
+| EPUB response | `200` JSON keeps `chapter` and searchable plain-text `content`; adds `"format": "epub"`, `resourceUrl`, and RFC3339 `resourceExpiresAt`. A fragment chapter keeps canonical `chapter.resourcePath` plus nullable `resourceFragment`/`resourceEndFragment`; its `resourceUrl` includes an encoded `#resourceFragment` for iframe location. |
+| Side effects | For EPUB, may safely extract/rebuild a derived resource tree and backfill canonical `resourcePath` plus nullable fragment metadata. It must not alter the archived source EPUB. |
 | `400` | Invalid book/chapter parameter. |
 | `404` | Book/chapter/source archive is not available to the current user. |
 | `422` | EPUB exists but is corrupt, unsafe, unsupported, or exceeds extraction limits. |
@@ -204,10 +204,10 @@ Example:
 | Field | Contract |
 |---|---|
 | Auth | Does not accept or require the login Bearer token. Authorization is the signed path capability returned by the protected chapter endpoint. |
-| Capability scope | One user ID, one book ID, one source fingerprint/extracted version, read-only access, and a bounded expiration. It is signed with a purpose-separated key derived from `OPENREADER_JWT_SECRET`; it is never interchangeable with a login JWT. |
+| Capability scope | One user ID, one book ID, one source fingerprint/extracted version, read-only access, and a bounded expiration. For a fragment chapter it additionally signs the canonical XHTML path and nullable start/end fragment ids used to slice that one document; it is never interchangeable with a login JWT. |
 | Path | `resourcePath` is URL-decoded once, normalized as an EPUB POSIX path, and resolved strictly below that book/version's derived extraction root. |
 | Success | `200` with a supported XHTML/HTML, CSS, image, SVG, or font MIME type. `HEAD` may return the same headers without a body. |
-| XHTML | Dynamically receives the OpenReader iframe bridge and restrictive security headers. The archived/extracted source file is not modified in place. |
+| XHTML | Dynamically receives the OpenReader iframe bridge and restrictive security headers. When the capability is for a fragment chapter, the served document contains only the upstream-equivalent start/end DOM range; sibling CSS/image/font resources retain the same capability root and are not sliced. The archived/extracted source file is not modified in place. |
 | Relative assets | The capability remains a stable path segment so relative chapter CSS/image/font/link URLs stay within the same authorized root. |
 | `400` | Malformed capability or unsafe/malformed resource path. |
 | `403` | Invalid signature, expired capability, wrong purpose, wrong archive version, or book ownership no longer matches. |
@@ -245,6 +245,26 @@ The route must not log the capability value. Application access logs should reda
 | Error body | `{ "error": "<stable client-safe message>" }`; never include a host filesystem path or token. |
 
 The CBZ additions are backward-compatible JSON fields. Existing clients that only consume `content` will see upstream-style image HTML.
+
+### CBZ bookshelf and book-detail cover projection
+
+`POST /api/imports/books`, `POST /api/local-store/import`, `POST /api/webdav/import`,
+`GET /api/books`, `GET /api/books/:id`, and any existing `bookshelf_update` payload retain their
+current book/book-list JSON shapes. For a local CBZ with no `customCoverUrl`, the existing
+`coverUrl` field is projected at response time to
+`/api/cbz-resource/<capability>/<first-safe-archive-image>`.
+
+The source image is the first safe image encountered in CBZ archive order, matching
+reader-dev `CbzFile.parseBookInfo`; it is intentionally independent of the lexicographically
+sorted chapter catalogue. The response capability is bound to the current user, book and
+archive fingerprint, expires normally, and remains readable without appending the login JWT.
+`coverUrl` capability values and archive member paths are **not** written to `books`,
+`chapters.json`, `bookSource.json`, backups, WebDAV metadata, or logs. A user-supplied
+`customCoverUrl` remains the frontend's first-choice cover and is never overwritten.
+
+If the archived CBZ is unavailable, malformed, unsafe, over budget, or has no supported image,
+the stable book endpoint stays successful with its stored/empty `coverUrl`; it must not turn a
+normal bookshelf response into an archive or host-path error.
 
 Example:
 

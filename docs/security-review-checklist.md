@@ -89,10 +89,19 @@ Evidence for the checked items: `backend/api/workspace_storage_access_contract_t
 
 Evidence: `backend/api/workspace_file_manager_p1e3_contract_test.go` covers private rooted listing fields, multi-file ordinary-file storage and a rejected later part preserving its old destination. `frontend/tests/workspaceFileManagerParity.test.mjs` keeps source-specific presentation gates separated from direct parser support. `scripts/smoke/workspace-storage-import-state-machine.mjs` validates authenticated WebDAV requests and removed actions across desktop and both required mobile sizes.
 
+## P1-E4 TXT empty-catalogue follow-up
+
+- [x] A valid staged TXT with an unmatched user TOC rule is no longer misclassified as a parser or transport failure. The response retains only the opaque caller-scoped stage token and returns no mounted path, parser internals, credentials or source bytes.
+- [x] Confirmation consumes only that caller's staged file, archives the original safely, and creates a zero-chapter local book without fabricating a chapter or dereferencing a missing final chapter. Foreign/expired-token rejection remains covered by the existing stage-token contract.
+- [x] Direct, LocalStore and WebDAV UI keep the empty catalogue distinct from an actual parser failure, so a user can retry against the immutable staged data or deliberately confirm the upstream-compatible zero-chapter state.
+
+Evidence: `backend/services/localbook/importer_test.go`, `backend/api/api_test.go`, `backend/api/workspace_import_stage_contract_test.go`, `frontend/tests/overlayBookImport.test.mjs`, `frontend/tests/storageImportWorkflow.test.mjs`, and `scripts/smoke/local-book-import-contract.mjs` / `workspace-storage-retry-contract.mjs` at desktop and both mobile viewports.
+
 ## P2 import parser and staged-preview follow-up
 
 - [x] Initial EPUB parsing now validates ZIP paths/symlinks/duplicates/count/per-entry/expanded-size before local import work; every archive-member read is bounded.
 - [x] Initial CBZ parsing retains its existing safe checks while using the same local-import limit policy.
+- [x] E4-CBZ-1 derives its first image only from the bounded/normalized archive walk and returns a short-lived CBZ capability at serialization time. It does not persist a capability, ZIP member path, raw archive path, or JWT in SQLite, archive metadata, backup/WebDAV data, sync payload storage, or logs; malformed/missing archives degrade to an empty cover without failing the bookshelf response. Evidence: `TestDirectCBZImportAndResourceCapability`, `TestParseCBZKeepsFirstArchiveImageAsCoverSeparateFromSortedCatalogue`, full backend tests and the Docker volume/backup smoke for this release.
 - [x] Standard reader-dev UMD uses a bounded `#`/`$` section reader: signature/type, section/additional lengths, segment count, offsets/titles, zlib output and total decoded text are validated before archive/database writes. Image, malformed and corrupt zlib UMD inputs fail closed; the legacy OpenReader-only prefix is isolated to its existing fallback.
 - [x] Expired and orphaned preview tokens are cleaned from every user directory at startup and hourly, without touching active previews or any mounted source/library data.
 - [x] Backup ZIP restore now receives a separately tested compressed/entry/expanded-size budget; it remains a distinct compatibility slice from parser/stage handling.
@@ -164,16 +173,20 @@ Apply this section to Reader P0 EPUB work:
 - [x] Entry count, per-entry expanded size, and total expanded size are bounded before/during extraction.
 - [x] Extraction uses a staging directory and only exposes an atomically completed version.
 - [x] XHTML is served without EPUB-authored active scripts; the reader bridge is injected dynamically rather than written into the archived source.
+- [x] A title-less, image-only first spine resource is retained as the upstream-compatible cover chapter, but it is still served only through the same per-user, signed EPUB capability and XHTML/media allowlist; import never exposes an archive path or raw ZIP member directly.
 - [x] CSP blocks remote network loads and untrusted scripts while allowing scoped local CSS/images/fonts and required inline reader styles.
 - [x] MIME types are allowlisted and responses set `nosniff` and `no-referrer`.
 - [x] Multi-user tests prove one user's capability cannot read another user's book or resource tree.
 - [x] Parent `message` handlers verify both the active iframe window and expected same-origin resource origin.
+- [x] EPUB fragment values are decoded once, bounded, UTF-8/NUL-checked, and signed together with their canonical XHTML document path; a capability cannot move a slice to another resource.
+- [x] Slice lookup compares DOM ids directly rather than interpolating a fragment into a CSS selector. Missing ids preserve a sanitized readable document; same-resource links to an omitted slice re-enter the parent Reader transaction instead of exposing an unrestricted resource.
 
 Evidence for the checked EPUB items:
 
-- Backend tests: `go test ./services/epubreader ./api ./db ./engine ./services/localbook` and full `go test ./...`.
+- Backend tests: `go test ./services/epubreader ./api ./db ./engine ./services/localbook` and full `go test ./...`; `TestDirectEPUBImageOnlyTitlepagePreviewImportAndReaderResource` proves the cover route remains capability-protected.
 - Frontend tests: `npm test`.
 - Browser test: `scripts/smoke/reader-epub-contract.mjs` against 1440×900, 390×844, and 360×800.
+- E4-EPUB-2 additions: `backend/services/epubreader/capability_test.go`, `document_test.go`, `backend/api/api_test.go`, `backend/db/db_test.go`, `frontend/tests/readerEpubFrame.test.mjs`, and the same three-viewport browser smoke cover signed fragment bounds, migration/lazy recovery, document slicing and cross-resource navigation.
 
 # 2026-07-13 Docker OCI fallback
 

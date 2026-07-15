@@ -6,9 +6,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"openreader/backend/models"
 )
@@ -154,6 +157,77 @@ func TestWebDAVPreviewStagesSnapshotForConfirmImport(t *testing.T) {
 	}
 }
 
+func TestStorageGB18030NoTocStageImportRemainsReadable(t *testing.T) {
+	text := "无目录 GB18030 存储导入正文。\n删除挂载源后仍可从归档恢复。"
+	encoded, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name            string
+		previewEndpoint string
+		importEndpoint  string
+		filePath        func(*Server) string
+	}{
+		{
+			name:            "local store",
+			previewEndpoint: "/api/local-store/import-preview",
+			importEndpoint:  "/api/local-store/import",
+			filePath: func(server *Server) string {
+				return filepath.Join(server.cfg.LocalStoreDir, "gb18030-no-toc.txt")
+			},
+		},
+		{
+			name:            "WebDAV",
+			previewEndpoint: "/api/webdav/import-preview",
+			importEndpoint:  "/api/webdav/import",
+			filePath: func(server *Server) string {
+				return filepath.Join(server.cfg.DataDir, "webdav", "gb18030-no-toc.txt")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router, server := setupTestServer(t)
+			auth := authHeader(t, router)
+			path := tt.filePath(server)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("create fixture root: %v", err)
+			}
+			if err := os.WriteFile(path, encoded, 0o644); err != nil {
+				t.Fatalf("write GB18030 fixture: %v", err)
+			}
+
+			preview := previewStorageBook(t, router, auth, tt.previewEndpoint, "gb18030-no-toc.txt")
+			if preview.Items[0].Book.ChapterCount != 1 {
+				t.Fatalf("GB18030 no-TOC preview = %+v, want one upstream pseudo chapter", preview.Items[0])
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatalf("remove mounted source after preview: %v", err)
+			}
+			book := importStagedStorageBook(t, router, auth, tt.importEndpoint, "gb18030-no-toc.txt", preview.Items[0].ImportToken, "GB18030 staged import")
+			var chapter models.Chapter
+			if err := server.db.Where("book_id = ? AND `index` = 0", book.ID).First(&chapter).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(server.cfg.LibraryDir, book.LibraryPath, chapter.CachePath)); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("remove derived chapter cache: %v", err)
+			}
+			contentReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+			contentReq.Header.Set("Authorization", auth)
+			contentW := httptest.NewRecorder()
+			router.ServeHTTP(contentW, contentReq)
+			if contentW.Code != http.StatusOK {
+				t.Fatalf("GB18030 rebuilt reader content: expected 200, got %d: %s", contentW.Code, contentW.Body.String())
+			}
+			if !strings.Contains(contentW.Body.String(), "删除挂载源后仍可从归档恢复。") {
+				t.Fatalf("GB18030 rebuilt reader content lost decoded text: %s", contentW.Body.String())
+			}
+		})
+	}
+}
+
 func TestStoragePreviewStageReparsesAfterMountedSourceIsRemoved(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -197,9 +271,9 @@ func TestStoragePreviewStageReparsesAfterMountedSourceIsRemoved(t *testing.T) {
 				t.Fatalf("remove mounted source after preview: %v", err)
 			}
 
-			failed := reparseStagedStorageBook(t, router, auth, tt.previewEndpoint, "retry-rule.txt", stageToken, `^不存在的目录$`)
-			if failed.Items[0].ImportToken != stageToken || !strings.Contains(failed.Items[0].Error, "no readable chapters") {
-				t.Fatalf("failed staged reparse must retain token/error, got %+v", failed.Items[0])
+			emptyCatalog := reparseStagedStorageBook(t, router, auth, tt.previewEndpoint, "retry-rule.txt", stageToken, `^不存在的目录$`)
+			if emptyCatalog.Items[0].ImportToken != stageToken || emptyCatalog.Items[0].Book == nil || emptyCatalog.Items[0].Book.ChapterCount != 0 || emptyCatalog.Items[0].Error != "" {
+				t.Fatalf("empty staged reparse must retain token and return a normal empty preview, got %+v", emptyCatalog.Items[0])
 			}
 
 			retry := reparseStagedStorageBook(t, router, auth, tt.previewEndpoint, "retry-rule.txt", stageToken, `^== .+ ==$`)

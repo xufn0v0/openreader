@@ -117,7 +117,7 @@ The current UMD parser recognizes an early OpenReader-only `#TEXTNOV` layout, wh
 - Direct upload, LocalStore and WebDAV retries continue to reuse the same immutable, caller-scoped staged bytes. Parsing never consults the original mounted path after staging, so observed catalogue failures cannot depend on network speed or later source-file changes.
 - Required migration evidence is an existing-volume regression containing cached local books plus an unconsumed staged `.umd` preview: upgrade leaves the cached books intact, the staged standard UMD can be previewed/imported, and a failed reparse retains only its caller's retry token.
 
-Implementation evidence: the runtime now recognizes the standard segmented reader-dev UMD stream first, parses its bounded UTF-16LE/zlib sections and retains the previous OpenReader-only prefix only as an isolated fallback. No model, schema, mounted-root, archive-path or backup-format write changed. `backend/engine/umd_parser_contract_test.go` verifies actual upstream writer framing (`F1` separators and final `81` table included); `backend/api/umd_import_contract_test.go` verifies direct staged upload plus LocalStore/WebDAV preview→confirm after the original mounted UMD has been deleted. Corrupted compressed input retains only its scoped retry stage and returns no host path. Full Go tests, frontend tests and build pass; the existing-volume Docker/backup smoke is the release evidence for this correction.
+Implementation evidence: the runtime now recognizes the standard segmented reader-dev UMD stream first, parses its bounded UTF-16LE/zlib sections and retains the previous OpenReader-only prefix only as an isolated fallback. No model, schema, mounted-root, archive-path or backup-format write changed. `backend/engine/umd_parser_contract_test.go` verifies actual upstream writer framing (`F1` separators and final `81` table included); `backend/api/umd_import_contract_test.go` verifies direct staged upload plus LocalStore/WebDAV preview→confirm after the original mounted UMD has been deleted, then removes the derived chapter cache and proves reader recovery from the archived UMD. The same API contract verifies standard UMD `refresh-local` preserves its original archive while rebuilding ordered chapters, and a pre-existing `#TEXTNOV` archive row recovers lazily without import or migration. Corrupted compressed input retains only its scoped retry stage and returns no host path. Full Go tests pass for this evidence; the still-pending E4-VOLUME-1 Docker/backup smoke must cover a real historical SQLite volume and the remaining formats.
 
 ## P2 backup ZIP restore compatibility and bounds
 
@@ -155,6 +155,7 @@ Status: extracted 2026-07-10; implementation must not add a destructive schema m
 - `books`, `chapters`, `book_categories`, `bookmarks`, and `reading_progress` are SQLite rows. Book/category/progress/bookmark rows are user scoped; chapter rows are owned by their book.
 - Remote `Chapter.CachePath` is a relative path under `cache/`, calculated from the book/chapter URLs. A physical cache path can be referenced by more than one chapter row and must therefore be reference-checked before removal.
 - Direct, LocalStore, and WebDAV imports are copied by `ArchiveImportedBook` into a private `library/data/<safe-user>/<unique-book>/` archive. `OriginalFile`, `chapters.json`, `bookSource.json`, `content/`, and derived EPUB/CBZ resources live under that archive.
+- E4-CBZ-1 keeps this persisted layout and SQLite schema unchanged. A CBZ's upstream-compatible first-image cover is derived from the bounded private archive walk only while serializing an import, shelf or detail response; the resulting signed resource URL and ZIP member path are never written back to `books`, `chapters.json`, `bookSource.json`, backups or WebDAV metadata. Old archives therefore remain readable without migration, while malformed/missing archives retain the existing empty-cover response.
 - Browser chapter cache keys are user-scoped in current clients but are not database rows; they must be explicitly removed by the shelf/browser store when a book-delete sync event arrives.
 
 ### Required lifecycle and compatibility shim
@@ -247,18 +248,25 @@ Status: implemented for the Reader P0 EPUB slice; remaining Reader P0 work is ou
 - The original imported EPUB is already archived below `library/<Book.LibraryPath>` and referenced by `Book.OriginalFile`.
 - `Book.LibraryPath`, `Book.OriginalFile`, `Book.TOCFile`, and `Book.SourceFile` are persistent source-of-truth fields.
 - `Chapter.CachePath` points to the flattened plain-text chapter copy used by existing reader/search/cache flows.
-- Existing EPUB chapter rows do not retain the canonical XHTML resource path from the archive.
+- Older installed EPUB chapter rows may not retain canonical XHTML paths or fragment boundaries from the archive.
 
 ### Additive representation
 
 - Add nullable/empty `Chapter.ResourcePath` (`resourcePath` in JSON) through GORM auto-migration. It stores a normalized POSIX EPUB path such as `OEBPS/Text/chapter-1.xhtml`; it is never an absolute host path.
 - Add optional `resourcePath` to archived `chapters.json` entries. Old archives without it remain valid.
+- E4-EPUB-2 additionally adds nullable `Chapter.ResourceFragment` and `Chapter.ResourceEndFragment` (`resourceFragment` and `resourceEndFragment` in JSON and `chapters.json`). They hold bounded decoded DOM ids only; they never form filesystem paths. A missing value preserves the current whole-XHTML behavior for old rows/backups.
 - EPUB import writes both:
   - the existing plain-text `CachePath`;
-  - the canonical XHTML `ResourcePath`.
+  - the canonical XHTML `ResourcePath` and, when a TOC/NCX entry targets it, nullable fragment bounds.
 - Existing imported EPUBs are lazily backfilled from the archived original file and current TOC rule when first opened/refreshed. Backfill updates only matching chapter rows and the optional portable `chapters.json` metadata.
 
 No table or column is removed. Text, PDF, UMD, Markdown, remote, and existing EPUB rows remain readable when `ResourcePath` is empty.
+
+Migration evidence: `TestAutoMigrateAddsEPUBResourcePathWithoutLosingChapters` drops the three EPUB
+resource columns from a populated SQLite fixture and proves auto-migration restores them without changing
+the existing chapter. `TestDirectEPUBTOCFragmentsImportAsBoundedReaderChapters` proves a legacy empty
+fragment row and its `chapters.json` companion are lazily restored from the archived EPUB. Docker mounted
+volume/backup smoke remains required before publishing the release image.
 
 ### Derived extracted resources
 

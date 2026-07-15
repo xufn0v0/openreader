@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"openreader/backend/config"
 	readerdb "openreader/backend/db"
@@ -91,6 +92,35 @@ func authHeader(t *testing.T, router *gin.Engine) string {
 	}
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	return "Bearer " + resp.Token
+}
+
+func directLocalBookMultipartRequest(t *testing.T, router http.Handler, auth string, endpoint string, fileName string, data []byte, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if data != nil {
+		part, err := writer.CreateFormFile("file", fileName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, endpoint, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", auth)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	return response
 }
 
 func TestHealthIncludesBuildInfo(t *testing.T) {
@@ -6278,28 +6308,29 @@ func TestDirectTXTPreviewRetainsStageWhenExplicitRuleFindsNoChapters(t *testing.
 	}
 	dataPath, metadataPath := localImportStagePaths(server.localImportStageDir(1), firstPreview.ImportToken)
 
-	failed := request("/api/imports/books/preview", map[string]string{
+	emptyCatalog := request("/api/imports/books/preview", map[string]string{
 		"importToken": firstPreview.ImportToken,
 		"tocRule":     `^不存在的目录$`,
 	}, false)
-	if failed.Code != http.StatusBadRequest {
-		t.Fatalf("explicit nonmatching rule: expected 400, got %d: %s", failed.Code, failed.Body.String())
+	if emptyCatalog.Code != http.StatusOK {
+		t.Fatalf("explicit nonmatching rule: expected 200 empty preview, got %d: %s", emptyCatalog.Code, emptyCatalog.Body.String())
 	}
-	var failure struct {
-		Error       string `json:"error"`
-		ImportToken string `json:"importToken"`
+	var emptyPreview struct {
+		ImportToken  string     `json:"importToken"`
+		ChapterCount int        `json:"chapterCount"`
+		Chapters     []struct{} `json:"chapters"`
 	}
-	if err := json.Unmarshal(failed.Body.Bytes(), &failure); err != nil {
+	if err := json.Unmarshal(emptyCatalog.Body.Bytes(), &emptyPreview); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(failure.Error, "no readable chapters") || failure.ImportToken != firstPreview.ImportToken {
-		t.Fatalf("failed reparse must retain token and clear error, got %+v", failure)
+	if emptyPreview.ImportToken != firstPreview.ImportToken || emptyPreview.ChapterCount != 0 || len(emptyPreview.Chapters) != 0 {
+		t.Fatalf("empty reparse must retain token and return an empty catalogue, got %+v", emptyPreview)
 	}
 	if _, err := os.Stat(dataPath); err != nil {
-		t.Fatalf("failed reparse must retain staged data: %v", err)
+		t.Fatalf("empty reparse must retain staged data: %v", err)
 	}
 	if _, err := os.Stat(metadataPath); err != nil {
-		t.Fatalf("failed reparse must retain staged metadata: %v", err)
+		t.Fatalf("empty reparse must retain staged metadata: %v", err)
 	}
 
 	retry := request("/api/imports/books/preview", map[string]string{
@@ -6316,6 +6347,229 @@ func TestDirectTXTPreviewRetainsStageWhenExplicitRuleFindsNoChapters(t *testing.
 	}, false)
 	if imported.Code != http.StatusCreated {
 		t.Fatalf("valid staged import: expected 201, got %d: %s", imported.Code, imported.Body.String())
+	}
+}
+
+func TestDirectTXTEmptyCatalogPreviewCanBeConfirmed(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+
+	request := func(path string, fields map[string]string, withFile bool) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if withFile {
+			part, err := writer.CreateFormFile("file", "empty-catalog.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := part.Write([]byte("这是没有匹配目录的正文。")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for key, value := range fields {
+			if err := writer.WriteField(key, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	preview := request("/api/imports/books/preview", map[string]string{
+		"tocRule": `^不存在的目录$`,
+	}, true)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("empty-catalog preview: expected 200, got %d: %s", preview.Code, preview.Body.String())
+	}
+	var staged struct {
+		ImportToken  string `json:"importToken"`
+		ChapterCount int    `json:"chapterCount"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &staged); err != nil {
+		t.Fatal(err)
+	}
+	if !validLocalImportToken(staged.ImportToken) || staged.ChapterCount != 0 {
+		t.Fatalf("unexpected empty-catalog preview: %+v", staged)
+	}
+	dataPath, metadataPath := localImportStagePaths(server.localImportStageDir(1), staged.ImportToken)
+
+	imported := request("/api/imports/books", map[string]string{
+		"importToken": staged.ImportToken,
+		"tocRule":     `^不存在的目录$`,
+	}, false)
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("empty-catalog import: expected 201, got %d: %s", imported.Code, imported.Body.String())
+	}
+	var book struct {
+		ID           uint   `json:"id"`
+		ChapterCount int    `json:"chapterCount"`
+		LastChapter  string `json:"lastChapter"`
+	}
+	if err := json.Unmarshal(imported.Body.Bytes(), &book); err != nil {
+		t.Fatal(err)
+	}
+	if book.ID == 0 || book.ChapterCount != 0 || book.LastChapter != "" {
+		t.Fatalf("empty-catalog import response = %+v", book)
+	}
+	var chapterCount int64
+	if err := server.db.Model(&models.Chapter{}).Where("book_id = ?", book.ID).Count(&chapterCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if chapterCount != 0 {
+		t.Fatalf("empty-catalog import wrote %d chapters", chapterCount)
+	}
+	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
+		t.Fatalf("empty-catalog import must consume its staged data, got %v", err)
+	}
+	if _, err := os.Stat(metadataPath); !os.IsNotExist(err) {
+		t.Fatalf("empty-catalog import must consume its staged metadata, got %v", err)
+	}
+}
+
+func TestDirectTXTEncodingAndLongRuleCatalogRemainReadableAcrossStageImport(t *testing.T) {
+	gb18030Text := "无目录 GB18030 正文。\n第二段仍然必须可读。"
+	gb18030Data, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(gb18030Text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gbkText := "无目录 GBK 正文。\nGBK 编码也必须完整恢复。"
+	gbkData, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(gbkText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	utf8BOMText := "无目录 UTF-8 BOM 正文。\nBOM 不能出现在阅读正文中。"
+	utf8BOMData := append([]byte{0xEF, 0xBB, 0xBF}, []byte(utf8BOMText)...)
+	longBody := strings.Repeat("这是超过一百 KiB 的第一章正文。", 4_000)
+	if len(longBody) <= 100*1024 {
+		t.Fatalf("long-rule fixture must exceed reader-dev's disabled 100 KiB split threshold, got %d bytes", len(longBody))
+	}
+	longText := "== 第一章 ==\n" + longBody + "\n第一章结尾标记。\n== 第二章 ==\n第二章正文。"
+
+	tests := []struct {
+		name              string
+		fileName          string
+		data              []byte
+		tocRule           string
+		wantChapterCount  int
+		wantFirstTitle    string
+		wantContentMarker string
+	}{
+		{
+			name:              "UTF-8 BOM no toc",
+			fileName:          "utf8-bom-no-toc.txt",
+			data:              utf8BOMData,
+			wantChapterCount:  1,
+			wantFirstTitle:    "第1章(1)",
+			wantContentMarker: "BOM 不能出现在阅读正文中。",
+		},
+		{
+			name:              "GBK no toc",
+			fileName:          "gbk-no-toc.txt",
+			data:              gbkData,
+			wantChapterCount:  1,
+			wantFirstTitle:    "第1章(1)",
+			wantContentMarker: "GBK 编码也必须完整恢复。",
+		},
+		{
+			name:              "GB18030 no toc",
+			fileName:          "gb18030-no-toc.txt",
+			data:              gb18030Data,
+			wantChapterCount:  1,
+			wantFirstTitle:    "第1章(1)",
+			wantContentMarker: "第二段仍然必须可读。",
+		},
+		{
+			name:              "explicit long chapter stays whole",
+			fileName:          "long-rule.txt",
+			data:              []byte(longText),
+			tocRule:           `^== .+ ==$`,
+			wantChapterCount:  2,
+			wantFirstTitle:    "== 第一章 ==",
+			wantContentMarker: "第一章结尾标记。",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router, server := setupTestServer(t)
+			auth := authHeader(t, router)
+			previewW := directLocalBookMultipartRequest(t, router, auth, "/api/imports/books/preview", tt.fileName, tt.data, map[string]string{"tocRule": tt.tocRule})
+			if previewW.Code != http.StatusOK {
+				t.Fatalf("preview: expected 200, got %d: %s", previewW.Code, previewW.Body.String())
+			}
+			var preview struct {
+				ChapterCount int    `json:"chapterCount"`
+				ImportToken  string `json:"importToken"`
+				Chapters     []struct {
+					Title string `json:"title"`
+				} `json:"chapters"`
+			}
+			if err := json.Unmarshal(previewW.Body.Bytes(), &preview); err != nil {
+				t.Fatal(err)
+			}
+			if preview.ChapterCount != tt.wantChapterCount || len(preview.Chapters) != tt.wantChapterCount || !validLocalImportToken(preview.ImportToken) {
+				t.Fatalf("preview = %+v, want %d staged chapters", preview, tt.wantChapterCount)
+			}
+			if preview.Chapters[0].Title != tt.wantFirstTitle {
+				t.Fatalf("preview first title = %q, want %q", preview.Chapters[0].Title, tt.wantFirstTitle)
+			}
+
+			importW := directLocalBookMultipartRequest(t, router, auth, "/api/imports/books", tt.fileName, nil, map[string]string{
+				"importToken": preview.ImportToken,
+				"tocRule":     tt.tocRule,
+			})
+			if importW.Code != http.StatusCreated {
+				t.Fatalf("stage import: expected 201, got %d: %s", importW.Code, importW.Body.String())
+			}
+			var imported bookListItem
+			if err := json.Unmarshal(importW.Body.Bytes(), &imported); err != nil {
+				t.Fatal(err)
+			}
+			var book models.Book
+			if err := server.db.First(&book, imported.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			var chapters []models.Chapter
+			if err := server.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(chapters) != tt.wantChapterCount || chapters[0].Title != tt.wantFirstTitle {
+				t.Fatalf("imported chapters = %+v", chapters)
+			}
+			if err := os.Remove(filepath.Join(server.cfg.LibraryDir, book.LibraryPath, chapters[0].CachePath)); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("remove derived chapter cache: %v", err)
+			}
+
+			contentReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+			contentReq.Header.Set("Authorization", auth)
+			contentW := httptest.NewRecorder()
+			router.ServeHTTP(contentW, contentReq)
+			if contentW.Code != http.StatusOK {
+				t.Fatalf("rebuild local reader content: expected 200, got %d: %s", contentW.Code, contentW.Body.String())
+			}
+			var content struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(contentW.Body.Bytes(), &content); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(content.Content, tt.wantContentMarker) {
+				t.Fatalf("recovered content lost marker %q: %q", tt.wantContentMarker, content.Content)
+			}
+			if tt.name == "UTF-8 BOM no toc" && strings.Contains(content.Content, "\ufeff") {
+				t.Fatalf("UTF-8 BOM leaked into recovered reader content: %q", content.Content)
+			}
+			if tt.tocRule != "" && strings.Contains(content.Content, "第二章正文。") {
+				t.Fatalf("first explicit long-rule chapter was implicitly split or merged: %q", content.Content[len(content.Content)-min(256, len(content.Content)):])
+			}
+		})
 	}
 }
 
@@ -6580,6 +6834,227 @@ func TestDirectEPUBImportAndRefreshUseTocRule(t *testing.T) {
 	}
 }
 
+func TestDirectEPUBImageOnlyTitlepagePreviewImportAndReaderResource(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	epubData := testEPUBArchiveWithImageOnlyTitlepage(t)
+
+	request := func(path string) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("file", "cover.epub")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(epubData); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.WriteField("tocRule", "spin"); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, path, &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	previewW := request("/api/imports/books/preview")
+	if previewW.Code != http.StatusOK {
+		t.Fatalf("image-only titlepage preview: expected 200, got %d: %s", previewW.Code, previewW.Body.String())
+	}
+	var preview struct {
+		ChapterCount int `json:"chapterCount"`
+		Chapters     []struct {
+			Title string `json:"title"`
+		} `json:"chapters"`
+	}
+	if err := json.Unmarshal(previewW.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.ChapterCount != 2 || len(preview.Chapters) != 2 || preview.Chapters[0].Title != "封面" || preview.Chapters[1].Title != "第一章" {
+		t.Fatalf("image-only titlepage preview lost upstream cover chapter: %+v", preview)
+	}
+
+	importW := request("/api/imports/books")
+	if importW.Code != http.StatusCreated {
+		t.Fatalf("image-only titlepage import: expected 201, got %d: %s", importW.Code, importW.Body.String())
+	}
+	var imported bookListItem
+	if err := json.Unmarshal(importW.Body.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	var chapters []models.Chapter
+	if err := server.db.Where("book_id = ?", imported.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 || chapters[0].Title != "封面" || chapters[0].ResourcePath != "OPS/titlepage.xhtml" {
+		t.Fatalf("imported image-only titlepage = %+v", chapters)
+	}
+
+	contentReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(imported.ID), 10)+"/chapters/0/content", nil)
+	contentReq.Header.Set("Authorization", token)
+	contentW := httptest.NewRecorder()
+	router.ServeHTTP(contentW, contentReq)
+	if contentW.Code != http.StatusOK {
+		t.Fatalf("image-only titlepage content: expected 200, got %d: %s", contentW.Code, contentW.Body.String())
+	}
+	var content struct {
+		Format      string         `json:"format"`
+		ResourceURL string         `json:"resourceUrl"`
+		Chapter     models.Chapter `json:"chapter"`
+	}
+	if err := json.Unmarshal(contentW.Body.Bytes(), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.Format != "epub" || content.ResourceURL == "" || content.Chapter.ResourcePath != "OPS/titlepage.xhtml" {
+		t.Fatalf("image-only titlepage content response = %+v", content)
+	}
+	resourceReq := httptest.NewRequest(http.MethodGet, content.ResourceURL, nil)
+	resourceW := httptest.NewRecorder()
+	router.ServeHTTP(resourceW, resourceReq)
+	if resourceW.Code != http.StatusOK || !strings.Contains(resourceW.Body.String(), "images/cover.svg") {
+		t.Fatalf("image-only titlepage resource: got %d: %s", resourceW.Code, resourceW.Body.String())
+	}
+}
+
+func TestDirectEPUBTOCFragmentsImportAsBoundedReaderChapters(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	epubData := testEPUBArchiveWithFragments(t)
+
+	previewW := directLocalBookMultipartRequest(t, router, token, "/api/imports/books/preview", "fragments.epub", epubData, map[string]string{"tocRule": "toc"})
+	if previewW.Code != http.StatusOK {
+		t.Fatalf("fragment EPUB preview: expected 200, got %d: %s", previewW.Code, previewW.Body.String())
+	}
+	var preview struct {
+		ChapterCount int `json:"chapterCount"`
+		Chapters     []struct {
+			Title string `json:"title"`
+		} `json:"chapters"`
+		ImportToken string `json:"importToken"`
+	}
+	if err := json.Unmarshal(previewW.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	if preview.ChapterCount != 3 || len(preview.Chapters) != 3 || preview.Chapters[0].Title != "第一节" || preview.Chapters[1].Title != "第二节" || preview.Chapters[2].Title != "第三节" {
+		t.Fatalf("fragment EPUB preview must retain three TOC entries, got %+v", preview)
+	}
+
+	importW := directLocalBookMultipartRequest(t, router, token, "/api/imports/books", "fragments.epub", nil, map[string]string{
+		"tocRule":     "toc",
+		"importToken": preview.ImportToken,
+	})
+	if importW.Code != http.StatusCreated {
+		t.Fatalf("fragment EPUB import: expected 201, got %d: %s", importW.Code, importW.Body.String())
+	}
+	var imported bookListItem
+	if err := json.Unmarshal(importW.Body.Bytes(), &imported); err != nil {
+		t.Fatal(err)
+	}
+	var book models.Book
+	if err := server.db.First(&book, imported.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var chapters []models.Chapter
+	if err := server.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 3 ||
+		chapters[0].ResourcePath != "OPS/Text/one.xhtml" || chapters[0].ResourceFragment != "part-a" || chapters[0].ResourceEndFragment != "part-b" ||
+		chapters[1].ResourcePath != "OPS/Text/one.xhtml" || chapters[1].ResourceFragment != "part-b" || chapters[1].ResourceEndFragment != "" ||
+		chapters[2].ResourcePath != "OPS/Text/two.xhtml" || chapters[2].ResourceFragment != "opening" || chapters[2].ResourceEndFragment != "" {
+		t.Fatalf("imported fragment EPUB chapters = %+v", chapters)
+	}
+	archivePath := filepath.Join(server.cfg.LibraryDir, book.TOCFile)
+	archiveData, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived []engine.ArchivedChapter
+	if err := json.Unmarshal(archiveData, &archived); err != nil {
+		t.Fatal(err)
+	}
+	if len(archived) != 3 || archived[0].ResourceFragment != "part-a" || archived[0].ResourceEndFragment != "part-b" || archived[1].ResourceFragment != "part-b" || archived[2].ResourceFragment != "opening" {
+		t.Fatalf("chapters.json fragment metadata = %+v", archived)
+	}
+
+	contentReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+	contentReq.Header.Set("Authorization", token)
+	contentW := httptest.NewRecorder()
+	router.ServeHTTP(contentW, contentReq)
+	if contentW.Code != http.StatusOK {
+		t.Fatalf("first fragment EPUB content: expected 200, got %d: %s", contentW.Code, contentW.Body.String())
+	}
+	var content struct {
+		Content     string `json:"content"`
+		ResourceURL string `json:"resourceUrl"`
+	}
+	if err := json.Unmarshal(contentW.Body.Bytes(), &content); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(content.Content, "片段一正文") || strings.Contains(content.Content, "片段二正文") || !strings.HasSuffix(content.ResourceURL, "#part-a") {
+		t.Fatalf("first fragment content must not overlap the second fragment: %+v", content)
+	}
+	resourceW := httptest.NewRecorder()
+	// A browser keeps a document fragment client-side and never sends it in the
+	// resource request. httptest accepts a raw URL, so model that transport
+	// boundary explicitly instead of accidentally routing `#part-a` as a file.
+	resourceRequestURL := strings.SplitN(content.ResourceURL, "#", 2)[0]
+	router.ServeHTTP(resourceW, httptest.NewRequest(http.MethodGet, resourceRequestURL, nil))
+	if resourceW.Code != http.StatusOK || !strings.Contains(resourceW.Body.String(), "片段一正文") || strings.Contains(resourceW.Body.String(), "片段二正文") {
+		t.Fatalf("first fragment resource must be bounded to its TOC section: %d %s", resourceW.Code, resourceW.Body.String())
+	}
+
+	// Older installed databases and archives have no fragment fields. Loading an
+	// EPUB TOC chapter must recover them lazily without rebuilding the book.
+	if err := server.db.Model(&models.Chapter{}).Where("book_id = ?", book.ID).Updates(map[string]any{
+		"resource_fragment":     "",
+		"resource_end_fragment": "",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for index := range archived {
+		archived[index].ResourceFragment = ""
+		archived[index].ResourceEndFragment = ""
+	}
+	archiveData, err = json.MarshalIndent(archived, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath, append(archiveData, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recoveredReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10)+"/chapters/0/content", nil)
+	recoveredReq.Header.Set("Authorization", token)
+	recoveredW := httptest.NewRecorder()
+	router.ServeHTTP(recoveredW, recoveredReq)
+	if recoveredW.Code != http.StatusOK {
+		t.Fatalf("legacy fragment metadata recovery: expected 200, got %d: %s", recoveredW.Code, recoveredW.Body.String())
+	}
+	var recovered models.Chapter
+	if err := server.db.Where("book_id = ? AND `index` = ?", book.ID, 0).First(&recovered).Error; err != nil {
+		t.Fatal(err)
+	}
+	if recovered.ResourceFragment != "part-a" || recovered.ResourceEndFragment != "part-b" {
+		t.Fatalf("legacy SQLite fragments were not recovered: %+v", recovered)
+	}
+	archiveData, err = os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(archiveData, &archived); err != nil {
+		t.Fatal(err)
+	}
+	if archived[0].ResourceFragment != "part-a" || archived[0].ResourceEndFragment != "part-b" {
+		t.Fatalf("legacy chapters.json fragments were not recovered: %+v", archived[0])
+	}
+}
+
 func TestDirectCBZImportAndResourceCapability(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
@@ -6641,6 +7116,69 @@ func TestDirectCBZImportAndResourceCapability(t *testing.T) {
 	}
 	if book.Title != "CBZ 标题" || book.Author != "CBZ 作者" || book.ChapterCount != 2 {
 		t.Fatalf("imported CBZ metadata mismatch: %+v", book)
+	}
+	if book.CoverURL != "" {
+		t.Fatalf("CBZ cover capability must not be persisted in the book row: %+v", book)
+	}
+	assertCBZCover := func(label, coverURL string) {
+		t.Helper()
+		if !strings.HasPrefix(coverURL, "/api/cbz-resource/") || strings.Contains(coverURL, strings.TrimPrefix(token, "Bearer ")) {
+			t.Fatalf("%s CBZ cover URL must be a same-origin capability without a login JWT: %q", label, coverURL)
+		}
+		coverReq := httptest.NewRequest(http.MethodGet, coverURL, nil)
+		coverW := httptest.NewRecorder()
+		router.ServeHTTP(coverW, coverReq)
+		if coverW.Code != http.StatusOK || !strings.Contains(coverW.Header().Get("Content-Type"), "image/png") || coverW.Body.String() != "second" {
+			t.Fatalf("%s CBZ cover must be the first archive image rather than the sorted chapter: got %d %q %q", label, coverW.Code, coverW.Header().Get("Content-Type"), coverW.Body.String())
+		}
+	}
+	assertCBZCover("import response", imported.CoverURL)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/books", nil)
+	listReq.Header.Set("Authorization", token)
+	listW := httptest.NewRecorder()
+	router.ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("CBZ shelf list: expected 200, got %d: %s", listW.Code, listW.Body.String())
+	}
+	var shelfItems []bookListItem
+	if err := json.Unmarshal(listW.Body.Bytes(), &shelfItems); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range shelfItems {
+		if item.ID == book.ID {
+			assertCBZCover("shelf list", item.CoverURL)
+			break
+		}
+	}
+
+	bookReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10), nil)
+	bookReq.Header.Set("Authorization", token)
+	bookW := httptest.NewRecorder()
+	router.ServeHTTP(bookW, bookReq)
+	if bookW.Code != http.StatusOK {
+		t.Fatalf("CBZ book detail: expected 200, got %d: %s", bookW.Code, bookW.Body.String())
+	}
+	var detail bookListItem
+	if err := json.Unmarshal(bookW.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	assertCBZCover("book detail", detail.CoverURL)
+	if err := server.db.Model(&models.Book{}).Where("id = ?", book.ID).Update("custom_cover_url", "/uploads/covers/user-choice.jpg").Error; err != nil {
+		t.Fatal(err)
+	}
+	customCoverReq := httptest.NewRequest(http.MethodGet, "/api/books/"+strconv.FormatUint(uint64(book.ID), 10), nil)
+	customCoverReq.Header.Set("Authorization", token)
+	customCoverW := httptest.NewRecorder()
+	router.ServeHTTP(customCoverW, customCoverReq)
+	if customCoverW.Code != http.StatusOK {
+		t.Fatalf("CBZ custom cover detail: expected 200, got %d: %s", customCoverW.Code, customCoverW.Body.String())
+	}
+	if err := json.Unmarshal(customCoverW.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.CustomCoverURL != "/uploads/covers/user-choice.jpg" || detail.CoverURL != "" {
+		t.Fatalf("custom cover must remain first-choice without generated CBZ fallback: %+v", detail.Book)
 	}
 	var chapters []models.Chapter
 	if err := server.db.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
@@ -6811,6 +7349,73 @@ func testEPUBArchiveWithBody(t *testing.T, firstChapterBody string) []byte {
 	write("OPS/styles/book.css", `body { color: rgb(12, 34, 56); }`)
 	write("OPS/images/cover.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>`)
 	write("OPS/scripts/evil.js", `window.epubAuthoredScript = true`)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func testEPUBArchiveWithImageOnlyTitlepage(t *testing.T) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	write := func(name string, content string) {
+		file, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("META-INF/container.xml", `<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>`)
+	write("OPS/content.opf", `<package>
+  <metadata><title>封面 EPUB</title></metadata>
+  <manifest>
+    <item id="cover" href="titlepage.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+    <item id="image" href="images/cover.svg" media-type="image/svg+xml"/>
+  </manifest>
+  <spine><itemref idref="cover"/><itemref idref="chapter"/></spine>
+</package>`)
+	write("OPS/titlepage.xhtml", `<html><body><img src="images/cover.svg" alt="封面"/></body></html>`)
+	write("OPS/chapter.xhtml", `<html><body><h1>第一章</h1><p>第一章正文。</p></body></html>`)
+	write("OPS/images/cover.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func testEPUBArchiveWithFragments(t *testing.T) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	write := func(name string, content string) {
+		file, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("META-INF/container.xml", `<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>`)
+	write("OPS/content.opf", `<package><metadata><title>Fragment API EPUB</title></metadata><manifest>
+  <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+  <item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/>
+  <item id="two" href="Text/two.xhtml" media-type="application/xhtml+xml"/>
+</manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>`)
+	write("OPS/nav.xhtml", `<html><body><nav epub:type="toc"><ol>
+  <li><a href="Text/one.xhtml#part-a">第一节</a></li>
+  <li><a href="Text/one.xhtml#part-b">第二节</a></li>
+  <li><a href="Text/two.xhtml#opening">第三节</a></li>
+</ol></nav></body></html>`)
+	write("OPS/Text/one.xhtml", `<html><body>
+  <section id="part-a"><h1>第一节</h1><p>片段一正文</p><a href="#part-b">下一节</a></section>
+  <section id="part-b"><h1>第二节</h1><p>片段二正文</p><a href="two.xhtml#opening">跨资源章节</a></section>
+</body></html>`)
+	write("OPS/Text/two.xhtml", `<html><body><section id="opening"><h1>第三节</h1><p>跨资源正文</p></section></body></html>`)
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
