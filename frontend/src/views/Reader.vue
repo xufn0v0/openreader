@@ -12,6 +12,7 @@
 
     <ReaderDesktopWorkspacePanel
       v-if="!isMobileReader && desktopWorkspacePanel"
+      :panel="desktopWorkspacePanel"
       :title="desktopWorkspaceTitle"
       @close="closeDesktopWorkspace"
     >
@@ -113,6 +114,17 @@
       @book-progress-change="handleMobileBookProgressChange"
     />
 
+    <button
+      v-if="isMobileReader && isReaderPrimaryPanelOpen()"
+      class="reader-mobile-primary-dismiss"
+      type="button"
+      aria-label="关闭阅读主面板"
+      @click.stop="closeReaderPrimaryPanels"
+      @touchstart.stop
+      @touchmove.stop
+      @touchend.stop
+    />
+
     <section
       ref="pageEl"
       class="reader-page"
@@ -165,8 +177,8 @@
             @audio-progress="handleAudioProgress"
             @audio-ended="handleAudioEnded"
             @audio-error="handleAudioError"
-            @audio-previous="goChapter(currentIndex - 1)"
-            @audio-next="goChapter(currentIndex + 1)"
+            @audio-previous="goAudioChapter(currentIndex - 1)"
+            @audio-next="goAudioChapter(currentIndex + 1)"
             @image-load="handleReaderImageLoad"
             @retry-block="retryContinuousChapter"
           />
@@ -387,7 +399,7 @@ import { useReaderChapterCache } from '../composables/useReaderChapterCache'
 import { useReaderChapterContent } from '../composables/useReaderChapterContent'
 import { useReaderChapterLoader } from '../composables/useReaderChapterLoader'
 import { useReaderChapterMaintenance } from '../composables/useReaderChapterMaintenance'
-import { useReaderChapterPresentation } from '../composables/useReaderChapterPresentation'
+import { isCBZBook, useReaderChapterPresentation } from '../composables/useReaderChapterPresentation'
 import { useReaderChapterWindow } from '../composables/useReaderChapterWindow'
 import { useReaderChrome } from '../composables/useReaderChrome'
 import { useReaderExternalUpdates } from '../composables/useReaderExternalUpdates'
@@ -471,6 +483,7 @@ const {
   reader,
   upload: uploadAsset,
   removeAsset: deleteAsset,
+  saveSettings: () => reader.saveReaderSettings(),
   syncFonts: syncReaderFontFaces,
   onSuccess: message => ElMessage.success(message),
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
@@ -801,6 +814,9 @@ const ttsConfigExpanded = ref(true)
 const isComicChapter = computed(() => (
   makeChapterBlock(currentIndex.value, chapter.value, content.value).isComic === true
 ))
+const isOrdinaryImageComicChapter = computed(() => (
+  isComicChapter.value && !isCBZBook(book.value)
+))
 const ttsReadBarLayoutActive = computed(() => (
   ttsBarRequested.value
     && chapterFormat.value !== 'epub'
@@ -813,6 +829,7 @@ const effectiveReaderMode = computed(() => (
     chapterFormat.value === 'epub',
     isAudioChapter.value,
     ttsReadBarLayoutActive.value,
+    isOrdinaryImageComicChapter.value,
   )
 ))
 const effectiveReaderState = {
@@ -1225,6 +1242,7 @@ const {
 })
 const mobileChromeVisible = ref(true)
 const {
+  close: closeReaderPrimaryPanels,
   isOpen: isReaderPrimaryPanelOpen,
   toggle: toggleReaderPrimaryPanel,
 } = useReaderPrimaryPanels({
@@ -1848,6 +1866,16 @@ function handleAudioProgress(event) {
   scheduleProgressSave(1200)
 }
 
+function goAudioChapter(index) {
+  const target = Math.max(0, Math.min(Number(index), chapters.value.length - 1))
+  if (target === currentIndex.value) return
+  // reader-dev marks both manual previous/next actions as autoplay requests
+  // before changing the chapter. The destination audio element receives that
+  // intent through its autoplay prop and clears it once metadata is available.
+  audioAutoplay.value = true
+  return goChapter(target)
+}
+
 function handleAudioEnded() {
   audioCurrentTime.value = Math.max(0, Number(audioDuration.value) || audioCurrentTime.value || 0)
   saveCurrentProgress({ force: true }).catch(() => {})
@@ -1931,6 +1959,7 @@ function readError(err, fallback) {
     inset -24px 0 44px rgba(90, 71, 28, 0.05);
   height: 100vh;
   overflow: hidden;
+  box-sizing: content-box;
   position: relative;
   width: var(--reader-frame-width);
 }
@@ -1970,6 +1999,12 @@ function readError(err, fallback) {
 }
 .reader-shell.flip .reader-body {
   transition: transform var(--reader-animate-duration, 180ms) ease;
+}
+
+@media (min-width: 751px) {
+  .reader-body {
+    text-align: left;
+  }
 }
 
 /* ---- Toast ---- */
@@ -2032,11 +2067,35 @@ function readError(err, fallback) {
     padding-bottom: calc(var(--reader-mobile-content-bottom-space) + env(safe-area-inset-bottom));
     text-align: justify;
   }
+  .reader-shell.flip .reader-page {
+    padding: 0;
+  }
+  .reader-shell.flip .reader-content {
+    position: absolute;
+    top: calc(30px + env(safe-area-inset-top));
+    right: 0;
+    bottom: 24px;
+    left: 0;
+    width: 100%;
+    height: auto;
+    padding: 0;
+    overflow: hidden;
+    scroll-padding-bottom: 0;
+  }
+  .reader-shell.flip .reader-body {
+    height: 100%;
+    margin: 0 16px;
+    padding: 0;
+    text-align: justify;
+    column-width: calc(100vw - 16px);
+    column-gap: 16px;
+    column-fill: auto;
+  }
   .reader-mobile-primary-popover-body {
     box-sizing: border-box;
     width: 100%;
-    height: 100dvh;
-    min-height: 100dvh;
+    height: auto;
+    min-height: 0;
     padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
     color: var(--reader-text);
   }
@@ -2046,12 +2105,11 @@ function readError(err, fallback) {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 0;
-    overflow: hidden;
+    overflow: visible;
   }
   .reader-mobile-primary-settings {
-    overflow: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
+    max-height: none;
+    overflow: visible;
   }
   .reader-mobile-primary-title-zone {
     display: flex;
@@ -2097,13 +2155,25 @@ function readError(err, fallback) {
   .reader-mobile-primary-shelf :deep(.reader-shelf-list),
   .reader-mobile-primary-toc :deep(.toc-list),
   .reader-mobile-primary-source :deep(.source-switch-list) {
-    height: 100%;
-    max-height: none;
+    height: 300px;
+    max-height: 300px;
     min-height: 0;
     padding-bottom: 0;
   }
   .reader-mobile-primary-source :deep(.title-zone) {
     margin-bottom: 20px;
+  }
+  .reader-mobile-primary-dismiss {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    width: 100vw;
+    height: 100dvh;
+    margin: 0;
+    padding: 0;
+    cursor: default;
+    background: transparent;
+    border: 0;
   }
   .reader-shell.scroll .reader-content,
   .reader-shell.scroll2 .reader-content {

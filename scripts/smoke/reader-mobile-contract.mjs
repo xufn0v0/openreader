@@ -165,7 +165,7 @@ async function installApiMocks(page) {
   })
 }
 
-async function assertWorkspaceOpen(page, viewport, label, { primary = false } = {}) {
+async function assertWorkspaceOpen(page, viewport, label, { primary = false, contentSized = false, heightRange = null } = {}) {
   await page.waitForSelector('.reader-mobile-workspace', { timeout: 10000 })
   const topCount = await page.locator('.reader-mobile-top.visible').count()
   assert(topCount === 1, `${viewport.width}: toolbar should remain visible after opening ${label}`)
@@ -183,6 +183,9 @@ async function assertWorkspaceOpen(page, viewport, label, { primary = false } = 
       count: workspaces.length,
       width: Math.round(rect.width),
       left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      height: Math.round(rect.height),
+      zIndex: Number(window.getComputedStyle(workspace).zIndex || 0),
       visibleDrawers,
       role: workspace.getAttribute('role'),
       text: workspace.innerText,
@@ -191,6 +194,7 @@ async function assertWorkspaceOpen(page, viewport, label, { primary = false } = 
       paddingTop: window.getComputedStyle(workspace).paddingTop,
       paddingBottom: window.getComputedStyle(workspace).paddingBottom,
       hasPrimaryBody: Boolean(workspace.querySelector('.reader-mobile-primary-popover-body')),
+      toolbarZIndex: Number(window.getComputedStyle(document.querySelector('.reader-mobile-top.visible')).zIndex || 0),
     }
   }, label)
   assert(workspaceState.count === 1, `${viewport.width}: exactly one mobile primary workspace should remain after opening ${label}`)
@@ -201,9 +205,23 @@ async function assertWorkspaceOpen(page, viewport, label, { primary = false } = 
   assert(workspaceState.hasLabel, `${viewport.width}: mobile workspace missing label ${label}`)
   if (primary) {
     assert(workspaceState.hasGenericHeader === false, `${viewport.width}: ${label} primary popover must not render generic workspace header`)
-    assert(workspaceState.paddingTop === '0px', `${viewport.width}: ${label} primary root top padding ${workspaceState.paddingTop}`)
+    assert(parseFloat(workspaceState.paddingTop) >= 58, `${viewport.width}: ${label} primary root must reserve the mobile tool strip, padding ${workspaceState.paddingTop}`)
     assert(workspaceState.paddingBottom === '0px', `${viewport.width}: ${label} primary root bottom padding ${workspaceState.paddingBottom}`)
     assert(workspaceState.hasPrimaryBody, `${viewport.width}: ${label} primary popover missing owned content body`)
+    assert(workspaceState.zIndex > 8, `${viewport.width}: ${label} primary popover must paint above reader content`)
+    assert(workspaceState.toolbarZIndex > workspaceState.zIndex, `${viewport.width}: ${label} mobile toolbar must stay interactive above the primary popover`)
+  }
+  if (contentSized) {
+    assert(workspaceState.top === 0, `${viewport.width}: ${label} primary popover top ${workspaceState.top}`)
+    assert(workspaceState.height >= 300, `${viewport.width}: ${label} primary popover height ${workspaceState.height}`)
+    assert(workspaceState.height < viewport.height - 40, `${viewport.width}: ${label} must be a content-sized popover, not a fullscreen drawer (${workspaceState.height})`)
+  }
+  if (heightRange) {
+    const [min, max] = heightRange
+    assert(
+      workspaceState.height >= min && workspaceState.height <= max,
+      `${viewport.width}: ${label} primary popover height ${workspaceState.height}, expected ${min}-${max}`,
+    )
   }
 }
 
@@ -217,7 +235,7 @@ async function assertMobileTopToolContract(page, viewport) {
     disabled: button.disabled,
   })))
   assert(
-    JSON.stringify(state.map(item => item.label)) === JSON.stringify(['首页', '书架', '书源', '目录', '设置']),
+    JSON.stringify(state.map(item => item.label)) === JSON.stringify(['书架', '书源', '目录', '设置', '首页']),
     `${viewport.width}: mobile Reader top-tool order must match reader-dev`,
   )
   assert(state.find(item => item.label === '书源')?.disabled === false, `${viewport.width}: Reader source entry must remain available`)
@@ -226,6 +244,36 @@ async function assertMobileTopToolContract(page, viewport) {
 async function assertWorkspaceClosed(page, viewport, label) {
   await page.waitForFunction(() => !document.querySelector('.reader-mobile-workspace'), null, { timeout: 10000 })
   assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: toolbar should remain visible after closing ${label}`)
+}
+
+async function assertPrimaryPopoverKeepsChromeInteractive(page, viewport, label) {
+  const toolLabel = label === '来源' ? '书源' : label
+  const activeTool = mobileTopTool(page, toolLabel)
+  const state = await page.evaluate(() => {
+    const active = document.querySelector('.reader-mobile-top.visible .mobile-tool-button')
+    const rect = active?.getBoundingClientRect()
+    const hit = rect && document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    return {
+      hitIsTool: hit === active || active?.contains(hit),
+      dismissVisible: Boolean(document.querySelector('.reader-mobile-primary-dismiss')),
+    }
+  })
+  assert(state.dismissVisible, `${viewport.width}: ${label} must install a click-away layer`)
+  assert(state.hitIsTool === true, `${viewport.width}: ${label} toolbar tool must remain above the primary popover`)
+  await activeTool.click()
+  await assertWorkspaceClosed(page, viewport, label)
+  await activeTool.click()
+  await assertWorkspaceOpen(page, viewport, label, { primary: true })
+}
+
+async function closePrimaryWorkspace(page, viewport, label) {
+  const bounds = await page.locator('.reader-mobile-workspace').evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { bottom: rect.bottom }
+  })
+  const y = Math.min(viewport.height - 130, Math.ceil(bounds.bottom + 24))
+  await page.mouse.click(Math.round(viewport.width / 2), y)
+  await assertWorkspaceClosed(page, viewport, label)
 }
 
 async function assertGlobalReaderDialog(page, viewport, selector, label) {
@@ -412,6 +460,39 @@ async function assertDesktopReaderDialog(page, selector, label) {
   assert(state.settingsOpen === 1, `desktop: ${label} must not close the active settings workspace`)
 }
 
+async function assertDesktopPrimaryPopover(page, label, [minHeight, maxHeight]) {
+  await page.waitForSelector('.reader-desktop-workspace', { timeout: 10000 })
+  const state = await page.evaluate(() => {
+    const workspace = document.querySelector('.reader-desktop-workspace')
+    const rail = document.querySelector('.reader-left-rail')
+    const pageEl = document.querySelector('.reader-page')
+    const rect = workspace?.getBoundingClientRect()
+    const railRect = rail?.getBoundingClientRect()
+    const pageRect = pageEl?.getBoundingClientRect()
+    return {
+      count: document.querySelectorAll('.reader-desktop-workspace').length,
+      left: Math.round(rect?.left || 0),
+      top: Math.round(rect?.top || 0),
+      width: Math.round(rect?.width || 0),
+      height: Math.round(rect?.height || 0),
+      panel: ['shelf', 'source', 'toc', 'settings'].find(panel => workspace?.classList.contains(`workspace-panel-${panel}`)) || '',
+      railRight: Math.round(railRect?.right || 0),
+      pageLeft: Math.round(pageRect?.left || 0),
+      pageRight: Math.round(pageRect?.right || 0),
+      zIndex: Number(window.getComputedStyle(workspace).zIndex || 0),
+    }
+  })
+  const expectedPanel = { 书架: 'shelf', 书源: 'source', 目录: 'toc', 设置: 'settings' }[label]
+  assert(state.count === 1, `desktop: ${label} must have exactly one primary popover`)
+  assert(state.panel === expectedPanel, `desktop: ${label} must expose ${expectedPanel}, received ${state.panel}`)
+  assert(state.top === 0, `desktop: ${label} popover top ${state.top}`)
+  assert(state.left >= state.railRight + 10, `desktop: ${label} must begin after the left rail (${state.left}/${state.railRight})`)
+  assert(Math.abs(state.left - (state.pageLeft + 5)) <= 1, `desktop: ${label} left ${state.left}, expected reader frame + 5 (${state.pageLeft})`)
+  assert(Math.abs((state.left + state.width) - (state.pageRight - 6)) <= 1, `desktop: ${label} right ${state.left + state.width}, expected reader frame - 6 (${state.pageRight})`)
+  assert(state.height >= minHeight && state.height <= maxHeight, `desktop: ${label} height ${state.height}, expected ${minHeight}-${maxHeight}`)
+  assert(state.height < 560, `desktop: ${label} must be a content-sized Popover, not a full-height workspace (${state.height})`)
+}
+
 async function assertBookmarkFormContext(page, viewport, { fullscreen, excerpt = '用于验证根级书签表单的摘录。' }) {
   const selector = '.global-bookmark-form-dialog'
   await page.waitForSelector(selector, { timeout: 10000 })
@@ -547,11 +628,13 @@ async function assertSettingsRowGeometry(page, viewport) {
     const control = firstRow ? Array.from(firstRow.children).find(element => !element.classList.contains('setting-label')) : null
     const activeTheme = document.querySelector('.theme-item.active')
     const firstSelectionButton = firstRow?.querySelector('.selection-button')
+    const firstConfigScheme = document.querySelector('.config-scheme')
     const firstFontOption = document.querySelector('.font-family-option')
     const labelRect = label?.getBoundingClientRect()
     const controlRect = control?.getBoundingClientRect()
     const activeThemeRect = activeTheme?.getBoundingClientRect()
     const selectionButtonRect = firstSelectionButton?.getBoundingClientRect()
+    const configSchemeRect = firstConfigScheme?.getBoundingClientRect()
     const fontOptionRect = firstFontOption?.getBoundingClientRect()
     const labelStyle = label ? window.getComputedStyle(label) : null
     const activeThemeStyle = activeTheme ? window.getComputedStyle(activeTheme) : null
@@ -565,6 +648,9 @@ async function assertSettingsRowGeometry(page, viewport) {
       activeThemeWidth: activeThemeRect?.width ?? null,
       activeThemeHeight: activeThemeRect?.height ?? null,
       firstSelectionButtonHeight: selectionButtonRect?.height ?? null,
+      firstSelectionButtonWidth: selectionButtonRect?.width ?? null,
+      firstConfigSchemeWidth: configSchemeRect?.width ?? null,
+      firstConfigSchemeHeight: configSchemeRect?.height ?? null,
       firstFontOptionWidth: fontOptionRect?.width ?? null,
       firstFontOptionHeight: fontOptionRect?.height ?? null,
     }
@@ -576,9 +662,112 @@ async function assertSettingsRowGeometry(page, viewport) {
   assert(geometry.activeThemeBorderColor === 'rgb(237, 66, 89)', `${viewport.width}: active theme border ${geometry.activeThemeBorderColor}`)
   assertClose(geometry.activeThemeWidth, 34, 1, `${viewport.width}: settings theme item width`)
   assertClose(geometry.activeThemeHeight, 34, 1, `${viewport.width}: settings theme item height`)
+  assertClose(geometry.firstSelectionButtonWidth, 78, 1, `${viewport.width}: settings selection button width`)
   assertClose(geometry.firstSelectionButtonHeight, 34, 1, `${viewport.width}: settings selection button height`)
+  assertClose(geometry.firstConfigSchemeWidth, 78, 1, `${viewport.width}: settings configuration scheme width`)
+  assertClose(geometry.firstConfigSchemeHeight, 34, 1, `${viewport.width}: settings configuration scheme height`)
   assertClose(geometry.firstFontOptionWidth, 78, 1, `${viewport.width}: settings font option width`)
   assertClose(geometry.firstFontOptionHeight, 34, 1, `${viewport.width}: settings font option height`)
+}
+
+async function assertSettingsFirstScreenDensity(page, viewport) {
+  const state = await page.evaluate(() => {
+    const list = document.querySelector('.settings-list')
+    const listRect = list?.getBoundingClientRect()
+    const labels = ['特殊模式', '配置方案', '方案类型', '阅读主题'].map((label) => {
+      const node = [...document.querySelectorAll('.settings-body .setting-label')].find(item => item.textContent?.trim() === label)
+      const rect = node?.closest('.setting-row')?.getBoundingClientRect()
+      return { label, top: rect?.top ?? null, bottom: rect?.bottom ?? null }
+    })
+    const warning = document.querySelector('.setting-help')
+    const warningRect = warning?.getBoundingClientRect()
+    const warningZone = warning?.closest('.selection-zone')?.getBoundingClientRect()
+    const configScheme = document.querySelector('.config-scheme')
+    const configStyle = configScheme ? window.getComputedStyle(configScheme) : null
+    return {
+      listTop: listRect?.top ?? null,
+      listBottom: listRect?.bottom ?? null,
+      labels,
+      warningInsideSelectionZone: Boolean(warning?.closest('.selection-zone')),
+      warningTop: warningRect?.top ?? null,
+      warningBottom: warningRect?.bottom ?? null,
+      warningZoneTop: warningZone?.top ?? null,
+      warningZoneBottom: warningZone?.bottom ?? null,
+      configSchemeBorderRadius: configStyle?.borderTopLeftRadius ?? '',
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: innerWidth,
+    }
+  })
+  assert(state.listTop !== null && state.listBottom !== null, `${viewport.width}: settings list missing`)
+  assert(state.warningInsideSelectionZone, `${viewport.width}: special-mode warning must stay inside its option zone`)
+  assert(state.warningTop >= state.warningZoneTop && state.warningBottom <= state.warningZoneBottom, `${viewport.width}: special-mode warning must be bounded by its option zone`)
+  assert(state.configSchemeBorderRadius === '2px', `${viewport.width}: configuration scheme border radius ${state.configSchemeBorderRadius}`)
+  for (const row of state.labels) {
+    assert(row.top !== null && row.bottom !== null, `${viewport.width}: missing first-screen settings row ${row.label}`)
+    assert(row.top >= state.listTop - 1 && row.bottom <= state.listBottom + 1, `${viewport.width}: ${row.label} must remain visible in the initial settings list`)
+  }
+  assert(state.documentWidth <= state.viewportWidth + 1, `${viewport.width}: settings initial screen must not overflow horizontally`)
+}
+
+async function assertSettingsFixedTitle(page, viewport, { desktop = false } = {}) {
+  const state = await page.evaluate(({ desktop }) => {
+    const title = document.querySelector('.settings-title')
+    const list = document.querySelector('.settings-list')
+    const outer = desktop
+      ? document.querySelector('.reader-desktop-workspace .reader-workspace-body')
+      : document.querySelector('.reader-mobile-primary-settings')
+    const titleRect = title?.getBoundingClientRect()
+    const listRect = list?.getBoundingClientRect()
+    const titleStyle = title ? window.getComputedStyle(title) : null
+    const listStyle = list ? window.getComputedStyle(list) : null
+    const outerStyle = outer ? window.getComputedStyle(outer) : null
+    return {
+      titleTop: titleRect?.top ?? null,
+      titleBottom: titleRect?.bottom ?? null,
+      listTop: listRect?.top ?? null,
+      listHeight: listRect?.height ?? null,
+      listClientHeight: list?.clientHeight ?? 0,
+      listScrollHeight: list?.scrollHeight ?? 0,
+      listOverflowY: listStyle?.overflowY ?? '',
+      outerOverflowY: outerStyle?.overflowY ?? '',
+      titleFontSize: titleStyle?.fontSize ?? '',
+      titleLineHeight: titleStyle?.lineHeight ?? '',
+      titleFontWeight: titleStyle?.fontWeight ?? '',
+    }
+  }, { desktop })
+  assert(state.titleTop !== null && state.listTop !== null, `${viewport.width}: settings title/list missing`)
+  assert(state.titleBottom < state.listTop, `${viewport.width}: fixed title must precede the scroll list`)
+  assert(Math.abs(state.listHeight - state.listClientHeight) <= 1, `${viewport.width}: settings list must not have a nested height mismatch`)
+  assert(state.listScrollHeight > state.listClientHeight + 20, `${viewport.width}: settings fixture must require list scrolling`)
+  assert(state.listOverflowY === 'auto', `${viewport.width}: settings list overflow ${state.listOverflowY}`)
+  assert(state.outerOverflowY === 'visible', `${viewport.width}: outer settings shell overflow ${state.outerOverflowY}`)
+  assert(state.titleFontSize === '18px', `${viewport.width}: settings title font size ${state.titleFontSize}`)
+  assert(state.titleLineHeight === '22px', `${viewport.width}: settings title line height ${state.titleLineHeight}`)
+  assert(state.titleFontWeight === '400', `${viewport.width}: settings title font weight ${state.titleFontWeight}`)
+
+  const beforeTop = state.titleTop
+  const moved = await page.evaluate(() => {
+    const list = document.querySelector('.settings-list')
+    if (!list) return null
+    list.scrollTop = Math.min(180, Math.max(1, list.scrollHeight - list.clientHeight))
+    return list.scrollTop
+  })
+  assert(moved > 0, `${viewport.width}: settings list did not scroll`)
+  const after = await page.evaluate(({ desktop }) => {
+    const title = document.querySelector('.settings-title')
+    const list = document.querySelector('.settings-list')
+    const outer = desktop
+      ? document.querySelector('.reader-desktop-workspace .reader-workspace-body')
+      : document.querySelector('.reader-mobile-primary-settings')
+    return {
+      titleTop: title?.getBoundingClientRect().top ?? null,
+      listScrollTop: list?.scrollTop ?? 0,
+      outerScrollTop: outer?.scrollTop ?? 0,
+    }
+  }, { desktop })
+  assertClose(after.titleTop, beforeTop, 1, `${viewport.width}: settings title must stay fixed while list scrolls`)
+  assert(after.listScrollTop > 0, `${viewport.width}: settings list scroll position must change`)
+  assert(after.outerScrollTop === 0, `${viewport.width}: outer settings shell must not scroll`)
 }
 
 async function assertSettingsBackgroundGeometry(page, viewport) {
@@ -669,15 +858,6 @@ function assertReaderGeometry(geometry, viewport, label) {
   assert(geometry.paragraphTextAlign === 'justify', `${viewport.width} ${label}: paragraph text-align ${geometry.paragraphTextAlign}`)
 }
 
-async function closeWorkspace(page, method = 'close-button') {
-  if (method === 'settings-toggle') {
-    await page.locator('.reader-mobile-top.visible .mobile-tool-button').filter({ hasText: '设置' }).click()
-  } else {
-    await page.getByRole('button', { name: '关闭' }).click()
-  }
-  await page.waitForFunction(() => !document.querySelector('.reader-mobile-workspace'), null, { timeout: 10000 })
-}
-
 async function runDesktopViewport(browser) {
   const viewport = { width: 1440, height: 900 }
   const context = await browser.newContext({ viewport })
@@ -698,8 +878,18 @@ async function runDesktopViewport(browser) {
   await page.waitForSelector('.reader-body p', { timeout: 10000 })
   await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: false })
   const selectedBookmarkText = await createBookmarkFromSelectedText(page, viewport, { fullscreen: false })
+  await page.locator('.reader-left-rail button[title="书架"]').click()
+  await assertDesktopPrimaryPopover(page, '书架', [380, 410])
+  await page.locator('.reader-left-rail button[title="书源"]').click()
+  await assertDesktopPrimaryPopover(page, '书源', [380, 410])
+  await page.locator('.reader-left-rail button[title="目录"]').click()
+  await assertDesktopPrimaryPopover(page, '目录', [380, 410])
   await page.locator('.reader-left-rail button[title="设置"]').click()
+  await assertDesktopPrimaryPopover(page, '设置', [470, 520])
   await page.waitForSelector('.reader-desktop-workspace .settings-body', { timeout: 10000 })
+  await assertSettingsRowGeometry(page, viewport)
+  await assertSettingsFirstScreenDensity(page, viewport)
+  await assertSettingsFixedTitle(page, viewport, { desktop: true })
   await page.locator('.theme-custom-button').click()
 
   const themeModeButtons = page.locator('.custom-theme-mode .selection-button')
@@ -765,26 +955,31 @@ async function runViewport(browser, viewport) {
   assertReaderGeometry(initialGeometry, viewport, 'initial')
 
   await mobileTopTool(page, '书架').click()
-  await assertWorkspaceOpen(page, viewport, '书架', { primary: true })
-  await mobileTopTool(page, '书架').click()
-  await assertWorkspaceClosed(page, viewport, '书架')
+  await assertWorkspaceOpen(page, viewport, '书架', { primary: true, contentSized: true, heightRange: [418, 488] })
+  await assertPrimaryPopoverKeepsChromeInteractive(page, viewport, '书架')
+  await closePrimaryWorkspace(page, viewport, '书架')
 
-  await mobileTopTool(page, '书架').click()
-  await assertWorkspaceOpen(page, viewport, '书架', { primary: true })
   await mobileTopTool(page, '书源').click()
-  await assertWorkspaceOpen(page, viewport, '来源', { primary: true })
+  await assertWorkspaceOpen(page, viewport, '来源', { primary: true, contentSized: true, heightRange: [418, 488] })
+  await assertPrimaryPopoverKeepsChromeInteractive(page, viewport, '来源')
+  await closePrimaryWorkspace(page, viewport, '来源')
   await mobileTopTool(page, '目录').click()
-  await assertWorkspaceOpen(page, viewport, '目录', { primary: true })
+  await assertWorkspaceOpen(page, viewport, '目录', { primary: true, contentSized: true, heightRange: [418, 488] })
+  await assertPrimaryPopoverKeepsChromeInteractive(page, viewport, '目录')
+  await closePrimaryWorkspace(page, viewport, '目录')
   await mobileTopTool(page, '设置').click()
-  await assertWorkspaceOpen(page, viewport, '设置', { primary: true })
+  await assertWorkspaceOpen(page, viewport, '设置', { primary: true, contentSized: true, heightRange: [488, 588] })
+  await assertPrimaryPopoverKeepsChromeInteractive(page, viewport, '设置')
   await assertSettingsRowGeometry(page, viewport)
+  await assertSettingsFirstScreenDensity(page, viewport)
+  await assertSettingsFixedTitle(page, viewport)
   await assertSettingsBackgroundGeometry(page, viewport)
 
   await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
   const afterPanelCenterTap = await page.locator('.reader-mobile-top.visible').count()
   assert(afterPanelCenterTap === 1, `${viewport.width}: center tap with panel open must not hide toolbar`)
 
-  await closeWorkspace(page, 'settings-toggle')
+  await closePrimaryWorkspace(page, viewport, '设置')
   await page.locator('.reader-mobile-float-left.visible button[title="书签"]').click()
   await assertGlobalReaderDialog(page, viewport, '.global-bookmark-dialog', '书签')
   await exerciseBookmarkManager(page, viewport, { fullscreen: true, selectedText: selectedBookmarkText })

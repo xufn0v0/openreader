@@ -18,15 +18,35 @@ test('ReaderSettingsPanel exposes upstream canonical settings labels', () => {
 test('mobile reader settings suppresses the generic workspace header', () => {
   assert.match(mobileWorkspaceSource, /showHeader/, 'mobile workspace must expose header visibility control')
   assert.match(readerViewSource, /title="设置"\s+:show-header="false"/, 'mobile settings should not add a second generic 设置 title')
-  assert.match(panelSource, /<strong>设置<\/strong>/, 'settings panel must keep the upstream ReadSettings title row')
-  assert.match(panelSource, /重置为默认配置/, 'settings panel must keep the upstream reset action')
+  assert.match(panelSource, /class="settings-title"/, 'settings panel must keep the upstream ReadSettings title')
+  assert.match(panelSource, /class="settings-title"[\s\S]*?设置[\s\S]*?重置为默认配置/, 'settings title must own the upstream reset action')
+  assert.match(panelSource, /<\/div>\s*<div class="settings-list">/, 'settings title and scrollable settings list must be siblings')
+  assert.doesNotMatch(panelSource, /<strong>设置<\/strong>/, 'settings title must not retain the rewritten underlined strong label')
+})
+
+test('reader settings keeps the upstream fixed title while only the list scrolls', () => {
+  assert.match(
+    panelSource,
+    /\.settings-list\s*\{[\s\S]*?max-height:\s*45vh;[\s\S]*?overflow-y:\s*auto;/,
+    'only the settings list should own the upstream 45vh vertical scrolling region',
+  )
+  assert.match(
+    panelSource,
+    /\.settings-title\s*\{[\s\S]*?font-size:\s*18px;[\s\S]*?line-height:\s*22px;[\s\S]*?margin-bottom:\s*28px;[\s\S]*?font-weight:\s*400;/,
+    'settings title must retain upstream fixed-title typography and spacing',
+  )
 })
 
 test('mobile reader settings keeps upstream-like two-column row geometry', () => {
-  assert.match(panelSource, /@media \(max-width: 750px\)[\s\S]*?\.settings-body \{\s*gap: 20px;/, 'mobile settings rows should keep upstream-like 20px vertical density')
+  assert.match(panelSource, /@media \(max-width: 750px\)[\s\S]*?\.settings-list \{\s*gap: 20px;/, 'mobile settings rows should keep upstream-like 20px vertical density')
   assert.match(panelSource, /@media \(max-width: 750px\)[\s\S]*?\.setting-row \{[\s\S]*?grid-template-columns: 72px minmax\(0, 1fr\);/, 'mobile settings should use 56px label + 16px gutter geometry')
   assert.match(panelSource, /@media \(max-width: 750px\)[\s\S]*?\.setting-row > \.setting-label \{[\s\S]*?line-height: 36px;/, 'mobile settings labels should align with upstream 36px controls')
   assert.match(panelSource, /@media \(max-width: 750px\)[\s\S]*?\.setting-row > :not\(\.setting-label\) \{[\s\S]*?grid-column: 2;/, 'mobile settings controls should start in the second column')
+})
+
+test('desktop reader settings keeps the upstream 56px label plus 16px gutter', () => {
+  assert.match(panelSource, /@media \(min-width: 751px\)[\s\S]*?\.setting-row \{[\s\S]*?grid-template-columns: 56px minmax\(0, 1fr\);[\s\S]*?column-gap: 16px;/, 'desktop settings should use the upstream 56px label and 16px gutter')
+  assert.match(panelSource, /@media \(min-width: 751px\)[\s\S]*?\.typography-setting-row,[\s\S]*?\.stepper-setting-row \{[\s\S]*?grid-template-columns: 56px minmax\(0, 220px\);[\s\S]*?column-gap: 16px;/, 'desktop numeric settings should use the same upstream label gutter')
 })
 
 test('reader settings selected controls use upstream accent color', () => {
@@ -44,8 +64,28 @@ test('reader settings discrete options use upstream-like local buttons', () => {
   assert.doesNotMatch(panelSource, /<el-radio-button\b/, 'settings panel should not use Element radio buttons for upstream span-item options')
   assert.match(panelSource, /class="selection-zone"/, 'settings panel should expose upstream-like selection zones')
   assert.match(panelSource, /class="selection-button"/, 'settings panel should expose upstream-like selection buttons')
-  assert.match(panelSource, /\.selection-button \{[\s\S]*?min-width: 78px;[\s\S]*?height: 34px;/, 'selection buttons should keep upstream span-item dimensions')
+  assert.match(panelSource, /\.selection-button \{[\s\S]*?box-sizing: border-box;[\s\S]*?width: 78px;[\s\S]*?min-width: 78px;[\s\S]*?height: 34px;/, 'selection buttons should keep upstream 78x34 outer dimensions')
   assert.match(panelSource, /\.selection-button\.active \{[\s\S]*?color: #ed4259;[\s\S]*?border-color: #ed4259;/, 'selection buttons should keep upstream selected color')
+})
+
+test('reader settings keeps upstream warning and configuration option ownership', () => {
+  const specialModeStart = panelSource.indexOf('<label class="setting-label">特殊模式</label>')
+  const specialModeEnd = panelSource.indexOf('<div class="setting-row">', specialModeStart + 1)
+  const specialMode = panelSource.slice(specialModeStart, specialModeEnd)
+  const readerModeStart = panelSource.indexOf('<label class="setting-label">翻页方式</label>')
+  const readerModeEnd = panelSource.indexOf('<div class="setting-row', readerModeStart + 1)
+  const readerMode = panelSource.slice(readerModeStart, readerModeEnd)
+
+  assert(specialModeStart >= 0 && specialModeEnd > specialModeStart, 'special-mode setting row missing')
+  assert(readerModeStart >= 0 && readerModeEnd > readerModeStart, 'read-method setting row missing')
+  assert.match(specialMode, /<div class="selection-zone">[\s\S]*?class="setting-help"/, 'special-mode warning must belong to its selection zone')
+  assert.match(readerMode, /<div class="selection-zone">[\s\S]*?class="setting-help"/, 'read-method warning must belong to its selection zone')
+  assert.match(panelSource, /class="selection-zone config-scheme-list"/, 'configuration schemes must use the shared discrete option zone')
+  assert.match(panelSource, /class="selection-button config-scheme"/, 'configuration schemes must use compact option controls')
+  assert.doesNotMatch(panelSource, /<small v-if="config\.configDefaultType">/, 'configuration type is its own upstream row, not a card subtitle')
+  assert.match(panelSource, /\.config-scheme \{[\s\S]*?width: 78px;[\s\S]*?height: 34px;[\s\S]*?border-radius: 2px;/, 'configuration scheme controls must keep upstream 78x34 geometry')
+  assert.doesNotMatch(panelSource, /\.config-scheme\s*\{[^}]*border-radius:\s*6px;/, 'configuration scheme controls must not retain card rounding')
+  assert.match(panelSource, /\.setting-help \{[\s\S]*?flex-basis: 100%;/, 'compact warning text must wrap inside its owning option zone')
 })
 
 test('reader settings theme options use upstream theme-item geometry', () => {

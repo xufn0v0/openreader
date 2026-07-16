@@ -69,6 +69,25 @@ Evidence: `backend/engine/source_rule_evaluator_test.go`, `backend/api/source_fa
 
 For each release, record which checklist sections were relevant and which tests/probes covered them.
 
+## P2 BookInfo assets and follow-state review
+
+- [x] `POST /uploads` derives the owner only from the authenticated JWT and writes all
+  new covers/backgrounds/fonts/misc assets below `data/uploads/users/<user-id>/`.
+- [x] `PUT /books/:id` accepts a new custom cover only from the same user's `covers`
+  subtree; cross-user, escaped, missing and new external URLs fail closed. Existing
+  legacy/database values remain readable without a bulk move or migration.
+- [x] `DELETE /uploads` parses an exact user-scoped path, returns a safe non-owner
+  result, retains legacy global paths, and refuses to delete a Book or reader-setting
+  reference. The Reader saves the unreferenced setting before its delete request and
+  restores the local font/background state if that save fails.
+- [x] Upload size and extension allowlists are unchanged; rooted path checks reject
+  traversal, query and fragment variants without leaking a filesystem path.
+
+Evidence: `backend/api/bookinfo_asset_contract_test.go`, upload/update API tests,
+`frontend/tests/overlayBookInfo.test.mjs`,
+`frontend/tests/readerAppearanceAssets.test.mjs`, and the P2 BookInfo real-browser
+contract (three viewports).
+
 ## P1-E2 workspace storage audit
 
 - [x] Raw `/webdav/*` now uses the normal Bearer JWT and activity middleware before it can reach a filesystem handler.
@@ -116,6 +135,16 @@ Evidence: `backend/engine/import_limits_contract_test.go`, `backend/engine/umd_p
 - [x] Structural archive failure has no user-data mutation; valid reader-dev/Legado/OpenReader formats preserve count/event compatibility.
 
 Evidence: `backend/api/backup_restore_contract_test.go`, existing reader-dev/Legado/OpenReader backup fixtures in `backend/api/api_test.go`, and bookmark restore fixtures. Mounted-volume Docker smoke remains mandatory before release.
+
+## P1-E4 portable local archive backup review
+
+- [x] Portable packages are explicit `openreader-portable-v1` archives; ordinary reader-dev/Legado/OpenReader backup ZIPs do not gain `library/` data or change their meaning.
+- [x] The archive reader rejects unsafe/duplicate/case-conflicting names, directories, symlinks, unknown logical entries, invalid manifest slots, unbounded compressed/member/total sizes and bad SHA-256 before logical restore dispatch.
+- [x] Original archives are streamed to a caller-private staging root, checked against the manifest, parsed under the portable per-entry budget, and never derive a destination path from an archive member or stored host path.
+- [x] Trigger and restore are caller scoped. A matching `local://` identity with a different/missing destination archive is a `409` before mutation; an identical existing archive is reused, so a package cannot overwrite another user's or an unrelated same-identity book.
+- [x] Type=1 local audio directories and missing/unsafe originals fail generation rather than being silently omitted. No JWT, WebDAV credential, archive member or host filesystem path appears in the API error or manifest.
+
+Evidence: `backend/services/backup/portable_test.go`, `backend/api/portable_backup_contract_test.go`, full backend suite, and `HISTORICAL_VOLUME=1 scripts/docker-volume-backup-smoke.sh` export/upload/fresh-volume/restart coverage.
 
 ## P2 replace-rule review
 

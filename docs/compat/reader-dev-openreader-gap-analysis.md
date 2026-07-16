@@ -20,14 +20,14 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Module | reader-dev original behavior/files | OpenReader current behavior/files | Difference/risk | Status | Recommended tests |
 |---|---|---|---|---|---|
 | Frontend scene structure | `web/src/views/Index.vue`, `web/src/views/Reader.vue`; router has `/` and `/reader`. | Canonical Index work stays at `/`; historical search/discover/source/settings/storage/detail URLs now preserve their intent through root-workspace redirects/overlays, while Reader remains a separate scene. | Vue Router has more compatibility routes than upstream, but they no longer create independent product pages. | `aligned` for extracted P1 scene convergence | Router redirect tests; browser flow search → BookInfo → read. |
-| Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar, with a read-aloud-bar exception. | `frontend/src/views/Reader.vue` uses `mobileChromeVisible = ref(true)`; primary panels/global dialogs retain it, while TTS opening hides it and TTS center taps do not retoggle it. | Default-visible toolbar, panel/dialog coexistence and the extracted TTS exception are implemented. | `aligned` for Reader P0 tool-layer states | Unit contracts plus `reader-mobile-contract.mjs` and `reader-tts-contract.mjs` at desktop/390/360. |
-| Reader mobile panel structure | Primary shelf/source/catalog/settings use Element popovers; bookmarks/search-content are App-level dialogs; cache is an inline read-bar zone. | OpenReader uses `ReaderMobileWorkspacePanel.primary` for the four primary panels, shared root dialogs for bookmark/search/BookInfo, and an inline cache zone. | The Vue/Element structure differs but ownership, geometry, coexistence and click protection are verified. | `technical-stack-equivalent` | `reader-mobile-contract.mjs` covers all branches at desktop/390/360. |
-| Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Base geometry is implemented; acceptance requires actual rendered paragraph left/right gap checks, not only CSS value checks. | `aligned` for base P0 | DOM geometry probe for page/body/paragraph left/right gaps within 1px across 390×844 and 360×800; ensure toolbar show/hide does not shift content. |
+| Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar, with a read-aloud-bar exception. | `frontend/src/views/Reader.vue` uses `mobileChromeVisible = ref(true)`; primary panels/global dialogs retain it, while TTS opening hides it and TTS center taps do not retoggle it. | Base state is present, but the renewed P0 audit found an incorrect mobile button order and coverage that mistakes current assertions for upstream proof. | `partial` — re-audit in progress | Real DOM/state assertions at desktop/390/360, including exact button order, panel interaction and TTS exception. |
+| Reader mobile panel structure | Primary shelf/source/catalog/settings use Element popovers; bookmarks/search-content are App-level dialogs; cache is an inline read-bar zone. | OpenReader uses `ReaderMobileWorkspacePanel.primary` for the four primary panels, shared root dialogs for bookmark/search/BookInfo, and an inline cache zone. | The full-width technical adaptation is viable, but current mutual-exclusion and global-dialog click-through claims need source/runtime evidence, not previous unit-test assumptions. | `partial` — re-audit in progress | Compare each panel transition to upstream and add browser evidence for every primary/global panel. |
+| Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Static values match, but no current proof establishes that every mode/tool state keeps left/right paragraph gaps equal. | `partial` — re-audit in progress | DOM geometry probe for page/body/paragraph left/right gaps within 1px across 390×844 and 360×800; ensure toolbar show/hide and panel changes do not shift content. |
 | Reader scrolling vs click paging | Upstream has page/scroll modes with discrete click navigation. | User requested continuous native finger/wheel scrolling while click paging remains segmented. | Intentional UX improvement if it does not change mode selection semantics. | `acceptable-change` | Browser scroll continuity probe; click paging regression tests. |
 | Reader settings controls | Upstream uses controls that are easier to distinguish visually; user requested minus/value/plus controls instead of current easy-to-mis-tap slider behavior. | Current setting stepper exists but must be rechecked against upstream layout/state. | Allowed UX adaptation, but values/defaults/state must match upstream. | `acceptable-change` | Unit tests for value bounds; browser setting interaction test. |
 | Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, read-aloud, and cross-chapter behavior. `EpubFile.kt` additionally treats `BookChapter.startFragmentId`/`endFragmentId` and the next chapter URL as EPUB content boundaries. | Current `ReaderChapterContent.vue` handles text/images/volume blocks, CBZ image resources, EPUB iframe resources, a dedicated audio branch for `type === 1` chapters, and the extracted TTS/read-bar state machine. | E4 keeps the image-only first EPUB spine cover and now preserves NAV/NCX fragment directory entries, signed XHTML slices, exact `(resourcePath, resourceFragment)` matching, same-resource slice navigation and cross-XHTML chapter transitions. CSP/capability protection remains the allowed Go/Vue security adaptation. | `aligned` for E4-EPUB-2 | [`epub-fragment-p1e4-contract.md`](epub-fragment-p1e4-contract.md), parser/API/migration/security tests, and `reader-epub-contract.mjs` at 1440/390/360. |
-| BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent `BookDetail.vue` route structure has been removed from the product path; search/discover/route actions are centralized; Reader opens plain BookInfo without injecting toolbar shortcut actions. Remaining P1 work is Index-scene placement and search/discover/source flow convergence. | `partial` for P1 | Single BookInfo action contract; search/shelf/reader reuse tests. |
-| Bookshelf/BookManage/BookGroup | Upstream: `BookShelf.vue`, `BookManage.vue`, `BookGroup.vue` under Index workspace. | Current: `Home.vue`, overlay management components, categories/store utilities. | Some enhancements may be valid, but workflow and mobile sidebar behavior need upstream comparison. | `unknown` | Workspace browser flows; category/order tests. |
+| BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent `BookDetail.vue` route structure has been removed from the product path; search/discover/route actions are centralized; Reader opens plain BookInfo without injecting toolbar shortcut actions. Five-entry Browser/API evidence now verifies the shared action state machine. Shelf-only metadata mutations remain a separate P2 semantic boundary. | `aligned` for P1-B entry/action flow; `partial` only for P2 shelf-field mutations | Keep the single action contract; audit cover/edit/follow/local-refresh/cache mutations against their data/sync side effects. |
+| Bookshelf/BookManage/BookGroup | Upstream: `BookShelf.vue`, `BookManage.vue`, `BookGroup.vue` under Index workspace. | Current: `Home.vue`, `OverlayBookManagement.vue`, `OverlayBookGroups.vue`, shared controllers and user-scoped category store. | The fixed-baseline re-audit confirms one root-workspace Dialog for manage/set modes (fullscreen on compact UI), upstream-equivalent non-empty set guard and per-user category operations. Many-to-many category rows replace the upstream bit mask without adding a user-visible flow. The no-mock browser workflow now proves the manager-to-API persistence/deletion path at all required viewports. | `aligned` for extracted P1-D BookManage / BookGroup; BookInfo remains separately partial | Retain Go ownership/delete/category regressions; finish BookInfo's five-entry action matrix separately. |
 | Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons are defined by `Index.vue` and related CSS. | `AppLayout.vue` and `useAppMobileNavigation.js` now separate 260px visual width from the 270px gesture window, with bottom controls outside the scroll container. | The user-requested stable bottom controls during drag are an explicit OpenReader UX adaptation; the extracted upstream interaction contract is browser-validated. | `aligned` for extracted P1 sidebar slice | Mobile drag/fixed-bottom/shelf-geometry smoke at 390×844 and 360×800. |
 | Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Root workspace owns Search/Explore bodies and source overlays; historical URLs are compatibility intents, and shared BookInfo owns the handoff. | API clients and OpenReader multi-user extensions remain, but no separate page flow remains. | `aligned` for extracted P1 scene convergence | Search → result group → BookInfo → add/read browser test. |
 | Online source parsing | Upstream reader3-compatible source semantics live across `AnalyzeRule` plus `BookList/BookInfo/BookChapterList/BookContent`. | Current Go parser executes the extracted CSS/JSONPath/XPath/regex/composite/replace/pagination subsets, bounded persisted `@put`/`@get` variables, and redacted parser errors. Dynamic headers and `loginCheckJs` now fail before any request rather than being silently ignored. | `{{...}}`/arbitrary JavaScript remain explicit security-gated unsupported behavior; this is not a silent parsing gap. | `aligned` for extracted P2 parser + explicit security difference | Parser/request-isolation and source-debug/error-redaction contracts; browser source flow. |
@@ -37,7 +37,7 @@ The current risk is not framework selection. The risk is implementing from an ab
 | RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition, reset/refresh ordering and compact fullscreen behavior have been rebuilt; persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | RSS fixture/parser tests; source/article browser smoke. |
 | WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P2 storage UI/import audit found CBZ reachability and LocalStore result-gate differences despite the prior path/security alignment. | `partial` | Storage UI/import contract, path traversal tests, upload/list/import browser smoke, Docker volume smoke. |
 | Backup/restore | Upstream backup flows and reader-dev formats require extraction. | Current OpenReader backup service and Legado restore exist. | Must preserve OpenReader data and document reader-dev/Legado import semantics. | `unknown` | Restore testdata; backup list/download/restore tests. |
-| Auth/user management | Upstream user management components include `AddUser.vue`, `UserManage.vue`; OpenReader adds JWT. | Current JWT/multi-user/admin endpoints are intentional runtime adaptation. | Root dialog, ordinary-user creation, protected-account controls, time metadata and direct legacy-intent behavior have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 + intentional runtime redesign | Auth dialog and admin/non-admin browser smoke; protected-account API tests. |
+| Auth/user management | Upstream user management components include `AddUser.vue`, `UserManage.vue`; OpenReader adds JWT. | Current JWT/multi-user/admin endpoints retain a root Dialog and protected administrator adaptation, but use 3-character unrestricted usernames, 6-character passwords, one merged storage permission, incomplete user cleanup and a global BookSource model. | JWT and protected `admin` are allowed runtime/security adaptations; the listed input, authorization, deletion and source-ownership differences are not aligned. | `partial` — [`user-management-p2-contract.md`](user-management-p2-contract.md) extracted; implementation/tests pending | Input contract, protected-account API, independent WebDAV/LocalStore route authorization, full user data/file deletion and admin/non-admin browser smoke. |
 | Docker/runtime | Upstream ships Java/Gradle/Docker variants. | Current single Go binary + frontend dist in Alpine, env-driven volumes. Official Node/Go/Alpine base digests are pinned; CA roots are copied from the Go builder and the Go binary embeds IANA time-zone data, so the final stage has no mutable registry/APK package step. | Intentional deployment redesign. The digest pinning and embedded runtime assets are an allowed reproducibility/security adaptation; mounted-volume behavior remains unchanged. | `intentional-redesign` | `PUSH=0 ./scripts/docker-build-push.sh`; `scripts/docker-volume-backup-smoke.sh`. |
 
 ## Immediate parser contract: TXT local import catalog rules
@@ -261,11 +261,206 @@ Required implementation before claiming P1 BookInfo parity:
 
 ## Immediate P0 contract: Reader mobile
 
+### 2026-07-16 full re-audit — evidence replaces prior incremental claims
+
+This section supersedes the status of individual Reader micro-slices above whenever they conflict.
+It was extracted without changing application code from the fixed upstream checkout
+`/private/tmp/changshengyu-reader-dev` at `fa22f271849d45f93349ae1636223e27b16a4691` and the
+current OpenReader worktree at Git `5ad0768`.
+
+Authoritative upstream files:
+
+- `web/src/views/Reader.vue` — toolbar order, popover state flags, central tap/keyboard branches,
+  reading modes and desktop rails.
+- `web/src/components/Content.vue` — title/paragraph/volume/image DOM and typography.
+- `web/src/components/ReadSettings.vue` — setting labels, defaults, steppers and mode changes.
+- `web/src/App.vue` and `web/src/plugins/config.js` — mini popover geometry and fresh defaults.
+
+Current OpenReader scope:
+
+- `frontend/src/views/Reader.vue`, `components/reader/ReaderMobileChrome.vue`,
+  `ReaderMobileWorkspacePanel.vue`, `ReaderDesktopTools.vue`, `ReaderDesktopWorkspacePanel.vue`,
+  `ReaderChapterContent.vue`, `ReaderSettingsPanel.vue`.
+- `composables/useReaderChrome.js`, `useReaderPointer.js`, `useReaderPrimaryPanels.js`,
+  `useReaderPanels.js`, `useReaderTools.js`; `stores/reader.js`; and their existing tests/smokes.
+
+| Contract layer | Upstream fact | Current evidence | Classification and required action |
+|---|---|---|---|
+| Mobile top-tool order | Mini toolbar keeps template order **书架 → 书源 → 目录 → 设置 → 首页**; top/bottom buttons are desktop-only. | `ReaderMobileChrome.vue` now renders that order; unit and real-browser contracts assert it at 390px and 360px. | **resolved in the 2026-07-16 P0 defaults/order slice**. Keep the contract with the shared tool handlers unchanged. |
+| Tool-layer entry and center tap | `showToolBar` initializes to `true`; a center tap toggles it. Opening any primary popover returns before that toggle. TTS/read-bar is the explicit exception. | `mobileChromeVisible = ref(true)`, `useReaderPointer`, and `useReaderChrome` retain the state. The real-browser contract now covers default visibility, primary-popover click blocking, clicks inside a panel, click-away closing, and the ordinary center toggle at 390×844 and 360×800. | **aligned for this P0 state slice**. Keep separate TTS/read-bar contracts and re-run it when later reader modes change. |
+| Four primary popover flags | Upstream owns separate `popBookShelfVisible`, `popBookSourceVisible`, `popCataVisible`, and `readSettingsVisible` flags. It does not contain a handwritten global close-all transition. | A fixed-baseline Chromium probe at 390×844 opened shelf through a real click: only `popBookShelfVisible` became true and `showToolBar` remained true. The shelf Popover intercepted a subsequent physical source click, so only one primary panel can be reached at a time in the visible UI. OpenReader retains one active panel, but a z-index-10 Popover plus z-index-9 click-away layer now blocks the z-index-8 chrome instead of allowing pointer pass-through. | **aligned for the visible interaction contract**. The state storage adaptation is permitted; real browser tests cover the externally observable transition. |
+| Full-width primary panel geometry | Mini `.popper-component` is fixed at `top:0`, `left:0`, `width:100vw`, no border/shadow. Each inner upstream component owns its own safe-area/inset layout. The fixed-baseline shelf Popover measured `0,0,390×389.1875`; settings measured `0,0,390×472.796875`. | `ReaderMobileWorkspacePanel.primary` is now top-anchored, content-sized and capped rather than `100dvh`; primary shelf/source/catalog retain a 300px scroll region and settings use the upstream-equivalent `45vh + 96px` scroll bound. Primary panes paint above controls without clearing `mobileChromeVisible`. | **aligned for this P0 geometry slice**. Browser tests enforce 360–430px for shelf/source/catalog and 430–530px for settings at both mobile target viewports. |
+| Global overlays | `App.vue` mounts `Bookmark`, `BookmarkForm`, `SearchBookContent`, and `BookInfo` at the application root and opens them through event-bus state. They are not reader primary popovers and do not assign `showToolBar = false`. | `GlobalOverlayHost` owns the equivalent Pinia-backed root dialogs. The real-browser reader contract opens bookmarks, full-text search, and BookInfo at 1440×900, 390×844, and 360×800; it proves root-dialog/fullscreen behavior, preserved desktop rail/mobile chrome, and no body-click pass-through. | **aligned for the visible Reader dialog contract**. The Pinia host is a permitted framework adaptation; retain the dialog browser checks when dialog internals change. |
+| Desktop work area | Fixed-baseline Chromium at 1440×900 with upstream `readWidth:800` measured the chapter frame at `x=319`, `802px` wide; the left tool rail at `x=252`, `60px` outer width; and the right control stack beside the reading frame. The primary Popovers start at `x=324`, `y=0`, width `791px`: shelf/catalog `389.1875px` high, source `391px`, settings `498px`. The shelf is below the left rail, so a physical source click is delivered and Element Popover changes the visible panel. | `ReaderDesktopWorkspacePanel` now begins `5px` inside the frame, ends `5px` before its right edge, sizes to content, retains 300px shelf/source/catalog lists, and caps settings at the upstream `45vh` scroll core plus title allowance. The real-browser contract at 1440×900 proves all four bounds and an actual shelf→source rail click. | **aligned for the desktop primary-Popover outer geometry slice**. Settings’ deeper internal fixed-title/scroll composition still belongs to the remaining settings visual audit; do not call the entire Reader desktop UI complete yet. |
+| Text layout | Upstream desktop `.chapter` is `670px` content plus `65px` horizontal padding (802px including borders in the fixed runtime); `Content.vue` uses `h3` 28px/1.2/center and paragraph 2em indent with break-all. Mini pages are justified with 16px edges. | `ReaderChapterContent` retains title/paragraph DOM semantics. Browser contracts already prove 16px mobile symmetry and justified text for `scroll` plus continuous-window/anchor behavior for `scroll2` at all three target viewports. Page and flip mode title/paragraph bounds, desktop 670+65 frame content bounds, and inter-chapter spacing are not yet visually proved. | **partial / must-verify before retention**. Build a rendered mode matrix for page, flip, scroll, scroll2, volume, comic, EPUB, CBZ, and audio; only the user-approved native continuous scroll may differ from the upstream animated scroll behavior. |
+| Mode/default values | Upstream fresh defaults include 18px/400/1.8/0.2, `上下滑动`, `自动`, 300ms, `像素滚动`, `autoReadingPixel:1`, and `autoReadingLineTime:1000`. | OpenReader now applies `1`/`1000` to its fresh state, default custom schemes, and missing-field sanitization while retaining explicit persisted values such as `12`/`260`. | **resolved in the 2026-07-16 P0 defaults/order slice**. Unit contracts protect both fresh parity and stored-setting compatibility. |
+| Settings events | Upstream has one `@readMethodChange` transition per settings interaction. | The desktop and mobile `ReaderSettingsPanel` instances each contain one `@mode-change="onModeChange"`; the renewed source check found no duplicate mobile binding. | **aligned with a regression guard**. Keep the one-listener source contract; an interaction-level save/rebuild check belongs in the browser matrix. |
+| User-approved differences | Native finger/wheel scrolling remains continuous; click paging remains segmented. Numeric minus/value/plus controls replace easy-to-mis-tap sliders. | Implemented through scroll/pointer controllers and `ReaderSettingStepper`. | **acceptable-change**. Keep only after the surrounding upstream state/default/geometry contract passes. |
+
+#### 2026-07-16 focused inventory: settings scroll ownership and reading-mode matrix
+
+This is an inventory only. No Reader implementation was changed while recording it.
+The authority is the fixed upstream `web/src/components/ReadSettings.vue`,
+`web/src/views/Reader.vue`, and `web/src/components/Content.vue` at
+`fa22f271849d45f93349ae1636223e27b16a4691`.
+
+| Contract layer | Upstream fact | Current evidence | Classification / required test-before-code action |
+|---|---|---|---|
+| Settings structure | `ReadSettings.vue` places `.settings-title` and `.setting-list` as sibling children of `.settings-wrapper`. The title is `18px/22px`, regular weight, has `28px` bottom margin, and its reset action floats at right. | `ReaderSettingsPanel.vue` makes every setting row a sibling of `.settings-title-row` inside one `.settings-body`; title styling is an underlined, semibold red label. | **wrong structure / must rebuild.** Keep the user-approved stepper controls, but introduce a title sibling plus a settings-list wrapper; do not preserve the old all-in-one grid merely because it exists. |
+| Settings scroll owner | Upstream `.setting-list` alone has `max-height:45vh; overflow-y:auto`; the title and its reset action remain visible while the settings list scrolls. The wrapper owns the outer 24px plus safe-area inset. | Desktop `ReaderDesktopWorkspacePanel` scrolls its entire `.reader-workspace-body` for settings. Mobile `.reader-mobile-primary-settings` likewise scrolls its entire primary body. Both therefore scroll the title away. | **wrong behavior / P0.** Add a source/unit contract requiring the title and scroll list to be siblings, then real-browser tests proving the title's `top` is unchanged while a long settings list scrolls at 1440×900, 390×844, and 360×800. The outer panel must become non-scrolling for settings after the inner list takes ownership. |
+| Settings outer geometry | Upstream settings Popover has content-sized outer geometry; at the fixed 1440×900 probe it is 498px high. The scroll core is 45vh and title/padding create the remaining fixed space. | OpenReader's already-released desktop outer settings bound is within the observed outer range, but it obtains this by scrolling the wrong element. Mobile caps the whole body with `calc(45vh + 96px)`. | **outer geometry provisionally aligned; inner composition not aligned.** Preserve the measured outer bounds while moving overflow to the child list. Verify no double scroll bar and no title movement. |
+| `page` / upstream `上下滑动` | Upstream treats any non-slide/non-scroll text reading as vertical paged reading. `nextPage` / `prevPage` scroll the vertical content by a page-sized step until a chapter boundary, then change chapter; top/bottom click zones select previous/next on the Y axis. | `effectiveReaderMode === 'page'`, `useReaderNavigation`, `useReaderPointer`, and `useReaderKeyboard` use a vertical scroll container and page step. Its rendered title/paragraph bounds and exact chapter-boundary transition have not been proved against upstream. | **technically plausible but unverified.** Add desktop/mobile rendered layout and click/keyboard chapter-boundary contracts before retaining the implementation. |
+| `flip` / upstream `左右滑动` | Upstream `isSlideRead` uses horizontal CSS columns for eligible text. Left/right click zones and horizontal swipe advance a column before moving to another chapter. EPUB, comic, audio, and TTS/read-bar explicitly disable this mode. | `effectiveReaderMode === 'flip'` uses `column-width`, a `page` index, pointer horizontal swipe, and the same format/TTS exclusions. Exact column width, transform/page count, and title/paragraph clipping have not been visually compared. | **technically plausible but unverified.** Add a real-browser column/page-count assertion at all target viewports, then verify left/right click and swipe before chapter transition. |
+| `scroll` / upstream `上下滚动` | Upstream renders a loaded chapter window around the current chapter and preserves/restores its anchor while extending it. Normal navigation is vertical; it does not use horizontal columns. | OpenReader renders `chapterBlocks` for both scroll modes and browser checks already prove text justification, mobile 16px symmetry, and continuous wheel/finger scrolling. | **partially aligned.** The user-approved native continuous wheel/finger behavior intentionally replaces the upstream animated/segmented scroll feel; click paging must remain paged. Add desktop title/paragraph/inter-chapter-gap measurements and chapter-window boundary tests. |
+| `scroll2` / upstream `上下滚动2` | Upstream starts the visible chapter window before the current chapter and hides viewed chapters, restoring an anchor after window changes; it warns that this may jitter. | OpenReader has a dedicated continuous-window and anchor controller; browser checks cover anchor restoration and native continuous scrolling at all target sizes. | **partially aligned, permitted scroll-physics difference.** Retain only after adding explicit previous-chapter eviction/forward extension and click-page contracts against an upstream fixture. |
+| Paragraph/layout common contract | Upstream `Content.vue` has centered `h3` at `28px/1.2`, paragraphs with `2em` first-line indent, break-all, user-configured weight/line height/paragraph space, and the fixed desktop 65px content edges / mobile 16px edges. | `ReaderChapterContent.vue` has the same basic title/paragraph selectors; mobile scroll/scroll2 symmetry is tested. The page/flip desktop and mobile measured bounds, title margins, paragraph gaps, and inter-chapter spacing are still not proven. | **partial / must measure.** The mode browser matrix must assert each visible left/right gap (difference <=1px), title top/center, first paragraph indent, and paragraph/inter-chapter vertical spacing for page, flip, scroll, and scroll2. |
+| Format mode guards | Upstream disables slide mode for EPUB, comic, audio, and TTS/read-bar; those branches use their own content/rendering and navigation semantics. | OpenReader has `readerEffectiveMode` plus EPUB/comic/audio/TTS gates, and separate image/audio/EPUB smoke scripts. | **separate evidence exists, final re-audit still pending.** Do not merge text-mode assertions into these format branches; audit their state transitions after the four text modes and settings slice complete. |
+
+Implementation order resulting from this inventory:
+
+1. Replace the settings structure/scroll-owner tests and then rebuild `ReaderSettingsPanel` plus its
+   desktop/mobile containers. Preserve the explicit stepper-control exception.
+2. Add the text-mode real-browser matrix before changing page/flip/scroll/scroll2 logic. Existing
+   scroll and scroll2 tests are partial evidence, not completion evidence.
+3. Use the matrix failures to decide whether each mode is repaired or replaced; do not infer parity
+   from the current composable split.
+
+Settings slice result: `ReaderSettingsPanel` now has the upstream-shaped fixed title plus
+scrollable list siblings. Both desktop and mobile outer settings shells deliberately have visible
+overflow, while `.settings-list` owns `max-height:45vh` scrolling. The explicit numeric
+minus/value/plus controls remain the documented user-requested difference. Static contracts and
+the real-browser Reader smoke now scroll the list at 1440×900, 390×844, and 360×800 and assert
+that the title top and outer scroll position remain unchanged.
+
+#### 2026-07-16 focused inventory: rendered text-mode geometry and state
+
+The following probe used the fixed upstream commit and the same 44-paragraph, three-chapter text
+fixture against OpenReader's production preview. It measured a 1440×900 desktop page and 390×844 /
+360×800 mobile pages. It is the authoritative rendered evidence for the next P0 slice; no
+application code was changed while collecting it.
+
+| Mode / contract | Fixed upstream rendered evidence | Current rendered evidence | Classification / required action |
+|---|---|---|---|
+| Desktop availability of `左右滑动` | `vuex.js#getters.isSlideRead` requires both `miniInterface` and `readMethod === '左右滑动'`; at 1440×900 it deliberately remains the ordinary vertical branch. `ReadSettings.vue` still exposes the selection only through the mini reader semantics. | `ReaderSettingsPanel` marks `flip` as `mobileOnly`; `useReaderMode` converts a persisted desktop `flip` value to `page`. The 1440×900 probe rendered `page` for both persisted `page` and `flip`. | **aligned.** The old matrix wording that implied desktop slide reading was too broad; retain the desktop conversion contract. |
+| Desktop vertical text frame | Upstream 1440×900: chapter outer `x=319,w=802`; content and title/paragraph box `x=385,w=670`; heading begins at `y=72`, first paragraph at `y=134`. Paragraph is 18px/32.4px with 36px indent and 3.6px top/bottom margins. | OpenReader: reader page `x=320,w=800`; text box `x=386,w=668`; heading/paragraph start at the same `y=72/134`, typography values match. | **must-fix geometry.** Current global border-box sizing consumes the two border pixels from the configured reading width, shifting the text box right 1px and making it 2px narrower. Restore the upstream `670 + 65px × 2 + two borders` desktop frame, then recheck the already-aligned desktop Popover offsets. |
+| Mobile `上下滑动` / `page` | 390×844 and 360×800: chapter/content/inner left-right edges are 16px symmetric; heading `y=73`, first paragraph `y=135`; lower click advances document scroll by `772px` / `728px` (viewport minus the upstream scroll offset). | Same mobile bounds, title/paragraph top positions, typography, and lower click page step in OpenReader's inner scroller. Native finger/wheel movement remains continuous by explicit user requirement. | **aligned visible geometry and allowed scroll-host adaptation.** Preserve page click segmentation and the continuous native finger/wheel exception. Add the final real-browser contract rather than relying only on this audit probe. |
+| Mobile `左右滑动` first page | Upstream 390×844: outer content `x=0,w=390,y=30,h=790`; clipped inner content `x=16,w=358`; heading `y=58`, first paragraph `y=120`. At 360×800 these are `x=0,w=360,y=30,h=746`, inner `x=16,w=328`, and the same heading/paragraph tops. | OpenReader currently keeps the ordinary page's padded content `x=16,w=358/328`, has heading `y=73` and first paragraph `y=135`, and its body extends below the viewport. | **wrong structure / P0 must-fix.** The flip mode needs the upstream-specific outer content viewport and inner clipping layout; it must not inherit normal mobile reader padding and 15px content-body top padding. |
+| Mobile `左右滑动` page stride | Upstream increments the current page and applies `translateX(-(windowWidth - 16px))`: `-374px` at 390px and `-344px` at 360px. Its column content keeps the 16px inter-page relationship while the visible text stays at 16px left/right edges. | OpenReader currently calculates the page width from the already-padded 358px/328px content viewport, translating `-358px` / `-328px`. | **wrong pagination contract / P0 must-fix.** Make mobile flip pagination use the upstream `viewportWidth - 16px` stride and matching column gap, then verify next/previous click and horizontal swipe before chapter transitions. |
+| `上下滚动` and `上下滚动2` visible text | Both upstream variants retain the same 16px mobile / 670px desktop text geometry and vertical click step. `scroll` holds the visible start while extending forward; `scroll2` can include prior chapters and removes read chapters after its anchor-preserving rebuild. | OpenReader uses the same text geometry and has a separate chapter-window controller. Existing browser checks cover the user-approved native wheel/finger continuity and anchor restoration; the fixture also confirmed lower click advances one vertical page step. | **partial / final state transitions unverified.** Add the mode browser contract for forward extension, `scroll2` eviction, and chapter-boundary click paging. Do not change these branches until that contract exposes an observable mismatch. |
+| Common typography | Upstream probes give `h3: 28px/33.6px, margin 28px`, and `p: 18px/32.4px, margin 3.6px, indent 36px`, with desktop `text-align:left` and mini `justify`. | Current values matched except the desktop computed inherited value is `start` rather than upstream `left`; it renders equivalently in the tested LTR fixture. | **minor must-normalize with the frame fix.** Set desktop text alignment explicitly to `left` so saved themes and inherited direction cannot alter the upstream contract. |
+
+Next implementation gate from this rendered inventory:
+
+1. Add red unit and browser contracts for the mobile flip outer viewport, heading top, page stride,
+   click paging and horizontal swipe at 390×844 and 360×800.
+2. Rebuild only the mobile flip CSS and its page-width calculation; it must stay mobile-only.
+3. In the same release slice, correct the two-pixel desktop content frame and explicit desktop
+   alignment, then re-run the desktop Popover bounds because they are frame-relative.
+4. Only after those failures are resolved, add the remaining continuous-window transition contract
+   before deciding whether `scroll`/`scroll2` need code changes.
+
+Text-frame and flip slice result: the desktop page now uses a content-box 800px reading frame with
+the two borders outside it, restoring the `x=319,w=802` outer page and `x=385,w=670` text box.
+Desktop text alignment is explicit `left`. Mobile flip now owns the upstream-style unpadded outer
+viewport (`top:30px`, `bottom:24px`), 16px clipped text edges, and `viewportWidth - 16px` column
+stride. `reader-text-modes-contract.mjs` passed against the production preview at 1440×900,
+390×844, and 360×800; the existing mobile primary-panel and continuous-scroll browser contracts
+also passed after the frame change.
+
+#### 2026-07-16 focused inventory: continuous chapter-window state machine
+
+Upstream authority is `reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`, principally
+`web/src/views/Reader.vue#isScrollRead`, `#computeShowChapterList`, `#scrollHandler`, and
+`components/Content.vue#renderScrollChapterList`. The following is an interaction/state contract,
+not permission to retain the existing Vue composable structure.
+
+| State / transition | Upstream behavior | Current OpenReader evidence | Classification and required contract |
+|---|---|---|---|
+| Eligibility | `上下滚动` and `上下滚动2` are continuous vertical text modes only when not EPUB, audio, or mobile-only slide reading. Comic text remains on the vertical branch. | `readerEffectiveMode`, `isContinuousScrollRead`, and the format gates make the same effective-mode decision. | **technically equivalent.** Retain the Vue adaptation only if format-mode smoke checks remain green. |
+| Initial window | Entering either scroll mode anchors at the current chapter. The upstream window initially contains the current chapter plus one next chapter (`showNextChapterSize: 1`); normal scroll remembers its explicit start while scroll2 derives its start from the active chapter minus the retained-previous count. | `useReaderChapterWindow.compute()` builds `[current, next]`; `readerChapterWindowIndexes()` retains an explicit start for `scroll` and anchors `scroll2` at the active chapter. | **aligned by source inspection.** Unit contract must cover first/middle/last chapter boundaries. |
+| Forward extension | Near the bottom (`scrollTop > scrollHeight - 4 × viewportHeight`), upstream loads exactly the next unseen chapter, extends the list, and releases its pre-cache lock whether the request succeeds or fails. | `readerChapterWindowExtension()` uses the same strict `> scrollHeight - 4 × clientHeight` threshold; `maybeExtend()` serializes the request and appends one block. OpenReader may prefetch a nearby chapter into its private cache before this point. | **aligned, with allowed robustness improvement.** OpenReader renders a retryable error block rather than silently leaving an inaccessible failed prefetch. Browser contract must assert one visible-window append per boundary crossing and no duplicate append while pending; background cache warming is intentionally not observable parity. |
+| Normal `scroll` retention | Upstream keeps the original visible start while extending forward; its disabled previous-chapter loader means ordinary continuous scrolling never invents a preceding chapter window. | OpenReader never prunes `scroll` blocks and retains the explicit start index. | **aligned.** Test a multi-chapter forward read and prove the first visible chapter is retained. |
+| `scroll2` eviction timing | Upstream warns it may jitter. After the active reading chapter advances, the next anchor-preserving window rebuild removes chapters before the active chapter; it normally occurs when forward extension/rebuild is triggered, not by an unconditional DOM replacement on every pixel of scroll. The old previous-load branch is commented out. | `syncCurrentChapter()` only updates visible progress during scroll; `appendNext()` applies the `scroll2` prune plan in the same anchored replacement that adds the next chapter. This deliberately avoids mid-scroll DOM removal. | **provisionally equivalent / must prove in browser.** A contract must show that crossed chapter state advances, no pre-extension DOM jump occurs, and the next extension evicts only read blocks while retaining the currently read paragraph's viewport offset (within 1px). |
+| Explicit chapter/search/bookmark navigation | Upstream sets `scrollStartChapterIndex` to the target and rebuilds with `reset`, then returns to the top. | OpenReader rebuilds around the selected index through `goChapter`/`computeShowChapterList`, then positions the requested paragraph/offset. | **technical adaptation / must verify.** Keep the more precise paragraph restoration if the target chapter, top/offset, and progress match the upstream-visible outcome. |
+| Click/keyboard at a boundary | Both modes keep vertical page-step behavior for top/bottom click and Arrow Up/Down. At a content boundary the action moves to the adjacent chapter rather than creating horizontal pagination. | `useReaderNavigation` pages the native vertical scroller and falls through to `goChapter`; pointer and keyboard call the shared navigation functions. | **must prove.** Browser tests need top/bottom click and Arrow Up/Down at an interior position and at both book boundaries. |
+| Scroll host and gesture physics | Upstream scrolls the document and animates click paging. | OpenReader scrolls its reader viewport and deliberately preserves native wheel/finger continuity; click/keyboard paging still uses the configured step. | **acceptable user-requested difference.** Geometry, visible chapter order, click boundaries, and saved progress remain the parity requirements. |
+
+Required test-first implementation gate:
+
+1. Add a real-browser `reader-continuous-window` contract with a deterministic three-or-more-chapter fixture at 1440×900, 390×844, and 360×800.
+2. For `scroll`, prove initial `[0,1]`, one-at-a-time visible forward extension, retained first chapter, and a lower-region click/ArrowDown page step before the chapter boundary.
+3. For `scroll2`, prove current chapter detection after crossing a chapter, no visible replacement before the forward-extension threshold, then one anchored eviction transaction that retains the active chapter and next chapter only. Background cache warming is permitted.
+4. Cover failed adjacent chapter retrieval and retry without blanking the active chapter; this is OpenReader's allowed robustness improvement.
+5. Do not alter the controller until those contracts reveal a visible discrepancy. Existing `readerChapterWindow*.test.mjs` tests are supporting evidence only; they are not sufficient upstream-parity proof.
+
+Contract result: `scripts/smoke/reader-continuous-contract.mjs` now executes both modes at
+1440×900, 390×844, and 360×800. It passed on the production preview: native wheel movement stays
+continuous; ArrowDown and lower-region click remain discrete vertical page steps; `scroll` retains
+`[0,1]` before extension then reaches `[0,1,2]`; `scroll2` does not visibly replace its window
+before the threshold, then reaches `[1,2]` with the active paragraph's viewport position preserved
+within 2px. The same script proves a failed adjacent chapter remains retryable without blanking the
+active chapter. Nearby background caching is intentionally excluded from the visible-window
+assertions.
+
+#### 2026-07-16 focused inventory: Reader content-format state transitions
+
+Upstream authority is `reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`:
+`web/src/components/Content.vue` (`render`, `renderScrollChapterList`, `renderEpub`, `renderAudio`,
+and audio methods) plus `web/src/views/Reader.vue` format predicates, click/keyboard branches, and
+`showPosition`/progress logic. This review covers the final P0 format branches; transport and archive
+security contracts remain documented in their dedicated backend sections below.
+
+| Format / transition | Upstream contract | Current OpenReader evidence | Classification / required change |
+|---|---|---|---|
+| Volume chapter layout | A catalog row with `isVolume` renders a `.volume-chapter` with `min-height:100vh`, `display:flex`, `flex-direction:column`, and horizontal centering. It starts at the content top; its title is centered and its optional `volume-tag` is right aligned. | `ReaderChapterContent` now uses the same top-aligned flex column, centered title, and right-aligned tag. | **aligned for this P0 format slice.** `reader-volume-contract.mjs` verifies geometry at 1440×900, 390×844, and 360×800. |
+| Image comic / CBZ | `Reader.vue.isCarToon` is true only for non-EPUB, non-CBZ content containing `<img>`; `isSlideRead` is false for that ordinary image-comic branch. A `.cbz` is deliberately excluded from `isCarToon`, so it keeps the configured slide/page decision while still suppressing its heading. Both kinds disable TTS/auto-reading and fill images to the readable width. Image click/preview must not leak into Reader click zones. | `useReaderChapterPresentation` keeps CBZ heading suppression separate from ordinary image-comic headings. `readerEffectiveMode` now receives an ordinary-image-comic flag, forces only that branch to `page`, and leaves explicitly requested CBZ `flip` intact. | **aligned for this P0 format slice.** Preserve stricter HTML/URL sanitization and Element preview as allowed security/framework changes. `reader-image-contract.mjs` verifies both variants at all target viewports. |
+| EPUB frame | Upstream uses a same-page iframe bridge: `inited` applies style/height, `load` restores position, `setHeight` repaginates, click/hash/keydown are forwarded to Reader, and EPUB forces the non-slide vertical branch. | `ReaderEpubContent`/`useReaderEpubFrame` implement the bridge with exact iframe-source and same-origin validation; `Reader.vue` routes navigation through a full chapter load to refresh signed resources. | **acceptable security adaptation.** Same-origin source validation and resource refresh are stricter than upstream. Browser contract must still cover height/style, fragment navigation, click/keyboard forwarding, progress restore, preview, and mobile chrome behavior at all target viewports. |
+| Audio mode/input | Upstream renders a dedicated audio surface, hides ordinary text paging/TTS/auto-reading, accepts center-tap toolbar toggling only, restores a saved playback second on metadata, and saves progress in seconds. | `ReaderAudioContent`, `useReaderChapterLoader`, and Reader audio payload logic implement dedicated controls, mode forcing, saved seconds, and input guards. | **aligned for this P0 format slice.** `reader-audio-contract.mjs` now covers 1440×900, 390×844, 360×800, restored seconds, ±15 seconds, manual/ended transitions, and persisted progress. |
+| Audio manual chapter transition | `Content.prevChapter()` and `nextChapter()` set `autoPlay = true` before emitting the chapter transition. `onEnd()` also sets it before moving forward, so the destination chapter starts automatically after metadata. | Reader routes manual previous/next through `goAudioChapter()`, which sets `audioAutoplay` before changing chapters; ended advancement uses the same intent. | **aligned for this P0 format slice.** Browser assertions prove the destination audio element receives autoplay for manual and ended transitions. |
+| Format switches | Upstream disables slide for EPUB, ordinary image-comic, and audio; audio suppresses paging input and EPUB delegates input through the iframe. It deliberately does **not** classify CBZ as ordinary image-comic for this purpose. | `readerEffectiveMode` has an explicit ordinary-image-comic argument, while `isComicChapter`, `isAudioChapter`, pointer/keyboard/wheel guards, and the TTS watch retain their existing format-specific routing. | **aligned for this P0 format slice.** Unit plus three-viewport browser proof covers ordinary image-comic `page` and CBZ `flip`; the user-approved native vertical scroll host remains text-only. |
+
+Test-first gate for the required repairs:
+
+1. Add a volume real-browser contract for the three standard viewports: `min-height:100vh`, top-aligned
+   inner block, centered title, and right-aligned tag.
+2. Extend `reader-audio-contract.mjs` to all three viewports and to restore seconds, ±15s, manual
+   previous/next autoplay, ended autoplay, and persisted seconds.
+3. Add a mode unit contract and browser fixture proving ordinary image-comic leaves `flip` for the upstream vertical page branch, while the existing CBZ fixture remains in `flip` when explicitly requested.
+4. Run existing image/CBZ and EPUB contracts unchanged before code; any failure is a separate P0 repair.
+5. Only then change the volume CSS, manual audio transition wiring, and ordinary-comic mode predicate; re-run the full reader/browser
+   set before a subsequent Docker candidate.
+
+Contract result (2026-07-16): all five gates above completed. The red tests exposed and then
+locked the volume vertical-centering defect, manual audio-autoplay omission, ordinary-image/CBZ
+mode conflation, and the mobile primary-popover layer covering the visible toolbar. `npm test`
+(395/395), `go test ./...`, the production build, `reader-volume-contract.mjs`,
+`reader-audio-contract.mjs`, `reader-image-contract.mjs`, `reader-epub-contract.mjs`,
+`reader-mobile-contract.mjs`, `reader-text-modes-contract.mjs`, and
+`reader-continuous-contract.mjs` pass. The EPUB contract imports a real fixture through the Go
+server and passes at 1440×900, 390×844, and 360×800.
+
+The previous tests are evidence only where they assert the table above. In particular,
+`readerToolOrderContract.test.mjs` and the primary-panel exclusivity test must not be used as proof
+of upstream parity until rewritten against this contract.
+
+#### P0 Reader implementation gates after this inventory
+
+1. Replace incorrect unit contracts first: mobile tool order, fresh auto-read defaults, the
+   one-listener `mode-change` regression guard, and independently documented primary-popover behavior.
+2. Rebuild only the pieces that fail those tests; preserve progress, query route, content-format,
+   TTS exception, and user-approved native scrolling contracts.
+3. Add a single real-browser matrix for 1440×900, 390×844 and 360×800 covering: entry toolbar,
+   center toggle, every primary panel, bookmark/search/BookInfo dialog click protection, tool
+   layering, paragraph left/right gap ≤1px, page/flip/scroll/scroll2 navigation, and settings
+   controls/defaults.
+4. A Docker release is eligible only after the browser matrix plus the normal frontend/backend
+   regression gates pass. It is a Reader P0 release, not a claim that P1 Index/P2 are complete.
+
 | Behavior | Upstream evidence | Current evidence | Required action |
 |---|---|---|---|
 | Tool layer default | `Reader.vue` data contains `showToolBar: true`. | `Reader.vue` now contains `mobileChromeVisible = ref(true)`. | Base behavior is aligned; retain direct state and browser coverage. |
-| Panel open | Upstream click handler returns when primary popovers/settings are visible; opening a panel does not hide `showToolBar`. | `useReaderTools` and `useReaderPanels` do not hide `mobileChromeVisible` for panel actions. | Base behavior is aligned; primary-panel toggle/exclusivity remains a separate must-fix. |
-| Mobile panel container | Upstream mini `.popper-component` is `top: 0`, `left: 0`, `width: 100vw`, without border/shadow; each child owns its own `24px + safe-area` padding. | `ReaderMobileWorkspacePanel` is full viewport but centrally reserves `58px` above and `96px` below for every panel. | Rebuild generic panel geometry and let panel content own the upstream-like insets. |
+| Panel open | Upstream click handler returns when primary popovers/settings are visible; opening a panel does not hide `showToolBar`. Its Element popover is positioned beside the triggering tool, so the visible mini tool layer remains available for a same-tool close or switching panels. | `ReaderMobileChrome` now paints at `z-index:11`, above the full-width primary panel at `z-index:10`; the panel reserves `58px + safe-area` before its owned body. Same-tool close and different-tool switching retain the existing primary-panel state machine. | **aligned for this P0 mobile slice.** Browser contract proves a retained tool is physically clickable above each primary panel, while panel/click-away interactions do not reach Reader content. |
+| Mobile panel container | Upstream mini `.popper-component` is anchored beside the triggering tool and does not intercept that tool; its child owns the visible content padding. | `ReaderMobileWorkspacePanel` remains a full-width Vue presentation adaptation, but its content begins below the interactive top tool layer and the panel stays below that layer in stacking order. | **technical-stack-equivalent.** The full-width structural adaptation preserves visible tool access, content-sized panel bounds, click-away blocking, and no text-click passthrough. |
 | Horizontal layout | Upstream mini chapter padding is 16px and justified. | Current mobile reader page uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified body. | Base geometry is aligned; real rendered symmetry remains required. |
 | Tests | Upstream behavior is source contract. | Existing toolbar-hide tests were replaced, but not every primary tool has a same-button toggle/exclusive-panel contract. | Add state and browser coverage before implementation. |
 
@@ -802,6 +997,42 @@ Status: implemented and browser-validated on 2026-07-13.
 - **Cancellation boundary.** The stream's request context is propagated into source content fetch and pagination. Browser `AbortController` cancellation or a client disconnect stops before scheduling another chapter fetch, retains only already completed cache files, and deliberately skips a final shelf-update broadcast for the incomplete operation.
 - **BookManage interaction.** The current remote book's cache button now becomes `停止 n/total`; activating it a second time aborts only that book's stream. Vue uses authenticated `fetch` SSE parsing rather than `EventSource`, so the JWT is never placed in a URL. A terminal stream error is surfaced through the existing BookManage error path; successful completion merges the returned shelf item.
 - **Evidence.** Go contracts cover success/progress/end, owner rejection before stream opening, total source failure/error and cancellation without next-chapter scheduling. Frontend contracts cover SSE framing/error handling plus active-book progress and stop behavior. The real-Chrome `book-management-dialog-contract.mjs` passed at 1440×900, 390×844 and 360×800: streamed completion reaches `已缓存 2/2 章`, BookManage remains mounted while BookInfo/BookGroup coexist, compact dialogs are fullscreen, panel clicks do not close the mobile sidebar, and no horizontal overflow is present.
+
+### 2026-07-16 P2 re-audit: BookManage / BookGroup real-API browser boundary
+
+Status: validated on 2026-07-16 against the fixed upstream baseline. This section supersedes the stale `unknown` summary labels above; it establishes the extracted P1-D BookManage / BookGroup boundary, not the still-separate full BookInfo action matrix.
+
+Authoritative upstream files:
+
+- `web/src/components/BookShelf.vue`
+- `web/src/components/BookManage.vue`
+- `web/src/components/BookGroup.vue`
+- `web/src/views/Index.vue`
+
+| Contract | Fixed upstream behavior | Current OpenReader evidence | Classification / required verification |
+|---|---|---|---|
+| Workspace ownership and shell | Index opens one `书架管理` dialog. Its BookInfo and BookGroup actions remain in the same workbench; compact UI does not become a different route/scene. | `OverlayBookManagement.vue` and `OverlayBookGroups.vue` are root global `el-dialog` hosts; both use `fullscreen` below the compact breakpoint. `GlobalOverlayHost` retains the workspace underneath. | `aligned` for the extracted shell. Existing three-viewport mock smoke remains the layout/pointer-leak gate; the new test must prove the same host works with real shelf data. |
+| Per-book group set | BookGroup preselects the book's current group, refuses an empty selection with `请选择书籍分组`, and commits the resulting group selection without leaving the manager scene. | `useOverlayBookGroups.prepareOpen()` derives preselection from the shelf record; `saveBookGroupSetting()` rejects zero ids before `PUT /books/:id/category`, updates the shelf and BookInfo state only after success. | `aligned in source`; **must verify without an API mock** that an empty UI selection makes no server mutation and a later non-empty selection persists through Go/SQLite and the visible table. |
+| Manager batch category operations | The selected BookManage rows can add/remove groups without a second product flow. | The shared manager uses `POST /books/batch` `category-add` / `category-remove`, refreshes the store from returned shelf records, and keeps desktop table/mobile cards as two views of one controller. | `technical-stack-equivalent`; real browser must select a shelf record, use the batch group menu, accept the confirmation, and observe the persisted category after a real API read. |
+| Selected deletion | BookManage confirms deletion, removes the selected shelf items, and keeps the current workbench usable. | The controller calls batch delete, removes the returned ids from the user shelf, and the Go transaction performs dependent-row/artifact cleanup before broadcasting. | `aligned for the extracted action`; real browser must confirm a selected deletion and prove that a fresh authenticated shelf read no longer contains that book. Existing Go cleanup/isolation tests remain mandatory. |
+| Group manager and user data model | Upstream supports create/edit/show/delete (only empty groups) and drag sorting using a user-local group mask. | The same set/manage Dialog owns create/rename/show/delete/sort. User-scoped category rows and `BookCategory` many-to-many mappings are retained instead of a bit mask. | `acceptable technical adaptation`; no schema migration or conversion to a mask is authorized. Existing controller/unit tests cover the manager-only actions; this test slice focuses on BookManage-to-BookGroup persistence. |
+| Browser evidence boundary | The upstream contract is visible only through its UI; a current visual smoke alone is insufficient if it substitutes all data operations. | `scripts/smoke/book-management-dialog-contract.mjs` deliberately routes all `/api` calls to fixtures, so it can verify responsive geometry but not authentication, request shape, transactions, store reconciliation, or persisted results. | **must verify** with a separately booted, isolated Go binary, actual register/login/category/book endpoints, and no `page.route()` interception of `/api`. It must run at 1440×900, 390×844 and 360×800. |
+
+Required no-mock browser workflow for this verification slice:
+
+1. Start an isolated OpenReader Go service with temporary data/cache/library roots and the production frontend build. Register one fresh user per viewport through the actual auth API; create two categories and two local shelf records through the actual category/book APIs.
+2. Open the Index workspace and `书架管理`; ensure the seeded shelf records are rendered by the real manager host. Open a record's `分组` flow, clear its preselected group and confirm: the visible warning must be `请选择书籍分组`, the dialog must remain open, and an authenticated API read must prove no mutation occurred.
+3. Select another valid group, confirm, and prove both the manager row and an authenticated `GET /api/books` return the new association. Then select the second book, use `批量添加分组` (an immediate upstream-style mutation, not a second confirmation dialog), and prove the real persisted association.
+4. Confirm `批量删除` for the selected second book; the management dialog must remain usable, and a fresh authenticated shelf read must prove the record is absent. Do not use cache/source actions in this slice because the seeded local records intentionally have no remote source.
+5. Repeat the workflow at desktop `1440×900`, mobile `390×844`, and mobile `360×800`. The established mock smoke remains responsible for additional responsive geometry, BookInfo coexistence, cache-stream, drag-sort, and no-click-through assertions; it is complementary, not a substitute.
+
+Allowed differences for this slice remain limited to Vue 3/Element Plus dialog mechanics and user-scoped many-to-many categories. No product UI, API schema, persistent data, or compatibility route change is authorized unless the no-mock test exposes a concrete deviation.
+
+Validation evidence (2026-07-16):
+
+1. `scripts/smoke/book-management-real-api-contract.mjs` passed at `1440×900`, `390×844`, and `360×800`. It builds one isolated Go binary with temporary data/cache/library roots, registers fresh users through the actual auth endpoint, seeds categories/books through the actual APIs, and intercepts no `/api` traffic. Each viewport proved preselection, empty-set warning/no mutation, real category persistence, real batch category persistence, confirmed deletion, and a fresh authenticated list read after deletion.
+2. `scripts/smoke/book-management-dialog-contract.mjs` passed against the freshly built frontend at the same three viewports, preserving the complementary geometry/compact-fullscreen/BookInfo-coexistence/group-manager/no-click-through assertions. Its API fixtures are intentionally restricted to that visual-state role and are not counted as API proof.
+3. `cd backend && go test ./...`, `cd frontend && npm test` (398 passing), `cd frontend && npm run build`, and `git diff --check` passed. This verification-only slice adds the no-mock contract and audit correction; it makes no product API, schema, persistent-data, or rendered UI change.
 
 ## P1-E pre-implementation audit: remaining Index operation routes
 
@@ -1774,7 +2005,35 @@ Implementation status:
 - Completed in this slice: upstream `主题模式` now maps to persisted `themeType`; custom themes preserve the explicit day/night value, preset themes derive it, and Reader/shared-shell night-state rendering reads it.
 - Completed in this slice: settings payloads, built-in and user custom-config snapshots, old-data sanitization, and Kindle temporary state preserve normalized `themeType`; the reader settings version is now `12`.
 - Completed in this slice: desktop and mobile custom-theme controls expose `白天` / `黑夜`, and real-browser smoke verifies that switching semantic night mode does not close the active settings/tool layer.
-- Pending follow-up: detailed per-control visual pass for mobile `ReadSettings` first-screen density after the base row structure is aligned.
+- Completed follow-up: the detailed mobile `ReadSettings` first-screen density pass is recorded below.
+
+### 2026-07-16 ReadSettings mobile-density follow-up inventory
+
+Status: extracted from the fixed upstream `web/src/components/ReadSettings.vue` before the follow-up implementation. No Reader application code is changed by this inventory. The earlier label, theme, font, custom-theme and semantic `themeType` records remain valid.
+
+| Concern | Fixed upstream behavior | Current OpenReader evidence | Classification / required result |
+|---|---|---|---|
+| Outer title and scroll owner | `settings-wrapper` supplies `24px` content padding and the `设置 / 重置为默认配置` title is outside the independently scrolling `45vh` setting list. | The mobile primary panel supplies the equivalent `24px` inset; `ReaderSettingsPanel` keeps its one title row outside `.settings-list`, and the list owns scrolling. | `aligned`: retain this current wrapper adaptation. The primary Reader tool layer stays visible above it as required by the Reader mobile contract. |
+| First-screen row geometry | Each upstream list item is a `56px + 16px` label/control row; controls begin exactly `72px` after the row edge and rows are separated by `20px`. | The mobile grid uses a `72px` first column and `20px` list gap, but its help text is emitted as a separate grid child/line. | `must-fix`: retain the two-column grid, but put the special-mode and read-method warnings inside their corresponding selection zone so they remain part of that option row rather than creating an accidental extra row. |
+| Special-mode and read-method warnings | `small-tip` is inline after the discrete options inside the same `selection-zone`; it communicates the constraint without becoming a new form field. | `setting-help` follows each selection zone as its own grid item, increasing the height of the first visible settings block and making the first screen less dense than upstream. | `must-fix`: use an inline warning element in the relevant selection zone; preserve readable wrapping on 360px without changing option hit targets. |
+| Configuration scheme / type controls | `配置方案` and `方案类型` use the same compact `span-item` vocabulary as other discrete options: `78px × 34px`, `2px` corners, red selected border/text, and no card surface. | `config-scheme-list`/`config-scheme` use padded rounded cards, a secondary label, and card-style selected background. | `must-fix`: rebuild these two rows on the shared discrete option geometry. Long user-defined configuration names may ellipsize and retain their delete affordance as a Vue 3/data-preservation adaptation, but the visual surface and selected state must be upstream-like. |
+| Reader numeric controls | Upstream uses compact `34px` resize controls. | `ReaderSettingStepper` is `42px` tall on compact screens and uses larger minus/value/plus targets. | `intentional-redesign`: retain the user-requested larger, less error-prone numeric controls. Do not treat their increased individual height as a density defect. |
+| Font preview | Upstream displays only compact font choices. | OpenReader adds the non-interactive `春风过处，纸页微明。` preview below the compact choices. | `user-requested enhancement`: retain the preview shown in the user's target layout, provided it does not turn font choices back into cards or change their `78px × 34px` geometry. |
+| Compact visual gate | Upstream uses one semantic settings scene; action clicks and scrolling stay within it. | Existing smoke proves dimensions/title/scroll ownership but does not prove the warning placement, compact configuration controls, or that the four first sections fit in the compact visible settings list without a horizontal overflow. | `must-fix test gap`: add static contracts and a three-viewport browser assertion for 1440×900, 390×844, and 360×800. It must check inline warnings, compact 34px scheme/type controls, first-screen section order/visibility, horizontal overflow, persistent title/tool layer, and no click-through. |
+
+Required implementation order:
+
+1. Add the static and browser contracts above before changing the panel.
+2. Move only the two warnings into their owning selection zones and replace only the configuration scheme/type card styling/markup with shared discrete-option controls.
+3. Keep the explicit mobile stepper and font-preview adaptations unchanged; rerun all Reader interaction contracts so the mobile tool-layer coexistence state machine is not regressed.
+4. Record the three-viewport result, then commit, push, locally build and publish a Docker image only if the full Reader regression and mounted-volume release gates pass.
+
+### 2026-07-16 ReadSettings mobile-density implementation record
+
+- **Compact option ownership.** `特殊模式` and `翻页方式` warnings now live inside their own selection zones, matching upstream state/visual ownership without creating another form-field grid row. Compact screens retain readable wrapped warning text inside that zone.
+- **Scheme/type controls.** `配置方案` and `方案类型` now use the shared `78px × 34px`, `2px`-corner discrete option controls. User-defined long names are still safely ellipsized and retain the existing Vue 3 delete affordance; the redundant scheme-type card subtitle and selected-card background are removed.
+- **Exact label gutter.** Desktop settings now also use the upstream `56px` label plus `16px` gutter; both desktop and compact controls begin exactly `72px` from the row edge. The current compact `42px` minus/value/plus stepper and the font preview remain the documented user-requested anti-mistap enhancements.
+- **Evidence.** `readerSettingsPanelContract.test.mjs` protects warning ownership, discrete control geometry and desktop/mobile gutters. `reader-mobile-contract.mjs` now verifies source-order first-screen visibility, no horizontal overflow, fixed-title scrolling, tool-layer coexistence and non-click-through at `1440×900`, `390×844`, and `360×800`. Frontend tests (**398**), `npm run build`, and backend `go test ./...` pass.
 
 ## Required workflow for each future module
 
@@ -1827,3 +2086,236 @@ Upstream evidence was rechecked before changing the current browser contracts:
 Allowed differences remain limited to the compatibility redirect and the user-approved
 multi-category confirmation. This inventory and its real-browser contracts are the
 completion evidence for the P1-B BookInfo five-entry slice.
+
+### 2026-07-16 matrix reconciliation: BookInfo five-entry boundary
+
+Status: re-audited without application changes. The top-level matrix previously
+described the BookInfo five-entry flow as unfinished even though the dedicated
+P1-B contract, current sources, test contracts and real-browser records above
+already establish it. That stale wording is corrected here; it must not be used
+to reopen a second BookInfo UI or to falsely claim that every shelf-only mutation
+has been audited.
+
+| Boundary | Fixed upstream behavior | Current evidence | Disposition |
+|---|---|---|---|
+| One global host and action predicate | `Index`/`Reader` set one `showBookInfo`; `BookInfo#isInShelf` is the sole distinction between shelf properties and the single unshelved add action. | `OverlayBookInfo → BookInfoDialog → BookInfoPanel` is the sole host. `bookInfoInShelf` resolves the actual shelf row by id/URL; Search, Discover, AppLayout and Reader only call `overlay.openBookInfo`. | `aligned` for P1-B. |
+| Shelf, Search and Explore entries | Shelf cover opens information while row/body reads; remote result cover previews and body creates a temporary Reader session. | `Home`, `RemoteBookResultGroups`, `Search` and `Discover` preserve the split. `remoteReaderEntryContract.test.mjs` and `index-workspace-contract.mjs` assert cover-only preview and body-only temporary reading. | `aligned` for P1-B. |
+| Saved and temporary Reader entries | Reader merges a matching shelf record, opens the same dialog, and does not alter route/tool state. | `useReaderPanels.openBookInfo` uses the shared overlay; `reader-mobile-contract.mjs` and `remote-reader-contract.mjs` verify saved and temporary Reader states across desktop/compact viewports. | `aligned` for P1-B. |
+| Legacy detail intent | Upstream has no detail page; closing the shared dialog simply returns to the current scene. | `/books/:id` redirects to `/?bookInfo=:id`; `AppLayout` loads the current user's record and the close watcher removes only the consumed query intent. `bookInfoRouteContract.test.mjs` protects the route boundary. | `acceptable compatibility adaptation`, verified. |
+| Unshelved add and post-add state | Only `加入书架` is visible; cancellation has no write; a successful add replaces the dialog record without starting a second reading flow. | `OverlayBookInfo` is the sole transaction owner. `bookInfoAddToShelfIntegrationContract.test.mjs` and `index-workspace-contract.mjs` cover one action, cancellation, successful replacement and route stability at `1440×900`, `390×844`, `360×800`. | `aligned` for P1-B; multi-category confirmation remains the explicit user-approved adaptation. |
+| Shelf-only field mutations | Upstream lets a shelf record update cover, follow, group and local catalogue through the same dialog. | Current dialog exposes cover upload, follow toggle, group setting and local refresh through `useOverlayBookInfo`; P1-B never claimed their request/transaction/sync details as part of the five-entry action matrix. | `P2 must-verify`: audit API/data/sync/cache side effects before altering these paths. |
+
+The next BookInfo work is therefore not an entry-flow rebuild. It is a focused
+P2 audit of existing-shelf field mutations, with `api-contract-compat`,
+`data-migration-compat`, `openreader-backend`, `openreader-frontend` and
+`openreader-regression` applied before any implementation change.
+
+## 2026-07-16 P1 final re-audit: Index Explore popover and workspace-config ownership
+
+Status: **Explore and workspace-configuration implementations completed on 2026-07-16.** This section supersedes
+the conflicting parts of the earlier P1-B/P1-E implementation notes. Those records
+correctly established a root workspace and legacy URL redirects, but their passing
+browser contracts did not prove the exact upstream Explore entry structure or the
+Index-owned configuration placement. They must not be cited as parity proof for the
+following rows.
+
+Fixed upstream authority:
+
+- `reader-dev/web/src/views/Index.vue`: sidebar template, `showExplorePop`,
+  `showSearchList`, `loadMore`, `backToShelf`, and mobile navigation gesture
+  handlers.
+- `reader-dev/web/src/components/Explore.vue`: the Explore chooser popup, source
+  grouping, selection, result emission, pagination, and retained popup scroll
+  position.
+
+### Revalidated upstream state table
+
+| Trigger / state | Upstream transition | Required OpenReader transition |
+|---|---|---|
+| Sidebar `探索书源` | Click closes the compact mobile navigation, then opens the `Explore` Popover anchored to the Index navigation. It does **not** immediately replace the shelf. | Close the mobile sidebar for this explicit action, then show an Explore chooser Popover. Do not set the workspace to `explore` until an entry is selected. |
+| Shelf-header `书海` | Opens the same `Explore` Popover, without first changing the shelf/result state. | Reuse the same chooser and its retained source/group/scroll state; do not render a second full-page Explore selector. |
+| Explore group/source entry | `Explore.exploreBookSource()` resets page to `1`, fetches the chosen entry, emits the rows to `Index.showSearchList()`, and the Index body becomes `isSearchResult=true, isExploreResult=true`. | After selection, close the chooser and transition the root workspace body to `explore`; preserve the selected source, entry URL/name, rows, continuation, and shared BookInfo/read actions. |
+| Explore load more | Root Index `loadMore()` delegates to the same Popover instance's `loadMore()`, which increments its retained page and emits deduplicated rows again. | Root result-body load-more must use the chooser-owned selected entry/page state (or an equivalent shared controller), preserve scroll position, and append deduplicated rows. |
+| Return to shelf | `backToShelf()` clears only search/explore result state. The long-lived navigation and Explore chooser state remain available. | Clear workspace result state/query only. Do not remount the entire shell or discard chooser state. |
+| Account/cache/user configuration | `Index.vue` exposes user-space backup/sync/user-management and browser-cache actions as sidebar controls in its long-lived navigation. Reader preferences are opened by Reader's own settings control. | Keep account/cache actions in the Index/sidebar ownership. Do not present an unrelated general-settings product page/drawer as the canonical UI; legacy `/settings?panel=...` links may still resolve to compatible root intents. |
+
+### Current-source comparison
+
+| Concern | Current evidence | Classification | Required correction |
+|---|---|---|---|
+| Root shelf/search scene | `AppLayout.vue` persists around `Home.vue`; `Home.vue` switches shelf/search result bodies through `indexWorkspace`; `/search` redirects to `/?workspace=search`. | `aligned` | Retain. |
+| Search result body | Sidebar search calls `beginWorkspaceSearch`; `Search.vue` is mounted only by `Home.vue` and uses shared BookInfo. | `aligned` | Retain existing regression coverage. |
+| Explore entry chooser | `AppLayout.beginWorkspaceExplore()` directly calls `workspace.beginExplore()`. `Home.vue` renders `Discover.vue` as a full root-body source picker. No component is anchored to the sidebar/header trigger. | `must-fix` | Replace the full-body source picker with one upstream-style `Explore` Popover. Only a selected entry may transition the root body to Explore results. |
+| Explore pagination ownership | `Discover.vue` owns source selection, page, loading and source-panel UI. The root `加载更多` button consequently depends on a full-page selector that upstream does not show. | `must-fix` | Move selection/page/scroll controller to the shared Explore Popover/controller while preserving the Go `/explore/sources` and `/explore/:id` APIs. |
+| Workspace configuration | `OverlayWorkspaceSettings.vue` opens `Settings.vue` in a global Element Drawer. `Settings.vue` contains account, cache, and a second global reader-preference editor; `AppLayout` already separately owns the upstream-style sidebar actions. | `must-fix` | Retire the Drawer as canonical UI. Rehome account/cache commands in the sidebar/appropriate operation overlays, keep Reader preferences in the Reader control surface, and retain legacy `/settings` only as a narrow compatibility intent. |
+| Mobile sidebar gesture | `useAppMobileNavigation.js` and `AppLayout.vue` retain 260px width, 270px drag range, 20px edge guard and fixed bottom GitHub/theme buttons. | `aligned` with user-requested fixed-bottom enhancement | Retain; verify Explore's deliberate close does not affect fixed bottom controls or result-body geometry. |
+| Existing Explore/browser tests | `index-workspace-contract.mjs` asserts that clicking `探索书源` immediately yields `.discover-results`; earlier P1-B prose describes this as acceptable. | `incorrect regression contract` | Delete/replace this assumption with Popover-before-selection contracts. Passing the old test is not evidence of upstream parity. |
+| Existing workspace-settings/browser tests | `workspace-operation-contract.mjs` asserts that account/cache/reader legacy links open `.global-workspace-settings-drawer`. | `stale compatibility-only contract` | Keep tests for old-link non-breakage only after a new root-compatible target is chosen; remove the Drawer-as-canonical assertions. |
+
+### Allowed implementation differences
+
+- The Vue 3 implementation may use a local popover/dialog primitive rather than
+  Vue 2 `el-popover`, as long as desktop anchoring and compact/mobile full-screen
+  behavior retain the state transitions above.
+- The Go Explore API may return normalized `exploreGroups` instead of executing the
+  upstream client-side `new Function` parser. Source parsing and SSRF constraints
+  remain governed by the parser/security contracts.
+- Existing multi-user permissions, browser-cache accounting, and user-requested
+  fixed sidebar-bottom controls remain valid enhancements; they must not change
+  the visible Index state machine.
+
+### Required pre-implementation test replacement
+
+1. Static/unit: `beginWorkspaceExplore()` (or its replacement) may open a chooser
+   but must not set `workspace.mode = 'explore'` before an entry selection.
+2. Real browser at 1440×900, 390×844, and 360×800: sidebar `探索书源` and shelf
+   `书海` open the same chooser; the shelf stays visible until selecting an entry;
+   selected entry transitions to the shared root result body; `书架` clears only
+   result state; and load-more delegates to the selected entry state.
+3. Real browser: mobile Explore trigger closes the sidebar once, chooser interaction
+   cannot click through to the shelf, and GitHub/theme buttons remain fixed while
+   the sidebar scrolls/drags.
+4. Legacy URL: `/discover` must retain its query intent, but it must hydrate the
+   same chooser/selected-entry controller rather than recreate a full-page source
+   selector.
+5. Static/browser: canonical account/cache/reader operations must not require
+   `.global-workspace-settings-drawer`; legacy `/settings` behavior must be
+   explicitly documented before its Drawer assertion is removed.
+
+Implementation order: (1) Explore chooser contract/tests, (2) chooser/controller
+and root-result transition, (3) real-browser verification and coherent Docker
+release, (4) separate workspace-configuration extraction audit. The configuration
+work is intentionally separated so the Explore correction cannot silently alter
+reader preference persistence or user-data compatibility.
+
+### 2026-07-16 Explore chooser implementation record
+
+- `indexWorkspace.requestExplore()` now records an Explore chooser request without
+  changing `mode`; `showExploreResults()` remains the only transition that turns
+  the root body into Explore results. The selected source name is retained with
+  the existing source/group/URL/name continuation metadata.
+- `ExploreWorkspacePopover.vue` is the single long-lived chooser. It keeps the
+  upstream source-group/collapse/entry layout and loads the first result page only
+  after an entry is selected. The root `Discover.vue` is now result-only and
+  delegates pagination to the selected entry saved in the workspace state.
+- The sidebar `探索书源`, shelf `书海`, and legacy `/discover` intent all open the
+  same chooser. The compact sidebar trigger still closes the navigation; opening
+  the chooser itself does not preemptively replace shelf/search results.
+- Replaced the stale browser assertion that treated immediate `.discover-results`
+  as correct. The new real-browser contract checks Popover-before-selection,
+  root-result transition, load-more, shared BookInfo, old `/discover` hydration,
+  mobile fullscreen/click isolation, and 1440×900 / 390×844 / 360×800 geometry.
+- Validation passed before release: backend `go test ./...`; frontend `npm test`
+  (396 tests); production build; `index-workspace-contract.mjs` at all three
+  desktop/mobile sizes; and `index-mobile-sidebar-contract.mjs` at 390×844 and
+  360×800. The latter confirms the 260px sidebar, 270px drag range, fixed bottom
+  GitHub/theme controls, and aligned shelf geometry still hold.
+
+### 2026-07-16 P1 workspace configuration ownership re-audit
+
+Status: implemented and validated on 2026-07-16.
+
+#### Upstream authority and state transitions
+
+`reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`
+`web/src/views/Index.vue` keeps all of the following inside its long-lived Index
+sidebar. It does not have a general Settings page or a settings Drawer:
+
+| Upstream action | Authority | State and durable effect |
+|---|---|---|
+| User identity / logout | `Index.vue` user-space heading | The signed-in user remains in the workspace; logout is a direct sidebar heading action. Manager-only controls are shown only in manager mode. |
+| `备份用户配置` | `Index.vue#saveUserConfig`, `UserController.kt#saveUserConfig` | After confirmation, save the current terminal's `config`, `shelfConfig`, `searchConfig`, and `customConfigList` as the authenticated user's configuration snapshot. |
+| `同步用户配置` | `Index.vue#restoreUserConfig`, `UserController.kt#getUserConfig` | After confirmation, fetch that snapshot, replace the four local cache values, then rehydrate the Vue store. |
+| WebDAV / logical backup | `Index.vue` | Open independent root dialogs; they are not sub-tabs of generic settings. |
+| Local browser cache | `Index.vue#clearCache` | Display cached counts and clear the four named browser-cache groups directly from the sidebar. |
+| Reading settings | `Reader.vue` + `components/ReadSettings.vue` | Only a Reader control opens settings. Index never hosts a second reader-settings editor. |
+
+#### Current OpenReader comparison
+
+| Concern | Current evidence | Classification | Required correction |
+|---|---|---|---|
+| Generic configuration shell | `OverlayWorkspaceSettings.vue` mounts `Settings.vue` in a `global-workspace-settings-drawer`; the overlay store, `AppLayout`, router, tests and smoke script treat it as canonical. | `must-fix` | Delete this canonical Drawer, its state, and its Drawer-specific test assertions. No replacement general-settings page/drawer is permitted. |
+| Account identity/logout | The `用户空间` item opens the Drawer merely to show profile data and logout; service health is duplicated there and on the sidebar version action. | `must-fix` | Keep current username/logout in the persistent user-space section. Keep only the existing version/health action in the sidebar; do not retain an account detail surface solely to justify a Drawer. |
+| User-config backup | Sidebar `备份用户配置` calls `overlay.openBackup()`, which opens the full logical/portable backup dialog. This is not upstream's client-configuration snapshot. | `must-fix` | Replace it with a confirmed, explicit flush of OpenReader's authenticated `reader`, `shelf`, and `search` setting records. Those records contain the upstream-equivalent reader configuration/custom schemes, shelf preference, and search preference, so a separate unbounded config-file API is not needed. The full backup dialog remains only `保存备份`. |
+| User-config restore | `syncUserConfig()` reloads profile, reader preferences, shelf/search preferences, bookshelf and cache statistics without upstream's confirmation. It currently does not intentionally distinguish configuration restore from a full shelf refresh. | `must-fix` | Retain the safe extra shelf/cache refresh as an OpenReader enhancement, but add the upstream confirmation and make the primary state transition explicit: rehydrate `reader`, `shelf`, and `search` from the current authenticated user before reporting success. |
+| Cache ownership | The same Drawer duplicates server/browser cache statistics and destructive actions that `AppLayout` already exposes in the sidebar. The server-cache half is a current-user, bounded OpenReader enhancement; upstream only has browser cache groups. | `must-fix` for duplication; `acceptable-change` for scoped server cache | Retain cache commands and counts only in the sidebar. Keep current-user server-cache accounting and browser cache groups; preserve their confirmation/error behavior. |
+| Reader preferences | `Settings.vue` embeds a second complete reader editor, including raw `el-slider` controls that conflict with the requested in-reader minus/value/plus controls. `ReaderSettingsPanel.vue` is already the authoritative reader surface. | `must-fix` | Remove the global reader editor and all of its duplicate upload/config/persistence wiring. Reader settings, including custom assets and persisted keys, remain owned by `ReaderSettingsPanel` only. |
+| Legacy `/settings` URLs | Router normalizes `account`, `cache`, and `reader` to the generic Drawer. Existing tests encode that structure as correct. | `must-fix` | Retain the old URL as a narrow root compatibility intent, never as a new product screen. `account` and `cache` focus the corresponding persistent sidebar section (and open the compact sidebar first); `reader` displays a one-shot root notice that settings have moved to an open book's Reader control, then removes only the compatibility intent. It must not silently drop the link or open a book without the user's action. |
+
+#### OpenReader data/API mapping
+
+The current `GET/PUT /settings/:key` contract accepts only `reader`, `shelf`, and
+`search`. `reader` already includes custom configuration lists/assets and strips
+local-only `pageMode`/`miniInterface`; `preferences` owns `shelf` and `search`.
+This is a deliberate multi-user adaptation of upstream's four localStorage keys:
+
+| Upstream snapshot key | OpenReader durable owner | Compatibility decision |
+|---|---|---|
+| `config` + `customConfigList` | `reader` user setting / reader Pinia store | `technical-stack-equivalent`: retain server conflict protection and current-user scope. |
+| `shelfConfig` | `shelf` user setting / preferences Pinia store | `technical-stack-equivalent`. |
+| `searchConfig` | `search` user setting / preferences Pinia store | `technical-stack-equivalent`. |
+| Terminal-only page layout | Reader's local `pageMode` | `intentional-security/usability adaptation`: never overwrite a device-specific layout during configuration restore. |
+
+No SQLite migration, setting-key rename, cache/library path change, backup format
+change, or loss of custom reader assets is authorized by this slice. Existing
+WebDAV and backup overlays remain their own operations and continue to restore
+the same scoped user settings through their established backend contracts.
+
+#### Required implementation order and tests
+
+1. Replace the stale static tests first: old `/settings` routes must retain their
+   intent but must not reference `workspace-settings`, `workspaceSettingsVisible`,
+   `global-workspace-settings-drawer`, or `Settings.vue` as a canonical body.
+2. Add a user-config action contract: confirmation precedes backup/restore;
+   backup flushes `reader`, `shelf`, and `search`; restore reloads all three;
+   a failed required write/read keeps the success message from appearing. The
+   extra shelf/cache refresh is permitted only after the primary configuration
+   action resolves.
+3. Add a route/focus contract: `/settings?panel=account|cache` preserves unrelated
+   query keys, reveals/focuses the persistent sidebar section (opening compact
+   navigation as needed), then removes only the one-shot intent. `/settings?panel=reader`
+   gives the migration notice and removes only that intent.
+4. Add a browser smoke at `1440×900`, `390×844`, and `360×800`: account/cache
+   legacy links never render a Drawer; compact sidebar focus blocks click-through;
+   backup/config sync, full backup, WebDAV, cache actions, fixed GitHub/theme
+   controls, and Reader settings ownership coexist without horizontal overflow.
+5. Only after those tests exist, remove `Settings.vue`, `OverlayWorkspaceSettings.vue`,
+   its Pinia state, and all imports/watchers. Run normal frontend/build/backend
+   gates plus a real-browser smoke before the next Docker release.
+
+#### Implementation record
+
+- **Drawer retirement.** The generic `Settings.vue` body,
+  `OverlayWorkspaceSettings.vue`, its Pinia state, GlobalOverlayHost mount, and
+  route hydration/watchers have been deleted. The root scene no longer has a
+  product Settings page or Drawer.
+- **Persistent workspace ownership.** The signed-in username and direct logout
+  now live in the `用户空间` sidebar heading. Server/browser cache actions remain
+  in the persistent cache section, which is the sole canonical owner. Reader
+  preferences remain exclusively in `ReaderSettingsPanel`.
+- **Configuration semantics.** `备份用户配置` now confirms then immediately
+  writes the authenticated `reader`, `shelf`, and `search` settings. `同步用户配置`
+  confirms then reloads those settings before performing the existing safe
+  shelf/cache refresh. This retains the upstream configuration meaning while
+  using OpenReader's durable per-user conflict-aware setting records rather than
+  incorrectly launching a full logical backup.
+- **Legacy URL behavior.** `/settings?panel=account|cache` redirects to `/` with
+  a one-shot sidebar-focus intent; on compact screens the sidebar opens first.
+  `/settings?panel=reader` redirects to root with a one-shot explanatory notice,
+  without opening a book or silently discarding the link. Backup, WebDAV,
+  replace, RSS, admin, and local-store links continue to use their established
+  root dialogs.
+- **Evidence.** The rewritten workspace-operation contracts reject Drawer
+  ownership and require all three config writes. `frontend npm test` passed
+  (396 tests), `frontend npm run build` passed, backend `go test ./...` passed,
+  and `workspace-operation-contract.mjs` completed against real Chrome at
+  `1440×900`, `390×844`, and `360×800`, including old-link focus/notice,
+  mobile click isolation, no horizontal overflow, direct config backup/restore,
+  and the retained root operation dialogs.
+## 2026-07-16 P2 用户管理复审边界
+
+固定上游 `UserManage.vue` / `UserController.kt` 复审已经完成，结论记录在
+[`user-management-p2-contract.md`](user-management-p2-contract.md)。当前用户管理不能视为
+“多用户增强即可保留”：其短用户名规则/短密码、合并存储权限、用户删除遗漏 user-owned rows/files
+以及只删 `users` 行的 cleanup 都是必须修复的数据边界。全局 `BookSource` 与上游私有
+用户书源/默认书源模型的差异需要单独书源所有权合同，不能用无效果按钮伪装已对齐。

@@ -1,9 +1,5 @@
 <template>
   <header class="reader-mobile-top" :class="{ visible }">
-    <button class="mobile-tool-button" type="button" @click="$emit('action', 'home')">
-      <el-icon :size="19"><ArrowLeft /></el-icon>
-      <span>首页</span>
-    </button>
     <button class="mobile-tool-button" type="button" @click="$emit('action', 'shelf')">
       <el-icon :size="19"><Notebook /></el-icon>
       <span>书架</span>
@@ -19,6 +15,10 @@
     <button class="mobile-tool-button" type="button" @click="$emit('action', 'settings')">
       <el-icon :size="19"><Setting /></el-icon>
       <span>设置</span>
+    </button>
+    <button class="mobile-tool-button" type="button" @click="$emit('action', 'home')">
+      <el-icon :size="19"><ArrowLeft /></el-icon>
+      <span>首页</span>
     </button>
   </header>
 
@@ -194,7 +194,9 @@ defineEmits(['action', 'book-progress-input', 'book-progress-change', 'cache', '
     top: 0;
     right: 0;
     left: 0;
-    z-index: 8;
+    /* Primary popovers occupy the viewport, but reader-dev keeps the tool
+       strip above its popovers so the active tool can close/switch them. */
+    z-index: 11;
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     padding: max(5px, env(safe-area-inset-top)) 8px 5px;

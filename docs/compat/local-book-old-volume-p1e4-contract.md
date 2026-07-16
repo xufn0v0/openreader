@@ -1,6 +1,7 @@
 # P1-E4-VOLUME-1 旧挂载卷恢复合同
 
-状态：**已完成只读审查；尚未添加失败夹具或业务实现。**
+状态：**旧 SQLite、相对/绝对路径、相对 cache 迁移、已有多用户隔离及 EPUB/UMD/CBZ/TXT
+archive 的 API 与 Docker 旧卷回归均已完成；可移植 archive 备份仍是后续范围。**
 
 基准仍为 `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。本合同把
 reader-dev 的本地书格式行为与 OpenReader 已发布的 SQLite/挂载目录表示分开：前者决定
@@ -37,14 +38,14 @@ chapter 行。因此“恢复一个旧 Docker 卷”必须保留三个挂载根�
 
 | 范围 | 历史/上游期望 | 当前映射 | 判定 | E4-VOLUME-1 要求 |
 |---|---|---|---|---|
-| SQLite 增量列 | 旧 EPUB chapter 没有 resource/fragment 列时仍可阅读；不丢失已存在的行。 | `db.AutoMigrate` 只添加字段；已有 `TestAutoMigrateAddsEPUBResourcePathWithoutLosingChapters` 覆盖单行。 | 部分已证实 | 使用真实旧数据库文件启动一次，检查所有旧行、progress、bookmark 保留，并验证三个新列为空且可惰性回填。 |
-| 原始 archive | reader-dev 本地书以原始文件为正文重建来源。 | `library/<LibraryPath>/<OriginalFile>` 与 `localBookSourcePath`。 | 部分已证实 | 对 TXT、EPUB、UMD、CBZ 删除 `content/` 后均能读；refresh 只能新建派生 generation，archive 字节哈希不变。 |
-| 历史相对字段 | 已有版本保存相对 `OriginalFile`/`CachePath`。 | `library` 和旧 `cache` 均有候选回退。 | 待旧卷验证 | 升级时从挂载路径重建，并将可移植 cache 字段规范到该书目录；不得删除有效 archive。 |
-| 历史绝对字段 | 早期 OpenReader 可能保存开发机/Docker 绝对路径；换机器后只能利用相同 archive 名/旧 `LibraryPath` 重定位。 | 当前读取逻辑会先尝试绝对 `OriginalFile` 或 `CachePath`。 | **must-fix（路径越界）** | 不得读取或写入 `library/`、该用户的本地书根及允许的旧 `cache/` 迁移根之外的任意宿主路径；仅可在私有 archive 根按受控 suffix/base-name 重定位。 |
-| `LibraryPath`/metadata | 原始、`chapters.json`、`bookSource.json` 都属于书自己的目录。 | `privateImportedBookDirectory` 已提供 `library/data/<safe-user>/...` 边界，但所有读路径尚未统一使用。 | **must-fix（所有权/路径）** | 不可信旧字段不得跨用户、`..`、绝对路径或符号链接逃逸；刷新 metadata 的失败不能部分写入。 |
-| 旧 cache 迁移 | 失去生成 cache 后应按 archive 惰性重建；存在旧 cache 时可以一次迁移。 | `MigrateLocalBookCache` 会移动相对 `CachePath`。 | 待旧卷验证 | 只迁移根内有效 regular file；非法/绝对/越界 cache 值不可触发读写或删除，且不会阻止其余健康书籍启动。 |
-| EPUB metadata | 旧行/`chapters.json` 没有 resource fragments 仍有效。 | 首次打开可从 archive 恢复 fragment。 | 部分已证实 | 真实旧卷覆盖空 resource 字段、无 `content/` 与保留封面/章节的恢复。 |
-| 用户隔离 | 书、chapter、progress、bookmark 是用户作用域。 | API `ensureBook` 已按 user ID 查询；文件根按用户名组织。 | 待旧卷验证 | 用户 B 读取/刷新 A 的旧本地书必须为 404/拒绝，且 B 的路径字段不能诱导读取 A 或主机文件。 |
+| SQLite 增量列 | 旧 EPUB chapter 没有 resource/fragment 列时仍可阅读；不丢失已存在的行。 | `db.AutoMigrate` 只添加字段；已有 `TestAutoMigrateAddsEPUBResourcePathWithoutLosingChapters` 覆盖单行。`TestHistoricalMountedVolumeMigratesRowsAndNeverReadsRetiredHostPaths` 新建、关闭并重开旧 SQLite 文件；Docker fixture 在同一旧库中载入 archive 与相对 cache。 | **已证实（API + Docker）** | 新增格式时仍必须复用真实旧 SQLite，而非已迁移的 model fixture。 |
+| 原始 archive | reader-dev 本地书以原始文件为正文重建来源。 | `library/<LibraryPath>/<OriginalFile>` 与 `localBookSourcePath`。`TestHistoricalMountedVolumeRebuildsEPUBUMDAndCBZArchives` 覆盖 stale absolute source + 无派生 content 的三种 archive；Docker smoke 同时验证 TXT、EPUB、UMD、CBZ。 | **已证实（API + Docker）** | 对四种 archive 删除 `content/` 后均可读；refresh 只能新建派生 generation，archive 字节哈希不变。 |
+| 历史相对字段 | 已有版本保存相对 `OriginalFile`/`CachePath`。 | `library` 和旧 `cache` 均有候选回退；迁移后将 cache 规范为 archive-root 相对 `content/...`。 | **已证实（API + Docker）** | 升级时从挂载路径重建，并将可移植 cache 字段规范到该书目录；不得删除有效 archive。 |
+| 历史绝对字段 | 早期 OpenReader 可能保存开发机/Docker 绝对路径；换机器后只能利用相同 archive 名/旧 `LibraryPath` 重定位。 | `localBookArchiveRoot` 将 archive 绑定到 `library/data/<safe-user>/...`，绝对字段只可在该根按 suffix/base-name 重定位；`chapterCacheCandidates` 不再把绝对 cache 作为主机候选。 | **已完成（全格式 API + Docker）** | 不得读取或写入 `library/`、该用户根及允许的旧 `cache/` 迁移根之外的任意宿主路径。 |
+| `LibraryPath`/metadata | 原始、`chapters.json`、`bookSource.json` 都属于书自己的目录。 | `localBookArchiveRoot` 复用私有目录边界并校验真实路径的符号链接解析；旧 archive 恢复、正文重建和 export 都使用它。 | **已完成第一批 must-fix** | 不可信旧字段不得跨用户、`..`、绝对路径或符号链接逃逸；刷新 metadata 的失败不能部分写入。 |
+| 旧 cache 迁移 | 失去生成 cache 后应按 archive 惰性重建；存在旧 cache 时可以一次迁移。 | `MigrateLocalBookCache` 只迁移 `cache/` 根内相对 regular file，逐段验证目标 `library/.../content/` 目录未越界或经符号链接逃逸，并把 SQLite 规范为相对 `content/...`。顺序为 copy → SQLite save → best-effort delete source。 | **已证实（API + Docker）** | 合法 cache 至多迁移一次；非法/绝对/越界值不可触发读写或删除，且不会阻止其余健康书籍启动。 |
+| EPUB metadata | 旧行/`chapters.json` 没有 resource fragments 仍有效。 | 首次打开可从 archive 恢复 fragment。 | **已证实（API + Docker）** | 旧卷继续覆盖空 resource 字段、无 `content/` 与保留封面/章节的恢复。 |
+| 用户隔离 | 书、chapter、progress、bookmark 是用户作用域。 | API `ensureBook` 按 user ID 查询；旧 SQLite 在迁移前已包含 A、B 的私有 archive。`TestHistoricalMountedVolumeExistingUsersStayIsolated` 和 Docker smoke 验证双向 list/read/refresh 404，以及 A backup/restore/restart 不改变 B。 | **已证实（API + Docker）** | 新增 archive/cache 迁移不得绕开用户作用域。 |
 | 逻辑备份/恢复 | 不应破坏安装卷。 | trigger/list 在 `data/webdav/`，restore 仅恢复 JSON 书架语义。 | 技术栈差异，需显式记录 | 旧卷存在时 trigger、list、一次无本地书 archive 的 restore 和重启不得改动 archive 哈希、chapter 行或本地书可读性；不得声称 ZIP 独立恢复 archive。 |
 
 允许差异：OpenReader 可以采用 capability、私有路径、惰性重建和有界 legacy parser
@@ -70,6 +71,40 @@ limits，代替上游未受限的文件访问/解压。这些差异只能收紧�
 每个失败路径都要断言：没有 archive 改写、没有跨用户读取、没有宿主路径泄漏，也没有部分
 chapter catalogue 提交。任何 test fixture 记录格式、大小、SHA-256 及自建来源说明。
 
+### VOLUME-CACHE-3 实现与证据
+
+reader-dev 没有 OpenReader 的 SQLite、`cache/` 或 Docker 挂载迁移；它的本地书正文合同只要求
+archive 可作为恢复来源。因此下列规则是 OpenReader 的**技术栈兼容/安全适配**，不能以当前
+绝对路径实现或既有测试作为依据：
+
+- 输入只接受 `SourceID=0`、有效私有 `LibraryPath` 且相对于当前 `cache/` 根的 regular file；
+  `..`、绝对路径、NUL、符号链接逃逸或其他用户/书根均不参与迁移，也不改写原 SQLite 字段。
+- 合法旧值 `legacy-cache/chapter.txt` 必须复制到私有 archive 根的
+  `content/legacy-cache/chapter.txt`，并把 `chapters.cache_path` 规范为可移植的相对值
+  `content/legacy-cache/chapter.txt`，而不是 Docker/开发机绝对路径。
+- 目标字节必须等于旧 cache；已存在的目标不得被无条件覆盖。数据库更新成功前不得删除旧
+  cache。更新成功后的删除失败只能留下可回收副本，不能使已更新的 chapter 不可读。
+- 第二次启动不得再次迁移或改变 archive；`chapterCacheCandidates` 必须优先解析规范后的
+  `archiveRoot/content/...`，而非退回宿主 cache 路径。
+- 真实旧 SQLite API 和 Docker fixture 都必须至少包含一个上述合法相对 cache，以及一个
+  绝对/越界诱饵；读取应返回合法 legacy cache 正文，重启后仍可读，且原始 local archive
+  SHA-256 不变。
+
+### VOLUME-OWNER-5 实现与证据
+
+用户作用域是 OpenReader 对 reader-dev 单用户文件模型的必要运行时适配。旧 SQLite/Docker
+夹具必须在**升级前**同时写入用户 A 和 B、各自私有 `library/data/<user>/...` archive 与
+chapter 行；不能只在升级后通过注册空用户代替 B。完成条件：
+
+- A、B 登录后各自 `GET /api/books` 只能看到自己的旧书；不得因旧 `LibraryPath`、cache 或
+  archive basename 相同而交叉列出。
+- B 读取或 `POST /refresh-local` A 的任一 TXT/EPUB/UMD/CBZ/relative-cache book 必须为 404；
+  A 对 B 同样如此。拒绝不得泄露 archive/cache 的宿主绝对路径。
+- A、B 均能读取自己的 old-volume chapter。A 的 refresh、backup trigger/list、restore 与
+  container restart 不得改变 B 的 book/chapter rows、cache 或原 archive SHA-256；反向同理。
+- Docker smoke 要用真实 HTTP/JWT 断言上述行为。API contract 仍保留相同旧 SQLite 的快速
+  回归，防止容器脚本成为唯一证据。
+
 ## 4. 实施顺序与发布闸门
 
 1. 提交本合同和父矩阵更新（本提交只含文档，不发布 Docker）。
@@ -81,6 +116,43 @@ chapter catalogue 提交。任何 test fixture 记录格式、大小、SHA-256 �
 5. 只有在 Docker volume fixture、读取/刷新、逻辑备份不破坏性与重启都通过后，才发布
    下一张 GHCR 镜像；发布报告列出 archive 可恢复格式、逻辑备份的边界、允许安全收紧和
    未完成项。
+
+### 当前实现证据（未发布 Docker）
+
+- `backend/api/old_volume_contract_test.go` 先创建并关闭缺少 EPUB resource/fragment/variable
+  列的 SQLite 文件，随后按启动顺序重开、AutoMigrate、执行 cache migration。测试保留
+  progress/bookmark，删除本地 derived cache 后从 archive 读取正文，且旧宿主诱饵文件绝不
+  成为 source/cache 候选；另一测试验证用户 B 得到 404。
+- `backend/db/TestMigrateLocalBookCacheSkipsUnsafeHistoricalCachePath` 先证明原实现会删除
+  `cache/../...` 外的文件，再锁定新行为：越界文件不复制、不删除、不改写 SQLite 值。
+- `localBookArchiveRoot`、`existingRegularPathInside` 和 db 的受控目录迁移保持无 archive
+  的相对 cache 以及音频库的相对 cache 读取，以免破坏真实早期记录；这一兼容分支从不接受
+  绝对 cache 路径。
+- `TestMigrateLocalBookCacheMovesLocalContentToLibrary` 和
+  `TestHistoricalMountedVolumeMigratesRelativeCacheOnce` 以真实旧 SQLite 断言
+  `legacy-cache/chapter.txt` 复制为 `content/legacy-cache/chapter.txt`，SQLite 只保存该
+  相对值，第二次迁移不再变更，读取仍优先返回 legacy cache 正文且 archive 不变。
+- `backend/cmd/create-old-volume-fixture` 生成可由容器启动的旧 SQLite + 相对路径 TXT、以及
+  stale absolute `OriginalFile` 的 EPUB、标准 reader-dev UMD、CBZ archive，外加 archive
+  正文不同的相对 cache 书；`HISTORICAL_VOLUME=1 scripts/docker-volume-backup-smoke.sh` 断言
+  旧 cache 已删、私有 content 字节相同、SQLite 保存相对字段，并在读取、刷新、逻辑备份/restore
+  和 restart 后持续成立。普通新卷 smoke 也在同一镜像通过。这完成 VOLUME-DB/PATH、
+  VOLUME-FORMATS-2 与 VOLUME-CACHE-3；同一 Docker fixture 也覆盖 VOLUME-OWNER-5。
+- `TestHistoricalMountedVolumeExistingUsersStayIsolated` 在升级前创建 B 的独立 archive，验证
+  A、B 的列表各自可见；双方对对方的 read/refresh 都为不泄露路径的 404；A refresh 不改变
+  B 的 cache path 或 archive 哈希。Docker fixture 同样预置 B，并验证 A 的 backup/restore、
+  restart 后 B 的列表、正文、archive 哈希和 chapter cache path 均保持。
+- `TestHistoricalMountedVolumeRebuildsEPUBUMDAndCBZArchives` 将最小 EPUB、标准 reader-dev
+  UMD 与 CBZ archive 写进同一类 user-private 旧卷目录，保留 stale absolute `OriginalFile`
+  和缺失 content。三者分别经 EPUB resource、文本恢复、CBZ resource 路径读取，并在
+  `refresh-local` 后验证原 archive SHA-256 不变。Docker fixture 复用等价 archive，在容器
+  内完成同一读取、刷新、备份恢复与重启链路。
+- 本批通过 `go test ./...`、`npm test`（386）、`npm run build`、`PUSH=0` 本地镜像构建，以及
+  `c7d5abb` 的普通与 `HISTORICAL_VOLUME=1` 全格式/相对 cache/已有用户 Docker smoke。已从本机发布
+  `ghcr.io/changshengyu/openreader:c7d5abb` 与 `:latest`；两者同为 OCI index
+  `sha256:d7000822b4a135c3ee9ab12c4cbef5c5343cfc87c125cc3e5f05f52098d46fa7`
+  （amd64 `sha256:cda62a0be6b051d28277eaf4659beca91169b368363c318e768dc48c6c268168`；arm64
+  `sha256:72361558537e01c9ed32ca1bbd46aca9758df8ae02b00ddd8942bc48b28df838`）。
 
 ## 5. 非目标
 

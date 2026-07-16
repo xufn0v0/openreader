@@ -57,7 +57,7 @@ defineEmits(['close'])
   height: 100dvh;
   padding: calc(58px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom));
   color: var(--reader-text);
-  background: color-mix(in srgb, var(--reader-popup-bg) 97%, transparent);
+  background: var(--reader-popup-bg);
   backdrop-filter: blur(2px);
 }
 
@@ -66,17 +66,29 @@ defineEmits(['close'])
 }
 
 .reader-mobile-workspace-primary {
+  inset: 0 0 auto;
+  z-index: 10;
   display: block;
-  padding: 0;
-  background: var(--reader-popup-bg);
+  width: 100vw;
+  height: auto;
+  min-height: 0;
+  max-height: 100dvh;
+  /* Keep primary-panel content below the interactive mobile tool strip.
+     The surface remains full-width, while the strip above it can toggle or
+     switch the open panel just like reader-dev's anchored popovers. */
+  padding: calc(58px + env(safe-area-inset-top)) 0 0;
+  overflow-x: hidden;
+  overflow-y: visible;
+  background: color-mix(in srgb, var(--reader-popup-bg) 97%, transparent);
   backdrop-filter: none;
 }
 
 .reader-mobile-workspace-primary .reader-mobile-workspace-body {
   width: 100%;
-  height: 100dvh;
-  min-height: 100dvh;
-  overflow: hidden;
+  height: auto;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: visible;
 }
 
 .reader-mobile-workspace-head {
