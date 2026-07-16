@@ -1,7 +1,7 @@
 # P1-E4 PDF、Markdown 与 `.text` 历史本地书兼容合同
 
-状态：**上游清单已提取；尚未进入实现。** 本文只记录合同和待写失败测试，不把当前
-OpenReader 的额外 parser、API 或 UI 当作正确性依据。
+状态：**已完成实现、回归与 Docker 发布。** 实现仍以固定上游清单为准，不把 OpenReader
+原有的额外 parser、API 或 UI 当作正确性依据。
 
 基准：`changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。
 
@@ -18,7 +18,7 @@ OpenReader 的额外 parser、API 或 UI 当作正确性依据。
 
 | 合同层 | 当前证据 | 判定 |
 |---|---|---|
-| 直接导入可见入口 | `OverlayBookImport.vue` 的文件选择器为 `.txt,.text,.md,.epub,.pdf,.umd,.cbz`，文案还公开 PDF；`useOverlayBookImport.js` 将 `.text/.md` 视作 TXT 目录规则文件。 | **must-fix**：新用户入口没有对齐上游。 |
+| 直接导入可见入口 | `OverlayBookImport.vue` 仅声明 `.txt,.epub,.umd,.cbz` 与四格式文案；`useOverlayBookImport.js` 用 `isDirectImportableLocalPath` 在预览 API 之前拒绝被“所有文件”强行选入的历史扩展名。 | **aligned（E4-PDFMD-1）**：新用户入口已收敛。 |
 | 直接导入 API | `backend/api/imports.go`、`services/localbook/importer.go` 接受 `.text/.md/.pdf`；PDF 走受限提取，Markdown/`.text` 走普通 TXT parser。 | **明确的遗留数据兼容差异**：不作为 UI 能力宣传，但暂保留路由，以免已部署客户端、已暂存导入流和历史自动化调用失效。 |
 | 既有书架阅读、刷新、缓存恢复 | `backend/api/books.go` 的 `parseLocalBookChapters` 和 `isSupportedLocalBookFile` 仍能读取 `.text/.md/.pdf` 原始 archive。 | **必须保留**：不能为了 UI 对齐而让已导入书籍白屏、无法刷新或无法从缺失 cache 恢复。 |
 | 书仓 / WebDAV 工作台 | `storageImportable.js` 分别限制为 `txt/epub/umd/cbz` 与 `txt/epub/umd`，已有回归测试覆盖。 | **aligned（P1-E3）**：本切片不得回退。 |
@@ -47,18 +47,29 @@ OpenReader 的额外 parser、API 或 UI 当作正确性依据。
 
 | 编号 | 夹具与断言 | 目的 |
 |---|---|---|
-| E4-PDFMD-1A | 真实最小文本 PDF：历史 direct API 导入后删除 chapter cache，正文仍可由 archive 恢复；`refresh-local` 重建目录不改原 archive。 | 保留既有 PDF 用户数据。 |
-| E4-PDFMD-1B | 扫描/无可读文本 PDF 与超过页数/文本预算的 PDF：preview/import 都返回受控错误；断言零 book、零 chapter、零持久 archive。 | 防止解析失败污染书架或卷。 |
-| E4-PDFMD-1C | `.md`、`.text` 的历史导入/旧 SQLite fixture：按 TXT 正文读取、删 cache 后恢复、刷新不白屏；不产生 Markdown HTML。 | 保留历史文本数据但不扩张产品语义。 |
-| E4-PDFMD-1D | 浏览器与单元合同：直接导入 chooser/文案只包含四种上游格式；通过“所有文件”绕过 chooser 选择额外扩展名时不调用 preview API；LocalStore/WebDAV 的既有格式矩阵不变。 | 修正可见工作台行为。 |
-| E4-PDFMD-1E | 用户 A 的历史 archive、stage token 与 chapter route 不可由用户 B 读取；非法路径和超额输入在解析/归档前被拒绝。 | 多用户与资源边界。 |
+| E4-PDFMD-1A | **已完成**：最小文本 PDF 通过历史 direct API 导入后删除 chapter cache，正文从 archive 恢复；`refresh-local` 重建目录且字节级保留原 archive。 | 保留既有 PDF 用户数据。 |
+| E4-PDFMD-1B | **已完成**：无可读文本 PDF 与超过 parsed-text 预算的 PDF，在 preview/import 都返回 `400`；断言零 book、零 chapter、零持久 archive。 | 防止解析失败污染书架或卷。 |
+| E4-PDFMD-1C | **已完成**：`.md`、`.text` 的历史导入删除 cache 后恢复、刷新后可读且不生成 Markdown HTML。 | 保留历史文本数据但不扩张产品语义。 |
+| E4-PDFMD-1D | **已完成**：单元合同锁定四格式 chooser；真实 Chrome 在 1440×900 与 390×844 强制选入 PDF 时不发 preview 请求，TXT 仍正常预览；LocalStore/WebDAV 格式矩阵不变。 | 修正可见工作台行为。 |
+| E4-PDFMD-1E | **已完成**：用户 B 不能消费用户 A 的 Markdown stage token，也不能读取用户 A 已导入的历史章节；解析限额仍在 archive/SQLite 写入前生效。 | 多用户与资源边界。 |
 
-测试必须先落地并在当前错误 UI 上失败，再实施 UI 收敛。实现后的门禁是 `go test ./...`、
-`npm test`、`npm run build`，以及真实浏览器的直接导入和历史书阅读 smoke。此项完成后再判断是否
-构建 Docker；仅文档或纯测试提交不重新发布镜像。
+测试已先在错误 UI 上失败，再实施 UI 收敛。`go test ./...`、`npm test`、`npm run build` 与
+隔离真实 Chrome 的直接导入验证均已通过；历史 PDF/Markdown/`.text` 阅读、刷新、cache 回建和
+跨用户隔离由 API 合同测试覆盖。本切片可以构建 Docker；纯文档或纯测试更新不重新发布镜像。
 
 ## 5. 非目标
 
 - 不把 PDF、Markdown、`.text` 加入上游工作台，也不为其补上游不存在的书源、书仓或 WebDAV 流程。
 - 不把“当前 API 能工作”写成上游对齐。
 - 不删除用户已有本地书，也不将历史格式转换成 TXT 后覆盖原始 archive。
+
+## 6. 发布记录
+
+2026-07-16 已完成本地镜像构建、卷/备份 smoke 与 GHCR 多架构发布：
+
+- Git：`d0a0f5b fix: align visible local import formats`；
+- tags：`ghcr.io/changshengyu/openreader:d0a0f5b`、`ghcr.io/changshengyu/openreader:latest`；
+- remote multi-architecture index digest：`sha256:b55e119fbb272065f1c8b447d783a371d00c633f183f583f987d7471aab0914d`；
+- linux/amd64：`sha256:cd19fa3cd0a7c7d75ea8803af67d2897892b30785bb1083513a008ebd1927979`；linux/arm64：`sha256:8831ac5442fa5d06b7940e5bfd7ca85a18cec4d66d2723d00eddf9054d9218bd`。
+
+本合同的发布记录提交不改变镜像内容，不会重复发布 Docker。
