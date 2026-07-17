@@ -1,26 +1,10 @@
 #!/usr/bin/env node
 
+import { openSmokeBrowser } from './playwright-runtime.mjs'
+
 const targetUrl = process.env.TARGET_URL || 'http://127.0.0.1:5173'
 const readerUrl = process.env.SMOKE_READER_URL || `${targetUrl.replace(/\/$/, '')}/books/1/read?chapter=0`
-const defaultChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const smokeBgImage = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2236%22 height=%2236%22%3E%3Crect width=%2236%22 height=%2236%22 fill=%22%23d8c49a%22/%3E%3C/svg%3E'
-
-async function loadPlaywright() {
-  try {
-    const module = await import('playwright')
-    return module.chromium ? module : module.default
-  } catch (error) {
-    const bundled = '/Users/yuchangsheng/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.js'
-    try {
-      const module = await import(bundled)
-      return module.chromium ? module : module.default
-    } catch {
-      console.error('Playwright is required for reader mobile contract smoke.')
-      console.error(`Original import error: ${error.message}`)
-      process.exit(2)
-    }
-  }
-}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -123,7 +107,9 @@ async function installApiMocks(page) {
           '春风过处，纸页微明。',
           '这一段用于验证移动端阅读正文左右留白对称，并保持两端对齐。',
           '点击中央区域应当只在没有面板时切换工具层。',
-        ].join('\n'),
+        ].concat(Array.from({ length: 48 }, (_, index) => (
+          `移动工具层滚动契约段落 ${index + 1}：正文需要足够长，才能验证顶部和底部按钮确实移动阅读容器。`
+        ))).join('\n'),
       }))
     }
     if (path === '/books/1/bookmarks' && method === 'GET') {
@@ -235,10 +221,111 @@ async function assertMobileTopToolContract(page, viewport) {
     disabled: button.disabled,
   })))
   assert(
-    JSON.stringify(state.map(item => item.label)) === JSON.stringify(['书架', '书源', '目录', '设置', '首页']),
+    JSON.stringify(state.map(item => item.label)) === JSON.stringify(['首页', '书架', '书源', '目录', '设置']),
     `${viewport.width}: mobile Reader top-tool order must match reader-dev`,
   )
   assert(state.find(item => item.label === '书源')?.disabled === false, `${viewport.width}: Reader source entry must remain available`)
+}
+
+async function assertMobileFloatNavigationContract(page, viewport, initialGeometry) {
+  const state = await page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('.reader-mobile-float-left.visible button')]
+    return {
+      titles: buttons.map(button => button.title),
+      rects: buttons.map(button => {
+        const rect = button.getBoundingClientRect()
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }
+      }),
+    }
+  })
+  assert(
+    JSON.stringify(state.titles) === JSON.stringify(['书签', '搜索正文', '书籍信息', '顶部', '底部']),
+    `${viewport.width}: mobile left float controls ${JSON.stringify(state.titles)}`,
+  )
+  state.rects.forEach((rect, index) => {
+    assert(rect.top >= 0 && rect.bottom <= viewport.height, `${viewport.width}: float control ${index} must stay inside viewport`)
+    if (index > 0) {
+      assert(rect.top >= state.rects[index - 1].bottom, `${viewport.width}: float controls ${index - 1}/${index} must not overlap`)
+    }
+  })
+
+  const scrollState = await page.locator('.reader-content').evaluate(element => ({
+    top: element.scrollTop,
+    max: element.scrollHeight - element.clientHeight,
+  }))
+  assert(scrollState.max > 100, `${viewport.width}: fixture must be scrollable for top/bottom controls`)
+
+  await page.locator('.reader-mobile-float-left.visible button[title="底部"]').click()
+  await page.waitForFunction(() => {
+    const element = document.querySelector('.reader-content')
+    return element && element.scrollTop >= element.scrollHeight - element.clientHeight - 2
+  })
+  assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: bottom action must keep toolbar visible`)
+
+  await page.locator('.reader-mobile-float-left.visible button[title="顶部"]').click()
+  await page.waitForFunction(() => document.querySelector('.reader-content')?.scrollTop === 0)
+  assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: top action must keep toolbar visible`)
+  const geometry = await readerGeometry(page)
+  assertClose(geometry.paragraphLeft, initialGeometry.paragraphLeft, 1, `${viewport.width}: top/bottom actions should not shift paragraph left`)
+  assertClose(geometry.paragraphRight, initialGeometry.paragraphRight, 1, `${viewport.width}: top/bottom actions should not shift paragraph right`)
+}
+
+async function assertMobilePageProgressContract(page, viewport, initialGeometry) {
+  await page.waitForFunction(() => {
+    const input = document.querySelector('.reader-mobile-bottom.visible .mobile-progress-slider')
+    return input && Number(input.max) > 1 && /^第 \d+\/\d+ 页$/.test(input.parentElement?.innerText || '')
+  })
+  const initial = await page.evaluate(() => {
+    const input = document.querySelector('.reader-mobile-bottom.visible .mobile-progress-slider')
+    const content = document.querySelector('.reader-content')
+    const progressButton = document.querySelector('.reader-mobile-bottom.visible .mobile-chapter-progress')
+    return {
+      min: Number(input.min),
+      max: Number(input.max),
+      value: Number(input.value),
+      label: input.parentElement?.querySelector('span')?.textContent?.trim() || '',
+      scrollTop: content?.scrollTop || 0,
+      progressText: progressButton?.textContent?.trim() || '',
+    }
+  })
+  assert(initial.min === 1, `${viewport.width}: mobile page slider min ${initial.min}`)
+  assert(initial.max > 1, `${viewport.width}: mobile page slider must expose rendered pages`)
+  assert(initial.value === 1, `${viewport.width}: initial mobile page must be 1, got ${initial.value}`)
+  assert(initial.label === `第 1/${initial.max} 页`, `${viewport.width}: mobile page label ${initial.label}`)
+  assert(/^阅读进度: \d+%$/.test(initial.progressText), `${viewport.width}: bottom progress text ${initial.progressText}`)
+  assert(!initial.progressText.includes('第一章'), `${viewport.width}: bottom progress must not duplicate the chapter title`)
+
+  const routeBefore = await page.url()
+  await page.locator('.reader-mobile-bottom.visible .mobile-progress-slider').evaluate((input) => {
+    input.value = input.max
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await page.waitForFunction((max) => (
+    document.querySelector('.reader-mobile-bottom.visible .mobile-progress-slider-row span')?.textContent?.trim()
+      === `第 ${max}/${max} 页`
+  ), initial.max)
+  assert(await page.locator('.reader-content').evaluate(element => element.scrollTop) === initial.scrollTop, `${viewport.width}: page slider input must not move content before change`)
+  assert(await page.url() === routeBefore, `${viewport.width}: page slider input must not change the Reader route`)
+
+  await page.locator('.reader-mobile-bottom.visible .mobile-progress-slider').evaluate((input) => {
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForFunction(() => {
+    const element = document.querySelector('.reader-content')
+    return element && element.scrollTop >= element.scrollHeight - element.clientHeight - 2
+  })
+  assert(await page.url() === routeBefore, `${viewport.width}: page slider change must stay in the current chapter route`)
+  assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: page slider change must keep toolbar visible`)
+
+  await page.locator('.reader-mobile-bottom.visible .mobile-progress-slider').evaluate((input) => {
+    input.value = '1'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await page.waitForFunction(() => document.querySelector('.reader-content')?.scrollTop === 0)
+  const geometry = await readerGeometry(page)
+  assertClose(geometry.paragraphLeft, initialGeometry.paragraphLeft, 1, `${viewport.width}: page slider should not shift paragraph left`)
+  assertClose(geometry.paragraphRight, initialGeometry.paragraphRight, 1, `${viewport.width}: page slider should not shift paragraph right`)
 }
 
 async function assertWorkspaceClosed(page, viewport, label) {
@@ -311,18 +398,44 @@ async function closeGlobalReaderDialog(page, selector) {
   await dialog.waitFor({ state: 'hidden', timeout: 10000 })
 }
 
-async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen }) {
+async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen, touch = false }) {
   const paragraph = page.locator('.reader-body p').first()
   const selectedText = (await paragraph.textContent())?.trim() || ''
   assert(selectedText, `${viewport.width}: reader fixture must include selectable text`)
-  await paragraph.evaluate((node) => {
-    const selection = window.getSelection()
-    const range = document.createRange()
-    range.selectNodeContents(node)
-    selection?.removeAllRanges()
-    selection?.addRange(range)
-    node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
-  })
+  if (touch) {
+    await paragraph.evaluate((node) => {
+      const rect = node.getBoundingClientRect()
+      const event = new Event('touchstart', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'touches', {
+        value: [{ clientX: rect.left + 12, clientY: rect.top + 12, identifier: 1 }],
+      })
+      node.dispatchEvent(event)
+    })
+    await page.waitForTimeout(720)
+    await paragraph.evaluate((node) => {
+      const rect = node.getBoundingClientRect()
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      const event = new Event('touchend', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'touches', { value: [] })
+      Object.defineProperty(event, 'changedTouches', {
+        value: [{ clientX: rect.left + 12, clientY: rect.top + 12, identifier: 1 }],
+      })
+      node.dispatchEvent(event)
+    })
+  } else {
+    await paragraph.evaluate((node) => {
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+    })
+  }
 
   const chooser = page.locator('.el-message-box').last()
   await chooser.getByRole('button', { name: '添加过滤规则', exact: true }).click()
@@ -342,7 +455,11 @@ async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen 
   })
   if (fullscreen) {
     assert(geometry.width === viewport.width && geometry.height === viewport.height, `${viewport.width}: selected-text editor must be fullscreen on mobile`)
-    assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: selected-text editor must preserve the reader toolbar`)
+    const chromeState = await page.evaluate(() => ({
+      topClass: document.querySelector('.reader-mobile-top')?.className || '',
+      shellClass: document.querySelector('.reader-shell')?.className || '',
+    }))
+    assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: selected-text editor must preserve the reader toolbar (${JSON.stringify(chromeState)})`)
     await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
     assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: selected-text editor click must not pass through to reader chrome`)
   } else {
@@ -353,6 +470,20 @@ async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen 
   await editor.getByRole('button', { name: '取消', exact: true }).click()
   await editor.waitFor({ state: 'hidden', timeout: 10000 })
   assert(await page.locator('.global-replace-dialog').count() === 0, `${viewport.width}: closing the direct editor must not reveal a manager`)
+}
+
+async function assertDirectNumericSettingEdit(page, viewport) {
+  const row = page.locator('.settings-body .setting-row').filter({ hasText: '亮度' }).first()
+  const valueButton = row.locator('.reader-setting-stepper-value')
+  await valueButton.click()
+  const input = row.locator('.reader-setting-stepper-input')
+  await input.fill('87')
+  await input.press('Enter')
+  assert((await valueButton.textContent())?.trim() === '87', `${viewport.width}: brightness center value must accept direct numeric input`)
+  const brightness = await page.locator('.reader-shell').evaluate(node => (
+    node.style.getPropertyValue('--reader-brightness')
+  ))
+  assert(brightness === '87%', `${viewport.width}: direct brightness input must update the reader, got ${brightness}`)
 }
 
 async function assertReaderBookInfoDialog(page, viewport, { fullscreen }) {
@@ -945,7 +1076,7 @@ async function runViewport(browser, viewport) {
     throw new Error(`${error.message}\nState: ${JSON.stringify(state, null, 2)}\nFailures: ${failures.join('\n')}`)
   }
   await page.waitForSelector('.reader-body p', { timeout: 10000 })
-  await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: true })
+  await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: true, touch: true })
   const selectedBookmarkText = await createBookmarkFromSelectedText(page, viewport, { fullscreen: true })
 
   const initialTopVisible = await page.locator('.reader-mobile-top.visible').count()
@@ -953,6 +1084,7 @@ async function runViewport(browser, viewport) {
   await assertMobileTopToolContract(page, viewport)
   const initialGeometry = await readerGeometry(page)
   assertReaderGeometry(initialGeometry, viewport, 'initial')
+  await assertMobilePageProgressContract(page, viewport, initialGeometry)
 
   await mobileTopTool(page, '书架').click()
   await assertWorkspaceOpen(page, viewport, '书架', { primary: true, contentSized: true, heightRange: [418, 488] })
@@ -973,6 +1105,7 @@ async function runViewport(browser, viewport) {
   await assertSettingsRowGeometry(page, viewport)
   await assertSettingsFirstScreenDensity(page, viewport)
   await assertSettingsFixedTitle(page, viewport)
+  await assertDirectNumericSettingEdit(page, viewport)
   await assertSettingsBackgroundGeometry(page, viewport)
 
   await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
@@ -989,6 +1122,7 @@ async function runViewport(browser, viewport) {
   await page.locator('.reader-mobile-float-left.visible button[title="书籍信息"]').click()
   await assertReaderBookInfoDialog(page, viewport, { fullscreen: true })
   await closeReaderBookInfoDialog(page)
+  await assertMobileFloatNavigationContract(page, viewport, initialGeometry)
   await page.locator('.reader-mobile-bottom.visible button[title="缓存章节"]').click()
   await assertInlineMobileCacheZone(page, viewport)
   await page.locator('.reader-mobile-bottom.visible button[title="缓存章节"]').click()
@@ -1008,11 +1142,7 @@ async function runViewport(browser, viewport) {
 }
 
 async function main() {
-  const { chromium } = await loadPlaywright()
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.CHROME_PATH || defaultChromePath,
-  })
+  const browser = await openSmokeBrowser()
   try {
     await runDesktopViewport(browser)
     await runViewport(browser, { width: 390, height: 844 })
