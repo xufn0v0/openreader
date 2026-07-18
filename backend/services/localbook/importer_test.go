@@ -6,12 +6,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"openreader/backend/config"
 	readerdb "openreader/backend/db"
 	"openreader/backend/engine"
 	"openreader/backend/models"
+	"openreader/backend/services/cbzreader"
+	"openreader/backend/services/epubreader"
 )
 
 func TestImporterPreviewAllowsExplicitTXTTOCRuleWithNoMatches(t *testing.T) {
@@ -26,6 +29,496 @@ func TestImporterPreviewAllowsExplicitTXTTOCRuleWithNoMatches(t *testing.T) {
 	}
 	if preview.Title != "规则不匹配" || preview.ChapterCount != 0 || len(preview.Chapters) != 0 {
 		t.Fatalf("explicit no-match TOC preview = %+v, want a normal empty catalog", preview)
+	}
+}
+
+func TestImporterRejectsOversizedLocalTOCRuleBeforeRegexCompilation(t *testing.T) {
+	_, err := (Importer{}).Preview(ImportRequest{
+		FileName:  "oversized-rule.txt",
+		Extension: ".txt",
+		Data:      []byte("第一章 正文"),
+		TOCRule:   strings.Repeat("a", maxLocalBookTOCRuleBytes+1),
+	})
+	if !errors.Is(err, ErrParseFailed) {
+		t.Fatalf("oversized TOC rule error = %v, want ErrParseFailed", err)
+	}
+}
+
+func TestImporterPreparedPreviewIsTheConfirmedChapterSource(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "prepared-import", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	request := ImportRequest{
+		UserID:    user.ID,
+		UserName:  user.Username,
+		FileName:  "prepared.txt",
+		Extension: ".txt",
+		Data:      []byte("第一章 原目录\n原正文"),
+		TOCRule:   `^第.+章.*$`,
+	}
+	importer := NewImporter(cfg, database)
+	preview, prepared, err := importer.Prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ChapterCount != 1 || len(prepared.Book.Chapters) != 1 {
+		t.Fatalf("prepared preview = %+v / %+v", preview, prepared)
+	}
+	prepared.Book.Chapters[0].Title = "快照章节"
+	prepared.Book.Chapters[0].Content = "快照正文"
+
+	book, err := importer.ImportPrepared(request, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chapter models.Chapter
+	if err := database.Where("book_id = ?", book.ID).First(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if chapter.Title != "快照章节" {
+		t.Fatalf("confirmed chapter title = %q, want prepared snapshot", chapter.Title)
+	}
+	content, err := os.ReadFile(filepath.Join(cfg.LibraryDir, book.LibraryPath, chapter.CachePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "快照正文" {
+		t.Fatalf("confirmed chapter content = %q, want prepared snapshot", content)
+	}
+}
+
+func TestImporterEPUBPreviewStoresCatalogueOnlyAndConfirmationPreparesReaderResources(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret:    "epub-import-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "epub-catalogue", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := ImportRequest{
+		UserID:    user.ID,
+		UserName:  user.Username,
+		FileName:  "catalogue.epub",
+		Extension: ".epub",
+		Data:      localBookTestEPUB(t),
+		TOCRule:   "spin+toc",
+	}
+	importer := NewImporter(cfg, database)
+	preview, prepared, err := importer.Prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ChapterCount != 2 || len(prepared.Book.Chapters) != 2 {
+		t.Fatalf("EPUB preview = %+v / %+v", preview, prepared)
+	}
+	if !prepared.EPUBCatalogOnly {
+		t.Fatal("EPUB preview snapshot must identify catalogue-only content")
+	}
+	for _, chapter := range prepared.Book.Chapters {
+		if chapter.Content != "" {
+			t.Fatalf("EPUB preview materialized body content: %+v", chapter)
+		}
+	}
+
+	book, err := importer.ImportPrepared(request, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chapters []models.Chapter
+	if err := database.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 {
+		t.Fatalf("confirmed chapter count = %d, want 2", len(chapters))
+	}
+	for _, chapter := range chapters {
+		content, err := os.ReadFile(filepath.Join(cfg.LibraryDir, book.LibraryPath, chapter.CachePath))
+		if err != nil {
+			t.Fatalf("confirmed chapter %d cache: %v", chapter.Index, err)
+		}
+		if !strings.Contains(string(content), "正文") {
+			t.Fatalf("confirmed chapter %d content = %q", chapter.Index, content)
+		}
+	}
+	extractionParent := filepath.Join(cfg.LibraryDir, book.LibraryPath, ".epub-resources")
+	entries, err := os.ReadDir(extractionParent)
+	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
+		t.Fatalf("confirmed EPUB did not prepare one immutable resource tree: entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestImporterCBZConfirmationPreparesReaderResources(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret:    "cbz-import-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "cbz-import", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	book, err := NewImporter(cfg, database).Import(ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "prepared.cbz", Extension: ".cbz", Data: localBookTestCBZ(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(cfg.LibraryDir, book.LibraryPath, ".cbz-resources"))
+	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
+		t.Fatalf("confirmed CBZ did not prepare one immutable image tree: entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestImporterCBZExtractionIsCompensatedWhenDatabaseCommitCannotStart(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret:    "failed-cbz-import-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "failed-cbz-import", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "failed.cbz", Extension: ".cbz", Data: localBookTestCBZ(t),
+	}
+	importer := NewImporter(cfg, database)
+	_, prepared, err := importer.Prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.ImportPrepared(request, prepared); err == nil {
+		t.Fatal("CBZ import with a closed database must fail")
+	}
+	userLibrary := filepath.Join(cfg.LibraryDir, "data", user.Username)
+	entries, readErr := os.ReadDir(userLibrary)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed CBZ import left archive/extraction entries: %+v", entries)
+	}
+}
+
+func TestClassifyCBZPreparationErrorKeepsClientMessageSafe(t *testing.T) {
+	cause := errors.Join(cbzreader.ErrUnsafePath, errors.New("/private/library/secret.cbz"))
+	err := classifyCBZPreparationError(cause)
+	if !errors.Is(err, ErrParseFailed) || !errors.Is(err, cbzreader.ErrUnsafePath) {
+		t.Fatalf("classified error = %v, want parse and unsafe-path identity", err)
+	}
+	if strings.Contains(err.Error(), "/private/library") || strings.Contains(err.Error(), "secret.cbz") {
+		t.Fatalf("client-visible CBZ preparation error leaked a host path: %q", err)
+	}
+}
+
+func TestImporterAcceptsLegacyFullContentEPUBPreparedSnapshot(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret:    "legacy-epub-snapshot-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "legacy-epub-snapshot", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "legacy.epub", Extension: ".epub", Data: localBookTestEPUB(t), TOCRule: "spin",
+	}
+	parsed, err := engine.ParseEPUBWithRule(request.Data, request.TOCRule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.Chapters[0].Content = "旧版完整快照正文"
+	prepared := NewPreparedImport(request, parsed)
+	if prepared.EPUBCatalogOnly {
+		t.Fatal("legacy full-content snapshot unexpectedly marked catalogue-only")
+	}
+	book, err := NewImporter(cfg, database).ImportPrepared(request, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chapter models.Chapter
+	if err := database.Where("book_id = ? AND `index` = 0", book.ID).First(&chapter).Error; err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(cfg.LibraryDir, book.LibraryPath, chapter.CachePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "旧版完整快照正文" {
+		t.Fatalf("legacy prepared content = %q", content)
+	}
+}
+
+func TestImporterAcceptsUpgradeTimeCatalogueOnlyEPUBFragmentSnapshot(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret:    "legacy-epub-catalogue-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "legacy-epub-catalogue", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "legacy-catalogue.epub", Extension: ".epub", Data: localBookTestEPUB(t), TOCRule: "toc",
+	}
+	prepared := NewPreparedImport(request, engine.ParsedBook{
+		Title: "升级前目录快照",
+		Chapters: []engine.TXTChapter{
+			{Index: 0, Title: "旧第一节", ResourcePath: "OPS/one.xhtml", ResourceFragment: "old-start", ResourceEndFragment: "old-end"},
+			{Index: 1, Title: "旧第二章", ResourcePath: "OPS/two.xhtml"},
+		},
+	})
+	prepared.EPUBCatalogOnly = true
+
+	book, err := NewImporter(cfg, database).ImportPrepared(request, prepared)
+	if err != nil {
+		t.Fatalf("upgrade-time catalogue-only snapshot became invalid: %v", err)
+	}
+	var chapters []models.Chapter
+	if err := database.Where("book_id = ?", book.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 2 || chapters[0].Title != "旧第一节" || chapters[0].ResourceFragment != "old-start" || chapters[0].ResourceEndFragment != "old-end" {
+		t.Fatalf("upgrade-time fragment snapshot was not preserved: %+v", chapters)
+	}
+}
+
+func TestImporterEPUBExtractionIsCompensatedWhenDatabaseCommitCannotStart(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret:    "failed-epub-import-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "failed-epub-import", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "failed.epub", Extension: ".epub", Data: localBookTestEPUB(t), TOCRule: "spin+toc",
+	}
+	importer := NewImporter(cfg, database)
+	_, prepared, err := importer.Prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.ImportPrepared(request, prepared); err == nil {
+		t.Fatal("EPUB import with a closed database must fail")
+	}
+	userLibrary := filepath.Join(cfg.LibraryDir, "data", user.Username)
+	entries, readErr := os.ReadDir(userLibrary)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed EPUB import left archive/extraction entries: %+v", entries)
+	}
+}
+
+func TestClassifyEPUBPreparationErrorKeepsClientMessageSafe(t *testing.T) {
+	cause := errors.Join(epubreader.ErrUnsafePath, errors.New("/private/library/secret.epub"))
+	err := classifyEPUBPreparationError(cause)
+	if !errors.Is(err, ErrParseFailed) || !errors.Is(err, epubreader.ErrUnsafePath) {
+		t.Fatalf("classified error = %v, want parse and unsafe-path identity", err)
+	}
+	if strings.Contains(err.Error(), "/private/library") || strings.Contains(err.Error(), "secret.epub") {
+		t.Fatalf("client-visible preparation error leaked a host path: %q", err)
+	}
+	if got := classifyEPUBPreparationError(errors.New("disk unavailable")); got.Error() != "disk unavailable" {
+		t.Fatalf("internal storage error was incorrectly classified as client input: %v", got)
+	}
+}
+
+func localBookTestEPUB(t *testing.T) []byte {
+	t.Helper()
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	write := func(name, body string) {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("META-INF/container.xml", `<container><rootfiles><rootfile full-path="OPS/content.opf"/></rootfiles></container>`)
+	write("OPS/content.opf", `<package><metadata><title>目录快照</title><creator>作者</creator></metadata><manifest>
+  <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+  <item id="one" href="one.xhtml" media-type="application/xhtml+xml"/>
+  <item id="two" href="two.xhtml" media-type="application/xhtml+xml"/>
+</manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>`)
+	write("OPS/nav.xhtml", `<html><body><nav epub:type="toc"><a href="one.xhtml">目录一</a><a href="two.xhtml">目录二</a></nav></body></html>`)
+	write("OPS/one.xhtml", `<html><head><title>文档一</title></head><body><h1>正文一</h1><p>第一章正文。</p></body></html>`)
+	write("OPS/two.xhtml", `<html><head><title>文档二</title></head><body><h1>正文二</h1><p>第二章正文。</p></body></html>`)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return archive.Bytes()
+}
+
+func localBookTestCBZ(t *testing.T) []byte {
+	t.Helper()
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for _, item := range []struct{ name, body string }{
+		{"ComicInfo.xml", `<ComicInfo><Title>CBZ prepared</Title><Writer>作者</Writer></ComicInfo>`},
+		{"pages/002.png", "second"},
+		{"pages/001.jpg", "first"},
+		{"notes/readme.txt", "ignored"},
+	} {
+		entry, err := writer.Create(item.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(item.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return archive.Bytes()
+}
+
+func TestImporterRemovesNewArchiveWhenDatabaseCommitCannotStart(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "failed-import", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = NewImporter(cfg, database).Import(ImportRequest{
+		UserID:    user.ID,
+		UserName:  user.Username,
+		FileName:  "failed.txt",
+		Extension: ".txt",
+		Data:      []byte("第一章 失败\n正文"),
+	})
+	if err == nil {
+		t.Fatal("import with a closed database must fail")
+	}
+	userLibrary := filepath.Join(cfg.LibraryDir, "data", user.Username)
+	entries, readErr := os.ReadDir(userLibrary)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed import left durable library entries: %+v", entries)
 	}
 }
 

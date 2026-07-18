@@ -1,8 +1,8 @@
-import { onBeforeUnmount } from 'vue'
+import { getCurrentInstance, onBeforeUnmount } from 'vue'
 import {
   readerProgressSaveKey,
   readerProgressThrottleDelay,
-} from '../utils/readerProgressPersistence'
+} from '../utils/readerProgressPersistence.js'
 
 export function useReaderProgressPersistence(options) {
   const minimumInterval = Math.max(0, Number(options.minimumInterval) || 1200)
@@ -38,6 +38,7 @@ export function useReaderProgressPersistence(options) {
   }
 
   async function save(saveOptions = {}) {
+    if (options.isBlocked?.()) return
     const payload = options.getPayload?.()
     if (!payload?.bookId) return
 
@@ -54,17 +55,20 @@ export function useReaderProgressPersistence(options) {
     pendingPayload = nextPayload
 
     if (background) {
-      sendKeepAlive(nextPayload)
-      flush(force).catch(() => {})
+      if (sendKeepAlive(nextPayload)) {
+        pendingPayload = null
+        return
+      }
+      await flush(force)
       return
     }
     await flush(force)
   }
 
   function sendKeepAlive(payload) {
-    if (typeof window === 'undefined' || typeof fetch !== 'function') return
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return false
     const token = window.localStorage?.getItem('openreader_token')
-    if (!token) return
+    if (!token) return false
     const progress = options.getStoredProgress?.(payload.bookId)
     try {
       fetch('/api/progress', {
@@ -81,8 +85,10 @@ export function useReaderProgressPersistence(options) {
           clientId: options.ensureClientId?.(),
         }),
       }).catch(() => {})
+      return true
     } catch {
       // The optimistic local snapshot remains pending for the next sync attempt.
+      return false
     }
   }
 
@@ -131,7 +137,7 @@ export function useReaderProgressPersistence(options) {
     })
   }
 
-  onBeforeUnmount(cancelScheduled)
+  if (getCurrentInstance()) onBeforeUnmount(cancelScheduled)
 
   return {
     cancelScheduled,

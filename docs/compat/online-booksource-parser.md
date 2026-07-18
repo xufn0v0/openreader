@@ -1,6 +1,6 @@
 # 在线书源解析兼容契约
 
-状态：2026-07-13 已从固定上游 `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691` 提取；P2-Parser-0 与 P2-Parser-1 的搜索/探索子集正在实现。本文件仍是目录、正文和剩余规则链重构的前置闸门。
+状态：CSS、JSONPath、XPath、正则、组合、分页、持久变量与安全结构化错误主链均已实施，并于 2026-07-16 通过真实 Go API 浏览器验收。任意 JavaScript/WebView 仍是明确的安全差异；当前剩余用户可见缺口转入 [`booksource-script-transparency-p2-contract.md`](booksource-script-transparency-p2-contract.md)，不再把已完成的 P2-Parser-0/1 主链标为“正在实现”。
 
 当前已落地（尚未宣告整模块对齐）：统一的无脚本 CSS、JSONPath、XPath、正则基础求值器和规则级 `##` 替换；搜索/探索、详情、目录、正文的基础列表/字段/分页调用链；分类多值与空详情 URL 回退；受限的 `@put`/`@get` 变量及其搜索→书架→目录→正文的持久状态；不执行 JS/WebJS/`{{...}}` 模板的明确错误；以及“解析错误不写入失效书源缓存”、跨章节正文分页边界、空文本正文规则和结构化安全错误边界。上游 JavaScript/模板及其隔离执行策略仍未完成。
 
@@ -228,6 +228,13 @@
 - 没有变更路由、请求体、SQLite schema、导入/导出字段或静态 header 合并。动态字段仍可无损保存、备份和导出；它们首次被使用时得到确定的安全错误，不会再伪装成请求失败或空结果。
 - `backend/engine/source_script_entrypoints_contract_test.go` 覆盖 `@js:`、`<js>` 和 `loginCheckJs` 在搜索、探索、详情/目录、目录和正文五条引擎链路上均零网络请求；`backend/api/source_error_contract_test.go` 覆盖所有稳定 API 错误 stage、零请求、零失效源缓存和敏感脚本文本不回显。
 - `backend/api/api_test.go` 的上游书源导入全链路 fixture 继续验证静态 `headerMap` 的搜索、探索、详情、目录、正文和加书流程；登录检查脚本不再被该静态路径误当成可执行依赖。
+- 2026-07-18 已完成前端能力透明化：导入预览、编辑器和调试统一使用结构化兼容结论；动态 Header、
+  `loginCheckJs`、规则脚本/模板和 WebView 不再被默认选为可运行源，固定基准未消费字段仍可无损保存且不被
+  误判阻断。完整合同与三视口证据见 [`booksource-script-transparency-p2-contract.md`](booksource-script-transparency-p2-contract.md)。
+- 2026-07-18 已完成远端元数据后处理与 `canReName` 语义统一：CSS、JSONPath、XPath 的搜索/详情共享
+  固定基准书名、作者和简介格式化；`canReName` 只按配置存在决定是否允许详情覆盖已有书名/作者，不再
+  执行规则取布尔值。API、存量数据与安全边界见
+  [`booksource-metadata-normalization-p2-contract.md`](booksource-metadata-normalization-p2-contract.md)。
 
 ## 审查范围与上游证据
 

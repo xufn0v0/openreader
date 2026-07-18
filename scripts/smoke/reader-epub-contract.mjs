@@ -111,7 +111,7 @@ function createEPUB() {
     </section>
     <section id="part-b">
       <h1>第一章 EPUB 第二节</h1>
-      <p id="part-b-content">这是同一 XHTML 的第二个目录片段，不能在第一节 iframe 中出现。</p>
+      <p id="part-b-content">这是同一 XHTML 的第二个目录片段，应与第一节在同一个 iframe 中连续显示。</p>
       <p><a id="next-chapter" href="two.xhtml#opening">下一章</a></p>
     </section>
   </body>
@@ -140,7 +140,7 @@ function createEPUB() {
 }
 
 async function registerAndImport(archive) {
-  const username = `epub_smoke_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  const username = `epubsmoke${Date.now()}${Math.random().toString(16).slice(2)}`
   const register = await fetch(`${baseURL}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -173,6 +173,9 @@ async function seedProgress(token, bookID) {
   const chaptersBody = await chaptersResponse.text()
   assert.equal(chaptersResponse.status, 200, chaptersBody)
   const chapters = JSON.parse(chaptersBody)
+  assert.equal(chapters.length, 3, 'fixed upstream EPUB catalog must contain one row per XHTML href')
+  assert.deepEqual(chapters.map(chapter => chapter.title), ['封面', '第一章（下）', '第二章'])
+  assert.ok(chapters.every(chapter => !chapter.resourceFragment && !chapter.resourceEndFragment))
   const target = chapters[1]
   assert.ok(target?.id, 'the image-only titlepage must precede the saved first text chapter')
 
@@ -215,11 +218,65 @@ async function assertCoverFrameContract(page, resourceResponses) {
   assert.ok(resourceResponses.some(row => row.url.includes('/OPS/Text/titlepage.xhtml') && row.status === 200))
 }
 
+async function assertCurrentEpubParagraphBookmark(page, viewport) {
+  if (viewport.width <= 750 && !await page.locator('.reader-mobile-top.visible').count()) {
+    await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
+    await page.waitForTimeout(150)
+  }
+  const expectedParagraph = await page.locator('iframe.epub-iframe').evaluate((frame) => {
+    const viewport = document.querySelector('.reader-content')?.getBoundingClientRect()
+    const frameRect = frame.getBoundingClientRect()
+    if (!viewport || !frame.contentDocument) return ''
+    const anchor = viewport.top + Math.min(viewport.height * 0.32, 180)
+    const rows = [...frame.contentDocument.querySelectorAll('p, li, blockquote')]
+      .map(node => {
+        const rect = node.getBoundingClientRect()
+        return {
+          node,
+          top: frameRect.top + rect.top,
+          bottom: frameRect.top + rect.bottom,
+        }
+      })
+      .filter(row => String(row.node.textContent || '').trim() && row.bottom >= viewport.top + 8 && row.top <= viewport.bottom - 8)
+    const anchored = rows.find(row => row.top <= anchor && row.bottom >= anchor)
+    const selected = anchored || rows.sort((left, right) => (
+      Math.abs(left.top - anchor) - Math.abs(right.top - anchor)
+    ))[0]
+    return String(selected?.node?.textContent || '').trim()
+  })
+  assert.ok(expectedParagraph, `${viewport.width}: EPUB viewport must expose a current paragraph`)
+
+  const button = viewport.width <= 750
+    ? page.locator('.reader-mobile-float-left.visible button[title="书签"]')
+    : page.locator('.reader-right-rail button[title="书签"]')
+  await button.click()
+  const manager = page.locator('.global-bookmark-dialog')
+  await manager.waitFor({ state: 'visible', timeout: 10_000 })
+  await manager.getByRole('button', { name: '添加当前段落', exact: true }).click()
+  const form = page.locator('.global-bookmark-form-dialog')
+  await form.waitFor({ state: 'visible', timeout: 10_000 })
+  assert.equal(
+    await form.locator('textarea[readonly]').inputValue(),
+    expectedParagraph,
+    `${viewport.width}: EPUB bookmark must contain exactly one current iframe paragraph`,
+  )
+  await form.locator('textarea').last().fill('EPUB 当前段落')
+  await form.getByRole('button', { name: '确定', exact: true }).click()
+  await form.waitFor({ state: 'hidden', timeout: 10_000 })
+  await manager.getByText('EPUB 当前段落', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
+  assert.equal(await manager.isVisible(), true, `${viewport.width}: saving EPUB paragraph must keep bookmark manager open`)
+  await manager.getByRole('button', { name: '取消', exact: true }).click()
+  await manager.waitFor({ state: 'hidden', timeout: 10_000 })
+  if (viewport.width <= 750) {
+    assert.equal(await page.locator('.reader-mobile-top.visible').count(), 1)
+  }
+}
+
 async function assertFrameContract(page, viewport, resourceResponses) {
   console.log(`checking ${viewport.width}x${viewport.height}`)
   await page.waitForSelector('iframe.epub-iframe', { timeout: 15_000 })
   const frame = page.frameLocator('iframe.epub-iframe')
-  await frame.locator('h1').waitFor({ timeout: 10_000 })
+  await frame.locator('#start').waitFor({ timeout: 10_000 })
   await page.waitForTimeout(300)
 
   const frameState = await frame.locator('body').evaluate((body) => {
@@ -241,7 +298,7 @@ async function assertFrameContract(page, viewport, resourceResponses) {
     }
   })
   assert.match(frameState.text, /第一章 EPUB 文档/)
-  assert.doesNotMatch(frameState.text, /第一章 EPUB 第二节/)
+  assert.match(frameState.text, /第一章 EPUB 第二节/)
   assert.equal(frameState.bridge, true)
   assert.equal(frameState.authoredScript, false)
   assert.equal(frameState.authoredGlobal, false)
@@ -282,6 +339,8 @@ async function assertFrameContract(page, viewport, resourceResponses) {
   await page.waitForTimeout(250)
   const homeOffset = await page.locator('.reader-content').evaluate(element => element.scrollTop)
   assert.ok(homeOffset < keyboardOffset, `EPUB Home did not move toward the top: ${homeOffset}`)
+
+  await assertCurrentEpubParagraphBookmark(page, viewport)
 
   if (viewport.width <= 750) {
     if (!await page.locator('.reader-mobile-top.visible').count()) {
@@ -325,7 +384,7 @@ async function assertFrameContract(page, viewport, resourceResponses) {
   }
   await frame.locator('#part-b-link').click()
   await frame.locator('#part-b-content').waitFor({ timeout: 10_000 })
-  assert.equal(await frame.locator('#part-a').count(), 0)
+  assert.equal(await frame.locator('#part-a').count(), 1)
 
   await frame.locator('#next-chapter').click()
   await frame.locator('h1').filter({ hasText: '第二章 EPUB 文档' }).waitFor({ timeout: 10_000 })
@@ -333,7 +392,7 @@ async function assertFrameContract(page, viewport, resourceResponses) {
     await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
     await page.waitForTimeout(150)
   }
-  await page.waitForFunction(() => document.body.innerText.includes('4 / 4'))
+  await page.waitForFunction(() => document.body.textContent.includes('3 / 3'))
 
   await page.goBack({ waitUntil: 'domcontentloaded' })
   assert.equal(new URL(page.url()).pathname, '/', 'EPUB cross-chapter navigation must not consume browser back history')

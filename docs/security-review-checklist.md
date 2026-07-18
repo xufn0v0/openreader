@@ -27,6 +27,35 @@ Use this checklist for security-sensitive changes and release reviews.
 - [ ] Backup downloads only expose expected backup files.
 - [ ] API errors do not leak host filesystem paths.
 
+## P2 reading-progress CAS and WebDAV mirror review (2026-07-18)
+
+- [x] Progress GET/PUT resolves the book through `(authenticated user_id, book_id)` and resolves
+  the canonical chapter through that book before any write. A supplied chapter ID cannot select a
+  chapter from another book or user; negative/missing catalogue positions fail before persistence.
+- [x] Existing-row progress writes use an `id + updated_at` conditional update and first writes use
+  the existing `(user_id,book_id)` unique index. A losing concurrent request reloads the committed
+  winner and cannot emit a second WebSocket event.
+- [x] Live `bookProgress` output is attempted only after the database commit and only when the
+  caller's existing WebDAV feature directory is enabled. Administrators retain the historical root;
+  regular users remain under `webdav/users/<safe-username>`.
+- [x] The WebDAV root and feature directory are resolved and checked; a feature-directory symlink,
+  non-directory or resolved path outside the caller root fails closed. Output uses a sanitized
+  filename, same-directory temporary file, bounded JSON fields and atomic rename.
+- [x] A mirror failure returns only a path-free diagnostic header, never a host path, credential or
+  token. It cannot roll back or falsify the already committed SQLite progress.
+- [x] Real dual-client browser checks pass at 1440×900, 390×844 and 360×800 with one CAS
+  winner, one conflict, both active readers converged, a clean-context restore and the WebDAV file
+  matching the SQLite winner. Remote application no longer echoes an additional progress write.
+- [x] Full Go tests, 474 frontend tests, production build, Reader text/mobile/continuous, shelf
+  multiclient and real EPUB/CBZ browser gates pass on the implementation commit candidate.
+- [x] Fresh-volume/portable restore and historical TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation
+  Docker gates pass; the locally built amd64/arm64 image is published as `9f19d21` and `latest`.
+
+Targeted evidence: `backend/api/progress_p2_contract_test.go`,
+`frontend/tests/readerProgressPersistence.test.mjs`, `frontend/tests/readerRouteSync.test.mjs` and
+`scripts/smoke/reader-progress-multiclient-contract.mjs`. Release evidence will be appended after
+the remaining gates pass.
+
 ## Uploads and archive formats
 
 - [ ] File size limits are enforced before expensive parsing.
@@ -121,11 +150,105 @@ Evidence: `backend/services/localbook/importer_test.go`, `backend/api/api_test.g
 - [x] Initial EPUB parsing now validates ZIP paths/symlinks/duplicates/count/per-entry/expanded-size before local import work; every archive-member read is bounded.
 - [x] Initial CBZ parsing retains its existing safe checks while using the same local-import limit policy.
 - [x] E4-CBZ-1 derives its first image only from the bounded/normalized archive walk and returns a short-lived CBZ capability at serialization time. It does not persist a capability, ZIP member path, raw archive path, or JWT in SQLite, archive metadata, backup/WebDAV data, sync payload storage, or logs; malformed/missing archives degrade to an empty cover without failing the bookshelf response. Evidence: `TestDirectCBZImportAndResourceCapability`, `TestParseCBZKeepsFirstArchiveImageAsCoverSeparateFromSortedCatalogue`, full backend tests and the Docker volume/backup smoke for this release.
+- [x] CBZ fixed-baseline runtime extracts only supported image media below a private
+  `.cbz-resources/<sha256>/` generation after normalized-path, symlink, duplicate,
+  file/directory-conflict, entry-count, per-entry and aggregate expansion checks. Activation is an
+  atomic same-directory rename with a complete marker; no partial tree is served.
+- [x] A CBZ capability remains scoped to one user/book/fingerprint and cannot select another
+  generation or arbitrary host path. Source replacement invalidates old capabilities; temporary
+  source absence may expose only an already complete signed generation. GET/HEAD/Range stream the
+  allowlisted derived file and never log the capability or disclose a filesystem path.
+
+Evidence: `backend/services/cbzreader/service_test.go` covers atomic activation, conflict rejection,
+warm no-rehash selection, one-time recovery, source absence and source replacement invalidation;
+`backend/api.TestDirectCBZImportAndResourceCapability` covers import preparation, GET/HEAD/Range,
+security headers, unsupported paths and stale capabilities; full Go/frontend suites and real-Go
+`scripts/smoke/reader-cbz-contract.mjs` pass at 1440×900, 390×844 and 360×800.
 - [x] Standard reader-dev UMD uses a bounded `#`/`$` section reader: signature/type, section/additional lengths, segment count, offsets/titles, zlib output and total decoded text are validated before archive/database writes. Image, malformed and corrupt zlib UMD inputs fail closed; the legacy OpenReader-only prefix is isolated to its existing fallback.
 - [x] Expired and orphaned preview tokens are cleaned from every user directory at startup and hourly, without touching active previews or any mounted source/library data.
 - [x] Backup ZIP restore now receives a separately tested compressed/entry/expanded-size budget; it remains a distinct compatibility slice from parser/stage handling.
 
 Evidence: `backend/engine/import_limits_contract_test.go`, `backend/engine/umd_parser_contract_test.go`, `backend/services/localbook/importer_test.go`, `backend/api/workspace_import_stage_contract_test.go`, `backend/api/umd_import_contract_test.go`, `backend/config/config_test.go`, and full `go test ./...`. Docker mounted-volume/backup validation remains required before this slice is released.
+
+## P0 parsed local-import snapshot lifecycle (2026-07-18)
+
+- [x] A successful local-book preview writes an optional versioned
+  `<token>.parsed.json` only below the existing authenticated user's
+  `cache/import-previews/<user-id>/` directory. The token remains a validated
+  192-bit random hex basename; no request field can select another path or
+  user's directory.
+- [x] The snapshot is plain JSON data with no executable/type-polymorphic
+  decoder. Its raw file size, chapter count and aggregate
+  title/content/resource string bytes are bounded before save and after load.
+  Limit arithmetic saturates instead of wrapping for extreme environment
+  values.
+- [x] The snapshot records its format version, normalized extension, exact TOC
+  rule and SHA-256 of the immutable staged `.book`. A mismatched snapshot is
+  never consumed; the bounded parser reconstructs it from the caller's own raw
+  stage. Malformed or over-limit derived snapshots are removed.
+- [x] Snapshot replacement uses a `0600` temporary file and same-directory
+  atomic rename. A failed parse cannot replace the last successful snapshot.
+  Expiry, successful confirmation and explicit token removal delete `.book`,
+  metadata and parsed snapshot together; aged interrupted temporary files are
+  confined to and cleaned from the stage directory.
+- [x] Confirmation retains existing EPUB/CBZ archive limits, TXT/UMD/PDF
+  parser bounds and user-scoped library path construction. It does not trust
+  MIME type, expose a host path, log a token, or broaden LocalStore/WebDAV
+  access. A failed database transaction compensates by removing only the newly
+  allocated durable archive directory.
+
+Evidence: `backend/api/api_test.go`,
+`backend/api/workspace_import_stage_contract_test.go`,
+`backend/services/localbook/importer_test.go`,
+`frontend/tests/overlayBookImport.test.mjs`, and
+`scripts/smoke/local-book-import-contract.mjs` at 1440x900, 390x844 and
+360x800.
+
+## EPUB catalogue/prepared-extraction performance review (2026-07-18)
+
+- [x] Catalogue-only preview validates every central-directory path, duplicate, symlink, entry count,
+  per-entry size and total expanded size before trusting OPF/NAV/NCX metadata; skipping body materialization
+  must not skip archive-bomb validation.
+- [x] A new prepared extraction is written only below the caller-owned newly allocated library archive, via a
+  sibling temporary directory and atomic rename. Failed import compensation cannot select or remove an old book,
+  mounted LocalStore/WebDAV source, or another user's directory.
+- [x] The extraction marker fast path accepts only a valid SHA-256 fingerprint and exact regular-source
+  size/mtime match. Any mismatch, corrupt marker, missing resource or source replacement falls back to bounded
+  hashing/rebuild and invalidates capabilities for the old archive identity.
+- [x] Catalogue-only and legacy full-content parsed snapshots share the existing owner/token/rule/source-hash
+  checks and deserialization bounds. Empty EPUB body fields are never interpreted as authority to read a request
+  path or another user's source.
+- [x] One-chapter EPUB text recovery uses only normalized persisted archive paths/fragments below the verified
+  extraction root, remains bounded by document/text limits, and never logs a capability, stage token, host path
+  or EPUB body.
+- [x] The real-browser gate must not print the WebSocket login JWT. `/ws/sync?token=...` remains a transport
+  compatibility path, but access logging renders its entire query as `<redacted>` while leaving the actual
+  request available to authentication middleware.
+
+Evidence: `backend/engine/parser_test.go`, `backend/services/localbook/importer_test.go`,
+`backend/services/epubreader/resource_runtime_test.go`, `backend/api/api_test.go`,
+`backend/middleware/access_log_test.go`, full backend tests, both three-viewport EPUB/import browser smokes, and
+the local `HISTORICAL_VOLUME=1` Docker volume/portable-backup smoke. Archive-policy failures are returned through
+a client-safe parse error while host storage failures remain generic server errors.
+
+### Fixed EPUB href catalogue correction
+
+- [x] A TOC-only chapter is accepted only when its canonical path matches a manifest item whose media type is
+  XHTML/HTML-compatible; an arbitrary NAV/NCX href cannot make a non-manifest ZIP entry readable.
+- [x] Manifest and TOC paths pass the existing NUL/backslash/absolute/drive/`..` normalization. Central-directory
+  duplicate, symlink, entry-count, per-entry and total-expanded limits still run before any TOC-only title read.
+- [x] TOC-only title fallback uses `readEPUBZipFile` with `MaxArchiveEntryBytes`; the fixed href dedupe does not
+  add network access, public archive URLs, host-path errors or unbounded body materialization.
+- [x] Historical fragment capabilities remain scoped to their signed user/book/fingerprint/path. New rows leave
+  fragment fields empty; resource-aware progress/bookmark reconciliation compares normalized metadata only and
+  never opens a filesystem path.
+- [x] The legacy pure-`toc`/no-TOC fallback runs only while recovering an existing row with missing metadata,
+  reuses the bounded local EPUB parser, selects a normalized manifest/spine resource at the same numeric index,
+  and neither broadens archive access nor changes new import/refresh catalogues.
+
+Evidence: fixed EPUB engine/import/API contracts, full Go tests, 426 frontend tests, production build, both
+three-viewport EPUB/import browser smokes, and the local `HISTORICAL_VOLUME=1` Docker gate covering rejected
+empty-TOC replacement preservation, explicit spine refresh, owner isolation and portable backup/restore/restart.
 
 ## P2 backup restore follow-up
 

@@ -28,7 +28,6 @@ function createNavigation(overrides = {}) {
     getMode: () => 'flip',
     getAnimateDuration: () => 200,
     scrollStep: () => 600,
-    scrollBehavior: () => 'smooth',
     jumpToParagraph: () => {},
     closeToc: () => {},
     navigate: async query => navigated.push(query),
@@ -105,6 +104,111 @@ test('scrolls vertical pages and schedules progress without changing chapters', 
   assert.deepEqual(fixture.navigated, [])
 })
 
+test('settles vertical synchronization only after the click animation finishes', async () => {
+  const settled = []
+  let finishAnimation
+  const fixture = createNavigation({
+    contentEl: ref({
+      scrollTop: 0,
+      scrollHeight: 3000,
+      clientHeight: 800,
+    }),
+    isVerticalRead: ref(true),
+    getMode: () => 'page',
+    onVerticalPageSettled: () => settled.push('settled'),
+    scrollAnimator: {
+      isActive: () => Boolean(finishAnimation),
+      scrollBy: (_element, _delta, _duration, onFinish) => {
+        finishAnimation = () => {
+          finishAnimation = null
+          onFinish()
+        }
+        return true
+      },
+    },
+  })
+
+  await fixture.navigation.nextPage()
+  assert.deepEqual(settled, [])
+  finishAnimation()
+  assert.deepEqual(settled, ['settled'])
+})
+
+test('uses the composited body for mobile page clicks and buffers one repeated direction', async () => {
+  const settled = []
+  const animationCalls = []
+  const finishes = []
+  const body = { animate: () => ({ cancel() {} }) }
+  const fixture = createNavigation({
+    contentEl: ref({
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 800,
+    }),
+    contentBody: ref(body),
+    isVerticalRead: ref(true),
+    getMode: () => 'page',
+    useCompositedPageAnimation: () => true,
+    onVerticalPageSettled: () => settled.push('settled'),
+    scrollAnimator: {
+      cancel: () => {},
+      isActive: () => finishes.length > 0,
+      scrollBy: (_element, delta, duration, onFinish, animationOptions) => {
+        animationCalls.push({ delta, duration, animationOptions })
+        finishes.push(onFinish)
+        return true
+      },
+    },
+  })
+
+  await fixture.navigation.nextPage()
+  await fixture.navigation.nextPage()
+  assert.equal(animationCalls.length, 1, 'the repeated tap must be bounded while motion is active')
+  assert.equal(animationCalls[0].animationOptions.visualElement, fixture.options.contentBody.value)
+
+  finishes.shift()()
+  await Promise.resolve()
+  assert.equal(animationCalls.length, 2, 'one repeated next-page tap must run immediately after settlement')
+  assert.equal(animationCalls[1].animationOptions.visualElement, fixture.options.contentBody.value)
+  finishes.shift()()
+  assert.deepEqual(settled, ['settled', 'settled'])
+})
+
+test('native gesture cancellation clears a buffered page click', async () => {
+  const finishes = []
+  let active = false
+  let cancelCalls = 0
+  const fixture = createNavigation({
+    contentEl: ref({
+      scrollTop: 0,
+      scrollHeight: 4000,
+      clientHeight: 800,
+    }),
+    isVerticalRead: ref(true),
+    getMode: () => 'page',
+    scrollAnimator: {
+      cancel: () => {
+        active = false
+        cancelCalls += 1
+      },
+      isActive: () => active,
+      scrollBy: (_element, _delta, _duration, onFinish) => {
+        active = true
+        finishes.push(onFinish)
+        return true
+      },
+    },
+  })
+
+  await fixture.navigation.nextPage()
+  await fixture.navigation.nextPage()
+  fixture.navigation.cancelPageAnimation()
+  assert.equal(cancelCalls, 1)
+  finishes.shift()()
+  await Promise.resolve()
+  assert.equal(finishes.length, 0, 'cancelled native handoff must not run the buffered tap')
+})
+
 test('rebuilds an explicitly selected loaded chapter before jumping in continuous mode', async () => {
   const calls = []
   const targetChapter = {
@@ -128,12 +232,23 @@ test('rebuilds an explicitly selected loaded chapter before jumping in continuou
     isContinuousScrollRead: ref(true),
     getMode: () => 'scroll2',
     rebuildContinuousWindow: async index => calls.push(['rebuild', index]),
+    scrollAnimator: {
+      cancel: () => calls.push(['cancel']),
+      isActive: () => false,
+      scrollBy: () => false,
+      scrollTo: (element, top, duration) => {
+        calls.push(['animate-scroll', top, duration])
+        element.scrollTop = top
+        return true
+      },
+    },
   })
 
   await fixture.navigation.goChapter(2)
   assert.deepEqual(calls, [
+    ['cancel'],
     ['rebuild', 2],
-    ['scroll', { top: 900, behavior: 'smooth' }],
+    ['animate-scroll', 900, 200],
   ])
   assert.equal(fixture.options.currentIndex.value, 2)
   assert.deepEqual(fixture.navigated, [])

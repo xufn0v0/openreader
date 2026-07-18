@@ -2,7 +2,7 @@
   <main ref="shellEl" class="reader-shell" :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible }]" :style="readerStyle">
     <ReaderDesktopTools
       :auto-reading="autoReading"
-      :auto-reading-supported="!isAudioChapter"
+      :auto-reading-supported="autoReadingSupportedForChapter"
       :tts-playing="tts.state.playing"
       :tts-supported="ttsSupportedForChapter"
       :active-panel="desktopWorkspacePanel"
@@ -94,7 +94,7 @@
     <ReaderMobileChrome
       :visible="mobileChromeVisible"
       :auto-reading="autoReading"
-      :auto-reading-supported="!isAudioChapter"
+      :auto-reading-supported="autoReadingSupportedForChapter"
       :tts-playing="tts.state.playing"
       :tts-supported="ttsSupportedForChapter"
       :is-night="isNightTheme"
@@ -159,10 +159,10 @@
             :audio-resource="audioResource"
             :audio-initial-time="audioInitialTime"
             :audio-title="chapter?.title || book?.title || ''"
+            :audio-book-title="book?.title || ''"
+            :audio-author="book?.author || ''"
             :audio-cover-url="book?.customCoverUrl || book?.coverUrl || ''"
             :audio-autoplay="audioAutoplay"
-            :previous-disabled="currentIndex <= 0"
-            :next-disabled="currentIndex >= chapters.length - 1"
             :epub-style="epubStyleText"
             :viewport-height="readerViewportHeight"
             @reload="reloadChapter"
@@ -176,6 +176,8 @@
             @epub-error="handleEpubError"
             @audio-loaded="handleAudioLoaded"
             @audio-progress="handleAudioProgress"
+            @audio-play="handleAudioPlay"
+            @audio-autoplay-blocked="handleAudioAutoplayBlocked"
             @audio-ended="handleAudioEnded"
             @audio-error="handleAudioError"
             @audio-previous="goAudioChapter(currentIndex - 1)"
@@ -183,6 +185,16 @@
             @image-load="handleReaderImageLoad"
             @retry-block="retryContinuousChapter"
           />
+          <button
+            v-if="showChapterEndPrompt"
+            class="reader-chapter-end"
+            type="button"
+            @click.stop="handleChapterEndNext"
+            @touchstart.stop
+            @touchend.stop
+          >
+            加载下一章
+          </button>
         </div>
       </article>
       <ReaderClickZones
@@ -400,6 +412,7 @@ import { useReaderChapterCache } from '../composables/useReaderChapterCache'
 import { useReaderChapterContent } from '../composables/useReaderChapterContent'
 import { useReaderChapterLoader } from '../composables/useReaderChapterLoader'
 import { useReaderChapterMaintenance } from '../composables/useReaderChapterMaintenance'
+import { useReaderChapterReady } from '../composables/useReaderChapterReady'
 import { isCBZBook, useReaderChapterPresentation } from '../composables/useReaderChapterPresentation'
 import { useReaderChapterWindow } from '../composables/useReaderChapterWindow'
 import { useReaderChrome } from '../composables/useReaderChrome'
@@ -413,7 +426,12 @@ import { useReaderProgressPersistence } from '../composables/useReaderProgressPe
 import { useReaderProgressControls } from '../composables/useReaderProgressControls'
 import { useReaderBookmarkActions } from '../composables/useReaderBookmarkActions'
 import { useReaderNavigation } from '../composables/useReaderNavigation'
-import { readerEffectiveMode, useReaderMode } from '../composables/useReaderMode'
+import {
+  readerAutoReadingSupported,
+  readerEffectiveMode,
+  readerTTSSupported,
+  useReaderMode,
+} from '../composables/useReaderMode'
 import { useReaderPageLifecycle } from '../composables/useReaderPageLifecycle'
 import { useReaderPanels } from '../composables/useReaderPanels'
 import { useReaderPrimaryPanels } from '../composables/useReaderPrimaryPanels'
@@ -438,10 +456,12 @@ import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
 import {
-  captureReaderBookmarkExcerpt,
+  readerBookmarkText,
   selectedTextBookmarkContext,
 } from '../utils/readerBookmarkContext'
+import { readerTextProgress, selectVisibleReaderBlock } from '../utils/readerVisibility'
 import { readerTTSBarVisible } from '../utils/readerTTS'
+import { createReaderScrollAnimator } from '../utils/readerAnimation'
 import {
   readerScrollBehaviorForDuration,
   readerScrollStep,
@@ -455,6 +475,7 @@ const router = useRouter()
 const reader = useReaderStore()
 const bookshelf = useBookshelfStore()
 const overlay = useOverlayStore()
+const readerScrollAnimator = createReaderScrollAnimator()
 const categoryName = createBookCategoryNameResolver(() => bookshelf.categories)
 const remoteSessionId = computed(() => (
   route.name === 'remote-reader' ? String(route.params.sessionId || '') : ''
@@ -468,6 +489,12 @@ function readerRouteLocation(query = {}) {
   return isTemporaryRemoteReader.value
     ? { name: 'remote-reader', params: { sessionId: remoteSessionId.value }, query }
     : { name: 'reader', params: { id: bookId.value }, query }
+}
+
+let suppressNextReaderPositionReload = () => {}
+function replaceReaderPositionWithoutReload(query = {}) {
+  suppressNextReaderPositionReload(query)
+  return router.replace(readerRouteLocation(query))
 }
 
 function temporaryReaderUnavailable() {
@@ -508,6 +535,7 @@ const {
 })
 const {
   createFromSelectedText: createBookmarkFromSelectedText,
+  currentDraft: currentBookmarkDraft,
   openNote: openNoteDialog,
 } = useReaderBookmarkActions({
   book,
@@ -515,7 +543,7 @@ const {
   currentIndex,
   getOffset: () => currentOffset(),
   getPercent: () => currentChapterPercent(),
-  getExcerpt: currentVisibleExcerpt,
+  getCurrentContext: currentBookmarkParagraphContext,
   getSelectedTextContext: selectedBookmarkContextFromText,
   onSelectedTextNotFound: () => ElMessage.error('选择1-2段整段文字才能定位段落'),
   openForm: (...args) => overlay.openBookmarkForm(...args),
@@ -541,11 +569,26 @@ const epubPreviewVisible = ref(false)
 const epubPreviewImages = ref([])
 const epubPreviewIndex = ref(0)
 const chapterBlocks = ref([])
+const chapterWindowBusy = ref(false)
 const chapterLoading = ref(true)
 const chapterLoadError = ref('')
 const chapterLoaded = ref(false)
 const contentEl = ref(null)
 const contentBody = ref(null)
+const {
+  wait: waitForReaderChapterReady,
+} = useReaderChapterReady({
+  currentIndex,
+  chapterLoaded,
+  chapterLoading,
+  chapterLoadError,
+  getScopeKey: () => [
+    bookId.value,
+    remoteSessionId.value,
+    book.value?.url || book.value?.bookUrl || book.value?.libraryPath || '',
+    book.value?.sourceId || '',
+  ].join('|'),
+})
 const {
   consumeSuppressedContentClick,
   schedule: scheduleSelectedTextOperation,
@@ -812,17 +855,23 @@ const chapterTextLength = computed(() => {
 const isAudioChapter = computed(() => chapterFormat.value === 'audio')
 const ttsBarRequested = ref(false)
 const ttsConfigExpanded = ref(true)
+const autoReading = ref(false)
 const isComicChapter = computed(() => (
   makeChapterBlock(currentIndex.value, chapter.value, content.value).isComic === true
 ))
 const isOrdinaryImageComicChapter = computed(() => (
   isComicChapter.value && !isCBZBook(book.value)
 ))
+const autoReadingSupportedForChapter = computed(() => readerAutoReadingSupported({
+  isEPUB: chapterFormat.value === 'epub',
+  isAudio: isAudioChapter.value,
+  isOrdinaryImageComic: isOrdinaryImageComicChapter.value,
+}))
 const ttsReadBarLayoutActive = computed(() => (
   ttsBarRequested.value
     && chapterFormat.value !== 'epub'
     && !isAudioChapter.value
-    && !isComicChapter.value
+    && !isOrdinaryImageComicChapter.value
 ))
 const effectiveReaderMode = computed(() => (
   readerEffectiveMode(
@@ -831,6 +880,7 @@ const effectiveReaderMode = computed(() => (
     isAudioChapter.value,
     ttsReadBarLayoutActive.value,
     isOrdinaryImageComicChapter.value,
+    autoReading.value,
   )
 ))
 const effectiveReaderState = {
@@ -858,11 +908,19 @@ const isVerticalRead = computed(() => isVerticalPagedRead.value || isScrollRead.
 const isContinuousScrollRead = computed(() => (
   !isAudioChapter.value && (effectiveReaderMode.value === 'scroll' || effectiveReaderMode.value === 'scroll2')
 ))
+const showChapterEndPrompt = computed(() => (
+  effectiveReaderMode.value === 'page'
+  && chapterLoaded.value
+  && !chapterLoading.value
+  && !chapterLoadError.value
+  && !isAudioChapter.value
+))
 const displayedChapterBlocks = computed(() => {
   if (chapterFormat.value === 'epub' || isAudioChapter.value) return []
   if (isContinuousScrollRead.value && chapterBlocks.value.length) return chapterBlocks.value
   return [makeChapterBlock(currentIndex.value, chapter.value, content.value)]
 })
+let settleVerticalPageScroll = () => false
 const {
   activeChapterElement,
   captureReaderScrollAnchor,
@@ -913,7 +971,9 @@ const {
   isTemporaryReader: isTemporaryRemoteReader,
 })
 const {
+  busy: continuousWindowBusy,
   compute: computeShowChapterList,
+  invalidate: invalidateShowChapters,
   maybeExtend: maybeExtendShowChapters,
   retry: retryContinuousChapter,
   syncCurrentChapter: updateCurrentChapterFromScroll,
@@ -934,8 +994,22 @@ const {
   visibleProgressSnapshot: visibleChapterProgressSnapshot,
   nextFrame,
   nextSize: 1,
+  busy: chapterWindowBusy,
+  getScopeKey: () => [
+    bookId.value,
+    remoteSessionId.value,
+    book.value?.url || book.value?.bookUrl || book.value?.libraryPath || '',
+    book.value?.sourceId || '',
+  ].join('|'),
+  onStable: () => {
+    updateCurrentChapterFromScroll()
+    progressVersion.value += 1
+    applyLocalProgressSnapshot()
+    scheduleProgressSave(120)
+  },
   formatError: error => readError(error, '章节加载失败，请检查书源或网络后重试'),
 })
+onBeforeUnmount(invalidateShowChapters)
 const {
   readableViewportSize,
   resize: handleResize,
@@ -972,7 +1046,7 @@ const {
   pageWidth,
   getMode: () => effectiveReaderMode.value,
   getRouteQuery: () => route.query,
-  navigate: query => router.replace(readerRouteLocation(query)),
+  navigate: replaceReaderPositionWithoutReload,
   loadChapter: (index, loadOptions) => loadChapter(index, 0, loadOptions),
   canMatchBookmark: () => chapterFormat.value === 'text',
   onBookmarkNotFound: () => ElMessage.error('无法定位内容所在段落'),
@@ -990,6 +1064,7 @@ const {
   scrollToBottom,
   scrollToTop,
 } = useReaderNavigation({
+  scrollAnimator: readerScrollAnimator,
   contentEl,
   contentBody,
   chapterBlocks,
@@ -1004,8 +1079,13 @@ const {
   isVerticalRead,
   getMode: () => effectiveReaderMode.value,
   getAnimateDuration: () => reader.animateDuration,
+  useCompositedPageAnimation: () => (
+    isMobileReader.value
+    && effectiveReaderMode.value === 'page'
+    && chapterFormat.value === 'text'
+    && !isOrdinaryImageComicChapter.value
+  ),
   scrollStep,
-  scrollBehavior: readerScrollBehavior,
   jumpToParagraph,
   rebuildContinuousWindow: index => computeShowChapterList({
     anchorIndex: index,
@@ -1017,6 +1097,7 @@ const {
   navigate: query => router.replace(readerRouteLocation(query)),
   saveProgress: () => saveCurrentProgress(),
   scheduleProgressSave: delay => scheduleProgressSave(delay),
+  onVerticalPageSettled: () => settleVerticalPageScroll(),
 })
 onBeforeUnmount(cancelPageAnimation)
 const {
@@ -1043,6 +1124,7 @@ const {
   handleMobilePageProgressChange,
   handleMobilePageProgressInput,
 } = useReaderProgressControls({
+  scrollAnimator: readerScrollAnimator,
   contentEl,
   contentBody,
   chapters,
@@ -1052,6 +1134,7 @@ const {
   progressVersion,
   isContinuousScrollRead,
   getMode: () => effectiveReaderMode.value,
+  getAnimateDuration: () => reader.animateDuration,
   getCurrentChapterPercent: currentChapterPercent,
   navigate: query => router.replace(readerRouteLocation(query)),
   applyLocalProgress: () => applyLocalProgressSnapshot(),
@@ -1243,6 +1326,7 @@ const {
   updateLayout: updateFlipLayout,
   restorePosition: restoreReadingPosition,
   saveProgress: () => saveCurrentProgress(),
+  invalidateChapterWindow: invalidateShowChapters,
 })
 const mobileChromeVisible = ref(true)
 const {
@@ -1288,10 +1372,10 @@ const {
 })
 
 const {
-  active: autoReading,
   stop: stopAutoReading,
   toggle: toggleAutoReading,
 } = useReaderAutoReading({
+  active: autoReading,
   reader,
   contentEl,
   contentBody,
@@ -1341,6 +1425,7 @@ const {
   schedule: scheduleProgressSave,
 } = useReaderProgressPersistence({
   minimumInterval: 1200,
+  isBlocked: () => continuousWindowBusy.value,
   getPayload: () => chapter.value ? currentProgressPayload() : null,
   getBaseUpdatedAt: progressServerBaseUpdatedAt,
   applyLocal: applyLocalProgressSnapshot,
@@ -1378,7 +1463,9 @@ const {
   refreshBrowserCachedChapters: computeBrowserCachedChapters,
   saveProgress: saveCurrentProgress,
   navigate: routeLocation => router.push(routeLocation),
-  openBookmarksOverlay: currentBook => overlay.openBookmark(currentBook),
+  openBookmarksOverlay: currentBook => overlay.openBookmark(currentBook, {
+    createDraft: currentBookmarkDraft(),
+  }),
   openContentSearchOverlay: currentBook => overlay.openSearchBookContent(currentBook),
   closeBookInfo: () => overlay.closeBookInfo(),
   openBookInfoOverlay: (...args) => overlay.openBookInfo(...args),
@@ -1424,6 +1511,7 @@ const {
   markProgressSaved,
   getCurrentProgress: currentProgressPayload,
   computeChapterWindow: computeShowChapterList,
+  invalidateChapterWindow: invalidateShowChapters,
   formatError: error => readError(error, '章节加载失败，请检查书源或网络后重试'),
   nextFrame,
   onEpubPrepared: pending => {
@@ -1436,18 +1524,23 @@ const {
   },
 })
 const {
+  flush: flushReaderScrollSync,
   handle: onScroll,
 } = useReaderScrollSync({
   isVerticalRead,
   restoringPosition,
   chapterLoading,
+  windowBusy: continuousWindowBusy,
   progressVersion,
   syncCurrentChapter: updateCurrentChapterFromScroll,
   maybeExtendChapterWindow: maybeExtendShowChapters,
   updateLayout: updateFlipLayout,
   applyLocalProgress: applyLocalProgressSnapshot,
   scheduleProgressSave,
+  pageAnimationActive: () => readerScrollAnimator.isActive(),
+  scrollPosition: () => contentEl.value?.scrollTop,
 })
+settleVerticalPageScroll = flushReaderScrollSync
 const {
   load: loadReaderBook,
 } = useReaderBookLoad({
@@ -1496,7 +1589,7 @@ const {
   loadChapter,
   progressKey: progressSaveKey,
   getCurrentProgress: currentProgressPayload,
-  navigate: query => router.replace(readerRouteLocation(query)),
+  navigate: replaceReaderPositionWithoutReload,
   markProgressSaved,
   jumpToRouteLine,
 })
@@ -1514,6 +1607,7 @@ const {
   previous: ttsPrevious,
   next: ttsNext,
   stop: ttsStop,
+  currentParagraphElement: currentTTSParagraphElement,
 } = useReaderTTS({
   reader,
   content,
@@ -1521,21 +1615,26 @@ const {
   currentIndex,
   chapters,
   goChapter,
+  waitForChapterReady: waitForReaderChapterReady,
   notify: showReaderToast,
   isSlideRead: () => effectiveReaderMode.value === 'flip',
+  topOffset: () => Math.max(
+    Number(contentEl.value?.getBoundingClientRect?.().top || 0) + 50,
+    Number(contentBody.value?.getBoundingClientRect?.().top || 0) + 5,
+  ),
 })
-const ttsSupportedForChapter = computed(() => (
-  tts.state.supported
-    && chapterFormat.value !== 'epub'
-    && !isAudioChapter.value
-    && !isComicChapter.value
-))
+const ttsSupportedForChapter = computed(() => readerTTSSupported({
+  speechSupported: tts.state.supported,
+  isEPUB: chapterFormat.value === 'epub',
+  isAudio: isAudioChapter.value,
+  isOrdinaryImageComic: isOrdinaryImageComicChapter.value,
+}))
 const ttsBarShown = computed(() => readerTTSBarVisible({
   requested: ttsBarRequested.value,
   supported: tts.state.supported,
   chapterFormat: chapterFormat.value,
   audio: isAudioChapter.value,
-  comic: isComicChapter.value,
+  comic: isOrdinaryImageComicChapter.value,
 }))
 function toggleTTSBar() {
   if (!ttsSupportedForChapter.value) return
@@ -1545,8 +1644,18 @@ function toggleTTSBar() {
   }
 }
 function closeTTSBar() {
+  const activeParagraph = currentTTSParagraphElement()
   ttsBarRequested.value = false
   ttsStop()
+  return (async () => {
+    await nextTick()
+    updateFlipLayout()
+    await nextFrame()
+    if (reader.mode !== 'flip' || !activeParagraph?.isConnected) return
+    updateFlipLayout()
+    await nextFrame()
+    jumpToParagraph(activeParagraph, { save: false, flash: false })
+  })()
 }
 
 function openReaderPrimaryTool(name, open) {
@@ -1554,8 +1663,8 @@ function openReaderPrimaryTool(name, open) {
   return openDesktopToolPanel(name, open)
 }
 
-watch([chapterFormat, isComicChapter], ([format, comic]) => {
-  if (format === 'epub' || format === 'audio' || comic) {
+watch([chapterFormat, isOrdinaryImageComicChapter], ([format, ordinaryImageComic]) => {
+  if (format === 'epub' || format === 'audio' || ordinaryImageComic) {
     ttsBarRequested.value = false
     ttsStop()
     if (autoReading.value) stopAutoReading()
@@ -1599,7 +1708,7 @@ const {
   },
 })
 
-useReaderRouteSync({
+const readerRouteSync = useReaderRouteSync({
   bookId,
   currentIndex,
   positionQuery: () => [route.query.chapter, route.query.offset, route.query.percent],
@@ -1615,6 +1724,7 @@ useReaderRouteSync({
     chapterLoading.value = false
   },
 })
+suppressNextReaderPositionReload = readerRouteSync.suppressNextPositionReload
 
 useReaderTypographySync({
   reader,
@@ -1645,7 +1755,7 @@ const {
   progressKey: progressSaveKey,
   getCurrentProgress: currentProgressPayload,
   cancelProgressSave,
-  navigate: query => router.replace(readerRouteLocation(query)),
+  navigate: replaceReaderPositionWithoutReload,
   loadChapter,
   markProgressSaved,
   getCurrentOffset: currentOffset,
@@ -1812,18 +1922,71 @@ function handleReaderVisibilityChange() {
   if (document.hidden) saveCurrentProgress({ force: true, background: true })
 }
 
-function currentVisibleExcerpt() {
-  if (isAudioChapter.value) {
-    return chapter.value?.title || book.value?.title || ''
+function currentBookmarkParagraphContext() {
+  if (isAudioChapter.value) return null
+  const paragraph = chapterFormat.value === 'epub'
+    ? currentEpubBookmarkParagraph()
+    : currentVisibleParagraph()
+  if (!paragraph || paragraph.closest?.('.chapter-inline-error')) return null
+  const excerpt = readerBookmarkText(paragraph)
+  if (!excerpt) return null
+
+  if (chapterFormat.value === 'epub') {
+    const activeChapter = chapter.value
+    if (!activeChapter) return null
+    return {
+      chapterId: activeChapter.id,
+      chapterIndex: currentIndex.value,
+      offset: currentOffset(),
+      percent: currentChapterPercent(),
+      title: activeChapter.title,
+      excerpt,
+    }
   }
-  const paragraph = currentVisibleParagraph()
-  const paragraphs = readerBookmarkParagraphs()
-  const index = paragraphs.findIndex(item => item.element === paragraph)
-  if (index >= 0) {
-    const excerpt = captureReaderBookmarkExcerpt(paragraphs, index)
-    if (excerpt) return excerpt
+
+  if (String(paragraph.tagName || '').toUpperCase() !== 'P') return null
+  const chapterIndex = Number(paragraph.closest?.('.chapter-content')?.dataset?.index)
+  if (!Number.isInteger(chapterIndex)) return null
+  const activeChapter = chapters.value[chapterIndex]
+    || (chapterIndex === currentIndex.value ? chapter.value : null)
+  if (!activeChapter) return null
+  const paragraphOffset = Number(paragraph.dataset?.pos)
+  const offset = Number.isFinite(paragraphOffset) ? Math.max(0, paragraphOffset) : currentOffset()
+  const block = displayedChapterBlocks.value.find(item => item.index === chapterIndex)
+    || chapterBlocks.value.find(item => item.index === chapterIndex)
+  const textLength = block ? chapterBlockTextLength(block) : chapterTextLength.value
+  return {
+    chapterId: activeChapter.id,
+    chapterIndex,
+    offset,
+    percent: readerTextProgress(offset, textLength),
+    title: activeChapter.title,
+    excerpt,
   }
-  return lines.value.slice(0, 2).join(' ').slice(0, 140)
+}
+
+function currentEpubBookmarkParagraph() {
+  const viewport = contentEl.value?.getBoundingClientRect()
+  const frame = contentBody.value?.querySelector('.epub-iframe')
+  const documentRoot = frame?.contentDocument
+  if (!viewport || !frame || !documentRoot) return null
+  const frameRect = frame.getBoundingClientRect()
+  const candidates = [...documentRoot.querySelectorAll('p, li, blockquote')]
+    .filter(node => readerBookmarkText(node))
+  return selectVisibleReaderBlock(candidates.map(node => {
+    const rect = node.getBoundingClientRect()
+    return {
+      node,
+      rect: {
+        top: frameRect.top + rect.top,
+        bottom: frameRect.top + rect.bottom,
+        left: frameRect.left + rect.left,
+        right: frameRect.left + rect.right,
+        width: rect.width,
+        height: rect.height,
+      },
+    }
+  }), viewport)
 }
 
 function readerBookmarkParagraphs() {
@@ -1865,8 +2028,16 @@ function currentAudioProgressPayload() {
 function handleAudioLoaded(event) {
   audioCurrentTime.value = Math.max(0, Number(event?.currentTime) || audioCurrentTime.value || 0)
   audioDuration.value = Math.max(0, Number(event?.duration) || 0)
-  audioAutoplay.value = false
   markProgressSaved(currentAudioProgressPayload())
+}
+
+function handleAudioPlay() {
+  audioAutoplay.value = false
+}
+
+function handleAudioAutoplayBlocked() {
+  audioAutoplay.value = false
+  showReaderToast('自动播放被浏览器阻止，请点击播放继续')
 }
 
 function handleAudioProgress(event) {
@@ -1876,21 +2047,42 @@ function handleAudioProgress(event) {
 }
 
 function goAudioChapter(index) {
-  const target = Math.max(0, Math.min(Number(index), chapters.value.length - 1))
+  const target = Number(index)
+  if (!Number.isInteger(target) || target < 0) {
+    showReaderToast('本章是第一章')
+    return false
+  }
+  if (target >= chapters.value.length) {
+    showReaderToast('本章是最后一章')
+    return false
+  }
   if (target === currentIndex.value) return
   // reader-dev marks both manual previous/next actions as autoplay requests
   // before changing the chapter. The destination audio element receives that
-  // intent through its autoplay prop and clears it once metadata is available.
+  // intent through its autoplay prop and clears it on play or visible rejection.
   audioAutoplay.value = true
-  return goChapter(target)
+  const transition = goChapter(target)
+  Promise.resolve(transition).catch(() => {
+    audioAutoplay.value = false
+  })
+  return transition
+}
+
+function handleChapterEndNext() {
+  if (currentIndex.value >= chapters.value.length - 1) {
+    showReaderToast('本章是最后一章')
+    return
+  }
+  goChapter(currentIndex.value + 1)
 }
 
 function handleAudioEnded() {
   audioCurrentTime.value = Math.max(0, Number(audioDuration.value) || audioCurrentTime.value || 0)
   saveCurrentProgress({ force: true }).catch(() => {})
   if (currentIndex.value < chapters.value.length - 1) {
-    audioAutoplay.value = true
-    goChapter(currentIndex.value + 1)
+    goAudioChapter(currentIndex.value + 1)
+  } else {
+    showReaderToast('本章是最后一章')
   }
 }
 
@@ -1989,7 +2181,26 @@ function readError(err, fallback) {
   box-sizing: border-box;
   scroll-padding-bottom: var(--reader-content-bottom-space);
 }
-.reader-body { transition: transform var(--reader-animate-duration, 180ms) ease; }
+.reader-chapter-end {
+  position: relative;
+  z-index: 3;
+  display: block;
+  width: 80%;
+  box-sizing: border-box;
+  margin: 25px auto 30px;
+  padding: 10px 40px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  text-align: center;
+}
+.reader-chapter-end:focus-visible {
+  outline: 2px solid #ed4259;
+  outline-offset: 2px;
+}
 .reader-shell.scroll .reader-body::after,
 .reader-shell.scroll2 .reader-body::after {
   content: "";

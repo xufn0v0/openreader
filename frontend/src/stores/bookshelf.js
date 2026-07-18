@@ -8,7 +8,9 @@ import { newestProgress, sortByShelfOrder } from '../utils/bookOrder'
 import { getBrowserCache, listBrowserCacheKeys, setBrowserCache } from '../utils/browserCache'
 import { bookCategoryIds } from '../utils/bookCategory'
 import { currentUserScope } from '../utils/authScope'
+import { createAuthenticatedOperationGuard } from '../utils/authenticatedOperation'
 import { createShelfRequestRevisionGate } from '../utils/shelfRequestRevision'
+import { resolveShelfNetworkFirst } from '../utils/shelfNetworkFirst'
 
 function asList(data) {
   if (Array.isArray(data)) return data
@@ -54,6 +56,7 @@ let booksRequest = null
 let booksRequestKey = ''
 let categoriesRequest = null
 const booksRevision = createShelfRequestRevisionGate()
+const categoryOperations = createAuthenticatedOperationGuard()
 
 export const useBookshelfStore = defineStore('bookshelf', {
   state: () => ({
@@ -91,6 +94,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
       booksRequestKey = ''
       categoriesRequest = null
       booksRevision.reset(scope)
+      categoryOperations.reset()
     },
     async loadBooks(options = {}) {
       this.ensureShelfScope()
@@ -110,32 +114,29 @@ export const useBookshelfStore = defineStore('bookshelf', {
       }
       if (!force && booksRequest && booksRequestKey === requestKey) return booksRequest
 
-      if (!force && this.books.length === 0) {
-        const cached = await readShelfCache(scopedShelfCacheKey(`${SHELF_CACHE_KEY}:${requestKey}`))
-        if (cached.length && this.books.length === 0) {
-          this.books = sortBooks(cached)
-          this.booksLoadedAt = Date.now()
-          this.booksLoadedKey = requestKey
-        }
-      }
-
       this.loading = this.books.length === 0
       booksRequestKey = requestKey
       const requestRevision = booksRevision.begin(this.shelfScope)
-      const request = listBooks(params)
-        .then(({ data }) => {
-          if (!booksRevision.canCommit(requestRevision, this.shelfScope)) return this.books
-          const serverBooks = asList(data)
-          syncServerProgressFromBooks(serverBooks)
-          this.books = sortBooks(serverBooks)
-          this.booksLoadedAt = Date.now()
-          this.booksLoadedKey = requestKey
-          writeShelfCache(scopedShelfCacheKey(`${SHELF_CACHE_KEY}:${requestKey}`), this.books)
+      const cacheKey = scopedShelfCacheKey(`${SHELF_CACHE_KEY}:${requestKey}`)
+      const request = resolveShelfNetworkFirst({
+        request: () => listBooks(params).then(({ data }) => asList(data)),
+        readFallback: () => readShelfCacheEntry(cacheKey),
+        isCurrent: () => booksRevision.canCommit(requestRevision, this.shelfScope),
+        hasCurrent: () => this.books.length > 0,
+      })
+        .then((result) => {
+          if (result.source === 'network') {
+            syncServerProgressFromBooks(result.value)
+            this.books = sortBooks(result.value)
+            this.booksLoadedAt = Date.now()
+            this.booksLoadedKey = requestKey
+            writeShelfCache(cacheKey, this.books)
+          } else if (result.source === 'fallback') {
+            this.books = sortBooks(result.value)
+            this.booksLoadedAt = 0
+            this.booksLoadedKey = requestKey
+          }
           return this.books
-        })
-        .catch((err) => {
-          if (this.books.length) return this.books
-          throw err
         })
         .finally(() => {
           if (booksRequest === request) {
@@ -148,7 +149,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
       return booksRequest
     },
     async loadCategories(options = {}) {
-      this.ensureShelfScope()
+      const scope = this.ensureShelfScope()
       const force = options === true || Boolean(options?.force)
       const now = Date.now()
       if (!force && this.categoriesLoadedAt > 0 && now - this.categoriesLoadedAt < REFRESH_DEDUPE_MS) {
@@ -156,8 +157,12 @@ export const useBookshelfStore = defineStore('bookshelf', {
       }
       if (!force && categoriesRequest) return categoriesRequest
 
+      const operation = categoryOperations.begin('categories')
+      const cacheKey = scopedShelfCacheKey(CATEGORY_CACHE_KEY, scope)
+
       if (!force && this.categories.length === 0) {
-        const cached = await readShelfCache(scopedShelfCacheKey(CATEGORY_CACHE_KEY))
+        const cached = await readShelfCache(cacheKey)
+        if (!categoryOperations.canCommit(operation)) return this.categories
         if (cached.length) {
           this.categories = sortCategories(cached)
           this.categoriesLoadedAt = Date.now()
@@ -166,12 +171,14 @@ export const useBookshelfStore = defineStore('bookshelf', {
 
       const request = listCategories()
         .then(({ data }) => {
+          if (!categoryOperations.canCommit(operation)) return this.categories
           this.categories = sortCategories(data)
           this.categoriesLoadedAt = Date.now()
-          writeShelfCache(scopedShelfCacheKey(CATEGORY_CACHE_KEY), this.categories)
+          writeShelfCache(cacheKey, this.categories)
           return this.categories
         })
         .catch((err) => {
+          if (!categoryOperations.canCommit(operation)) return this.categories
           if (this.categories.length) return this.categories
           throw err
         })
@@ -184,7 +191,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
     async ensureBooksLoaded(options = {}) {
       this.ensureShelfScope()
       const force = options === true || Boolean(options?.force)
-      if (force || (!this.books.length && !this.booksLoadedAt)) {
+      if (force || !this.booksLoadedAt) {
         return this.loadBooks({ all: true, ...normalizeLoadOptions(options) })
       }
       return this.books
@@ -263,19 +270,24 @@ export const useBookshelfStore = defineStore('bookshelf', {
       syncCachedBookUpsert(nextBook)
     },
     replaceCategories(categories) {
+      categoryOperations.invalidate('categories')
       this.categories = sortCategories(categories)
       this.categoriesLoadedAt = Date.now()
       writeShelfCache(scopedShelfCacheKey(CATEGORY_CACHE_KEY), this.categories)
     },
     upsertCategory(category) {
       if (!category?.id) return
+      categoryOperations.invalidate('categories')
       const index = this.categories.findIndex(item => Number(item.id) === Number(category.id))
       const nextCategories = index >= 0
         ? this.categories.map(item => Number(item.id) === Number(category.id) ? category : item)
         : [...this.categories, category]
-      this.replaceCategories(nextCategories)
+      this.categories = sortCategories(nextCategories)
+      this.categoriesLoadedAt = Date.now()
+      writeShelfCache(scopedShelfCacheKey(CATEGORY_CACHE_KEY), this.categories)
     },
     removeCategoryLocal(categoryId) {
+      categoryOperations.invalidate('categories')
       this.categories = this.categories.filter(category => Number(category.id) !== Number(categoryId))
       if (String(this.selectedCategoryId) === String(categoryId)) {
         this.selectedCategoryId = ''
@@ -416,12 +428,21 @@ async function readShelfCache(key) {
   }
 }
 
+async function readShelfCacheEntry(key) {
+  try {
+    const cached = await getBrowserCache(key)
+    return cached === null || cached === undefined ? null : asList(cached)
+  } catch {
+    return null
+  }
+}
+
 function writeShelfCache(key, value) {
   setBrowserCache(key, asList(value)).catch(() => {})
 }
 
-function scopedShelfCacheKey(key) {
-  return `${key}:${currentUserScope()}`
+function scopedShelfCacheKey(key, scope = currentUserScope()) {
+  return `${key}:${scope}`
 }
 
 function syncServerProgressFromBooks(books) {

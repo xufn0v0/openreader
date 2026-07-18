@@ -3,6 +3,7 @@ package engine
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -350,8 +351,8 @@ func TestParseEPUBUsesSpineOrder(t *testing.T) {
     <itemref idref="chapter2"/>
   </spine>
 </package>`)
-	writeZipFile(t, zipWriter, "OEBPS/chapter1.xhtml", `<html><body><h1>第一章</h1><p>第一章正文。</p></body></html>`)
-	writeZipFile(t, zipWriter, "OEBPS/chapter2.xhtml", `<html><body><h1>第二章</h1><p>第二章正文。</p></body></html>`)
+	writeZipFile(t, zipWriter, "OEBPS/chapter1.xhtml", `<html><head><title>第一章</title></head><body><h1>第一章</h1><p>第一章正文。</p></body></html>`)
+	writeZipFile(t, zipWriter, "OEBPS/chapter2.xhtml", `<html><head><title>第二章</title></head><body><h1>第二章</h1><p>第二章正文。</p></body></html>`)
 	if err := zipWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -372,12 +373,19 @@ func TestParseEPUBUsesSpineOrder(t *testing.T) {
 	if book.Chapters[0].ResourcePath != "OEBPS/chapter1.xhtml" || book.Chapters[1].ResourcePath != "OEBPS/chapter2.xhtml" {
 		t.Fatalf("chapter resource paths not preserved: %#v", book.Chapters)
 	}
-	tocFallback, err := ParseEPUBWithRule(buffer.Bytes(), "toc")
+	tocOnly, err := ParseEPUBWithRule(buffer.Bytes(), "toc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tocOnly.Chapters) != 0 {
+		t.Fatalf("fixed upstream pure toc rule must remain empty when toc is missing: %#v", tocOnly.Chapters)
+	}
+	tocFallback, err := ParseEPUBWithRule(buffer.Bytes(), "toc+spin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(tocFallback.Chapters) != 2 || tocFallback.Chapters[0].Title != "第一章" {
-		t.Fatalf("toc rule should fall back to readable spine when toc is missing: %#v", tocFallback.Chapters)
+		t.Fatalf("toc+spin should fall back to readable spine when toc is missing: %#v", tocFallback.Chapters)
 	}
 }
 
@@ -389,13 +397,13 @@ func TestParseEPUBWithRuleCombinesSpineAndNav(t *testing.T) {
 		titles []string
 		bodies []string
 	}{
-		{rule: "spin", titles: []string{"正文一", "正文二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
-		{rule: "spin+toc", titles: []string{"正文一", "正文二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
+		{rule: "spin", titles: []string{"文档标题一", "文档标题二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
+		{rule: "spin+toc", titles: []string{"目录一", "目录二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
 		{rule: "spin<toc", titles: []string{"目录一", "目录二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
-		{rule: "toc", titles: []string{"目录二", "目录一"}, bodies: []string{"第二章内容。", "第一章内容。"}},
-		{rule: "toc+spin", titles: []string{"目录二", "目录一"}, bodies: []string{"第二章内容。", "第一章内容。"}},
-		{rule: "toc<spin", titles: []string{"正文二", "正文一"}, bodies: []string{"第二章内容。", "第一章内容。"}},
-		{rule: "", titles: []string{"正文一", "正文二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
+		{rule: "toc", titles: []string{"目录二", "目录附录", "目录一"}, bodies: []string{"第二章内容。", "附录内容。", "第一章内容。"}},
+		{rule: "toc+spin", titles: []string{"目录二", "目录附录", "目录一"}, bodies: []string{"第二章内容。", "附录内容。", "第一章内容。"}},
+		{rule: "toc<spin", titles: []string{"目录二", "目录附录", "目录一"}, bodies: []string{"第二章内容。", "附录内容。", "第一章内容。"}},
+		{rule: "", titles: []string{"目录一", "目录二"}, bodies: []string{"第一章内容。", "第二章内容。"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.rule, func(t *testing.T) {
@@ -421,6 +429,65 @@ func TestParseEPUBWithRuleCombinesSpineAndNav(t *testing.T) {
 	}
 }
 
+func TestParseEPUBCatalogDoesNotMaterializeSpineBodies(t *testing.T) {
+	data := testEPUBWithNav(t)
+	limits := DefaultLocalBookParseLimits()
+	limits.MaxParsedTextBytes = 1
+
+	catalog, err := ParseEPUBCatalogWithLimits(data, "spin+toc", limits)
+	if err != nil {
+		t.Fatalf("catalog-only EPUB preview must not apply the body text limit: %v", err)
+	}
+	if len(catalog.Chapters) != 2 {
+		t.Fatalf("catalog chapter count = %d, want 2", len(catalog.Chapters))
+	}
+	for index, chapter := range catalog.Chapters {
+		if chapter.Content != "" {
+			t.Fatalf("catalog chapter %d materialized body content: %q", index, chapter.Content)
+		}
+		if chapter.ResourcePath == "" {
+			t.Fatalf("catalog chapter %d lost its EPUB resource path: %+v", index, chapter)
+		}
+	}
+	if _, err := ParseEPUBWithLimits(data, "spin+toc", limits); !errors.Is(err, ErrLocalBookParseLimit) {
+		t.Fatalf("full EPUB parse error = %v, want body text limit", err)
+	}
+}
+
+func TestParseEPUBCatalogUsesDocumentTitleInsteadOfBodyHeading(t *testing.T) {
+	data := testEPUBWithNav(t)
+	tests := []struct {
+		rule   string
+		titles []string
+	}{
+		{rule: "spin", titles: []string{"文档标题一", "文档标题二"}},
+		{rule: "spin+toc", titles: []string{"目录一", "目录二"}},
+		{rule: "spin<toc", titles: []string{"目录一", "目录二"}},
+		{rule: "toc", titles: []string{"目录二", "目录附录", "目录一"}},
+		{rule: "toc+spin", titles: []string{"目录二", "目录附录", "目录一"}},
+		{rule: "toc<spin", titles: []string{"目录二", "目录附录", "目录一"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.rule, func(t *testing.T) {
+			catalog, err := ParseEPUBCatalogWithLimits(data, tt.rule, DefaultLocalBookParseLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(catalog.Chapters) != len(tt.titles) {
+				t.Fatalf("chapter count = %d, want %d", len(catalog.Chapters), len(tt.titles))
+			}
+			for index, want := range tt.titles {
+				if got := catalog.Chapters[index].Title; got != want {
+					t.Fatalf("chapter %d title = %q, want %q", index, got, want)
+				}
+				if strings.Contains(catalog.Chapters[index].Title, "正文标题") {
+					t.Fatalf("body heading leaked into catalogue title: %+v", catalog.Chapters[index])
+				}
+			}
+		})
+	}
+}
+
 func TestParseEPUBRetainsFirstImageOnlyTitlepageAsCover(t *testing.T) {
 	var buffer bytes.Buffer
 	zipWriter := zip.NewWriter(&buffer)
@@ -437,7 +504,7 @@ func TestParseEPUBRetainsFirstImageOnlyTitlepageAsCover(t *testing.T) {
   <spine><itemref idref="cover"/><itemref idref="chapter"/></spine>
 </package>`)
 	writeZipFile(t, zipWriter, "OPS/titlepage.xhtml", `<html><body><img src="images/cover.svg" alt="封面"/></body></html>`)
-	writeZipFile(t, zipWriter, "OPS/chapter.xhtml", `<html><body><h1>第一章</h1><p>第一章正文。</p></body></html>`)
+	writeZipFile(t, zipWriter, "OPS/chapter.xhtml", `<html><head><title>第一章</title></head><body><h1>第一章</h1><p>第一章正文。</p></body></html>`)
 	writeZipFile(t, zipWriter, "OPS/images/cover.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
 	if err := zipWriter.Close(); err != nil {
 		t.Fatal(err)
@@ -493,55 +560,81 @@ func TestParseEPUBWithRuleReadsNCX(t *testing.T) {
 	}
 }
 
-func TestParseEPUBTOCFragmentsStaySeparateAndBoundPlainText(t *testing.T) {
+func TestParseEPUBNAVFragmentsCollapseToFixedUpstreamResourceCatalog(t *testing.T) {
 	data := testEPUBWithFragmentNavigation(t, true)
-
-	book, err := ParseEPUBWithRule(data, "toc")
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		rule   string
+		titles []string
+	}{
+		{rule: "spin", titles: []string{"文档标题一", "文档标题二"}},
+		{rule: "spin+toc", titles: []string{"第二节", "第三节"}},
+		{rule: "spin<toc", titles: []string{"第二节", "第三节"}},
+		{rule: "toc", titles: []string{"第二节", "第三节"}},
+		{rule: "toc+spin", titles: []string{"第二节", "第三节"}},
+		{rule: "toc<spin", titles: []string{"第二节", "第三节"}},
+		{rule: "", titles: []string{"第二节", "第三节"}},
 	}
-	if len(book.Chapters) != 3 {
-		t.Fatalf("TOC fragments must remain separate catalogue chapters, got %+v", book.Chapters)
-	}
-	wantTitles := []string{"第一节", "第二节", "第三节"}
-	wantPaths := []string{"OPS/Text/one.xhtml", "OPS/Text/one.xhtml", "OPS/Text/two.xhtml"}
-	wantBodies := []string{"片段一正文", "片段二正文", "跨资源正文"}
-	for index := range wantTitles {
-		chapter := book.Chapters[index]
-		if chapter.Title != wantTitles[index] || chapter.ResourcePath != wantPaths[index] {
-			t.Fatalf("fragment chapter %d = %+v, want title=%q path=%q", index, chapter, wantTitles[index], wantPaths[index])
-		}
-		if !strings.Contains(chapter.Content, wantBodies[index]) {
-			t.Fatalf("fragment chapter %d content = %q, want %q", index, chapter.Content, wantBodies[index])
-		}
-		for otherIndex, otherBody := range wantBodies {
-			if otherIndex != index && strings.Contains(chapter.Content, otherBody) {
-				t.Fatalf("fragment chapter %d leaked content for chapter %d: %q", index, otherIndex, chapter.Content)
+	for _, tt := range tests {
+		t.Run(tt.rule, func(t *testing.T) {
+			book, err := ParseEPUBWithRule(data, tt.rule)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-
-	spine, err := ParseEPUBWithRule(data, "spin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(spine.Chapters) != 2 || spine.Chapters[0].ResourcePath != "OPS/Text/one.xhtml" || spine.Chapters[1].ResourcePath != "OPS/Text/two.xhtml" {
-		t.Fatalf("spine rule must remain one chapter per resource: %+v", spine.Chapters)
+			if len(book.Chapters) != 2 {
+				t.Fatalf("fixed upstream catalog must dedupe TOC fragments by href: %+v", book.Chapters)
+			}
+			for index, wantPath := range []string{"OPS/Text/one.xhtml", "OPS/Text/two.xhtml"} {
+				chapter := book.Chapters[index]
+				if chapter.Title != tt.titles[index] || chapter.ResourcePath != wantPath || chapter.ResourceFragment != "" || chapter.ResourceEndFragment != "" {
+					t.Fatalf("chapter %d = %+v, want title=%q path=%q with empty fragments", index, chapter, tt.titles[index], wantPath)
+				}
+			}
+			if !strings.Contains(book.Chapters[0].Content, "片段一正文") || !strings.Contains(book.Chapters[0].Content, "片段二正文") || strings.Contains(book.Chapters[0].Content, "跨资源正文") {
+				t.Fatalf("first resource text must contain the whole current XHTML only: %q", book.Chapters[0].Content)
+			}
+			if !strings.Contains(book.Chapters[1].Content, "跨资源正文") || strings.Contains(book.Chapters[1].Content, "片段二正文") {
+				t.Fatalf("second resource text crossed resource boundaries: %q", book.Chapters[1].Content)
+			}
+		})
 	}
 }
 
-func TestParseEPUBNCXFragmentsStaySeparateAndBoundPlainText(t *testing.T) {
+func TestParseEPUBNCXFragmentsCollapseToFixedUpstreamResourceCatalog(t *testing.T) {
 	book, err := ParseEPUBWithRule(testEPUBWithFragmentNavigation(t, false), "toc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(book.Chapters) != 3 {
-		t.Fatalf("NCX fragments must remain separate catalogue chapters, got %+v", book.Chapters)
+	if len(book.Chapters) != 2 {
+		t.Fatalf("NCX fragments must collapse by resource href, got %+v", book.Chapters)
 	}
-	for index, want := range []string{"片段一正文", "片段二正文", "跨资源正文"} {
-		if !strings.Contains(book.Chapters[index].Content, want) {
-			t.Fatalf("NCX fragment chapter %d content = %q, want %q", index, book.Chapters[index].Content, want)
+	if book.Chapters[0].Title != "第二节" || book.Chapters[0].ResourcePath != "OPS/Text/one.xhtml" ||
+		book.Chapters[1].Title != "第三节" || book.Chapters[1].ResourcePath != "OPS/Text/two.xhtml" {
+		t.Fatalf("unexpected fixed NCX catalogue: %+v", book.Chapters)
+	}
+	for _, chapter := range book.Chapters {
+		if chapter.ResourceFragment != "" || chapter.ResourceEndFragment != "" {
+			t.Fatalf("new NCX catalogue retained fragment metadata: %+v", chapter)
 		}
+	}
+}
+
+func TestBuildEPUBChaptersUsesLastTOCTitleWriteIncludingBlankFallback(t *testing.T) {
+	spine := []epubChapter{
+		{Path: "OPS/Text/one.xhtml", Title: "文档标题一"},
+		{Path: "OPS/Text/two.xhtml", Title: "文档标题二"},
+	}
+	toc := []epubTOCEntry{
+		{Path: "OPS/Text/one.xhtml", Fragment: "part-a", Title: "第一节"},
+		{Path: "OPS/Text/one.xhtml", Fragment: "part-b", Title: ""},
+		{Path: "OPS/Text/two.xhtml", Fragment: "opening", Title: "第三节"},
+	}
+	for _, rule := range []string{"spin+toc", "spin<toc", "toc", "toc+spin", "toc<spin", ""} {
+		t.Run(rule, func(t *testing.T) {
+			chapters := buildEPUBChapters(spine, toc, rule)
+			if len(chapters) != 2 || chapters[0].Title != "文档标题一" || chapters[1].Title != "第三节" {
+				t.Fatalf("last blank TOC title must fall back to the document title for %q: %+v", rule, chapters)
+			}
+		})
 	}
 }
 
@@ -558,14 +651,16 @@ func testEPUBWithNav(t *testing.T) []byte {
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/>
     <item id="two" href="text/two.xhtml" media-type="application/xhtml+xml"/>
+    <item id="appendix" href="text/appendix.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
   <spine><itemref idref="one"/><itemref idref="two"/></spine>
 </package>`)
 	writeZipFile(t, zipWriter, "OEBPS/nav.xhtml", `<html><body><nav epub:type="toc">
-  <ol><li><a href="text/two.xhtml#start">目录二</a></li><li><a href="text/one.xhtml">目录一</a></li></ol>
+  <ol><li><a href="text/two.xhtml#start">目录二</a></li><li><a href="text/appendix.xhtml">目录附录</a></li><li><a href="text/one.xhtml">目录一</a></li></ol>
 </nav></body></html>`)
-	writeZipFile(t, zipWriter, "OEBPS/text/one.xhtml", `<html><body><h1>正文一</h1><p>第一章内容。</p></body></html>`)
-	writeZipFile(t, zipWriter, "OEBPS/text/two.xhtml", `<html><body><h1>正文二</h1><p>第二章内容。</p></body></html>`)
+	writeZipFile(t, zipWriter, "OEBPS/text/one.xhtml", `<html><head><title>文档标题一</title></head><body><h1>正文标题一</h1><p>第一章内容。</p></body></html>`)
+	writeZipFile(t, zipWriter, "OEBPS/text/two.xhtml", `<html><head><title>文档标题二</title></head><body><h1>正文标题二</h1><p>第二章内容。</p></body></html>`)
+	writeZipFile(t, zipWriter, "OEBPS/text/appendix.xhtml", `<html><head><title>文档附录</title></head><body><h1>正文附录</h1><p>附录内容。</p></body></html>`)
 	if err := zipWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -613,11 +708,11 @@ func testEPUBWithFragmentNavigation(t *testing.T, includeNav bool) []byte {
 	} else {
 		write("OPS/toc.ncx", navFile)
 	}
-	write("OPS/Text/one.xhtml", `<html><body>
+	write("OPS/Text/one.xhtml", `<html><head><title>文档标题一</title></head><body>
   <section id="part-a"><h1>第一节</h1><p>片段一正文</p><a id="to-part-b" href="#part-b">下一节</a></section>
   <section id="part-b"><h1>第二节</h1><p>片段二正文</p><a id="to-two" href="two.xhtml#opening">跨资源章节</a></section>
 </body></html>`)
-	write("OPS/Text/two.xhtml", `<html><body><section id="opening"><h1>第三节</h1><p>跨资源正文</p></section></body></html>`)
+	write("OPS/Text/two.xhtml", `<html><head><title>文档标题二</title></head><body><section id="opening"><h1>第三节</h1><p>跨资源正文</p></section></body></html>`)
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,20 @@
 
 Status: initial scaffold.
 
+## P2 reading-progress CAS and WebDAV mirror (audit pending implementation)
+
+The 2026-07-18 fixed-baseline audit in
+[`reading-progress-p2-contract.md`](reading-progress-p2-contract.md) does not authorize a schema
+migration. `reading_progresses` retains its existing `(user_id,book_id)` unique index and precise
+chapter/offset/percent fields. Atomicity is implemented with conditional writes against the
+existing row ID and `updated_at`, not a replacement table or destructive migration.
+
+The planned upstream-compatible live progress mirror is additive filesystem output only. It may
+write a safe `bookProgress/<book>_<author>.json` or `legado/bookProgress/...` file when that
+directory already exists in the caller's WebDAV root. It must not move/delete historical files,
+create the feature directory implicitly, cross the administrator/regular-user root boundary, or
+change `readingProgress.json` backup/restore behavior.
+
 ## Persistent roots
 
 | Root | Purpose | Compatibility rule |
@@ -101,6 +115,7 @@ Status: implemented in-progress; no database migration is required.
 - The mapping is determined from the authenticated persisted user after the relevant LocalStore or WebDAV authorization. It does not rewrite old paths.
 - Scheduled backup runs once per persisted user and filters all user-owned export rows. Administrator `RunNow()` remains the legacy-root compatibility path.
 - LocalStore/WebDAV uploads are atomically staged in their destination directory and accept at most `OPENREADER_MAX_IMPORT_BYTES` (default 128 MiB), so a rejected replacement does not truncate an existing file. A preview copies at most that same amount into `cache/import-previews/<user-id>/<random-token>.book` plus metadata; direct upload and every confirmation reread use the same bound. The cache location is user-private, token entropy is 192 bits, metadata expires after 24 hours, and success/expired-token access removes both files. It is safe to clear this derived cache; it is never part of the source file or library archive.
+- The 2026-07-18 parsed-result lifecycle correction adds an optional versioned `<random-token>.parsed.json` beside the existing `.book`/`.json` pair. It contains only bounded parser output, the exact normalized extension/rule and a SHA-256 binding to the staged raw bytes. It is derived caller-scoped cache, not a database or backup format. Existing two-file stages remain valid and create the third file lazily after their next successful preview. A failed reparse cannot replace the last successful snapshot; expiry, explicit cache clearing and successful token consumption remove all three files. No existing `data/`, `library/`, SQLite row, archived source or chapter cache is rewritten.
 - P1-E3 changes only the workbench's visible file-manager operations and makes LocalStore upload accept multiple already-supported multipart file parts. It does not move a LocalStore/WebDAV root, rename any existing source file, alter a book/library archive, or add a SQLite table/column. Each accepted part is independently staged and atomically renamed in its existing caller-scoped directory; a failure leaves other successfully written selected files and every pre-existing destination intact, matching the upstream multi-upload's per-file side effects.
 - Extra parser formats already stored in `library/`, LocalStore, WebDAV, SQLite book rows and old direct API clients remain readable. P1-E3 only stops advertising `.text/.md/.pdf` and WebDAV `.cbz` as new workbench import actions, so no data migration, cleanup, archive rewrite or background deletion is permitted.
 - A LocalStore/WebDAV preview retry that supplies an existing `importToken` reads that staged file directly, including when the mounted source was renamed, deleted, or changed after the first preview. A no-match custom TXT rule leaves the token in place, so a later retry/import uses the same bytes. An old client that does not send an `importToken` retains the path-based import fallback.
@@ -238,7 +253,7 @@ Status: extracted 2026-07-10; implementation must not add a destructive schema m
 - `books`, `chapters`, `book_categories`, `bookmarks`, and `reading_progress` are SQLite rows. Book/category/progress/bookmark rows are user scoped; chapter rows are owned by their book.
 - Remote `Chapter.CachePath` is a relative path under `cache/`, calculated from the book/chapter URLs. A physical cache path can be referenced by more than one chapter row and must therefore be reference-checked before removal.
 - Direct, LocalStore, and WebDAV imports are copied by `ArchiveImportedBook` into a private `library/data/<safe-user>/<unique-book>/` archive. `OriginalFile`, `chapters.json`, `bookSource.json`, `content/`, and derived EPUB/CBZ resources live under that archive.
-- E4-CBZ-1 keeps this persisted layout and SQLite schema unchanged. A CBZ's upstream-compatible first-image cover is derived from the bounded private archive walk only while serializing an import, shelf or detail response; the resulting signed resource URL and ZIP member path are never written back to `books`, `chapters.json`, `bookSource.json`, backups or WebDAV metadata. Old archives therefore remain readable without migration, while malformed/missing archives retain the existing empty-cover response.
+- E4-CBZ-1 keeps this persisted layout and SQLite schema unchanged. A CBZ's upstream-compatible first-image cover is selected during one bounded extraction into `library/<Book.LibraryPath>/.cbz-resources/<sha256>/`; the resulting signed resource URL and derived path are never written back to `books`, `chapters.json`, `bookSource.json`, backups or WebDAV metadata. Old archives remain lazy-readable without migration, while malformed/missing archives with no complete generation retain the existing empty-cover response.
 - Browser chapter cache keys are user-scoped in current clients but are not database rows; they must be explicitly removed by the shelf/browser store when a book-delete sync event arrives.
 
 ### Required lifecycle and compatibility shim
@@ -337,19 +352,21 @@ Status: implemented for the Reader P0 EPUB slice; remaining Reader P0 work is ou
 
 - Add nullable/empty `Chapter.ResourcePath` (`resourcePath` in JSON) through GORM auto-migration. It stores a normalized POSIX EPUB path such as `OEBPS/Text/chapter-1.xhtml`; it is never an absolute host path.
 - Add optional `resourcePath` to archived `chapters.json` entries. Old archives without it remain valid.
-- E4-EPUB-2 additionally adds nullable `Chapter.ResourceFragment` and `Chapter.ResourceEndFragment` (`resourceFragment` and `resourceEndFragment` in JSON and `chapters.json`). They hold bounded decoded DOM ids only; they never form filesystem paths. A missing value preserves the current whole-XHTML behavior for old rows/backups.
-- EPUB import writes both:
-  - the existing plain-text `CachePath`;
-  - the canonical XHTML `ResourcePath` and, when a TOC/NCX entry targets it, nullable fragment bounds.
-- Existing imported EPUBs are lazily backfilled from the archived original file and current TOC rule when first opened/refreshed. Backfill updates only matching chapter rows and the optional portable `chapters.json` metadata.
+- E4-EPUB-2 additionally added nullable `Chapter.ResourceFragment` and `Chapter.ResourceEndFragment` (`resourceFragment` and `resourceEndFragment` in JSON and `chapters.json`). They hold bounded decoded DOM ids only; they never form filesystem paths. The 2026-07-18 fixed-baseline correction keeps these columns solely for already published rows/staged snapshots; newly parsed local EPUB catalogues leave both empty and use whole-XHTML behavior.
+- Newly parsed EPUB import writes both the existing plain-text `CachePath` and canonical XHTML
+  `ResourcePath`, with empty fragment fields. An upgrade-time prepared snapshot created by the prior version
+  remains confirmable and may still write its historical fragment metadata; rejecting it as `invalid token`
+  is forbidden.
+- Existing imported EPUBs are not collapsed on startup/read. Missing canonical paths may still be lazily backfilled without changing chapter count. Recovery first uses the persisted TOC rule; for a legacy row whose path is missing, pure `toc` produced no chapters, and the archive has a readable spine, runtime recovery alone may locate the same index through `spin`. This does not change new pure-`toc` preview/import/refresh semantics. Only an explicit `refresh-local` rebuilds the catalogue by canonical href; before replacement, old progress/bookmarks with a known EPUB resource path are mapped to the matching new row, while unknown references retain their existing index/offset and clear only an invalid row id.
 
 No table or column is removed. Text, PDF, UMD, Markdown, remote, and existing EPUB rows remain readable when `ResourcePath` is empty.
 
 Migration evidence: `TestAutoMigrateAddsEPUBResourcePathWithoutLosingChapters` drops the three EPUB
 resource columns from a populated SQLite fixture and proves auto-migration restores them without changing
-the existing chapter. `TestDirectEPUBTOCFragmentsImportAsBoundedReaderChapters` proves a legacy empty
-fragment row and its `chapters.json` companion are lazily restored from the archived EPUB. Docker mounted
-volume/backup smoke remains required before publishing the release image.
+the existing chapter. EPUB-FIXED-2/3 replace the former incorrect “new fragment import” assertion: they must
+prove new imports write href-deduped rows, historical fragment rows/staged snapshots remain readable, and
+explicit refresh performs resource-aware reference reconciliation. Docker mounted-volume/backup smoke
+remains required before publishing the release image.
 
 ### Derived extracted resources
 
@@ -368,10 +385,63 @@ library/<Book.LibraryPath>/.epub-resources/<source-fingerprint>/
 
 - Old databases: GORM adds the empty `resource_path` column; no full-table destructive migration.
 - Old `chapters.json`: missing `resourcePath` is treated as unknown and recovered from the source EPUB.
+- Old pure-`toc` books without NAV/NCX: if a persisted row also lacks `resourcePath`, only that runtime
+  recovery may use the spine at the same index and backfill the normalized path. New pure-`toc` catalogues stay empty.
+  A default explicit refresh therefore rejects the empty replacement without mutating the old rows; an explicit
+  `spin` refresh may then rebuild and persist the spine catalogue.
 - Missing derived directory: rebuild transparently from `OriginalFile`.
 - Missing/corrupt source EPUB: preserve all database rows and plain-text caches; return a reader error instead of deleting/reimporting the book.
 - Backup/restore and WebDAV: the existing original EPUB and metadata remain sufficient. Derived `.epub-resources/` need not be present in a backup to recover the book.
+
+### EPUB catalogue-only preview and prepared extraction compatibility (2026-07-18)
+
+- The staged `<token>.parsed.json` remains versioned plain JSON at the same user-scoped cache path. A new
+  EPUB snapshot omits chapter `content`, stores one entry per canonical href and leaves fragment metadata empty.
+  Older full-content and catalogue-only snapshots—including snapshots containing the prior multi-fragment
+  catalogue—remain valid input to confirmation; absence of body content is not an invalid token and does not
+  require a browser re-upload.
+- New EPUB confirmation may create `.epub-resources/<sha256>/` under the newly allocated book archive before
+  committing its SQLite rows. This is derived data at the existing location, not a new mounted root or backup
+  requirement. If extraction or transaction work fails, the existing new-archive compensation removes that
+  whole allocation; no old archive or mounted LocalStore/WebDAV source is modified.
+- A complete extraction marker continues to record the SHA-256 fingerprint plus archived source size and
+  modification time. Matching size/mtime can select this process-created immutable extraction without hashing
+  again; a changed source identity, malformed marker, missing resource, or old marker falls back to the existing
+  bounded SHA-256 and atomic rebuild path.
+- Old books with no extraction, an old plain-fingerprint marker, missing chapter cache, or missing fragment
+  columns remain lazy-readable. EPUB chapter cache recovery must derive only the requested chapter from the
+  verified resource tree; it must not rewrite unrelated rows or require a destructive migration.
+
+Evidence completed 2026-07-18: old/new parsed snapshot confirmation, failed-confirm compensation, old marker and
+no-marker fixtures, source-replacement capability invalidation, full backend tests, and the local
+`HISTORICAL_VOLUME=1` mounted-volume/portable-backup smoke. The source EPUB remains authoritative; derived
+extraction may always be deleted and rebuilt.
 - Docker volumes: all new files remain under the existing `library/` mount. No new volume is introduced.
+
+### CBZ immutable image generation compatibility (2026-07-18)
+
+- CBZ extraction uses the existing private imported-book root and adds only derived data:
+
+```text
+library/<Book.LibraryPath>/.cbz-resources/<source-sha256>/
+```
+
+- The original CBZ, SQLite schema, `chapters.json`, `bookSource.json`, LocalStore/WebDAV source,
+  portable backup format and mounted roots do not change. Only supported normalized image members
+  are extracted; ComicInfo remains parser metadata and arbitrary ZIP members are not exposed.
+- A sibling staging directory is renamed into place only after archive entry count, path, symlink,
+  duplicate, per-entry and aggregate expansion limits pass and a complete marker has been written.
+  Interrupted/failed generations are not active.
+- New confirmation may prepare the generation before the existing transaction. Its existing
+  caller-owned archive compensation removes the whole new allocation if preparation or database
+  work fails. It never removes an old book or mounted source.
+- Existing books require no migration: missing generations are rebuilt lazily from `OriginalFile`.
+  A signed capability may continue reading an existing complete generation while the source is
+  temporarily absent. If source size/mtime changes, SHA-256 is recomputed before reuse; a different
+  fingerprint invalidates the old capability and creates a new generation.
+- Portable backup intentionally continues to carry the original CBZ and metadata only. Restore to
+  an empty volume must rebuild `.cbz-resources` deterministically. Deleting the derived directory is
+  always recoverable while the original archive remains valid.
 
 ### Required migration evidence
 
@@ -415,3 +485,31 @@ rows nullable and does not rewrite mounted-volume data.
 - An old mounted volume with no new column must auto-migrate without changing its
   effective permissions. Required evidence is a populated SQLite fixture, a two-user
   storage fixture, full backend tests and the Docker volume/backup smoke.
+
+## P2 bookshelf browser-cache freshness compatibility (2026-07-18)
+
+- No SQLite, mounted-volume, backup, WebDAV, book/category/progress row or API response migration is introduced.
+- Existing IndexedDB/localStorage keys named
+  `localCache@bookshelf@getBookshelf:<request-key>:<user-scope>` remain readable and are not cleared on upgrade.
+- Their role changes only in runtime ordering: a cold load requests the authenticated `/api/books` snapshot first;
+  the scoped persistent list is committed only when that network request fails and no newer request/local/WebSocket
+  mutation has invalidated its revision.
+- A successful network result continues to replace the same cache key. A fallback cache result must not be copied
+  across user scopes or persisted as a new server-fresh revision.
+- Hub backpressure handling and foreground reconciliation carry no persisted state. Closing a slow WebSocket client
+  is a transport recovery action; reconnect reuses the existing authenticated full-shelf API and does not rewrite data.
+
+Required evidence before release: old scoped browser cache remains a usable offline fallback; stale cache never
+precedes a successful delayed server response; two same-user clients converge after import and reconnect; current
+Docker volume/backup smoke remains byte/data compatible.
+
+Implementation evidence: network-pending/fallback/revision unit contracts and the real two-context Go/SQLite/
+WebSocket Chrome smoke pass at 1440×900, 390×844 and 360×800. The browser retains the same scoped cache key and
+the server uses the unchanged shelf/settings rows. The locally built `ff4cd9d` candidate passed the historical
+mounted-volume restart, backup/portable restore, TXT/EPUB/UMD/CBZ, relative-cache and owner-isolation smoke before
+the same commit was published for amd64/arm64. No persistence migration was required.
+
+The same multi-client gate makes first-time settings writes atomic through the already existing unique index on
+`user_settings(user_id,key)`. It adds no table, column, index, default row, mounted file, or backup field. Existing
+rows keep their IDs/values/timestamps; only two concurrent attempts to create the same missing row stop surfacing a
+UNIQUE error. SQLite connection count, WAL/busy-timeout configuration and existing `-wal`/`-shm` files do not change.

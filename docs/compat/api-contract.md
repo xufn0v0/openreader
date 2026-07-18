@@ -10,6 +10,9 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 - Sync WebSocket: `/ws/sync`.
 - Expected error shape for handled failures: JSON object with `error`.
 - User-owned resources must be scoped to the authenticated user unless documented as admin/global.
+- Concurrent first writes to the same authenticated `settings/:key` use the existing `(user_id,key)` unique key as
+  an atomic upsert. They retain validation, stale-base conflict behavior, response shape and scoped sync events;
+  a normal same-user startup race must never expose a UNIQUE error as `500`.
 
 ## Public endpoints
 
@@ -25,7 +28,7 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 |---|---|---|
 | User/settings/admin | `/api/me`, `/api/settings/:key`, `/api/admin/users` | Settings are per user. Admin endpoints require admin role. |
 | Sources | `/api/sources`, `/api/sources/import`, `/api/sources/:id/test*` | Preserve reader3-compatible source fields and parser semantics. Test endpoints keep their existing authenticated `200` response shape (`results`/`chapters`/`content` plus `error`), but may write `source_failures` only for remote request errors. Local unsupported or invalid parser rules remain visible in `error` and never suppress the source. |
-| Bookshelf | `/api/books`, `/api/books/:id`, `/api/books/batch`, `/api/books/export` | Book operations must not cross user boundaries. |
+| Bookshelf | `/api/books`, `/api/books/:id`, `/api/books/batch`, `/api/books/export` | Book operations must not cross user boundaries. `GET /api/books` is the current user's authoritative mutable shelf snapshot: the frontend requests it network-first and may use its scoped persistent copy only after a network failure. |
 | Reader content | `/api/books/:id/chapters`, `/api/books/:id/chapters/:index/content` | Content fetch uses a valid cache first and returns stable chapter data. On a remote cache miss, one single `nextContentUrl` that resolves to the adjacent catalog chapter is a chapter boundary, not continuation content. A blank text `contentRule` remains the existing client-safe `502` response but must not cache page HTML or create a `source_failures` row; audio sources retain their approved blank-rule media-URL behavior. |
 | Reader legacy search | `/api/reader3/searchBookContent` | Compatibility endpoint; keep until old clients/routes no longer need it. |
 | Progress | `/api/progress/:bookID`, `/api/progress` | Progress writes must be conflict-safe and user scoped. |
@@ -38,6 +41,19 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | RSS | `/api/rss/sources`, `/api/rss/articles` | Remote fetch limits and parser safety apply. |
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
+
+## P2 reading-progress API contract
+
+Status: audited on 2026-07-18; implementation is pending. The complete route, concurrency,
+chapter-identity, WebSocket and existing-directory WebDAV mirror contract is
+[`reading-progress-p2-contract.md`](reading-progress-p2-contract.md).
+
+The deployed `GET /api/progress/:bookID` and `PUT /api/progress` paths remain stable. The
+implementation must replace its non-atomic read/check/upsert sequence with a database CAS,
+derive chapter ID/title from the caller-owned book catalogue, preserve the existing `200` plus
+`X-OpenReader-Progress-Conflict: 1` compatibility response, and broadcast only after one winner
+commits. Existing `bookProgress/` or `legado/bookProgress/` directories regain upstream-compatible
+per-book JSON mirrors without weakening OpenReader's private WebDAV roots.
 
 ## P1-B workspace search API contract
 
@@ -121,12 +137,12 @@ The upstream has user-specific source-default/delete actions. OpenReader's sourc
 
 ## P0 local TXT preview and staged-reparse contract
 
-Status: implemented and backend/frontend-tested on 2026-07-11 against reader-dev `BookController.kt`, `LocalBook.kt` and `TextFile.kt`. OpenReader retains its JWT/JSON staging adaptation while restoring the upstream distinction between automatic no-TOC fallback and an explicit rule that found no headings.
+Status: TXT matching and raw-byte token reuse were implemented on 2026-07-11. The parsed-snapshot and latest-request-only lifecycle correction identified on 2026-07-18 is now implemented and validated without changing the response schema; see [`local-book-import-catalog-p0-contract.md`](local-book-import-catalog-p0-contract.md).
 
 | Method / path | Request | Success and side effects | Errors / retry contract |
 |---|---|---|---|
-| `POST /api/imports/books/preview` | Multipart `file`, optional `title`, `author`, `tocRule`, or an existing `importToken` instead of `file`. JWT required. | A new upload creates a caller-scoped immutable stage before parsing. Successful response is `200` with `{title,author,chapterCount,chapters,importToken}`. An empty `tocRule` uses the automatic first-512,000-byte probe and may return pseudo chapters for text without a TOC. An explicit TXT `tocRule` with no match is likewise a normal `200` empty catalogue, retaining the token for a rule refresh or empty-catalog confirmation. | Unsupported/invalid input remains `400` `{error,importToken}`. No book rows/cache files are created during preview. |
-| `POST /api/imports/books` | Same multipart/token fields plus existing category fields. JWT required. | `201` creates the book only from the staged bytes or submitted upload. A consumed staged token is deleted only after a successful import. A local TXT book with an explicit unmatched rule is allowed to persist with zero chapter rows, matching upstream local-book confirmation semantics. | `400` for unsupported/parse errors; failed parse/import leaves an existing stage reusable until normal expiry. |
+| `POST /api/imports/books/preview` | Multipart `file`, optional `title`, `author`, `tocRule`, or an existing `importToken` instead of `file`. JWT required. | A new upload creates a caller-scoped immutable stage before parsing. Successful response is `200` with `{title,author,chapterCount,chapters,importToken}`. The server atomically records the bounded parsed result for that token and exact rule without changing the public response. An empty `tocRule` uses the automatic first-512,000-byte probe and may return pseudo chapters for text without a TOC. An explicit TXT `tocRule` with no match is likewise a normal `200` empty catalogue, retaining the token for a rule refresh or empty-catalog confirmation. EPUB preview records catalogue metadata/resource boundaries only; it does not materialize every XHTML body merely to return titles. For newly parsed EPUB TOC rules, repeated `href#fragment` entries collapse to one canonical href item; the first href fixes order, the final TOC title write fixes title, and no fragment field is exposed or persisted for that new item. | Unsupported/invalid input remains `400` `{error,importToken}`. A failed reparse must not replace the last successful parsed snapshot. No durable book rows/library archives are created during preview. |
+| `POST /api/imports/books` | Same multipart/token fields plus existing category fields. JWT required. | `201` creates the book only from the staged bytes or submitted upload. When token/rule/hash match a successful preview, confirmation consumes that parsed catalogue instead of executing the catalogue parser again. Old full-content and catalogue-only snapshots—including an upgrade-time snapshot containing historical fragment rows—and stages without a snapshot remain accepted/rebuilt lazily. New preview snapshots persist one chapter per canonical EPUB href with empty fragment metadata. EPUB may prepare its caller-owned bounded derived resource tree below the new archive before commit so the first Reader request does not rehash/re-extract it. A consumed staged token and all derived snapshot files are deleted only after a successful import. A local TXT book with an explicit unmatched rule is allowed to persist with zero chapter rows, matching upstream local-book confirmation semantics. | `400` for unsupported/parser/archive-policy extraction errors; the client-safe extraction message cannot expose a host path. Host storage/database failures remain generic `500`. Failed confirmation leaves an existing stage and its last successful snapshot reusable until normal expiry. No book row, broadcast, consumed token or orphan new library directory may survive a failed confirmation. |
 | `POST /api/local-store/import-preview`, `POST /api/webdav/import-preview` | JSON `{paths}` or `{items:[{path,title,author,tocRule}]}`. JWT/store permission required. | `200 {items}`. Each readable item is copied once to a caller-scoped immutable stage; success item contains `{path,book,importToken}`. | A parser failure remains an item-level `{path,error,importToken}` in the `200` envelope. The token remains valid for a later `{items:[{path,importToken,tocRule}]}` preview/import; mounted-file mutation/removal cannot affect that retry. |
 | `POST /api/local-store/import`, `POST /api/webdav/import` | Existing paths/items/category body. | Successful staged item uses the original preview bytes and deletes its token after durable import. | Item-level parser failures retain the staged token and do not create book/cache rows. A container response does not expose paths outside the caller's scoped store. |
 
@@ -143,7 +159,7 @@ Status: implemented and regression-tested on 2026-07-13. The fixed reader-dev co
 | `MKCOL /webdav/<path>`, `MOVE /webdav/<path>` | Existing raw WebDAV compatibility methods remain unchanged. | P1-E3 WebDAV UI must not surface new-directory or rename controls. |
 | `POST /api/local-store/import-preview`, `POST /api/webdav/import-preview` | The P1-E2 controller may only be launched by reader-dev-visible suffixes: LocalStore `txt/epub/umd/cbz`, WebDAV `txt/epub/umd`. | Go can retain additional direct-parser formats for existing books/clients, but they cannot reappear as a workbench button without a later documented product decision. |
 
-This API shape is an allowed Go/JWT adaptation: reader-dev returns an empty chapter list in its controller response for a local `TocEmptyException`; OpenReader preserves deployed REST paths and reports the direct-preview failure as a `400`, but must preserve the retryable staged context in both direct and storage-backed flows.
+This API shape is an allowed Go/JWT adaptation: reader-dev returns an empty chapter list in its controller response for a local `TocEmptyException`; OpenReader preserves deployed REST paths and represents the same explicit no-match case as a successful empty preview. Actual malformed/unsupported parser failures remain `400` while preserving retryable staged context in direct and storage-backed flows.
 
 ## P2 replace-rule API contract
 
@@ -174,7 +190,7 @@ Status: extracted 2026-07-10. These routes retain their OpenReader paths while m
 | `GET /api/cache/stats` | None | Returns only the authenticated user's remote cache counts/size. The response never includes an absolute host cache path. | JWT required; it must not reveal another user's chapter count, filename, or root. |
 | `DELETE /api/cache` | None | Clears only the authenticated user's remote chapter-cache references in a transaction, then removes only cache files left unreferenced by all chapter rows; emits a current-user shelf refresh after commit. | JWT required; no other user's database cache state or still-referenced file may be removed. |
 | `POST /api/books/export` | `{ "bookIds": number[], "format": "txt"\|"epub"\|"json" }` | A single local book returns its archived original file. Remote books retain TXT/EPUB export. JSON and multi-book ZIP are explicit OpenReader extensions and remain user-scoped/bounded. | JWT required. Empty/foreign-only selections are client errors; safe `Content-Disposition` names must not expose host paths. |
-| `POST /api/books/:id/refresh`, `POST /api/books/:id/refresh-local`, `POST /api/books/:id/change-source` | Existing route bodies | Replace chapter rows atomically. Only after commit, prune superseded derived caches while preserving `OriginalFile`, `chapters.json`, `bookSource.json`, local-store/WebDAV source files, and valid progress/bookmark recovery. Broadcast the merged shelf item after durable writes. | Owner only. Parse/fetch errors leave current catalogue/cache metadata usable and do not delete source files. |
+| `POST /api/books/:id/refresh`, `POST /api/books/:id/refresh-local`, `POST /api/books/:id/change-source` | Existing route bodies | Replace chapter rows atomically. For EPUB `refresh-local`, the newly parsed catalogue uses one row per canonical href and empty fragment metadata; an old fragment progress/bookmark is rebound by canonical resource path before the generic index fallback. Only after commit, prune superseded derived caches while preserving `OriginalFile`, `chapters.json`, `bookSource.json`, local-store/WebDAV source files, and valid progress/bookmark recovery. Broadcast the merged shelf item after durable writes. | Owner only. Parse/fetch errors and an explicitly selected rule with no readable chapters return `400` and leave the current catalogue/cache metadata usable without deleting source files. Thus an old pure-`toc`/no-TOC EPUB remains readable after a rejected default refresh and can be explicitly refreshed with `{"tocRule":"spin"}`. Ordinary startup/read/backup never silently collapses historical fragment rows; only a successful explicit refresh applies the new catalogue. |
 
 The upstream uses namespace-specific JSON storage and SSE cache progress. OpenReader's REST/SQLite adaptation is allowed only where it preserves the visible action semantics, current-user isolation, durable event ordering, and bounded resource use described above.
 
@@ -190,8 +206,8 @@ The upstream uses namespace-specific JSON storage and SSE cache progress. OpenRe
 | Auth | Existing `Authorization: Bearer <jwt>` requirement. The book lookup remains scoped to the authenticated user. |
 | Request | Existing numeric book ID and zero-based chapter index. |
 | Text response | `200` JSON keeps `chapter` and `content`; adds `"format": "text"`. |
-| EPUB response | `200` JSON keeps `chapter` and searchable plain-text `content`; adds `"format": "epub"`, `resourceUrl`, and RFC3339 `resourceExpiresAt`. A fragment chapter keeps canonical `chapter.resourcePath` plus nullable `resourceFragment`/`resourceEndFragment`; its `resourceUrl` includes an encoded `#resourceFragment` for iframe location. |
-| Side effects | For EPUB, may safely extract/rebuild a derived resource tree and backfill canonical `resourcePath` plus nullable fragment metadata. It must not alter the archived source EPUB. |
+| EPUB response | `200` JSON keeps `chapter` and searchable plain-text `content`; adds `"format": "epub"`, `resourceUrl`, and RFC3339 `resourceExpiresAt`. Plain text is generated/cached only from the requested resource; Reader iframe preparation does not wait for unrelated chapters. Newly parsed catalogues have one row per canonical href and empty fragment fields. A historical fragment chapter keeps canonical `chapter.resourcePath` plus nullable `resourceFragment`/`resourceEndFragment`; its `resourceUrl` includes an encoded `#resourceFragment` for iframe location. |
+| Side effects | For EPUB, may safely reuse/extract/rebuild a derived resource tree, lazily create only the requested chapter's text cache, and backfill canonical `resourcePath` plus nullable fragment metadata. If an old row has no path and its persisted pure `toc` rule yields no chapters, runtime recovery may use the spine at the same index solely to keep that historical row readable; new catalogue generation does not use this fallback. A valid complete marker whose source size/mtime still match may avoid a redundant SHA-256 pass; any identity change or invalid marker must rehash/rebuild and invalidate the old capability. It must not alter the archived source EPUB. |
 | `400` | Invalid book/chapter parameter. |
 | `404` | Book/chapter/source archive is not available to the current user. |
 | `422` | EPUB exists but is corrupt, unsafe, unsupported, or exceeds extraction limits. |
@@ -256,7 +272,7 @@ The route must not log the capability value. Application access logs should reda
 | Auth | Existing `Authorization: Bearer <jwt>` requirement. The book lookup remains scoped to the authenticated user. |
 | Request | Existing numeric book ID and zero-based chapter index. |
 | CBZ response | `200` JSON keeps `chapter` and `content`; adds `"format": "cbz"`, `resourceUrl`, and RFC3339 `resourceExpiresAt`. `content` remains compatible with the upstream image chapter shape and contains an `<img>` tag pointing at `resourceUrl`. |
-| Side effects | May verify/recover the chapter `resourcePath` from the preserved archive. It must not modify the original CBZ archive. |
+| Side effects | May verify/recover the chapter `resourcePath` and create/reuse a bounded immutable `.cbz-resources/<source-fingerprint>/` generation below the private book root. A complete generation is selected by its marker and matching source identity without reopening or rehashing the CBZ on every chapter. It must not modify the original CBZ archive. |
 | `400` | Invalid book/chapter parameter or unsafe archive path. |
 | `404` | Book/chapter/source archive/page is not available to the current user. |
 | `415` | The selected CBZ entry is not a supported image media type. |
@@ -276,13 +292,16 @@ current book/book-list JSON shapes. For a local CBZ with no `customCoverUrl`, th
 
 The source image is the first safe image encountered in CBZ archive order, matching
 reader-dev `CbzFile.parseBookInfo`; it is intentionally independent of the lexicographically
-sorted chapter catalogue. The response capability is bound to the current user, book and
-archive fingerprint, expires normally, and remains readable without appending the login JWT.
+sorted chapter catalogue. A new import prepares that same bounded immutable image generation
+before committing the book, so projecting a cover or opening the first page does not rescan the
+archive. The response capability is bound to the current user, book and archive fingerprint,
+expires normally, and remains readable without appending the login JWT.
 `coverUrl` capability values and archive member paths are **not** written to `books`,
 `chapters.json`, `bookSource.json`, backups, WebDAV metadata, or logs. A user-supplied
 `customCoverUrl` remains the frontend's first-choice cover and is never overwritten.
 
-If the archived CBZ is unavailable, malformed, unsafe, over budget, or has no supported image,
+If both the archived CBZ and its last complete derived generation are unavailable, malformed,
+unsafe, over budget, or have no supported image,
 the stable book endpoint stays successful with its stored/empty `coverUrl`; it must not turn a
 normal bookshelf response into an archive or host-path error.
 
@@ -306,14 +325,16 @@ Example:
 
 ### Capability-protected CBZ image resources
 
-`GET /api/cbz-resource/:capability/*resourcePath`
+`GET|HEAD /api/cbz-resource/:capability/*resourcePath`
 
 | Field | Contract |
 |---|---|
 | Auth | Does not accept or require the login Bearer token. Authorization is the signed path capability returned by the protected chapter endpoint. |
 | Capability scope | One user ID, one book ID, one source fingerprint, read-only access, and a bounded expiration. It is signed with a purpose-separated key derived from `OPENREADER_JWT_SECRET`; it is never interchangeable with a login JWT or EPUB capability. |
-| Path | `resourcePath` is URL-decoded once, normalized as a ZIP/POSIX path, and resolved strictly to an image entry inside that book's preserved CBZ archive. |
-| Success | `200` with a supported image MIME type. `HEAD` may return the same headers without a body. |
+| Path | `resourcePath` is URL-decoded once, normalized as a ZIP/POSIX path, and resolved strictly below that book/fingerprint's complete immutable derived generation. Only supported image media are extracted or served. |
+| Source identity | A complete marker records fingerprint, source size and modification time. Matching identity selects the generation without hashing; changed identity is hashed once and invalidates a mismatched old capability. If the archived source is temporarily absent, an already complete generation for the signed fingerprint remains readable. |
+| Recovery | If the signed generation/resource is absent and the current archived source is available, the service may run the bounded atomic extraction once. It serves the rebuilt file only when its fingerprint still matches the signed capability. |
+| Success | `200` with a supported image MIME type, `Content-Length`, `Last-Modified`, and byte-range support. A valid single range returns `206` plus `Content-Range`; an unsatisfiable range returns `416`. `HEAD` returns the corresponding headers and no body. Responses stream the derived file and do not load the whole image or reopen the CBZ. |
 | `400` | Malformed capability or unsafe/malformed resource path. |
 | `403` | Invalid signature, expired capability, wrong purpose, wrong archive fingerprint, or book ownership no longer matches. |
 | `404` | Scoped book/resource no longer exists. |
@@ -438,9 +459,9 @@ an allowed OpenReader runtime adaptation.
 | Method / path | Request | Success / side effects | Auth and errors |
 |---|---|---|---|
 | `GET /api/books/:id/search` | `q` (or legacy `keyword`), optional `paged`, `lastIndex`, `chapterLimit`, `matchLimit`, `scanUntilMatch`, and local/remote work bounds. | Lists caller-owned book matches in source chapter order. A cursor always represents the last fully scanned chapter: all matches from that final chapter are returned before a later request can start at its successor. Response preserves `{ list, lastIndex, hasMore, total }` and additionally reports explicit `incomplete`, `unavailableChapters`, and `truncated` states. | JWT/current-book required; blank query `400`, foreign/missing book `404`. Request cancellation stops remote fetch scheduling without writing a false successful result. A returned incomplete page is `200` with a client-safe state, not a host/source error. |
-| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, `keyword`, `lastIndex`, `size` aliases. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Additive `incomplete`, `unavailableChapters`, and `truncated` data fields expose a safety-bound partial scan without breaking existing clients. | JWT required; legacy validation errors remain `isSuccess: false` messages for deployed Reader3 clients. |
+| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, `keyword`, `lastIndex`, `size` aliases. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Additive `incomplete`, `unavailableChapters`, and `truncated` data fields expose a safety-bound partial scan without breaking existing clients. | JWT required; legacy validation errors remain `isSuccess: false` messages for deployed Reader3 clients. Like the modern route, request cancellation must flow into chapter loading, stop later remote fetches, and return without fabricating a successful page. |
 
-OpenReader retains bounded remote/local scanning and case-insensitive normalized matching as runtime/security adaptations. A bound may never silently advance `lastIndex` past omitted same-chapter matches: it must set `truncated: true`, and the UI must say that results are incomplete. Unavailable remote content is likewise surfaced by `incomplete/unavailableChapters` rather than as a false “没有匹配内容”.
+OpenReader retains bounded remote/local scanning and case-insensitive normalized matching as runtime/security adaptations. A bound may never silently advance `lastIndex` past omitted same-chapter matches: it must set `truncated: true`, and the UI must say that results are incomplete. Unavailable remote content is likewise surfaced by `incomplete/unavailableChapters` rather than as a false “没有匹配内容”. The frontend must pass an `AbortSignal`; closing the search dialog, replacing its keyword/book, or resetting its state aborts the active transport request without treating the intentional abort as a visible search error. Closing and reopening the same book preserves completed keyword/results/scroll state, matching the upstream root-dialog lifecycle.
 
 ## P1-B remote temporary-reader contract (implemented slice)
 

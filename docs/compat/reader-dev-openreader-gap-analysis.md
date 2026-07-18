@@ -2,6 +2,15 @@
 
 Baseline: `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`.
 
+## 2026-07-18 P2 阅读进度 API、并发与 WebDAV 复审
+
+固定上游 `Reader.vue#saveBookProgress` 与 `BookController#saveBookProgress` 的合同已经抽取到
+[`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)。当前独立进度表、精确章节
+位置、JWT 用户隔离和 WebSocket 同步属于技术栈等价/增强，但审查确认四类 `must-fix`：
+章节身份/标题仍由客户端决定；版本检查与 upsert 之间没有原子 CAS，失败者可能广播；
+退出时 keepalive 与普通请求重复；普通阅读保存没有恢复上游对既有 `bookProgress` WebDAV
+目录的逐书 JSON 镜像。下一阶段先写上述失败测试，再修改应用代码。
+
 Local upstream checkout used for this pass: `/private/tmp/reader-dev-upstream-audit`.
 
 Status labels:
@@ -32,9 +41,10 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons are defined by `Index.vue` and related CSS. | `AppLayout.vue` and `useAppMobileNavigation.js` now separate 260px visual width from the 270px gesture window, with bottom controls outside the scroll container. | The user-requested stable bottom controls during drag are an explicit OpenReader UX adaptation; the extracted upstream interaction contract is browser-validated. | `aligned` for extracted P1 sidebar slice | Mobile drag/fixed-bottom/shelf-geometry smoke at 390×844 and 360×800. |
 | Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Root workspace owns Search/Explore bodies and source overlays; historical URLs are compatibility intents, and shared BookInfo owns the handoff. | API clients and OpenReader multi-user extensions remain, but no separate page flow remains. | `aligned` for extracted P1 scene convergence | Search → result group → BookInfo → add/read browser test. |
 | Online source parsing | Upstream reader3-compatible source semantics live across `AnalyzeRule` plus `BookList/BookInfo/BookChapterList/BookContent`. | Current Go parser executes the extracted CSS/JSONPath/XPath/regex/composite/replace/pagination subsets, bounded persisted `@put`/`@get` variables, and redacted parser errors. Dynamic headers and `loginCheckJs` now fail before any request rather than being silently ignored. | `{{...}}`/arbitrary JavaScript remain explicit security-gated unsupported behavior; this is not a silent parsing gap. | `aligned` for extracted P2 parser + explicit security difference | Parser/request-isolation and source-debug/error-redaction contracts; browser source flow. |
-| Local import catalog parsing | Upstream `BookController.kt` imports local files through `Book.initLocalBook(...)` and `LocalBook.getChapterList(...)`; TXT parsing uses `TextFile.kt` with a 512-KiB detection probe, enabled-rule reverse scoring with a one-match threshold, direct Java multiline matching, `前言`, and deterministic 10-KiB no-TOC pseudo chapters. | Go now probes the first 512 KiB, applies the enabled-rule reverse scoring/one-match semantics, preserves matching custom titles and `前言`, creates upstream-style no-TOC pseudo chapters, and makes upload/LocalStore/WebDAV rule retries reuse immutable user-scoped staged bytes. | Materialized per-chapter cache remains an allowed Go/multi-user adaptation; TXT parsing behavior is aligned for the extracted slice. | `aligned` for TXT P0; `partial` for non-TXT parser audit | Engine/import/API fixtures, frontend retry-state contract, full backend/frontend tests, and mounted-volume smoke before release. |
+| Local import catalog parsing | Upstream `BookController.kt` imports local files through `Book.initLocalBook(...)` and `LocalBook.getChapterList(...)`; TXT parsing uses `TextFile.kt` with a 512-KiB detection probe, enabled-rule reverse scoring with a one-match threshold, direct Java multiline matching, `前言`, and deterministic 10-KiB no-TOC pseudo chapters. Preview leaves a prepared local asset that confirmation saves without a second full parse. | Go matches the extracted TXT rules and reuses immutable user-scoped staged bytes. The frontend now isolates preview generations/cancels obsolete requests, while a versioned rule/hash-bound parsed snapshot lets direct/LocalStore/WebDAV confirmation consume the successful preview without a second full parse. Old two-file stages upgrade lazily and failed imports compensate their new archive. | The stale response and duplicate parse defects from the 2026-07-18 re-audit are resolved; see [`local-book-import-catalog-p0-contract.md`](local-book-import-catalog-p0-contract.md). Materialized chapter caches remain an allowed Go adaptation. | `aligned` for preview lifecycle and extracted TXT matcher; `partial` for wider non-TXT parser semantics | Retain deferred-response, snapshot/old-stage/bounds/compensation tests and three-viewport TXT/EPUB smoke; continue UMD/CBZ semantic audit separately. |
 | Replace rules/content cleanup | Upstream `ReplaceRule.vue`, `ReplaceRuleForm.vue`, `Reader.vue`, `ReplaceRuleController.kt`. | Current Go endpoints and overlays exist. | Default-mode, list/application order, regex flags/failure handling, form validation, manager shell and selected-text editor flow have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Rule-semantics API tests; selected-text editor contract; browser manager/editor smoke. |
 | Bookmarks | Upstream `Bookmark.vue`, `BookmarkForm.vue`, `Reader.vue`, `BookmarkController.kt`. | Current ID-backed bookmark APIs and root overlays exist. | Form/manager ownership, paragraph context, stale-offset fallback, creation order and request validation have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Bookmark context/jump/API contracts; three-viewport dialog smoke. |
+| Bookmark manager add-current-paragraph | Upstream bookmark creation is reached from Reader selected-text operations; `Bookmark.vue` itself has no create button. | Reader freezes one exact 32%-anchor paragraph from normal text or a same-origin EPUB iframe; the manager exposes “添加当前段落”. Audio/image/error/empty content has no fake fallback, and selected-text creation remains available. | User explicitly requested this path to avoid keeping the selection-operation popup enabled. | `intentional-redesign / completed 2026-07-18` | [`reader-bookmark-current-page-redesign.md`](reader-bookmark-current-page-redesign.md); 423 frontend tests plus main Reader and real EPUB browser contracts at 1440×900/390×844/360×800. |
 | RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition, reset/refresh ordering and compact fullscreen behavior have been rebuilt; persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | RSS fixture/parser tests; source/article browser smoke. |
 | WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P2 storage UI/import audit found CBZ reachability and LocalStore result-gate differences despite the prior path/security alignment. | `partial` | Storage UI/import contract, path traversal tests, upload/list/import browser smoke, Docker volume smoke. |
 | Backup/restore | Upstream backup flows and reader-dev formats require extraction. | Current OpenReader backup service and Legado restore exist. | Must preserve OpenReader data and document reader-dev/Legado import semantics. | `unknown` | Restore testdata; backup list/download/restore tests. |
@@ -311,7 +321,9 @@ The authority is the fixed upstream `web/src/components/ReadSettings.vue`,
 | Settings scroll owner | Upstream `.setting-list` alone has `max-height:45vh; overflow-y:auto`; the title and its reset action remain visible while the settings list scrolls. The wrapper owns the outer 24px plus safe-area inset. | Desktop `ReaderDesktopWorkspacePanel` scrolls its entire `.reader-workspace-body` for settings. Mobile `.reader-mobile-primary-settings` likewise scrolls its entire primary body. Both therefore scroll the title away. | **wrong behavior / P0.** Add a source/unit contract requiring the title and scroll list to be siblings, then real-browser tests proving the title's `top` is unchanged while a long settings list scrolls at 1440×900, 390×844, and 360×800. The outer panel must become non-scrolling for settings after the inner list takes ownership. |
 | Settings outer geometry | Upstream settings Popover has content-sized outer geometry; at the fixed 1440×900 probe it is 498px high. The scroll core is 45vh and title/padding create the remaining fixed space. | OpenReader's already-released desktop outer settings bound is within the observed outer range, but it obtains this by scrolling the wrong element. Mobile caps the whole body with `calc(45vh + 96px)`. | **outer geometry provisionally aligned; inner composition not aligned.** Preserve the measured outer bounds while moving overflow to the child list. Verify no double scroll bar and no title movement. |
 | `page` / upstream `上下滑动` | Upstream treats any non-slide/non-scroll text reading as vertical paged reading. `nextPage` / `prevPage` scroll the vertical content by a page-sized step until a chapter boundary, then change chapter; top/bottom click zones select previous/next on the Y axis. | `effectiveReaderMode === 'page'`, `useReaderNavigation`, `useReaderPointer`, and `useReaderKeyboard` use a vertical scroll container and page step. Its rendered title/paragraph bounds and exact chapter-boundary transition have not been proved against upstream. | **technically plausible but unverified.** Add desktop/mobile rendered layout and click/keyboard chapter-boundary contracts before retaining the implementation. |
-| Vertical click animation duration | Upstream `scrollContent()` passes `animateMSTime` directly into a frame animation; `0ms` jumps and positive values complete in their configured duration. | `createReaderScrollAnimator()` now owns discrete vertical click/keyboard animation with the configured duration; wheel/touch stays native and cancels an unfinished programmatic animation. | **2026-07-17 aligned.** Unit tests and the production browser contract distinguish 0/100/500ms without changing the continuous-scroll exception. See [`reader-animation-browser-runtime-p0-contract.md`](reader-animation-browser-runtime-p0-contract.md). |
+| Vertical click animation duration | Upstream `scrollContent()` and `showPage()` pass `animateMSTime` directly into a frame animation; `0ms` jumps and positive values complete in their configured duration. Runtime ReadSettings changes affect the next action immediately. | `createReaderScrollAnimator()` now owns discrete vertical click/keyboard animation, mobile rendered-page seeks, and continuous-window chapter-boundary positioning; wheel/touch stays native. The old direct `scrollTop` seek and native `smooth/auto` boundary paths were removed. | **2026-07-17 aligned after user regression.** A same-session 390×844 settings-to-animation contract uses real touch and distinguishes 0/100/500ms for both next-page clicks and bottom page-slider seeks. See [`reader-animation-browser-runtime-p0-contract.md`](reader-animation-browser-runtime-p0-contract.md). |
+| Vertical click frame workload | Upstream animation frames write the comparatively light root-document scrollTop; the ordinary `上下滑动` handler derives page number and defers persistence. | The first fix deferred business synchronization; the second fix now runs only mobile text/page click motion as a composited body transform, commits scrollTop once at settlement/cancellation, and buffers one repeated same-direction tap. Native drag cancellation begins only after real movement. | **resolved and published as `18d9183` on 2026-07-18 after second mobile regression.** Configured duration, stride, chapter boundaries and native touch/wheel remain intact. Dual-mobile cadence, continuous, image, real EPUB and Docker volume/backup contracts pass. See [`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md). |
+| Page-mode chapter-end entry | Upstream non-slide/non-scroll content ends with a flow-positioned `加载下一章`; the last chapter keeps the entry and reports `本章是最后一章` when clicked. | The page body now renders the same flow action with touch/click propagation guards and explicit last-chapter handling. | **resolved 2026-07-18.** Real touch enters adjacent chapters and the final prompt remains in place with the upstream error text. |
 | `flip` / upstream `左右滑动` | Upstream `isSlideRead` uses horizontal CSS columns for eligible text. Left/right click zones and horizontal swipe advance a column before moving to another chapter. EPUB, comic, audio, and TTS/read-bar explicitly disable this mode. | `effectiveReaderMode === 'flip'` uses `column-width`, a `page` index, pointer horizontal swipe, and the same format/TTS exclusions. Exact column width, transform/page count, and title/paragraph clipping have not been visually compared. | **technically plausible but unverified.** Add a real-browser column/page-count assertion at all target viewports, then verify left/right click and swipe before chapter transition. |
 | `scroll` / upstream `上下滚动` | Upstream renders a loaded chapter window around the current chapter and preserves/restores its anchor while extending it. Normal navigation is vertical; it does not use horizontal columns. | OpenReader renders `chapterBlocks` for both scroll modes and browser checks already prove text justification, mobile 16px symmetry, and continuous wheel/finger scrolling. | **partially aligned.** The user-approved native continuous wheel/finger behavior intentionally replaces the upstream animated/segmented scroll feel; click paging must remain paged. Add desktop title/paragraph/inter-chapter-gap measurements and chapter-window boundary tests. |
 | `scroll2` / upstream `上下滚动2` | Upstream starts the visible chapter window before the current chapter and hides viewed chapters, restoring an anchor after window changes; it warns that this may jitter. | OpenReader has a dedicated continuous-window and anchor controller; browser checks cover anchor restoration and native continuous scrolling at all target sizes. | **partially aligned, permitted scroll-physics difference.** Retain only after adding explicit previous-chapter eviction/forward extension and click-page contracts against an upstream fixture. |
@@ -415,10 +427,10 @@ security contracts remain documented in their dedicated backend sections below.
 | Format / transition | Upstream contract | Current OpenReader evidence | Classification / required change |
 |---|---|---|---|
 | Volume chapter layout | A catalog row with `isVolume` renders a `.volume-chapter` with `min-height:100vh`, `display:flex`, `flex-direction:column`, and horizontal centering. It starts at the content top; its title is centered and its optional `volume-tag` is right aligned. | `ReaderChapterContent` now uses the same top-aligned flex column, centered title, and right-aligned tag. | **aligned for this P0 format slice.** `reader-volume-contract.mjs` verifies geometry at 1440×900, 390×844, and 360×800. |
-| Image comic / CBZ | `Reader.vue.isCarToon` is true only for non-EPUB, non-CBZ content containing `<img>`; `isSlideRead` is false for that ordinary image-comic branch. A `.cbz` is deliberately excluded from `isCarToon`, so it keeps the configured slide/page decision while still suppressing its heading. Both kinds disable TTS/auto-reading and fill images to the readable width. Image click/preview must not leak into Reader click zones. | `useReaderChapterPresentation` keeps CBZ heading suppression separate from ordinary image-comic headings. `readerEffectiveMode` now receives an ordinary-image-comic flag, forces only that branch to `page`, and leaves explicitly requested CBZ `flip` intact. | **aligned for this P0 format slice.** Preserve stricter HTML/URL sanitization and Element preview as allowed security/framework changes. `reader-image-contract.mjs` verifies both variants at all target viewports. |
+| Image comic / CBZ | `Reader.vue.isCarToon` is true only for non-EPUB, non-CBZ content containing `<img>`; `isSlideRead` is false for that ordinary image-comic branch. A `.cbz` is deliberately excluded from `isCarToon`, so it keeps the configured slide/page decision while still suppressing its heading. The same exclusion means CBZ keeps the upstream auto-reading/TTS entries, while ordinary image-comic hides them. Both fill images to the readable width and preview clicks must not leak into Reader click zones. | `useReaderChapterPresentation` keeps CBZ heading suppression separate from ordinary image-comic headings. `readerEffectiveMode` and the shared capability helpers receive only the ordinary-image-comic predicate: ordinary image-comic forces `page` and hides controls, while CBZ keeps `flip`/controls; auto/read-bar temporarily maps CBZ flip to page. | **aligned for this P0 format slice.** Preserve stricter HTML/URL sanitization and Element preview as allowed security/framework changes. `reader-image-contract.mjs` keeps the mock ordinary-image regression; real `reader-cbz-contract.mjs` verifies import, capability, layout, controls and flip at all target viewports. |
 | EPUB frame | Upstream uses a same-page iframe bridge: `inited` applies style/height, `load` restores position, `setHeight` repaginates, click/hash/keydown are forwarded to Reader, and EPUB forces the non-slide vertical branch. | `ReaderEpubContent`/`useReaderEpubFrame` implement the bridge with exact iframe-source and same-origin validation; `Reader.vue` routes navigation through a full chapter load to refresh signed resources. | **acceptable security adaptation.** Same-origin source validation and resource refresh are stricter than upstream. Browser contract must still cover height/style, fragment navigation, click/keyboard forwarding, progress restore, preview, and mobile chrome behavior at all target viewports. |
-| Audio mode/input | Upstream renders a dedicated audio surface, hides ordinary text paging/TTS/auto-reading, accepts center-tap toolbar toggling only, restores a saved playback second on metadata, and saves progress in seconds. | `ReaderAudioContent`, `useReaderChapterLoader`, and Reader audio payload logic implement dedicated controls, mode forcing, saved seconds, and input guards. | **aligned for this P0 format slice.** `reader-audio-contract.mjs` now covers 1440×900, 390×844, 360×800, restored seconds, ±15 seconds, manual/ended transitions, and persisted progress. |
-| Audio manual chapter transition | `Content.prevChapter()` and `nextChapter()` set `autoPlay = true` before emitting the chapter transition. `onEnd()` also sets it before moving forward, so the destination chapter starts automatically after metadata. | Reader routes manual previous/next through `goAudioChapter()`, which sets `audioAutoplay` before changing chapters; ended advancement uses the same intent. | **aligned for this P0 format slice.** Browser assertions prove the destination audio element receives autoplay for manual and ended transitions. |
+| Audio mode/input | Upstream renders a dedicated audio surface in the order cover → progress → five operations → volume → book-info; it hides ordinary text paging/TTS/auto-reading, restores a saved second, and keeps first/last actions clickable with messages. | `ReaderAudioContent` now uses the same information order with chapter/book/author fields. Reader keeps boundary actions clickable, does not issue out-of-range requests, and retains second-based progress/input guards. | **aligned for the 2026-07-18 fixed-baseline P0 slice.** `reader-audio-contract.mjs` covers all three viewports, controls, fields, boundaries, saved seconds and progress. |
+| Audio manual chapter transition | `Content.prevChapter()` and `nextChapter()` set `autoPlay = true` before emitting the chapter transition. `onEnd()` also sets it before moving forward, so the destination chapter starts automatically after metadata. | Reader keeps `audioAutoplay` through metadata until the destination emits a real `play`, or clears it with a visible browser-policy rejection and manual recovery path. | **aligned for the 2026-07-18 fixed-baseline P0 slice.** Browser assertions count actual `play()` calls for manual/ended transitions and verify the rejection branch. |
 | Format switches | Upstream disables slide for EPUB, ordinary image-comic, and audio; audio suppresses paging input and EPUB delegates input through the iframe. It deliberately does **not** classify CBZ as ordinary image-comic for this purpose. | `readerEffectiveMode` has an explicit ordinary-image-comic argument, while `isComicChapter`, `isAudioChapter`, pointer/keyboard/wheel guards, and the TTS watch retain their existing format-specific routing. | **aligned for this P0 format slice.** Unit plus three-viewport browser proof covers ordinary image-comic `page` and CBZ `flip`; the user-approved native vertical scroll host remains text-only. |
 
 Test-first gate for the required repairs:
@@ -618,6 +630,38 @@ Implementation record (2026-07-11):
 - A 2,000-match per-chapter safety cap is explicit: the API returns `truncated: true` and `incomplete: true`; remote fetch/source failures increment `unavailableChapters` and also set `incomplete`. The root dialog renders these states as a warning instead of “没有匹配内容”.
 - The legacy Reader3 URL route keeps its original response shape and gains the same status fields additively inside `data`, so existing clients continue to read `list/lastIndex/hasMore/total` unchanged.
 - Required browser follow-up remains: at 1440×900, 390×844 and 360×800, verify result selection loads/highlights the intended occurrence, the warning is visible for an unavailable chapter, and dialog clicks leave the Reader chrome unchanged.
+
+#### 2026-07-17 completion re-audit
+
+The 2026-07-11 implementation record is partial evidence, not a completed
+module gate. A source-level re-audit found two cancellation gaps and one
+missing runtime gate:
+
+| Contract | Current evidence | Classification | Required test before implementation |
+|---|---|---|---|
+| Closing or replacing a search stops its in-flight request | `useBookContentSearch` invalidates a request token, but `searchBookContent()` receives no `AbortSignal`. Closing `OverlayBookContentSearch` does not call a cancellation action. The browser may therefore continue fetching remote chapters after the result has become unobservable. | `must-fix` | A composable contract must prove keyword replacement, dialog close, book replacement, and explicit reset abort the active request while an ordinary successful request is not aborted early. |
+| Both modern and Reader3 endpoints propagate disconnect cancellation | The modern route passes `c.Request.Context()` into `collectContentMatchesContext`; the legacy adapter still passes `context.Background()`. | `must-fix` | A legacy-handler cancellation fixture must prove a disconnected request does not schedule the next remote chapter and does not serialize a false successful page. |
+| Search dialog lifecycle preserves upstream state semantics | Upstream cancel only hides the root dialog; same-book keyword/results/scroll remain available, while changing books resets them. | Current OpenReader preserves same-book state, but cancellation must be added without clearing it on close. | `acceptable-change` with constraint | Close/reopen same book retains completed state; changing book aborts and resets. |
+| Runtime result/warning contract | Unit/API tests cover dense results and warning text, but no real-browser evidence covers the complete result jump and incomplete warning at the required viewports. | `unknown`, therefore incomplete | At 1440×900, 390×844, and 360×800: search a dense fixture, select a non-first occurrence, verify chapter/highlight; exercise an unavailable chapter warning; prove dialog interaction does not alter Reader chrome. |
+
+Implementation must keep the existing App-level Dialog, route query fields,
+dense-chapter cursor semantics, and same-book saved scroll position. Cancellation
+errors caused by an intentional abort are silent; network/source failures remain
+visible. This focused contract is the gate for the next code pass.
+
+Implementation completion record (2026-07-18):
+
+- `useBookContentSearch` now owns one `AbortController` for the active multi-round search and passes its
+  signal through the API client. Dialog close, keyword replacement, book replacement, reset, and component
+  teardown abort transport work; an intentional Axios/DOM abort is silent and completed same-book state is
+  retained on close.
+- Modern paged/non-paged and Reader3 compatibility handlers all propagate `c.Request.Context()` into chapter
+  loading. A canceled scan returns without serializing a false successful page. The legacy handler fixture
+  proves that canceling during chapter one never schedules chapter two.
+- Dense chapter, explicit truncation, unavailable chapter, frontend abort, same-book lifecycle, and existing
+  legacy-shape tests pass. The main Reader browser contract at 1440×900, 390×844, and 360×800 displays the
+  unavailable-chapter warning, renders the complete page fixture, selects/highlights the fifth occurrence,
+  preserves route metadata, and leaves mobile Reader chrome unchanged.
 
 ### 2026-07-10 focused audit: Reader App-level BookmarkForm protocol
 
@@ -1476,7 +1520,12 @@ Allowed differences: Vue 3 root dialogs, SQLite IDs/multiple-bookmark support, J
 
 ## Immediate P0 contract: continuous cross-chapter reading
 
-Status: implemented and validated on 2026-07-06.
+Status: **2026-07-18 fixed-baseline second-audit corrections are implemented and verified.** Window range,
+four-viewport extension, scroll/scroll2 retention, native input and visible retry remain aligned; continuous
+chapter identity now follows the upstream top boundary, progress writes are isolated during anchored DOM
+replacement, and compute/append/retry share a book/mode/generation guard. The authoritative contract and
+current evidence are in
+[`reader-continuous-fixed-baseline-p0-contract.md`](reader-continuous-fixed-baseline-p0-contract.md).
 
 This contract is tied to `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`. It replaces earlier audit notes and tests that treated a fixed previous-1/next-2 window as upstream behavior.
 
@@ -1536,6 +1585,15 @@ Validation evidence:
 - The browser contract verifies initial `[current, next]` rendering, native 137px wheel movement, symmetric readable geometry, `scroll2` read-chapter removal, paragraph anchor drift within 2px, no duplicate adjacent requests, current-content survival on failure, and successful retry.
 - Existing `scripts/smoke/reader-mobile-contract.mjs` and `scripts/smoke/reader-image-contract.mjs` both passed after this change.
 
+The earlier evidence above remains regression evidence for the window policy. The 2026-07-18 correction adds
+unit contracts for top-boundary chapter identity, progress suppression during anchored DOM replacement, and
+stale async append/retry invalidation. The expanded continuous browser contract now covers all three target
+viewports plus a delayed adjacent transaction and verifies that no transient progress PUT is sent. Frontend
+tests are 434/434; production build, backend tests, mobile/image/text/TTS/volume/audio smoke, and real Go
+EPUB/CBZ reader contracts all pass. CONT-FIX-1…6 are closed. Source commit `370d0f7` was locally built,
+passed the historical volume/portable-backup gate, and published for amd64/arm64 as both `370d0f7` and
+`latest` at OCI index `sha256:4f47a2d658ea324a2482c8b86cd8cffe3158bdba67b3255a98c4710295cd0311`.
+
 ## Immediate P0 contract: Content image/comic/CBZ reading
 
 Status: implemented and validated on 2026-07-06.
@@ -1560,7 +1618,7 @@ Status: implemented and validated on 2026-07-06.
 | Image parsing | `frontend/src/utils/readerContent.js` parses `<img>` into `type: "image"` blocks and reads `src`, `data-src`, `data-original`, `data-url`, including a non-browser parser path for deterministic tests. | `aligned` | Covered by parser contract tests for `__API_ROOT__`, mixed text+image lines, unsafe image URLs, and source positions. |
 | CBZ detection | `useReaderChapterPresentation.js` checks `url`, `bookUrl`, `libraryPath`, and `originalFile`, ignoring query/hash. | `acceptable-change` | Keep broader detection because Go/Vue data shape differs from upstream `bookUrl`; document as compatibility adaptation. |
 | Image layout | `ReaderChapterContent.vue` keeps the generic illustration cap but overrides comic/CBZ image boxes and image elements to fill the readable column width. | `aligned` | Browser geometry checks cover desktop page mode, mobile continuous scroll, and mobile flip mode. |
-| CBZ heading | `hideTitle` is set for CBZ and `h1` is skipped. | `aligned` | Tests cover query/hash `.CBZ`, `originalFile`, and `libraryPath` shapes. |
+| CBZ heading | `hideTitle` is set for CBZ and `h3` is skipped. | `aligned` | Tests cover query/hash `.CBZ`, `originalFile`, and `libraryPath` shapes. |
 | Image-load relayout | `ReaderChapterContent.vue` emits `image-load`; Reader calls `updateFlipLayout()` and refreshes progress state after every successful image load. | `aligned` | Static wiring test plus delayed-image browser checks cover page/flip recalculation. |
 | Preview | Element Plus image preview is used for ordinary image blocks; the image block stops click propagation before the Reader center-tap handler. | `acceptable-change` | Browser checks prove preview opens without hiding the default-visible mobile toolbar. |
 | Security | Current parser strips unsafe inline HTML and rejects non-http(s) image URLs. | `acceptable-change` | Keep the stricter allowlist; tests should prove `javascript:` and script attributes do not survive. |
@@ -1689,6 +1747,12 @@ Deferred from this EPUB slice:
 - Remaining CBZ archive/import and lazy-loading edge cases.
 
 ## Immediate P0 contract: CBZ/comic image and audio chapter reading
+
+> 2026-07-18 correction: this combined historical section remains useful for audio history, but its CBZ
+> completion claims are superseded by
+> [`reader-cbz-fixed-baseline-p0-contract.md`](reader-cbz-fixed-baseline-p0-contract.md). In particular,
+> current CBZ resource requests still rehash/rescan the archive and current `isComic` state incorrectly hides
+> the upstream-visible CBZ TTS entry.
 
 ### Upstream evidence
 
@@ -1895,18 +1959,20 @@ Current OpenReader evidence and classification:
 
 | Layer | Current evidence | Difference | Classification |
 |---|---|---|---|
-| Availability | `Reader.vue` `ttsSupportedForChapter` and `readerTTSBarVisible()` require speech support and exclude EPUB, audio, and rendered comic/image chapters. | OpenReader detects comic content through its Vue chapter presentation rather than upstream's `isCarToon` flag. | `technical-stack-equivalent` |
+| Availability | `readerSpeechSynthesisSupported()` requires `speechSynthesis.getVoices`; event registration/removal is capability-guarded. Reader excludes EPUB, audio, and ordinary image-comic while retaining CBZ. | OpenReader detects comic content through its Vue chapter presentation rather than upstream's `isCarToon` flag; an incomplete browser API no longer crashes Reader. | `technical-stack-equivalent` |
 | Read bar visibility | `Reader.vue` keeps `ttsBarRequested` separate from `tts.state.playing`; opening it hides mobile chrome, and closing it does not invent a chrome-reopen transition. | Matches upstream requirement that opening the read bar does not start speech and applies the read-bar exception to the otherwise visible mobile tool layer. | `aligned` |
 | Paging/slide mode coupling | `readerEffectiveMode()` maps a requested read bar plus `flip` mode to `page`, while leaving native scroll modes unchanged. | This is the Vue equivalent of upstream `isSlideRead() === false` during `showReadBar`; it restores the configured `flip` mode on close. | `aligned` |
 | Read-bar content clearance | Reader CSS sets content bottom space to `280px` expanded and `80px` collapsed while the bar is active. | Variables are applied to desktop scroll padding and mobile rendered-body padding rather than upstream's inline `chapterTheme()` style. | `technical-stack-equivalent` |
-| Read bar structure | `ReaderTTSBar.vue` now exposes close, previous paragraph, play/pause, next paragraph, collapse/expand config, voice list, rate, pitch, and sleep controls. | Equivalent control surface, with Vue 3/Element Plus styling and current pause/resume support retained. | `technical-stack-equivalent` |
+| Read bar structure | `ReaderTTSBar.vue` is fixed at bottom 0, desktop 500px aligned to the Reader frame and mobile 100vw. It exposes close, previous, play/pause, next, collapse/expand, a horizontal voice button list, and editable numeric steppers for rate/pitch/sleep. | Pause/resume and progress remain allowed enhancements; steppers are the user's explicit replacement for easy-to-mis-tap sliders. | `aligned + acceptable user-requested enhancement` |
 | Rate range | `useTTS`, `readerStore`, `ReaderTTSBar`, `ReaderSettingsPanel`, `Settings.vue` use `0.5–2`. | Matches upstream. | `aligned` |
 | Pitch range | `useTTS`, `readerStore`, `ReaderTTSBar`, `ReaderSettingsPanel`, `Settings.vue` use `0–2`. | Matches upstream. | `aligned` |
 | Voice ordering | `useTTS.loadVoices()` uses `sortTTSVoices()`, sorting `zh-*` first then by language without filtering non-English/non-Chinese voices. | Matches upstream ordering while keeping `voiceURI` persistence. | `aligned` |
-| Config persistence | Pinia reader store persists `ttsRate`, `ttsPitch`, `ttsVoiceURI`. | Uses `voiceURI` instead of upstream `voiceName`; this is a Vue 3/browser-stability adaptation as long as display labels remain human-readable. | `acceptable-change` |
+| Config persistence | Pinia reader store persists `ttsRate`, `ttsPitch`, `ttsVoiceURI`; blank or stale URI does not silently choose another voice. | Uses `voiceURI` instead of upstream `voiceName`; explicit selection and human-readable labels remain visible. | `acceptable-change` |
 | Restart on config change | `useTTS.setRate/setPitch/setVoice` call `restartCurrent()`. | Matches upstream restart-on-change behavior. | `aligned` |
 | Sleep timer | `useReaderTTS` uses 0–180 minutes and emits `定时关闭朗读`. | Matches upstream timer range and message. | `aligned` |
-| Paragraph traversal | `useReaderTTS` now derives speech paragraphs from rendered `h1,h2,h3,p`, starts from an active/visible paragraph, marks `.reading/.tts-active`, and routes previous/next across chapter boundaries. | Upstream reads `h3,p`; OpenReader includes `h1/h2` because current Vue renderer uses headings for chapter titles. | `technical-stack-equivalent` |
+| Paragraph traversal | `useReaderTTS` derives only the active chapter's rendered `h3,p`, uses the Reader's rendered safe top boundary, marks `.reading/.tts-active`, and routes previous/next across chapter boundaries. | Matches the upstream selector instead of the stale historical `h1/h2` exception. | `aligned` |
+| Cross-chapter readiness | `useReaderChapterReady` waits for the requested scope/index to become loaded, non-loading and error-free; old waits are cancelled by `AbortController`. | Replaces the former fixed `30×120ms` polling timeout without changing generic Reader navigation. | `technical-stack-equivalent` |
+| Close positioning | Reader freezes the active paragraph before stopping, restores flip layout over two frames, then maps rendered column geometry to the correct page. | Vue's fragmented-column `offsetLeft` is unreliable; rendered `getBoundingClientRect()` matches upstream `showParagraph()`. | `technical-stack-equivalent` |
 | Error handling | `useTTS` now forwards utterance errors to `useReaderTTS`, which displays `朗读错误: ...`. | Matches upstream user-visible error semantics. | `aligned` |
 
 Required tests for this TTS slice:
@@ -1935,7 +2001,9 @@ Implementation status:
 - Completed in this slice: TTS paragraph source now comes from rendered DOM headings/paragraphs rather than only splitting plain text, and starts from the active or first visible paragraph.
 - Completed in this slice: TTS previous/next now restarts the target DOM paragraph and can cross chapter boundaries.
 - Completed in this slice: `speechSynthesis` utterance errors are surfaced as `朗读错误: ...`.
-- Validation note: focused reader mode/pointer/TTS unit tests and production build passed. `scripts/smoke/reader-tts-contract.mjs` passed in Chrome at `1440×900`, `390×844`, and `360×800`, covering desktop rail persistence, mobile default tools, TTS chrome exception, center-tap guard, flip→page→flip transition, expanded/collapsed `280px`/`80px` clearance, paragraph controls/highlight, speech error handling and close behavior.
+- Completed in the 2026-07-18 fixed-baseline correction: incomplete speech APIs are guarded; voice selection is explicit; the bar is aligned/attached to the upstream frame; numeric settings use editable steppers; cross-chapter continuation waits on a cancellable chapter-ready transaction; and closing maps the frozen paragraph back to its actual flip page.
+- Validation note: `scripts/smoke/reader-tts-contract.mjs` passed in Chrome at `1440×900`, `390×844`, and `360×800`, including a deliberately delayed 4.1-second adjacent chapter, missing speech API, persisted voice/rate, rendered geometry, error handling and close positioning. Frontend `444/444`, Go full tests, build, mobile/text/continuous, audio, real EPUB and real CBZ regressions also passed.
+- Release note: commit `5260efd` was built locally for amd64/arm64 and published as `5260efd` plus `latest` at OCI index `sha256:5c8c7d9ab186ec80b26ed709123c1c88fe37261f18cf937988c4ffbfdc9a4df4`. The current historical-volume script was not rerun because Codex authorization quota denied the OrbStack socket; persistence compatibility inherits the passed `370d0f7` gate because backend, Dockerfile, database/backup and volume scripts have no intervening diff.
 
 ### 2026-07-08 follow-up contract: Reader settings panel labels and first-screen structure
 
@@ -2333,3 +2401,99 @@ the same scoped user settings through their established backend contracts.
 - 普通书首章被不必要的 book 详情请求阻塞；EPUB 每个子资源又在全局锁内重新 SHA-256 整本归档。
 
 以上均进入 `must-fix`，但 EPUB 优化必须保留 capability 指纹、用户所有权、归档路径和有界解压安全边界。合同完成后才允许添加失败测试并修改应用代码。
+
+## 2026-07-18 EPUB 导入与首次阅读性能复审
+
+固定上游的 lazy-resource、六种目录规则、确认导入和首次解压数据流已经记录在
+[`epub-import-first-read-performance-contract.md`](epub-import-first-read-performance-contract.md)。
+当前预览无条件物化所有 spine 正文、标题回退误用 `h1/h2`、首次 Reader 再次哈希/解压整本
+archive，以及单章 cache miss 重跑整本 parser，均为 `must-fix`。允许在确认导入期提前准备
+有界、caller-owned 的 immutable extraction，但必须保留 ZIP 限制、SHA-256 capability 绑定、
+事务补偿和旧 volume 惰性升级。
+
+实施结果：本批已拆分 catalogue/materialize，恢复上游 `<title>` 回退，确认导入预热受限 extraction，
+完整 marker 快路径避免重复 SHA-256，且 EPUB 单章 cache miss 只读取当前已验证 resource。全量后端、
+426 项前端测试、生产构建、三视口 EPUB/导入 smoke 及历史 Docker volume/backup smoke 均通过。
+当时把跨 resource 可见正文与纯文本合并记录为后续 `must-fix`；下方固定基准二次复审已明确
+撤销该结论，本段只保留性能批次的历史实施记录。
+
+### 2026-07-18 EPUB 固定基准二次复审纠正
+
+上述“跨 resource 可见正文必须合并”的结论经固定提交源码逐层复核后被否定：
+
+- `TableOfContents#getAllUniqueResources()` 按 resource href 去重，丢弃 TOC fragment；
+- `EpubFile#getChapterList()` 只写 `resource.href`，不写 fragment/`nextUrl`；
+- `BookController#getBookContent()` 对 EPUB 直接返回当前解压 XHTML URL并提前结束；
+- `Content.vue#renderEpub()` 只渲染一个 iframe。
+
+因此当前单 capability iframe 是安全等价结构，不应新增跨 resource DOM 合成。真正的错误重构是
+`buildEPUBChapters()` 以 `(path, fragment)` 生成了固定上游不存在的多个目录项。新导入和显式
+刷新必须改为 href 去重；已发布历史 fragment row 不自动迁移或删除。完整裁决、搜索辅助分支的
+显式差异及失败测试见
+[`epub-fixed-baseline-catalog-reader-contract.md`](epub-fixed-baseline-catalog-reader-contract.md)。
+
+## 2026-07-18 Reader 音频与 TTS 固定基准复审
+
+历史音频/TTS smoke 证明了基础控件、格式门禁和三视口可运行，但不足以证明固定上游对齐。
+本轮重新读取 `Content.vue#renderAudio` 和 `Reader.vue` speech/read-bar 状态机后，确认：
+
+- 音频页当前自创 card 缺少上游书名/作者 book-info，首末章按钮错误禁用；
+- 手动/ended autoplay 只检查了 HTML 属性，metadata 时又提前清除 intent，没有证明目标真实播放；
+- TTS 对不完整 speech API 可在 setup 中抛错，voice 空值标签与实际选中的第一个 voice 不一致；
+- 当前 TTS 栏不是上游 desktop 500px / mobile 100vw 的贴底结构，数值 range 也违反用户明确要求的可编辑 stepper；
+- TTS 跨章依赖 30×120ms 轮询，慢于 3.6 秒会静默停止；关闭 read bar 只恢复 flip class，不恢复朗读段落所在页。
+
+专门合同、允许差异和 AUDIO/TTS-FIX 测试清单见
+[`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md)。
+本阶段仅修改审计文档，不修改应用代码；旧“aligned”段落由该合同收窄。
+
+## 2026-07-18 书架网络优先与多客户端收敛复审
+
+7 月 17 日的 revision gate、导入即时 upsert 和 WebSocket 重连强刷已经修复了迟到请求覆盖，
+但不能关闭用户报告的完整链路。固定上游 `App.vue#loadBookShelf` 与
+`plugins/helper.js#networkFirstRequest` 是网络优先：只有网络失败才读书架缓存。当前 Pinia 却在
+网络请求完成前先提交 IndexedDB/localStorage 旧列表，所以冷启动/浏览器刷新会短暂显示缺少
+最新导入书籍的旧快照。
+
+同时，当前 Hub 在 16 项发送队列满时静默丢事件，而前端只要 WebSocket 显示 connected 且书架
+非空就跳过前台校准；connected 因而被错误用作数据新鲜证明。完整上游、REST、缓存、revision、
+Hub backpressure 和多客户端状态合同已记录在
+[`bookshelf-network-first-sync-p2-contract.md`](bookshelf-network-first-sync-p2-contract.md)。对应失败
+测试已经先行建立，随后恢复网络优先 fallback、增加不依赖 connected 的成功节流前台校准，并让
+Hub 对满队列客户端执行断开/重连恢复，不再静默丢弃状态事件。
+
+测试先行后的真实双客户端启动又发现 settings 首次写竞态：两个客户端同时读到不存在的 Reader
+默认设置，`SELECT -> FirstOrCreate` 随后让第二个 INSERT 撞上 `(user_id,key)` 唯一键，实际产生
+`PUT /api/settings/reader` 的 `500 failed to save setting`。该项已经补进同一合同，必须改为保留
+现有校验/陈旧写保护的原子 conflict upsert，并以并发 Go API 测试证明；不能在 smoke 中预先创建
+设置行或过滤 500 绕过。日志复核否定了上一版“连接级 busy timeout”推断，SQLite 连接配置不改。
+
+实施结果（2026-07-18）：首次设置写已改为基于现有 `(user_id,key)` 唯一键的 SQLite conflict
+upsert；八路确定性并发 API 契约、Hub backpressure、网络挂起/离线 fallback 和前台重试测试均
+通过。真实 Go + SQLite + WebSocket 的两个同账号 Chrome 上下文在 1440×900、390×844、
+360×800 全部验证：延迟 `/api/books` 期间不会展示旧持久书架，A 导入 TXT 后 B 即时出现新书，
+且没有设置 500、控制台错误或横向溢出。前端 457/457、生产构建和后端全量测试通过；在该验证
+时点，本地 Docker 构建、卷/备份 smoke 与 GHCR 发布是最后发布门禁。
+
+发布门禁随后完成：提交 `ff4cd9d` 已推送 `main`；本地 arm64 候选通过历史卷重启、备份/可移植
+恢复、四种本地格式、相对缓存和用户隔离 smoke。本机生成的 amd64/arm64 镜像已上传为
+`ghcr.io/changshengyu/openreader:ff4cd9d` 与 `latest`，远端 OCI index 为
+`sha256:31c3432d2d93242cde73bd38af1ff72a6e645a80f87551d2f4293c45099bb8e9`。两个标签和两个
+平台清单均由 `imagetools inspect` 核验；发布后 Docker daemon 回拉因 GHCR 502 未能复跑远端
+制品的第二次卷 smoke，此网络限制已显式记录，不影响已完成的远端清单与本地候选证据。
+
+## 2026-07-18 认证运行时 scope 与同步连接代际复审
+
+书架收敛发布后继续向同一状态层取证，确认既有 `settingsScope`、`preferenceScope`、
+`progressScope` 和 `shelfScope` 多数只在异步请求开始时校验。Reader 设置、shelf/search 偏好、
+阅读进度、分类与 `/me` 的迟到回调，会在响应时重新读取“当前” scope 并把旧用户 payload 提交到
+新用户 Pinia/localStorage；分类写缓存时还会用新用户 key。书架列表自身的 revision gate 是正确
+例外，必须保留。
+
+同时 `useSync` 的模块级 socket 没有实例/generation/token guard：旧 socket 的 error 可关闭新
+socket，旧 close 可清空新引用并启动重复重连，旧 message 可在新账号 store 中执行。固定上游的
+登录后身份→本地同步→初始化顺序，以及 OpenReader 必需的多用户适配、API/数据边界和测试先行
+状态机已写入
+[`authenticated-runtime-scope-p2-contract.md`](authenticated-runtime-scope-p2-contract.md)。本阶段按
+inventory 门禁只修改文档；下一阶段先建立迟到 load/save/progress/category/profile 和 fake
+WebSocket generation 失败测试，再修改应用代码。
