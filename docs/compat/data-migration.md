@@ -24,6 +24,20 @@ change `readingProgress.json` backup/restore behavior.
 | `cache/` | Chapter/content cache. | May be regenerated, but broad deletion requires explicit user action or migration note. |
 | `library/` | Imported original files and local store. | Must not be moved or deleted without migration. |
 
+## P2 raw WebDAV protocol compatibility (audit pending implementation)
+
+[`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md) adds protocol routes and authentication,
+not a storage migration. `/webdav/*` and the upstream-compatible `/reader3/webdav/*` must resolve to the
+same existing caller-scoped directory: administrators keep the historical `data/webdav/` root and regular
+users keep `data/webdav/users/<safe-username>/`. No startup scan, move, copy, rename or cleanup is allowed.
+
+Basic authentication validates the existing bcrypt `users.password_hash`; it adds no credential column,
+token file or setting. Stateless LOCK tokens are response-only and never enter SQLite, mounted volumes,
+backups or logs. COPY/MOVE/MKCOL/PUT may change only paths explicitly requested under the authenticated
+caller's existing root, after traversal and symlink rejection. The Docker gate must mount a historical
+administrator root and two regular-user roots, exercise both URL prefixes, restart, and prove that backup
+and import files remain in place and isolated.
+
 ## SQLite rules
 
 - Use non-destructive migrations.
@@ -532,3 +546,41 @@ UNIQUE error. SQLite connection count, WAL/busy-timeout configuration and existi
 
 Required release evidence: current and historical mounted-volume restart plus portable backup/restore,
 TXT/EPUB/UMD/CBZ and relative-cache/owner-isolation smoke using the final locally built image.
+
+## P2 embedded chapter-image derived cache compatibility (implementation in progress)
+
+- No SQLite table, column, index, model field, backup member, WebDAV file, local-book archive, browser key, or existing chapter-text filename changes.
+- New files are rebuildable derived data only, rooted under
+  `cache/chapter-images/user-<user-id>/book-<book-id>/`. `blobs/<sha256-normalized-url>` stores allow-listed raster bytes; `refs/chapter-<chapter-id>.json` stores only key/MIME/fingerprint/size. Neither location stores the source URL, source header, JWT, capability, host path, or user-controlled filename.
+- Existing mounted volumes require no migration. A missing image root means an empty image cache; existing text cache remains readable. `cache/` continues to be the only Docker mount involved, so restart can reuse verified files and portable logical backup/restore intentionally omits them.
+- Image capabilities are generated only while serializing a response and are never durable data. The frontend consumes the optional mapping after parsing the original text so offsets, bookmarks, progress, and `data-pos` remain compatible with pre-feature clients.
+- Cache cleanup is compensating post-commit file work: database changes commit first, then the exact rooted user/book image tree or obsolete chapter references are removed. A failed database transaction must never delete image files; malformed reference metadata makes blob pruning fail closed.
+- Source/catalogue changes may delete only the affected book's derived image root after the replacement rows are durable. Shared blobs are deduplicated only inside one user/book root, never across owners or books.
+
+Required release evidence: service/API ownership and malformed-cache tests, old-volume restart, portable backup/restore, TXT/EPUB/UMD/CBZ and relative-cache/owner-isolation smoke using the final locally built image.
+
+## P2 BookGroup built-in preference and backup compatibility (2026-07-19 extracted)
+
+- Existing `categories`, `book_categories`, `books.category_id`, user settings, `data/`, `cache/`, and `library/`
+  remain unchanged and readable. Custom group membership stays many-to-many; no deployed Category ID is converted
+  to a reader-dev bit mask.
+- Add only `book_group_preferences`, uniquely keyed by `(user_id,key)`, for the four built-in semantic keys. Rows
+  are lazily completed with names `全部/本地/音频/未分组`, show=true and orders `-10/-9/-8/-7`; this is an
+  additive AutoMigrate operation with no rewrite of existing rows or files.
+- Built-in and Category sort values share one logical order. A mixed reorder updates both tables atomically. A
+  failed validation/write leaves the previous full order intact. Deleting a user removes preference rows in the
+  same transaction as all other user-owned SQLite rows.
+- New backups retain every existing member and add `bookGroup.json`. Fixed negative IDs represent built-ins;
+  custom rows receive deterministic positive power-of-two portable IDs plus OpenReader `categoryId`/stable-key
+  extensions. `bookshelf.json.group` uses the same temporary map, while existing `categoryNames` remains the
+  lossless OpenReader round-trip field.
+- Restore accepts three generations without destructive conversion: old OpenReader archives with only
+  categories/categoryNames, reader-dev archives with bookGroup/group masks, and new archives containing both.
+  It restores groups before shelf memberships, prefers categoryNames when present, and otherwise translates the
+  reader-dev mask through `bookGroup.json`. Missing built-ins are completed with defaults.
+- `bookGroup.json` is added to the portable logical allowlist but stays under the existing ZIP entry/count/size/
+  expansion bounds. Restore broadcasts only the destination user's categories, book-group projection and shelf.
+
+Required evidence before release: populated old SQLite migration, two-user projection/isolation, transaction
+rollback, user deletion, old OpenReader restore, reader-dev group-mask restore, new round-trip, full backend tests,
+and the Docker mounted-volume/backup compatibility smoke.

@@ -6,6 +6,7 @@ function createClock() {
   let now = 0
   let nextId = 0
   const frames = new Map()
+  const tasks = new Map()
   return {
     now: () => now,
     requestFrame(callback) {
@@ -16,11 +17,24 @@ function createClock() {
     cancelFrame(id) {
       frames.delete(id)
     },
+    scheduleTask(callback) {
+      nextId += 1
+      tasks.set(nextId, callback)
+      return nextId
+    },
+    cancelTask(id) {
+      tasks.delete(id)
+    },
     step(time) {
       now = time
       const pending = [...frames.values()]
       frames.clear()
       pending.forEach(callback => callback(time))
+    },
+    flushTasks() {
+      const pending = [...tasks.values()]
+      tasks.clear()
+      pending.forEach(callback => callback())
     },
   }
 }
@@ -71,32 +85,8 @@ test('blocks overlapping page animations and supports cancellation', () => {
   assert.equal(animator.isActive(), false)
 })
 
-function createVisualAnimationFixture() {
-  const calls = []
-  const animation = {
-    currentTime: 0,
-    effect: {
-      getComputedTiming: () => ({ progress: 0 }),
-    },
-    cancel() {
-      calls.push(['cancel'])
-    },
-    onfinish: null,
-  }
-  const visualElement = {
-    style: {
-      willChange: '',
-    },
-    animate(keyframes, timing) {
-      calls.push(['animate', keyframes, timing])
-      return animation
-    },
-  }
-  return { animation, calls, visualElement }
-}
-
-test('runs mobile page motion on the composited body and commits scrollTop once at settlement', () => {
-  const fixture = createVisualAnimationFixture()
+test('starts responsive mobile page motion before a zero-timestamp first frame', () => {
+  const clock = createClock()
   let scrollTop = 100
   const writes = []
   const element = {
@@ -110,39 +100,42 @@ test('runs mobile page motion on the composited body and commits scrollTop once 
     scrollHeight: 2000,
     clientHeight: 800,
   }
+  const visualElement = {
+    style: { willChange: '' },
+    animate() {
+      assert.fail('mobile text paging must not animate the full chapter body')
+    },
+  }
   let completed = 0
-  const animator = createReaderScrollAnimator()
-
-  assert.equal(animator.prepare(fixture.visualElement), true)
-  assert.equal(fixture.visualElement.style.willChange, 'transform')
+  const animator = createReaderScrollAnimator(clock)
 
   assert.equal(animator.scrollBy(
     element,
     600,
     300,
     () => { completed += 1 },
-    { visualElement: fixture.visualElement },
+    { easing: 'responsive', visualElement },
   ), true)
-  assert.equal(fixture.calls[0][0], 'animate')
-  assert.equal(fixture.calls[0][2].duration, 300)
-  const firstMovingFrame = fixture.calls[0][1][1]
-  const secondMovingFrame = fixture.calls[0][1][2]
-  const translated = frame => Math.abs(Number(frame.transform.match(/,\s*(-?[\d.]+)px/)?.[1] || 0))
-  assert(translated(firstMovingFrame) >= 10, 'the first refresh interval must have visible motion')
-  assert(translated(secondMovingFrame) >= 25, 'the second refresh interval must not remain in a dead zone')
-  assert.equal(writes.length, 0, 'composited motion must not write scrollTop on every frame')
-  assert.equal(fixture.visualElement.style.willChange, 'transform')
-
-  fixture.animation.onfinish()
-  assert.deepEqual(writes, [700])
+  assert(scrollTop > 100, `touchend left the first painted position at the origin: ${scrollTop}`)
+  const startedTop = scrollTop
+  clock.step(0)
+  assert(scrollTop >= startedTop, `the first rAF moved back to the origin: ${scrollTop}/${startedTop}`)
+  clock.step(16)
+  assert(scrollTop >= 120, `the first refresh interval remained in a dead zone: ${scrollTop}`)
+  clock.step(32)
+  assert(scrollTop >= 145, `the second refresh interval remained in a dead zone: ${scrollTop}`)
+  assert.equal(visualElement.style.willChange, '')
+  clock.step(150)
+  assert(scrollTop > 300 && scrollTop < 500)
+  clock.step(300)
+  assert.equal(scrollTop, 700)
+  assert(writes.length >= 4, 'the lightweight path must advance scrollTop on refresh frames')
   assert.equal(completed, 1)
   assert.equal(animator.isActive(), false)
-  assert.equal(fixture.visualElement.style.willChange, '')
 })
 
-test('commits the visible composited offset before a touch or wheel cancellation', () => {
-  const fixture = createVisualAnimationFixture()
-  fixture.animation.currentTime = 150
+test('keeps the visible frame-scroll position after a touch or wheel cancellation', () => {
+  const clock = createClock()
   let scrollTop = 100
   const writes = []
   const element = {
@@ -157,33 +150,87 @@ test('commits the visible composited offset before a touch or wheel cancellation
     clientHeight: 800,
   }
   let completed = 0
-  const animator = createReaderScrollAnimator()
+  const animator = createReaderScrollAnimator(clock)
 
   animator.scrollBy(
     element,
     600,
     300,
     () => { completed += 1 },
-    { visualElement: fixture.visualElement },
+    { easing: 'responsive' },
   )
+  clock.step(150)
+  const visibleTop = scrollTop
   animator.cancel()
+  clock.step(300)
 
-  assert.equal(Math.round(scrollTop), 400)
-  assert.deepEqual(writes.map(Math.round), [400])
+  assert.equal(Math.round(scrollTop), Math.round(visibleTop))
+  assert(writes.length >= 1)
   assert.equal(completed, 0)
   assert.equal(animator.isActive(), false)
-  assert.equal(fixture.visualElement.style.willChange, '')
-  assert.deepEqual(fixture.calls.map(call => call[0]), ['animate', 'cancel'])
 })
 
-test('releases a prepared mobile page layer when no animation consumes it', () => {
-  const fixture = createVisualAnimationFixture()
-  fixture.visualElement.style.willChange = 'opacity'
-  const animator = createReaderScrollAnimator()
+test('presents the responsive target before running heavy completion work in a later task', () => {
+  const clock = createClock()
+  const element = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+  const completed = []
+  const animator = createReaderScrollAnimator(clock)
 
-  assert.equal(animator.prepare(fixture.visualElement), true)
-  assert.equal(fixture.visualElement.style.willChange, 'transform')
-  animator.releasePreparation()
-  assert.equal(fixture.visualElement.style.willChange, 'opacity')
+  animator.scrollBy(
+    element,
+    600,
+    300,
+    () => completed.push(element.scrollTop),
+    { easing: 'responsive', finish: 'after-paint' },
+  )
+  clock.step(300)
+
+  assert.equal(element.scrollTop, 600, 'the visual target must be committed in the final animation frame')
+  assert.deepEqual(completed, [], 'chapter/layout settlement must not run inside the final animation frame')
+  assert.equal(animator.isActive(), true, 'the handoff window must remain cancellable and block overlap')
+
+  clock.flushTasks()
+  assert.deepEqual(completed, [600])
+  assert.equal(animator.isActive(), false)
+})
+
+test('cancels an after-paint completion before stale settlement can run', () => {
+  const clock = createClock()
+  const element = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+  let completed = 0
+  const animator = createReaderScrollAnimator(clock)
+
+  animator.scrollBy(
+    element,
+    600,
+    300,
+    () => { completed += 1 },
+    { easing: 'responsive', finish: 'after-paint' },
+  )
+  clock.step(300)
+  animator.cancel()
+  clock.flushTasks()
+
+  assert.equal(element.scrollTop, 600)
+  assert.equal(completed, 0)
+  assert.equal(animator.isActive(), false)
+})
+
+test('keeps zero-duration paging synchronous even when the positive path finishes after paint', () => {
+  const clock = createClock()
+  const element = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+  let completed = 0
+  const animator = createReaderScrollAnimator(clock)
+
+  animator.scrollBy(
+    element,
+    600,
+    0,
+    () => { completed += 1 },
+    { easing: 'responsive', finish: 'after-paint' },
+  )
+
+  assert.equal(element.scrollTop, 600)
+  assert.equal(completed, 1)
   assert.equal(animator.isActive(), false)
 })

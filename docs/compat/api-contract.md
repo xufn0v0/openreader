@@ -7,6 +7,8 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 - Public API root: `/api`.
 - Auth: `Authorization: Bearer <jwt>` for protected `/api` endpoints.
 - WebDAV root: `/webdav`.
+- Upstream WebDAV compatibility root: `/reader3/webdav` (P2 protocol implementation pending;
+  see [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md)).
 - Sync WebSocket: `/ws/sync`.
 - Expected error shape for handled failures: JSON object with `error`.
 - User-owned resources must be scoped to the authenticated user unless documented as admin/global.
@@ -41,6 +43,24 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | RSS | `/api/rss/sources`, `/api/rss/articles` | Remote fetch limits and parser safety apply. |
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
+
+## P2 raw WebDAV protocol contract
+
+Status: audited on 2026-07-19; implementation is pending. The complete compatibility, authentication,
+filesystem and migration contract is
+[`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md).
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `OPTIONS /webdav/*`, `/reader3/webdav/*` | No body. An unauthenticated capability probe is allowed. | `200`; advertises `DAV: 1,2`, `Allow` and `MS-Author-Via`. | A supplied invalid Authorization returns `401` with Basic challenge. No filesystem access. |
+| `PROPFIND /webdav/*`, `/reader3/webdav/*` | Bearer JWT or Basic credentials; `Depth: 0/1` (infinity safely bounded to 1). | `207` DAV-namespace multistatus for the target and at most one child level; no physical path. | `401` missing/bad identity, `403` valid identity without WebDAV permission, `404` missing target. Read never creates a directory. |
+| `GET/PUT/MKCOL/DELETE` on both roots | Bearer or Basic; PUT remains bounded by `OPENREADER_MAX_IMPORT_BYTES`. | Current user root only. Existing `/webdav` directory GET remains a deployed frontend listing adapter; upstream alias uses PROPFIND for listing. | Root/path/symlink checks precede I/O. Parent/type/missing errors use the focused contract statuses. |
+| `MOVE/COPY` on both roots | Safe Destination within the same caller root; `Overwrite: T` is required to replace. | `201` after a complete validated rename/copy; recursive COPY does not follow symlinks. | `400` missing/invalid Destination, `403` unsafe/root operation, `409` missing parent, `412` missing source or forbidden overwrite. Failure preserves source and old target. |
+| `LOCK/UNLOCK` on both roots | LOCK may include Timeout; UNLOCK requires Lock-Token. | Upstream-compatible stateless lock response: LOCK `200` plus random `urn:uuid:` token; UNLOCK `204`. | No lock table/file and no token logging; missing unlock token `400`. |
+
+Both roots retain current caller-scoped storage: the administrator sees the historical WebDAV root and a
+regular user sees only `data/webdav/users/<safe-username>/`. Basic validates the existing bcrypt password;
+it is not a new stored credential and should only be exposed through HTTPS.
 
 ## P2 reading-progress API contract
 
@@ -490,6 +510,37 @@ Implemented tests: `backend/api/remote_reader_contract_test.go` proves user isol
 ## Compatibility rule
 
 If a refactor changes frontend routes, API paths should stay stable unless an old path is kept as a redirect/shim. Document removals before deleting compatibility behavior.
+
+## P2 BookGroup unified projection contract (2026-07-19 extracted)
+
+The fixed reader-dev baseline persists four editable built-in groups together with custom groups. OpenReader keeps
+its deployed `/categories` and many-to-many membership APIs, and adds one user-scoped projection instead of
+changing existing category response shapes. Full behavior and backup mapping are defined in
+`book-group-p2-contract.md`.
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `GET /api/book-groups` | None. | `200` ordered array containing the four lazily seeded built-ins and every current custom Category. Stable keys are `builtin:all`, `builtin:local`, `builtin:audio`, `builtin:ungrouped`, and `category:<id>`. | JWT/current user only. No cross-user Category may enter the projection. Unexpected persistence failure is `500 {error}`. |
+| `PUT /api/book-groups/:key` | Built-in semantic key `all`, `local`, `audio`, or `ungrouped`; body contains at least one of `{name,show}`. | `200` updated built-in projection row. Commit precedes `book_groups_update`. | Unknown key, empty body, or blank normalized name is `400`; no row from another user is addressable. |
+| `PUT /api/book-groups/reorder` | `{ "keys": ["builtin:...", "category:<id>", ...] }`, containing the current projection exactly once. | One SQLite transaction assigns the complete mixed order to built-in preferences and Categories, then returns the full ordered projection. After commit it emits `book_groups_update` and the existing `categories_update` compatibility event. | Missing, duplicate, extra, malformed, or foreign token is `400` and rolls back every order write; persistence failure is `500`. |
+
+Existing category create/update/delete/reorder paths retain their current request and response contracts. Their
+post-commit sync side effects additionally invalidate or broadcast the unified projection. New Categories append
+after the maximum order across both data sources; the old custom-only reorder endpoint remains compatible for old
+clients but is not used by the rebuilt mixed manager.
+
+## P2 embedded chapter-image cache contract (implementation in progress)
+
+Reader-dev downloads embedded chapter images while caching text and reuses those files during EPUB export. OpenReader keeps the existing authenticated chapter path and adds an optional browser-safe mapping rather than changing persisted text or text-position semantics.
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `GET /api/books/:id/chapters/:index/content` | Existing path and Bearer JWT. | Existing `chapter`, `content`, and `format` remain unchanged. For a remote text chapter with verified cached images, optional `cachedImages` maps normalized original HTTP(S) URLs to `/api/chapter-image/<capability>` and optional `cachedImagesExpiresAt` is RFC3339. Text cache writes retain original URLs. A failed image fetch never fails readable chapter text. | Existing ownership and chapter errors remain unchanged. Image-cache absence/corruption omits the optional mapping; it does not become a chapter `401`, `404`, or `502`. |
+| `GET|HEAD /api/chapter-image/:capability` | One opaque path capability; no JWT header, query token, source URL, or filesystem path. | Serves one verified raster blob with its detected MIME, exact `Content-Length`, `X-Content-Type-Options: nosniff`, same-origin/no-referrer policy, and private short-lived cache headers. `HEAD` returns identical relevant headers and no body. | Malformed, invalid, expired, wrong-purpose, or unsafe capability: `403`; deleted book/owner/source or missing blob: `404`; unexpected storage/DB failure: `500`. Errors are stable JSON and never expose token/path/source credentials. |
+| Existing cache/clear/delete/refresh/source-change routes | Existing request and response fields. | Successful text cache work also attempts bounded image caching. Image failures do not alter chapter success/failure counters. Cache clearing, book/user deletion, catalogue replacement, refresh, and source change remove that book's derived image references after the database transaction commits. | Existing auth/status behavior remains stable. A cleanup filesystem failure is never permission to roll back or corrupt committed user rows, and must not delete another user's root. |
+| Existing EPUB export | Existing authenticated export request. | Includes only already-cached verified blobs below `OEBPS/Images/`, adds OPF image manifest entries, and rewrites matching chapter image elements. It performs no export-time network fetch. Missing images do not fail export and never place capabilities or host paths in the archive. | Existing export error envelope remains unchanged. |
+
+Capabilities are HMAC purpose-separated from login/EPUB/CBZ/audio tokens and bind user ID, book ID, source ID, blob key, fingerprint, and expiry. The resource handler rechecks the current database owner/source and file fingerprint on every open. Access logs redact the entire capability segment.
 
 ## P2 parser structured-error contract (P2-Parser-2A implemented)
 

@@ -24,6 +24,25 @@ Use this checklist for security-sensitive changes and release reviews.
 - [ ] Every user path is cleaned and joined under an allowed root.
 - [ ] Final resolved path is verified to remain under the allowed root.
 - [ ] Local store, uploads, cache, backups, and WebDAV all use rooted paths.
+
+## P2 raw WebDAV protocol review (2026-07-19 audit; implementation pending)
+
+- [ ] `/webdav/*` and `/reader3/webdav/*` authenticate before reading path, Destination, Depth or body;
+  Bearer JWT and bcrypt-backed Basic both resolve to the same persisted user id and permission check.
+- [ ] Missing/bad Basic credentials return one generic `401` plus challenge; a valid user without WebDAV
+  permission returns `403`. Passwords, Authorization headers, JWTs and lock tokens never enter logs/errors.
+- [ ] Every existing source/target/parent/COPY descendant is checked with `Lstat`; traversal, symlink,
+  cross-root, root deletion and directory-into-descendant operations fail before mutation.
+- [ ] PROPFIND is read-only: a missing nested directory returns `404` and is not created. DAV XML contains
+  only encoded logical hrefs and bounded one-level metadata, never host paths.
+- [ ] PUT keeps the configured byte cap and atomic same-directory staging. COPY/MOVE validate the full plan
+  before replacing a destination, and failure preserves the source and old target.
+- [ ] Basic is documented for HTTPS-only exposure; upstream's wildcard-origin plus credentialed CORS headers
+  are not copied. Existing same-origin Bearer WebDAVBrowser requests remain compatible.
+
+Required evidence is fixed in
+[`docs/compat/webdav-protocol-p2-contract.md`](compat/webdav-protocol-p2-contract.md): auth/permission,
+two-prefix, PROPFIND, mutation/status, symlink, LOCK, browser regression, curl and mounted-volume tests.
 - [ ] Backup downloads only expose expected backup files.
 - [ ] API errors do not leak host filesystem paths.
 
@@ -318,15 +337,17 @@ Evidence: `backend/api/cache_stream_contract_test.go`, `frontend/tests/bookCache
 - [x] Canonical progress and all-failure events contain counts and fixed client text only. Raw parser/network errors, source headers, cookies, JWT, WebDAV credentials and host paths are never serialized.
 - [x] Frontend job keys include the authenticated scope; logout aborts server controllers, marks browser queues cancelled and clears the in-memory registry before removing credentials. No controller, token or response body is persisted.
 - [x] The whole-book browser/API smoke verifies target-only cancellation and no request on cancelled deletion confirmation at all three required viewports.
-- [ ] Embedded chapter-image implementation is pending. The required SSRF host/scheme policy, timeout/redirect/
-      byte/count limits, MIME allowlist, rooted user/book storage, HMAC read capability, reference cleanup,
-      credential-forwarding rules and cross-user tests are now fixed in
-      [`compat/book-cache-images-p2-contract.md`](compat/book-cache-images-p2-contract.md); do not mark this item
-      complete until those tests and the Docker historical-volume gate pass.
+- [x] Embedded chapter images use bounded HTTP(S), per-hop DNS/redirect validation, exact-origin credential
+      forwarding, cross-origin private-address rejection, image count/byte/time limits and a raster MIME allowlist.
+      Blob/reference files are rooted by user/book, manifests are atomic, stale/failed refreshes preserve old valid
+      references, and read-only lookups never recreate removed roots. Short-lived purpose-separated HMAC capabilities
+      revalidate book/source/fingerprint/MIME/path, while cleanup and EPUB export remain offline and user-scoped.
 
 Evidence: `backend/api/cache_stream_contract_test.go`, whole-catalogue cases in `backend/api/api_test.go`,
-`frontend/tests/overlayBookManagement.test.mjs`, `scripts/smoke/book-management-dialog-contract.mjs`, and
-the full Go/frontend gates. The unchecked image item is a release-noted gap rather than an implicit exception.
+`backend/services/chapterimage/service_contract_test.go`, `backend/api/chapter_image_contract_test.go`,
+`frontend/tests/overlayBookManagement.test.mjs`, `scripts/smoke/book-management-dialog-contract.mjs`,
+`scripts/smoke/reader-image-contract.mjs`, full Go/frontend gates, and the `32dc616` historical-volume/portable-backup
+Docker gate. The remaining security difference from upstream is intentional private-network/cross-origin hardening.
 
 ## EPUB iframe/resource review
 

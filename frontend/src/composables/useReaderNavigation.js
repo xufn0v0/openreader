@@ -22,22 +22,11 @@ export function useReaderNavigation(options) {
   }
 
   function verticalAnimationOptions() {
-    if (
-      options.getMode() !== 'page'
-      || !options.useCompositedPageAnimation?.()
-      || !options.contentBody.value
-    ) return undefined
-    return { visualElement: options.contentBody.value }
-  }
-
-  function prepareVerticalPageAnimation() {
-    const animationOptions = verticalAnimationOptions()
-    if (!animationOptions?.visualElement) return false
-    return Boolean(scrollAnimator.prepare?.(animationOptions.visualElement))
-  }
-
-  function releaseVerticalPageAnimationPreparation() {
-    return Boolean(scrollAnimator.releasePreparation?.())
+    if (!options.useResponsiveVerticalAnimation?.()) return undefined
+    return {
+      easing: 'responsive',
+      finish: 'after-paint',
+    }
   }
 
   function queueActiveVerticalPage(direction) {
@@ -57,20 +46,22 @@ export function useReaderNavigation(options) {
       () => {
         if (generation !== animationGeneration) return
         activeVerticalDirection = 0
+        const queuedDirection = queuedVerticalDirection
+        queuedVerticalDirection = 0
+        if (queuedDirection === direction) {
+          queueMicrotask(() => {
+            if (generation !== animationGeneration) return
+            if (direction > 0) void nextPage()
+            else void previousPage()
+          })
+          return
+        }
         if (options.onVerticalPageSettled) {
           options.onVerticalPageSettled()
         } else {
           options.progressVersion.value += 1
           options.scheduleProgressSave(60)
         }
-        const queuedDirection = queuedVerticalDirection
-        queuedVerticalDirection = 0
-        if (queuedDirection !== direction) return
-        queueMicrotask(() => {
-          if (generation !== animationGeneration) return
-          if (direction > 0) void nextPage()
-          else void previousPage()
-        })
       },
       verticalAnimationOptions(),
     )
@@ -284,9 +275,7 @@ export function useReaderNavigation(options) {
     jumpWithinCurrentChapter,
     nextPage,
     paragraphByChapterPosition,
-    prepareVerticalPageAnimation,
     previousPage,
-    releaseVerticalPageAnimationPreparation,
     scrollToBottom,
     scrollToTop,
   }
