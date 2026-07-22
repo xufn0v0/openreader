@@ -6,8 +6,8 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 
 - Public API root: `/api`.
 - Auth: `Authorization: Bearer <jwt>` for protected `/api` endpoints.
-- WebDAV root: `/webdav`.
-- Upstream WebDAV compatibility root: `/reader3/webdav` (P2 protocol implementation pending;
+- WebDAV roots: `/webdav` and upstream-compatible `/reader3/webdav`.
+- The upstream WebDAV compatibility root is implemented and shares the same caller-scoped storage;
   see [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md)).
 - Sync WebSocket: `/ws/sync`.
 - Expected error shape for handled failures: JSON object with `error`.
@@ -46,7 +46,7 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 
 ## P2 raw WebDAV protocol contract
 
-Status: audited on 2026-07-19; implementation is pending. The complete compatibility, authentication,
+Status: implemented and non-Docker validation complete on 2026-07-19. The complete compatibility, authentication,
 filesystem and migration contract is
 [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md).
 
@@ -440,17 +440,21 @@ Implementation tests must cover:
 - modified, expired, wrong-purpose, wrong-user/book, traversal, missing-file, and unsupported-media requests fail with client-safe errors;
 - access logs redact `/api/audio-resource/<capability>/...` the same way EPUB/CBZ resource capabilities are redacted.
 
-## WebDAV contract
+## Legacy WebDAV summary
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/webdav/*path` | List/download. |
-| `PUT` | `/webdav/*path` | Upload/write. |
-| `MKCOL` | `/webdav/*path` | Create directory. |
-| `MOVE` | `/webdav/*path` | Rename/move. |
-| `DELETE` | `/webdav/*path` | Delete. |
+| `OPTIONS/PROPFIND` | `/webdav/*path`, `/reader3/webdav/*path` | Discover and list with standard DAV metadata. |
+| `GET` | both roots | Download; `/webdav` additionally retains the deployed browser directory-list adapter. |
+| `PUT/MKCOL/MOVE/COPY/DELETE` | both roots | Caller-scoped file mutations with fixed protocol statuses. |
+| `LOCK/UNLOCK` | both roots | Upstream-compatible stateless lock handshake. |
 
-WebDAV paths must be normalized, rooted, and protected from traversal. Every raw WebDAV method requires the standard `Authorization: Bearer <JWT>` header: missing/invalid credentials return `401` before filesystem access; an authenticated user whose effective `canAccessWebdav` permission is false receives `403` before path parsing or file mutation. The browser uses header-based authenticated requests and must never append a JWT to a download URL.
+WebDAV paths are normalized, caller-rooted, and protected from traversal and symlinks. Protected methods accept
+`Authorization: Bearer <JWT>` or HTTPS-only Basic credentials; missing/invalid credentials return `401` before
+filesystem access, while an authenticated user whose effective `canAccessWebdav` permission is false receives
+`403` before path parsing or file mutation. Anonymous OPTIONS remains available for discovery. The browser uses
+header-based authenticated requests and never appends a JWT to a download URL. The focused table above and
+[`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md) supersede this summary.
 
 ## Workspace storage access contract
 
@@ -510,6 +514,22 @@ Implemented tests: `backend/api/remote_reader_contract_test.go` proves user isol
 ## Compatibility rule
 
 If a refactor changes frontend routes, API paths should stay stable unless an old path is kept as a redirect/shim. Document removals before deleting compatibility behavior.
+
+## P1 bookshelf latest-chapter timestamp contract (2026-07-22 extracted)
+
+Existing methods, paths, auth, status codes and error envelopes remain unchanged. Shelf book response objects gain
+one additive `lastCheckTime` integer containing Unix milliseconds.
+
+| Path family | Response / side effect | Compatibility rule |
+|---|---|---|
+| `GET /api/books`, `GET /api/books/:id`, and existing book mutation/import responses | Each shelf-book projection includes non-zero `lastCheckTime`; existing `shelfOrderAt`, `progress`, `createdAt` and `updatedAt` remain present. | `shelfOrderAt` is progress time when read, otherwise insertion time. Generic metadata `updatedAt` neither reorders the shelf nor changes `lastCheckTime`. |
+| `POST /api/books/:id/refresh`, scheduled/manual update check | If the fetched catalogue contains more chapters than the persisted pre-refresh count, commit the new chapter data and current `lastCheckTime` together. | Same-size/smaller result, metadata-only edit and failed refresh do not advance `lastCheckTime`; current statuses/errors remain stable. |
+| `POST /api/books/:id/change-source` | A successful source replacement commits the newly resolved latest chapter and current `lastCheckTime` while retaining independent reading progress. | Failed source selection does not change either timestamp; existing request/status/error behavior remains stable. |
+| Book create/import and legacy/portable restore | New rows initialize the field. A positive reader-dev `lastCheckTime` is retained on restore and later export. | Old payloads may omit it. Invalid/non-positive values fall back to destination insertion time rather than producing an error. |
+
+The frontend latest-chapter label consumes only `lastCheckTime`. It must not infer this display value from
+`shelfOrderAt`, progress or generic `updatedAt`. Full rationale and migration rules are in
+`bookshelf-last-check-time-p1-contract.md`.
 
 ## P2 BookGroup unified projection contract (2026-07-19 extracted)
 
