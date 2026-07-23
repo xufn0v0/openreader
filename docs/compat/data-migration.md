@@ -233,9 +233,10 @@ cache path and readability unchanged.
 
 ## P2 backup ZIP restore compatibility and bounds
 
-Status: implemented; release validation pending. Existing backup formats, SQLite rows and mounted roots remain readable.
+Status: archive structure/bounds plus ordinary backup aliases, stable generation, transactional content restore and source permission are implemented under the 2026-07-22
+[`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md); browser/Docker release validation is pending.
 
-- Valid OpenReader, reader-dev and Legado backup ZIPs continue to restore the existing sources, RSS sources, user settings, categories, shelf rows, progress, bookmarks and replace rules through their current scoped/upsert compatibility paths. The response count object and sync events remain compatible.
+- Old OpenReader plural aliases, reader-dev singular `bookmark.json`/`replaceRule.json`, `bookshelf.json`, Legado `myBookShelf.json` and nested progress remain readable. The restore planner prefers richer OpenReader aliases when both are present and executes each logical bookmark/rule artifact once.
 - A new bounded archive reader is runtime-only: it reads from the uploaded or scoped WebDAV ZIP, validates archive structure before dispatch, and never writes a new backup format, table, column, cache tree or library file.
 - Structural archive failures (compressed cap, entry/path/count/size/total budget, duplicate canonical name, unreadable member) happen before mutation. Existing user rows and mounted files are left intact.
 - Legacy nested progress filenames remain accepted only beneath a normalized `bookProgress/` path. Unsupported names are ignored after a valid archive plan is accepted; no user-controlled ZIP path is extracted to the host filesystem.
@@ -243,14 +244,14 @@ Status: implemented; release validation pending. Existing backup formats, SQLite
 
 Required evidence: valid reader-dev/Legado/OpenReader fixtures, invalid archive fixtures with no database mutation, multipart and stored-WebDAV size rejection, restore broadcast/count regression, and Docker mounted-volume backup smoke.
 
-Implementation evidence: uploaded and WebDAV recovery read a bounded compressed payload, then `backupRestoreArchive` validates and reads every member before any restore helper receives data. The restore dispatcher consumes that validated byte map rather than reopening ZIP members. `backend/api/backup_restore_contract_test.go` covers unsafe/over-budget structures, no-write structural failure, upload bounds and non-ZIP WebDAV targets; existing `api_test.go` and bookmark backup fixtures preserve reader-dev/Legado/OpenReader restore counts and records. Docker mounted-volume/backup smoke remains the release gate.
+Implementation evidence: uploaded and WebDAV recovery read a bounded compressed payload, then `backupRestoreArchive` validates and reads every member before planning. `backend/api/backup_restore_contract_test.go` and `backup_fixed_baseline_contract_test.go` cover unsafe/over-budget structures, no-write structural and typed-content failures, database rollback, upload bounds, non-ZIP WebDAV targets, atomic generation failure, source-edit permission, singular aliases, alias deduplication and newest-progress merge. Browser and mounted-volume Docker evidence remain mandatory before release.
 
 ## P2 replace-rule persistence compatibility
 
-Status: implemented without a schema or mounted-volume migration.
+Status: implemented with an additive, non-destructive schema migration; mounted-volume verification is pending for this slice.
 
-- Existing `replace_rules` rows stay in the same SQLite table with the same `id`, `user_id`, `name`, `pattern`, `replacement`, `scope`, `is_regex`, `enabled`, and timestamps. No row is deleted, deduplicated, rewritten, or moved during startup.
-- Reader-visible execution order is now the durable insertion order (`id ASC`) rather than the previous accidental `updated_at DESC` API order. Editing an existing row does not change its ID or its pipeline position. Backup writes the same `user_id, id` order, so restore into an empty database recreates the reader pipeline in the same sequence.
+- Existing `replace_rules` rows stay in the same SQLite table with the same `id`, `user_id`, `name`, `pattern`, `replacement`, `scope`, `is_regex`, `enabled`, and timestamps. AutoMigrate only adds `group_name` and `sort_order DEFAULT 0`; no row is deleted, deduplicated, rewritten, or moved during startup.
+- Reader-visible execution and backup order is `sort_order ASC, id ASC`. Every old row has the same zero order and therefore retains its historical insertion order; reader-dev imports can preserve explicit `group/order` without disturbing old rows.
 - Old rows whose nullable `is_regex` value is absent are interpreted as upstream's plain-text default (`false`) at read/execution time. This corrects a prior OpenReader default without changing the stored nullable value.
 - Old rows with an empty scope remain global only as a read-compatibility shim for already-deployed OpenReader data. The new editor/API requires an explicit scope; the next successful edit/import writes `*` (or a book-specific scope) instead of another empty value.
 - Backup restore accepts both `enabled` and legacy `isEnabled`. Missing `isRegex` restores as plain text; empty legacy scope stays readable through the shim. No new table/column and no `data/`, `cache/`, or `library/` path is introduced.
@@ -603,3 +604,25 @@ and the Docker mounted-volume/backup compatibility smoke.
 Required evidence: old-table migration plus idempotent second run, progress/update separation, growing/no-growth
 refresh, reader-dev restore and re-export, frontend source-field contract, and mounted-volume/backup smoke before
 Docker release. See `bookshelf-last-check-time-p1-contract.md`.
+
+## P1 book-deletion browser-state convergence compatibility (2026-07-22)
+
+- No SQLite table/column/index, mounted directory, backup member, browser cache
+  key or local-progress key changes. Existing scoped shelf snapshots,
+  `openreader_chapter_progress@<scope>@<book-id>` entries and chapter-content
+  keys retain their deployed formats.
+- Successful server deletion now removes matching browser state as derived/user
+  state cleanup; failed or cancelled deletion removes nothing. Legacy unscoped
+  chapter/progress keys remain readable and are removed only for the confirmed
+  deleted book as before.
+- Async cleanup captures the authenticated scope that received/initiated the
+  deletion. Shelf snapshot lookup/removal and scoped chapter-prefix generation
+  use that frozen scope even if another account becomes current before
+  IndexedDB/localStorage work completes. It cannot migrate or delete another
+  user's scoped keys.
+- Reader suspension, overlay reconciliation, BookManage selection pruning and
+  the deletion event carry no durable state and require no migration.
+
+Required release evidence: scoped cache/progress unit contracts, real
+two-client WebSocket deletion at desktop and both mobile viewports, full
+frontend/backend/build gates, and the unchanged mounted-volume/backup smoke.

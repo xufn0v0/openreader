@@ -38,12 +38,14 @@ function createLifecycle(overrides = {}) {
   const handlers = Object.fromEntries([
     'Resize',
     'Wheel',
+    'Scroll',
     'PageHide',
     'VisibilityChange',
     'ProgressUpdated',
     'BookDataUpdated',
     'ReplaceRulesUpdated',
     'BookmarksUpdated',
+    'BooksDeleted',
   ].map(name => [`on${name}`, () => calls.push([name])]))
   const customBg = ref('')
   const sliderLineHeight = ref(0)
@@ -60,6 +62,7 @@ function createLifecycle(overrides = {}) {
     clearChapterLoadingTimer: () => calls.push(['clear-timer']),
     stopAutoReading: () => calls.push(['stop-auto']),
     saveProgress: options => calls.push(['save', options]),
+    onUnmount: () => calls.push(['unmount']),
     ...handlers,
     ...overrides,
   })
@@ -73,12 +76,26 @@ function createLifecycle(overrides = {}) {
   }
 }
 
-test('initializes the reader before registering page listeners', async () => {
-  const controller = createLifecycle()
-  await controller.lifecycle.mount()
+test('registers deletion and page listeners before awaiting the initial book load', async () => {
+  let finishLoad
+  const controller = createLifecycle({
+    loadBook: () => new Promise(resolve => {
+      finishLoad = () => {
+        controller.calls.push(['load'])
+        resolve()
+      }
+    }),
+  })
+  const mounting = controller.lifecycle.mount()
+  await Promise.resolve()
+  controller.windowTarget.emit('openreader:books-deleted')
+  assert.equal(controller.calls.at(-1)?.[0], 'BooksDeleted')
+  finishLoad()
+  await mounting
   assert.deepEqual(controller.calls, [
     ['normalize'],
     ['fonts', { reader: '/fonts/reader.woff2' }],
+    ['BooksDeleted'],
     ['load'],
   ])
   assert.equal(controller.customBg.value, '#f5ecd2')
@@ -86,11 +103,13 @@ test('initializes the reader before registering page listeners', async () => {
   assert.deepEqual(controller.windowTarget.added, [
     ['resize', undefined],
     ['wheel', { passive: false }],
+    ['scroll', { passive: true }],
     ['pagehide', undefined],
     ['openreader:progress-updated', undefined],
     ['openreader:reader-book-data-updated', undefined],
     ['openreader:replace-rules-updated', undefined],
     ['openreader:bookmarks-updated', undefined],
+    ['openreader:books-deleted', undefined],
   ])
   assert.deepEqual(controller.documentTarget.added, [
     ['visibilitychange', undefined],
@@ -123,17 +142,20 @@ test('saves progress and removes every listener during teardown', async () => {
     ['clear-timer'],
     ['stop-auto'],
     ['save', { force: true, background: true }],
+    ['unmount'],
   ])
   assert.deepEqual(controller.windowTarget.removed, [
     'resize',
     'wheel',
+    'scroll',
     'pagehide',
     'openreader:progress-updated',
     'openreader:reader-book-data-updated',
     'openreader:replace-rules-updated',
     'openreader:bookmarks-updated',
+    'openreader:books-deleted',
   ])
   assert.deepEqual(controller.documentTarget.removed, ['visibilitychange'])
   controller.windowTarget.emit('resize')
-  assert.equal(controller.calls.length, 4)
+  assert.equal(controller.calls.length, 5)
 })

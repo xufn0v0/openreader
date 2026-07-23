@@ -12,6 +12,7 @@ import { currentUserScope } from '../utils/authScope'
 import { createAuthenticatedOperationGuard } from '../utils/authenticatedOperation'
 import { createShelfRequestRevisionGate } from '../utils/shelfRequestRevision'
 import { resolveShelfNetworkFirst } from '../utils/shelfNetworkFirst'
+import { dispatchBooksDeleted, normalizeDeletedBookIds } from '../utils/bookDeletion'
 
 function asList(data) {
   if (Array.isArray(data)) return data
@@ -39,10 +40,11 @@ function sortBookGroups(groups) {
   return asList(groups).sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.key || '').localeCompare(String(b.key || '')))
 }
 
-async function clearDeletedBookBrowserCache(book, bookId) {
-  if (!book) return
+async function clearDeletedBookBrowserCache(book, bookId, scope) {
+  const targetBook = book || await findCachedShelfBook(bookId, scope)
+  if (!targetBook) return
   try {
-    await clearBookBrowserChapterCache(book, bookId)
+    await clearBookBrowserChapterCache(targetBook, bookId, { scope })
   } catch {
     // Deletion has already succeeded remotely; stale browser entries are
     // cache-only data and will be retried/overwritten on the next read.
@@ -114,6 +116,7 @@ export const useBookshelfStore = defineStore('bookshelf', {
       this.ensureShelfScope()
       const force = options === true || Boolean(options?.force)
       const all = Boolean(options?.all)
+      const settleProgress = Boolean(options?.settleProgress)
       const params = {}
       if (!all && this.selectedCategoryId) {
         params.categoryId = this.selectedCategoryId
@@ -138,9 +141,12 @@ export const useBookshelfStore = defineStore('bookshelf', {
         isCurrent: () => booksRevision.canCommit(requestRevision, this.shelfScope),
         hasCurrent: () => this.books.length > 0,
       })
-        .then((result) => {
+        .then(async (result) => {
           if (result.source === 'network') {
-            const reconciledBooks = reconcileServerProgressFromBooks(result.value)
+            const reconciledBooks = await reconcileServerProgressFromBooks(result.value, {
+              awaitPending: settleProgress,
+            })
+            if (!booksRevision.canCommit(requestRevision, this.shelfScope)) return this.books
             this.books = sortBooks(reconciledBooks)
             this.booksLoadedAt = Date.now()
             this.booksLoadedKey = requestKey
@@ -305,19 +311,33 @@ export const useBookshelfStore = defineStore('bookshelf', {
     async removeBook(bookId) {
       const book = this.books.find(item => Number(item.id) === Number(bookId))
       await deleteBook(bookId)
-      await clearDeletedBookBrowserCache(book, bookId)
-      booksRevision.mutate(this.shelfScope)
-      this.books = this.books.filter(book => book.id !== bookId)
-      this.invalidateBooks()
-      syncCachedBookRemoval(bookId)
+      return this.reconcileDeletedBooks([bookId], [book])
     },
     removeBookLocal(bookId) {
       const book = this.books.find(item => Number(item.id) === Number(bookId))
-      clearDeletedBookBrowserCache(book, bookId)
-      booksRevision.mutate(this.shelfScope)
-      this.books = this.books.filter(book => Number(book.id) !== Number(bookId))
+      return this.reconcileDeletedBooks([bookId], [book])
+    },
+    async reconcileDeletedBooks(bookIds, knownBooks = []) {
+      const scope = this.ensureShelfScope()
+      const deletedIds = normalizeDeletedBookIds(bookIds)
+      if (!deletedIds.length) return []
+      const deletedSet = new Set(deletedIds)
+      const booksByID = new Map(
+        [...this.books, ...(Array.isArray(knownBooks) ? knownBooks : [])]
+          .filter(book => book?.id)
+          .map(book => [Number(book.id), book]),
+      )
+      const reader = useReaderStore()
+      deletedIds.forEach(id => reader.clearProgress(id))
+      booksRevision.mutate(scope)
+      this.books = this.books.filter(book => !deletedSet.has(Number(book.id)))
       this.invalidateBooks()
-      syncCachedBookRemoval(bookId)
+      dispatchBooksDeleted(deletedIds)
+      await Promise.all(deletedIds.map(async (id) => {
+        await clearDeletedBookBrowserCache(booksByID.get(id), id, scope)
+        await syncCachedBookRemoval(id, scope)
+      }))
+      return deletedIds
     },
     upsertBook(book) {
       if (!book?.id) return
@@ -389,14 +409,10 @@ export const useBookshelfStore = defineStore('bookshelf', {
       const booksByID = new Map(this.books.map(book => [Number(book.id), book]))
       const { data } = await batchBooks({ action: 'delete', bookIds })
       const deletedIds = Array.isArray(data?.deletedIds) && data.deletedIds.length ? data.deletedIds : bookIds
-      const deletedSet = new Set(deletedIds.map(id => Number(id)))
-      await Promise.all(deletedIds.map(bookId => (
-        clearDeletedBookBrowserCache(booksByID.get(Number(bookId)), bookId)
-      )))
-      booksRevision.mutate(this.shelfScope)
-      this.books = this.books.filter(book => !deletedSet.has(Number(book.id)))
-      this.invalidateBooks()
-      deletedIds.forEach(bookId => syncCachedBookRemoval(bookId))
+      return this.reconcileDeletedBooks(
+        deletedIds,
+        deletedIds.map(bookId => booksByID.get(Number(bookId))).filter(Boolean),
+      )
     },
     async batchSetCategory(bookIds, categoryId, options = {}) {
       const action = options.action || 'category'
@@ -533,13 +549,17 @@ function scopedShelfCacheKey(key, scope = currentUserScope()) {
   return `${key}:${scope}`
 }
 
-function reconcileServerProgressFromBooks(books) {
+async function reconcileServerProgressFromBooks(books, options = {}) {
   const reader = useReaderStore()
   const serverBooks = asList(books)
-  const progressByBook = reader.reconcileShelfProgress(serverBooks)
+  const progressByBook = await reader.reconcileShelfProgress(serverBooks, options)
   return serverBooks.map(book => {
     const progress = progressByBook[Number(book?.id || 0)]
-    if (!progress?.pendingSync) return book
+    if (progress === undefined) return book
+    if (progress === null) {
+      const { progress: _progress, ...withoutProgress } = book
+      return withoutProgress
+    }
     return { ...book, progress }
   })
 }
@@ -567,10 +587,10 @@ async function syncCachedBookProgress(progress, options = {}) {
   }
 }
 
-function isCurrentUserShelfCacheKey(key) {
+function isCurrentUserShelfCacheKey(key, scope = currentUserScope()) {
   const value = String(key || '')
   const unprefixed = value.startsWith('localCache@') ? value.slice('localCache@'.length) : value
-  return unprefixed.startsWith(`${SHELF_CACHE_KEY}:`) && unprefixed.endsWith(`:${currentUserScope()}`)
+  return unprefixed.startsWith(`${SHELF_CACHE_KEY}:`) && unprefixed.endsWith(`:${scope}`)
 }
 
 async function syncCachedBookUpsert(book) {
@@ -588,18 +608,38 @@ async function syncCachedBookUpsert(book) {
   })
 }
 
-async function syncCachedBookRemoval(bookId) {
+async function syncCachedBookRemoval(bookId, scope = currentUserScope()) {
   if (!bookId) return
-  await mutateCachedShelfLists(rows => rows.filter(book => Number(book.id) !== Number(bookId)))
+  await mutateCachedShelfLists(
+    rows => rows.filter(book => Number(book.id) !== Number(bookId)),
+    scope,
+  )
 }
 
-async function mutateCachedShelfLists(mutator) {
+async function findCachedShelfBook(bookId, scope = currentUserScope()) {
+  if (!bookId) return null
   try {
-    const keys = (await listBrowserCacheKeys(SHELF_CACHE_KEY)).filter(isCurrentUserShelfCacheKey)
+    const keys = (await listBrowserCacheKeys(SHELF_CACHE_KEY))
+      .filter(key => isCurrentUserShelfCacheKey(key, scope))
+    for (const key of keys) {
+      const cached = asList(await getBrowserCache(key))
+      const book = cached.find(item => Number(item.id) === Number(bookId))
+      if (book) return book
+    }
+  } catch {
+    // A missing persisted shelf snapshot only limits best-effort chapter cleanup.
+  }
+  return null
+}
+
+async function mutateCachedShelfLists(mutator, scope = currentUserScope()) {
+  try {
+    const keys = (await listBrowserCacheKeys(SHELF_CACHE_KEY))
+      .filter(key => isCurrentUserShelfCacheKey(key, scope))
     await Promise.all(keys.map(async (key) => {
       const cached = asList(await getBrowserCache(key))
       if (!cached.length) return
-      const next = asList(mutator(cached, shelfRequestParamsFromCacheKey(key)))
+      const next = asList(mutator(cached, shelfRequestParamsFromCacheKey(key, scope)))
       if (sameBookIdList(cached, next) && cached.every((book, index) => book === next[index])) return
       await setBrowserCache(key, sortBooks(next))
     }))
@@ -608,10 +648,10 @@ async function mutateCachedShelfLists(mutator) {
   }
 }
 
-function shelfRequestParamsFromCacheKey(key) {
+function shelfRequestParamsFromCacheKey(key, scope = currentUserScope()) {
   const value = String(key || '')
   const unprefixed = value.startsWith('localCache@') ? value.slice('localCache@'.length) : value
-  const suffix = `:${currentUserScope()}`
+  const suffix = `:${scope}`
   if (!unprefixed.startsWith(`${SHELF_CACHE_KEY}:`) || !unprefixed.endsWith(suffix)) return {}
   const requestKey = unprefixed.slice(`${SHELF_CACHE_KEY}:`.length, -suffix.length)
   try {

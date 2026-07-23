@@ -2,7 +2,7 @@
   <main
     ref="shellEl"
     class="reader-shell"
-    :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible, 'mini-interface': isMobileReader }]"
+    :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible, 'mini-interface': isMobileReader, 'document-scroll': usesDocumentScroll }]"
     :style="readerStyle"
   >
     <ReaderDesktopTools
@@ -472,6 +472,10 @@ import { readerTextProgress, selectVisibleReaderBlock } from '../utils/readerVis
 import { readerTTSBarVisible } from '../utils/readerTTS'
 import { createReaderScrollAnimator } from '../utils/readerAnimation'
 import {
+  createDocumentReaderScrollViewport,
+  shouldUseDocumentReaderScroll,
+} from '../utils/readerScrollViewport'
+import {
   readerScrollBehaviorForDuration,
   readerScrollStep,
 } from '../utils/readerPagination'
@@ -527,6 +531,7 @@ const {
 })
 
 const book = ref(null)
+const readerBookDeleted = ref(false)
 const chapters = ref([])
 const chapter = ref(null)
 const currentIndex = ref(Number(route.query.chapter || 0))
@@ -934,7 +939,21 @@ const displayedChapterBlocks = computed(() => {
   if (isContinuousScrollRead.value && chapterBlocks.value.length) return chapterBlocks.value
   return [makeChapterBlock(currentIndex.value, chapter.value, content.value, chapterCachedImages.value)]
 })
+const usesDocumentScroll = computed(() => shouldUseDocumentReaderScroll({
+  mobile: isMobileReader.value,
+  mode: effectiveReaderMode.value,
+  format: chapterFormat.value,
+  comic: isComicChapter.value,
+}))
+const documentScrollViewport = createDocumentReaderScrollViewport({
+  documentTarget: document,
+  windowTarget: window,
+})
+const scrollViewport = computed(() => (
+  usesDocumentScroll.value ? documentScrollViewport : contentEl.value
+))
 let settleVerticalPageScroll = () => false
+let isVerticalPageScrollSyncSuppressed = () => readerScrollAnimator.isActive()
 const {
   activeChapterElement,
   captureReaderScrollAnchor,
@@ -945,7 +964,7 @@ const {
   restoreReaderScrollAnchor,
   visibleChapterProgressSnapshot,
 } = useReaderViewportProgress({
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   chapterBlocks,
   displayedChapterBlocks,
@@ -994,7 +1013,7 @@ const {
   syncCurrentChapter: updateCurrentChapterFromScroll,
 } = useReaderChapterWindow({
   reader,
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   chapters,
   currentIndex,
@@ -1032,7 +1051,8 @@ const {
   update: updateFlipLayout,
 } = useReaderLayout({
   reader: effectiveReaderState,
-  contentEl,
+  contentEl: scrollViewport,
+  contentElement: contentEl,
   contentBody,
   page,
   pageCount,
@@ -1050,7 +1070,7 @@ const {
   jumpToRouteLine,
 } = useReaderSearchNavigation({
   keyword: computed(() => String(route.query.q || '')),
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   currentIndex,
   chapterBlocks,
@@ -1074,6 +1094,7 @@ const {
   goChapter,
   jumpToLoadedChapter,
   jumpWithinCurrentChapter,
+  isVerticalScrollSyncSuppressed,
   nextPage,
   paragraphByChapterPosition,
   previousPage,
@@ -1081,7 +1102,7 @@ const {
   scrollToTop,
 } = useReaderNavigation({
   scrollAnimator: readerScrollAnimator,
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   chapterBlocks,
   chapters,
@@ -1095,12 +1116,6 @@ const {
   isVerticalRead,
   getMode: () => effectiveReaderMode.value,
   getAnimateDuration: () => reader.animateDuration,
-  useResponsiveVerticalAnimation: () => (
-    isMobileReader.value
-    && isVerticalRead.value
-    && chapterFormat.value === 'text'
-    && !isOrdinaryImageComicChapter.value
-  ),
   scrollStep,
   jumpToParagraph,
   rebuildContinuousWindow: index => computeShowChapterList({
@@ -1115,12 +1130,13 @@ const {
   scheduleProgressSave: delay => scheduleProgressSave(delay),
   onVerticalPageSettled: () => settleVerticalPageScroll(),
 })
+isVerticalPageScrollSyncSuppressed = isVerticalScrollSyncSuppressed
 onBeforeUnmount(cancelPageAnimation)
 const {
   restore: restoreReadingPosition,
 } = useReaderPositionRestore({
   reader,
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   currentIndex,
   page,
@@ -1141,7 +1157,7 @@ const {
   handleMobilePageProgressInput,
 } = useReaderProgressControls({
   scrollAnimator: readerScrollAnimator,
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   chapters,
   currentIndex,
@@ -1172,6 +1188,7 @@ const readerStyle = computed(() => ({
   '--reader-text': reader.fontColor || reader.currentTheme.text,
   '--reader-font-weight': reader.fontWeight,
   '--reader-brightness': `${reader.brightness}%`,
+  '--reader-dim-opacity': Math.max(0, 1 - reader.brightness / 100),
   '--reader-line-height': reader.lineHeight,
   '--reader-paragraph-space': `${reader.paragraphSpace}em`,
   '--reader-read-width': `${reader.columnWidth}px`,
@@ -1195,7 +1212,7 @@ const readerContentStyle = computed(() => ({
 }))
 
 const readerViewportHeight = computed(() => (
-  contentEl.value?.clientHeight ||
+  scrollViewport.value?.clientHeight ||
   pageHeight.value ||
   (typeof window === 'undefined' ? 0 : window.innerHeight)
 ))
@@ -1380,7 +1397,7 @@ const {
 } = useReaderWheel({
   reader: effectiveReaderState,
   shellEl,
-  contentEl,
+  contentEl: scrollViewport,
   isOverlayOpen,
   isVerticalRead,
   cancelPageAnimation,
@@ -1394,7 +1411,7 @@ const {
 } = useReaderAutoReading({
   active: autoReading,
   reader,
-  contentEl,
+  contentEl: scrollViewport,
   contentBody,
   isVerticalRead,
   isOverlayOpen,
@@ -1441,9 +1458,11 @@ const {
   markSaved: markProgressSaved,
   save: saveCurrentProgress,
   schedule: scheduleProgressSave,
+  suspend: suspendProgressSaving,
+  resume: resumeProgressSaving,
 } = useReaderProgressPersistence({
   minimumInterval: 1200,
-  isBlocked: () => continuousWindowBusy.value,
+  isBlocked: () => continuousWindowBusy.value || readerBookDeleted.value,
   getPayload: () => chapter.value ? currentProgressPayload() : null,
   getBaseUpdatedAt: progressServerBaseUpdatedAt,
   applyLocal: applyLocalProgressSnapshot,
@@ -1554,10 +1573,12 @@ const {
   syncCurrentChapter: updateCurrentChapterFromScroll,
   maybeExtendChapterWindow: maybeExtendShowChapters,
   updateLayout: updateFlipLayout,
-  applyLocalProgress: applyLocalProgressSnapshot,
+  captureProgressSnapshot: visibleChapterProgressSnapshot,
+  applyLocalProgress: snapshot => applyLocalProgressSnapshot(currentProgressPayload(snapshot)),
   scheduleProgressSave,
-  pageAnimationActive: () => readerScrollAnimator.isActive(),
-  scrollPosition: () => contentEl.value?.scrollTop,
+  pageAnimationActive: () => isVerticalPageScrollSyncSuppressed(),
+  isContinuousScrollRead,
+  scrollPosition: () => scrollViewport.value?.scrollTop,
 })
 settleVerticalPageScroll = flushReaderScrollSync
 const {
@@ -1638,7 +1659,7 @@ const {
   notify: showReaderToast,
   isSlideRead: () => effectiveReaderMode.value === 'flip',
   topOffset: () => Math.max(
-    Number(contentEl.value?.getBoundingClientRect?.().top || 0) + 50,
+    Number(scrollViewport.value?.getBoundingClientRect?.().top || 0) + 50,
     Number(contentBody.value?.getBoundingClientRect?.().top || 0) + 5,
   ),
 })
@@ -1736,6 +1757,8 @@ const readerRouteSync = useReaderRouteSync({
   loadChapter: (index, offset, options) => loadChapter(index, offset, options),
   jumpToRouteLine,
   onBookLoadStart: () => {
+    readerBookDeleted.value = false
+    resumeProgressSaving()
     chapterLoadError.value = ''
   },
   onBookLoadError: error => {
@@ -1760,6 +1783,7 @@ useReaderTypographySync({
 })
 
 const {
+  handleBooksDeleted,
   handleBookDataUpdated: handleReaderBookDataUpdated,
   handleProgressUpdated,
   handleReplaceRulesUpdated,
@@ -1784,6 +1808,17 @@ const {
   refreshCachedChapters: computeBrowserCachedChapters,
   onReplaceSuccess: () => ElMessage.success('已按最新替换规则刷新当前章节'),
   onReplaceError: error => ElMessage.error(readError(error, '刷新当前章节失败')),
+  isTemporaryReader: () => isTemporaryRemoteReader.value,
+  isBookDeleted: () => readerBookDeleted.value,
+  markBookDeleted: () => {
+    readerBookDeleted.value = true
+  },
+  suspendProgressSaving,
+  stopAutoReading,
+  closeDeletedBookOverlays: ids => overlay.reconcileDeletedBooks(ids),
+  navigateHome: () => router.replace({ name: 'home' }),
+  onBookDeleted: () => ElMessage.info('书籍已从书架删除'),
+  onBookDeletionError: error => ElMessage.error(readError(error, '返回书架失败')),
 })
 
 useReaderPageLifecycle({
@@ -1802,12 +1837,19 @@ useReaderPageLifecycle({
   saveProgress: saveCurrentProgress,
   onResize: handleResize,
   onWheel: handleReaderWheel,
+  onScroll: () => {
+    if (usesDocumentScroll.value) onScroll()
+  },
   onPageHide: handleReaderPageHide,
   onVisibilityChange: handleReaderVisibilityChange,
   onProgressUpdated: handleProgressUpdated,
   onBookDataUpdated: handleReaderBookDataUpdated,
   onReplaceRulesUpdated: handleReplaceRulesUpdated,
   onBookmarksUpdated: () => {},
+  onBooksDeleted: handleBooksDeleted,
+  onUnmount: () => {
+    if (usesDocumentScroll.value) documentScrollViewport.scrollTop = 0
+  },
 })
 
 onBeforeRouteLeave(() => {
@@ -1920,7 +1962,7 @@ function handleReaderImageLoad() {
 }
 
 function scrollStep() {
-  const viewportHeight = contentEl.value?.clientHeight || window.innerHeight || readableViewportSize().height
+  const viewportHeight = scrollViewport.value?.clientHeight || window.innerHeight || readableViewportSize().height
   return readerScrollStep({
     viewportHeight,
     fontSize: reader.fontSize,
@@ -2170,7 +2212,6 @@ function readError(err, fallback) {
   background-color: var(--reader-bg);
   background-image: var(--reader-bg-image, var(--paper-texture));
   background-size: cover; background-position: center;
-  filter: brightness(var(--reader-brightness));
   color: var(--reader-text);
   border-left: 1px solid rgba(109,95,55,0.28);
   border-right: 1px solid rgba(109,95,55,0.28);
@@ -2182,6 +2223,15 @@ function readError(err, fallback) {
   box-sizing: content-box;
   position: relative;
   width: var(--reader-frame-width);
+}
+
+.reader-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: rgba(0, 0, 0, var(--reader-dim-opacity));
+  pointer-events: none;
 }
 
 .reader-page-head {
@@ -2310,6 +2360,24 @@ function readError(err, fallback) {
   padding-top: 15px;
   padding-bottom: calc(var(--reader-mobile-content-bottom-space) + env(safe-area-inset-bottom));
   text-align: justify;
+}
+
+.reader-shell.mini-interface.document-scroll {
+  min-height: 100dvh;
+  height: auto;
+  overflow: visible;
+}
+
+.reader-shell.mini-interface.document-scroll .reader-page {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
+
+.reader-shell.mini-interface.document-scroll .reader-content {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
 }
 
 .reader-shell.mini-interface.flip .reader-page {

@@ -1,5 +1,24 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-07-23 P0 移动点击翻页全设置与滚动宿主复审
+
+`0a77632` 的真实设备验收仍未达到固定上游体感，因此此前把独立 `.reader-content` 认定为
+`technical-stack-equivalent` 的结论撤销。固定上游的普通竖向点击始终写
+`document.documentElement/body.scrollTop`，而当前移动 Reader 仍在固定高度页面内滚动第二层
+元素；当前还把动画结束后的整个章节/布局/进度结算再推迟一个 `animateDuration`，不是上游只
+延迟保存进度的语义。
+
+完整设置复审也确认：`pageType/Kindle` 会强制 0ms 和左右滑动；配置方案及 `autoTheme` 会整套
+覆盖翻页方式、时长和排版；字号、行高、段距共同决定每页距离；自定义字体/背景可能影响绘制。
+自动阅读速度、全屏点击和选择文字只改变各自入口，不改变普通点击动画曲线。当前另有三项明确
+偏差：`autoTheme` 默认 false（上游 true）、`pageMode` 不进入方案/同步、Kindle 额外强制
+`clickMethod:none`。上述偏差和移动竖向文本根滚动已在第十一次候选实现中修复；同时修复了
+“默认自动主题先写、远端设置后读”导致远端动画/排版配置被启动竞态丢弃的问题。前端 544 项、
+Go、生产构建以及文字/移动工具层/连续跨章/图片真实浏览器合同均已通过；实现 `99e3e43` 已从
+本机完成新旧卷/备份门禁、真实 EPUB 三视口合同及 amd64/arm64 发布，当前等待用户实机体感
+复验。完整证据见
+[`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md) 第十一次矩阵与结果。
+
 Baseline: `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`.
 
 ## 2026-07-22 P1 书架刷新阅读进度复审
@@ -18,6 +37,66 @@ Baseline: `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`.
 构建和 1440×900/390×844/360×800 的真实 Go + Chromium 刷新合同通过。应用提交 `ed4ee27`
 已推送并从本机完成新旧卷/备份门禁及 amd64/arm64 发布；`ed4ee27`、`latest` 共同指向
 `sha256:f369cc6610312987e068dcdd015887e27569a9dcbe6c048525de12bb5ab95d89`。
+
+实机回归状态：本项重新标记为 **must-fix**。旧浏览器合同没有覆盖 Reader 离开时
+`background keepalive` 已提交但仍保留的 `pendingSync`，也没有让显式刷新等待 pending CAS 的
+最终赢家，更没有覆盖 Reader 内书架按钮。修订合同与测试门禁见
+[`bookshelf-refresh-progress-p1-contract.md`](bookshelf-refresh-progress-p1-contract.md)。
+
+第二次实施状态：上述缺口已修复并进入 **browser-validated / awaiting device verification**。
+keepalive 响应会确认本地 pending，同一快照不会因路由离开与卸载重复提交；首页和 Reader 内
+书架的显式刷新都会等待 CAS 最终赢家。真实 Go/SQLite/Chromium 在 1440×900、390×844、
+360×800 覆盖两个入口，证明无需 reload，且 Reader 正文不跳章。前端 537/537、构建和 Go
+全量通过。实现提交和本地双架构镜像 `a54bd72` 已发布；它与 `latest` 共同指向
+`sha256:5caae8c4277459431c9265e159e85702d8b1433e11d4083af8fb413d0aeedb96`，状态为
+**Docker-published / awaiting device verification**。
+
+## 2026-07-22 P0 移动点击翻页视觉节奏复审
+
+第七批已消除连续双击在两段动画之间等待 after-paint task 的空窗，但用户实机仍观察到点击上下
+翻页的明显顿挫。复审确认旧测试只排除了停帧，没有约束响应曲线造成的首帧文字大跳：当前
+`1-(1-t)^1.5` 在 300ms/772px 下首个约 16.7ms 周期理论移动约 64px。该现象即使没有掉帧也会
+显得像卡顿。第八批先同时测量帧间隔、速度轮廓、layout-shift 和顶部文字锚点，再把移动曲线改为
+有界非零初速/零终速；未测出证据前不改亮度滤镜或章节窗口。详见
+[`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md)。
+
+第八批实施状态：移动竖向文本使用初速 `0.35`、末速 `0` 的连续 Hermite 曲线；同步种子不超过
+2px，首刷新周期不超过页面步长 4%。390×844、360×800 的 `page/scroll/scroll2` 已分别通过
+向上/向下点击、连续双击、帧间隔、Long Task、LayoutShift 和段落几何合同；没有观测到正文
+重排或图层提升。前端 537/537、构建和 Go 全量通过，状态为
+**Docker-published / awaiting device verification**。实现提交和本地双架构镜像 `a54bd72`
+已发布；`a54bd72`、`latest` 均指向
+`sha256:5caae8c4277459431c9265e159e85702d8b1433e11d4083af8fb413d0aeedb96`。
+
+第九次实机复验后，本项重新按固定上游实现并进入
+**Docker-published / awaiting device verification**：移动竖向点击恢复 power-cubic ease-in-out，
+动画中拒绝同向/反向重叠点击，结算按配置时长延后；可见段落从全章几何测量改为命中即停，
+同一稳定位置只捕获一次快照。前端 `532/532`、生产构建、Go 全量以及 1440×900、390×844、
+360×800 的文字模式、移动工具层/iPad 与连续跨章真实 Chromium 合同通过。本机双架构镜像
+`fe32c00` 与 `latest` 已发布，index 为
+`sha256:09394c2183212b130db1eb8150952ca6ce688c5baf9ea8d6d47136f93db90617`；远端确切 arm64 镜像
+拉回后再次通过新旧卷、格式、重启、用户隔离和便携备份恢复门禁。
+
+第十次实机复验否定了上述“已对齐”结论，本项重新标记为 **must-fix**。直接读取固定提交的
+`plugins/animate.js` 后确认，上游在每个 rAF 回调体内调用 `Date.now()`；当前 animator 却使用
+浏览器传入的 rAF 时间戳。该时间戳代表刷新帧时间线，触摸结束发生在帧中段时可能早于当前动画
+的 `performance.now()` 起点，当前代码会把第一回调钳制为 `0%`。390×844 生产构建触控探针
+实际记录到触摸结束后约 15ms 的首个采样仍为 `scrollTop=0`，约 32ms 才出现正文位移；旧 smoke
+只有首区间位移上限，没有非静止/执行时钟断言，因此错误放行。当前 `.reader-page` 还始终带有
+`filter:brightness(...)`，而固定上游的根滚动正文没有过滤祖先；即使亮度为 100%，该 CSS 仍会
+建立过滤/合成边界。下一阶段先以失败单元锁定上游执行时钟，并以无过滤滚动祖先、等价遮罩亮度
+和真实触控首帧合同锁定移动渲染结构，再修改实现。完整矩阵见
+[`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md)。
+
+第十批实施状态已进入 **browser-validated / awaiting device verification**。animator 已改为
+在 rAF 回调实际执行时读取时钟，与固定上游 `Date.now()` 语义一致；滚动父层的
+`filter:brightness(...)` 已改为无事件黑色遮罩。前端 `534/534`、Go 全量、生产构建、
+1440×900/390×844/360×800/iPad 的文字模式、连续跨章、图片和真实后端 EPUB
+契约已通过。该结论仍需新 Docker 的真实手机体感验收，不再用自动测试代替设备结论。
+实现提交和本地双架构镜像 `0a77632` 已发布，它与 `latest` 共同指向
+`sha256:226f982cf31ef20d5d6c9c2e6e5c03c18da19bcc8a23db38acc3fcb43a177c11`；本地候选的
+新旧卷、格式、重启、用户隔离与便携备份恢复门禁通过。状态为
+**Docker-published / awaiting device verification**。
 
 ## 2026-07-18 P2 阅读进度 API、并发与 WebDAV 复审
 
@@ -814,7 +893,7 @@ The remaining structural gap is narrower but real. `Search.vue` and `Discover.vu
 
 | Concern | Upstream contract | Current evidence | Classification | Required test before code |
 |---|---|---|---|---|
-| Result-body ownership | `Index.vue` owns search and Explore as in-place shelf replacements; no standalone result product page exists. | `Home.vue` is canonical, and `Search.vue` / `Discover.vue` are only imported there, but both expose an obsolete optional standalone mode. | `must-fix` | Static contract: neither result body accepts an `embedded` prop, renders a `!embedded` branch, nor observes legacy page-route queries. |
+| Result-body ownership | `Index.vue` owns search and Explore as in-place shelf replacements; no standalone result product page exists. | `Home.vue` is canonical；`Search.vue` / `Discover.vue` 已删除 optional standalone/`embedded` 分支和旧 route watcher，只读取共享 workspace intent。 | `aligned`（P1-A 已实施并有静态/三视口合同） | 保持 `indexWorkspaceState.test.mjs` 与 `index-workspace-contract.mjs` 回归，不重建第二页面。 |
 | Legacy links | Old URLs may survive only as redirects preserving query intent. | Router already redirects `/search` and `/discover` to `/?workspace=…`; sidebar calls the workspace state directly. | `aligned` | Retain redirect and root-body assertions; prove no result component needs a route scene to initialize. |
 | Result behavior | Search, local search, Explore, pagination, BookInfo/add/read, and return-to-shelf stay in the one Index scene. | The shared Pinia workspace state already supplies those transitions. | `aligned` pending cleanup | Existing state/route contracts plus the P1-B browser smoke must continue to pass after deletion. |
 
@@ -929,7 +1008,7 @@ Status: audit completed on 2026-07-10. This is a compatibility gate: implementat
 | BookInfo host | `OverlayBookInfo.vue` + `BookInfoDialog.vue` + `BookInfoPanel.vue` are the single host used by `Home`, `Search`, `Discover`, `Reader`, and compatibility routes. | `aligned` structurally. Recheck every context action and overlay-close route transition during implementation. |
 | Shelf-only fields | Current code limits cover replacement, remote follow, local refresh and group setting by actual shelf membership. Source/category rows refresh from live events. | `aligned`; retain. Plain-text intro and extra stats are `acceptable-change` security/usability improvements. |
 | Search/explore add | `Search.vue`/`Discover.vue` inject contextual action closures and call `createRemoteBook` with currently selected category ids. | `must-fix`: add and add-and-read must open a shared group-selection confirmation, including cancel, as upstream does. Remove duplicated category/route closure logic after convergence. |
-| Edit ownership | `BookEditDialog` is shared through `OverlayBookInfo`; Home and BookManage open it directly. | `partial`: structured edit is `acceptable-change`, but its preconditions, post-save shelf/reader/BookInfo synchronization and non-shelf prohibition need contract tests. |
+| Edit ownership | `BookEditDialog` is shared through `OverlayBookInfo`; Home and BookManage open it directly. | `aligned`：structured edit 是 `acceptable-change`；保存已收敛为四个元数据 key，书架目标 guard、并发分组/追更保留及 shelf/reader/BookInfo 同步已按 [`book-edit-metadata-p2-contract.md`](book-edit-metadata-p2-contract.md) 三视口验证。 |
 | Single/batch deletion | `bookshelf.removeBook` and `batchDeleteBooks` update local shelf/cache state after REST actions. Backend scopes all rows by user. | `partial`: retain the hardened backend cleanup, then add API and browser tests proving progress/bookmarks/categories/chapters/cache cleanup plus active overlay/reader handling. |
 | Book management shell | `OverlayBookManagement.vue` is a Drawer with desktop table and mobile card list. | `must-fix`: upstream ownership is a root workbench dialog (fullscreen on compact UI), not a side/bottom Drawer. Rebuild shell only; preserve the current shared controller and safe card/table rendering. |
 | Batch cache/export | The former controller added batch cache/clear/JSON export and bounded single-book windows beyond the upstream footer. | **2026-07-18 fixed for the visible BookManage surface:** footer no longer exposes those controls; deployed backend actions retain their limits as hidden compatibility extensions. Per-book server/browser actions now cover the whole catalogue, own independent cancellable tasks and expose only TXT/EPUB. Embedded chapter-image persistence remains open; its source/request/storage/capability/export contract is now extracted in [`book-cache-images-p2-contract.md`](book-cache-images-p2-contract.md), with application code and tests still pending. |
@@ -1125,14 +1204,14 @@ Validation evidence (2026-07-16):
 
 ## P1-E pre-implementation audit: remaining Index operation routes
 
-Status: implemented and unit/build-validated on 2026-07-11. The three-viewport browser smoke is committed as `scripts/smoke/workspace-operation-contract.mjs`; execution remains pending because the local browser-runner authorization transport was interrupted. This uses the fixed `Index.vue` scene contract already recorded above.
+Status: implemented and unit/build-validated on 2026-07-11. **Audit correction:** the 2026-07-22 focused backup review supersedes this section's backup-dialog ownership and `/settings?panel=backup` mapping; LocalStore, WebDAV file-manager, RSS, replace-rule and user-manager conclusions remain historical evidence.
 
 ### Current duplicate ownership
 
 | Capability | Upstream Index responsibility | Current OpenReader evidence | Required target |
 |---|---|---|---|
 | Local book store | Index opens the local-store dialog while the shelf/side navigation remains the same scene. | `OverlayLocalStore.vue` already embeds `LocalStore.vue`, but `/local-store` still renders that same component as an independent page. | `must-fix`: retain one embedded LocalStore body under the global overlay; turn `/local-store` into a root `overlay=local-store` compatibility intent without losing unrelated query keys. No LocalStore path or import API changes. |
-| WebDAV and backup | Index opens WebDAV and backup dialogs. | `OverlayWebDAV.vue` and `OverlayBackups.vue` are canonical overlay hosts; `Settings.vue` duplicates their visible backup/WebDAV responsibilities. | `must-fix`: route sidebar and legacy `settings?panel=backup|webdav` to the existing overlays. Preserve mount paths, authenticated APIs, restore effects and the current backup/WebDAV security checks. |
+| WebDAV and backup | Index opens one WebDAV file-manager dialog; `保存备份` is a direct confirmed action, not a second dialog. | `OverlayWebDAV.vue` is the correct file manager; `OverlayBackups.vue` is a duplicated manager introduced by the rewrite. | `must-fix` under the 2026-07-22 focused contract: keep the WebDAV overlay, make ordinary/portable save direct actions, and map old backup-management links to WebDAV without an automatic write. |
 | Account and cache | Index keeps user-space/cache operations in the long-lived workspace rather than replacing it with a settings route. | `Settings.vue` contains account/sync summary, health, remote/browser cache operations and logout. AppLayout already owns cache commands; user management is a separate admin-only overlay. | `must-fix`: extract the account/cache summary into one workspace-settings overlay body. Do not map a normal user's account intent to admin UserManage; retain logout, sync/health and current-user cache scope. |
 | Reading preferences | Reader settings are part of the Reader control surface; Index-level navigation must not discard existing preferences merely because legacy Settings was removed. | `Settings.vue` contains a global reader preference editor, while `ReaderSettingsPanel.vue` is the authoritative in-reader control but is not reusable as an Index route replacement. | `must-fix`: extract/reuse the global reader-preference editor inside the workspace-settings overlay, keep its persisted setting keys/defaults/custom assets, and keep Reader's own settings panel independent. `/settings?panel=reader` must be a compatibility intent, not a silent drop. |
 | Replace rules, RSS, admin | Index opens root dialogs for replace rules, RSS and user space. | `OverlayReplaceRules`, `OverlayRSS`, and `OverlayUserManagement` already exist; `Settings.vue` only forwards actions to them. | `aligned ownership`: legacy panels must normalize to their existing overlays; preserve admin authorization and no route-page duplicate. |
@@ -1144,7 +1223,7 @@ The canonical route remains `/`. Legacy settings/local-store links must preserve
 | Legacy URL | Root intent | Open/close behavior |
 |---|---|---|
 | `/local-store` | `overlay=local-store` | Open LocalStore overlay; closing removes only `overlay`. |
-| `/settings?panel=backup` | `overlay=backup` | Open Backup overlay; closing removes only `overlay`. |
+| `/settings?panel=backup` | `overlay=webdav` | Open the sole WebDAV/backup file manager; never auto-trigger a write. This row supersedes the original 2026-07-11 mapping. |
 | `/settings?panel=webdav` | `overlay=webdav` | Open WebDAV overlay; closing removes only `overlay`. |
 | `/settings?panel=replace` | `overlay=replace-rules` | Open shared ReplaceRules overlay; Reader may still open the same overlay. |
 | `/settings?panel=rss` | `overlay=rss` | Open shared RSS overlay. |
@@ -1164,7 +1243,7 @@ Allowed differences: Vue 3/Pinia dialog bodies, JWT/multi-user authorization, an
 
 ### Implementation record
 
-- **Canonical operation scene.** `/local-store` and every `/settings?panel=…` legacy link now redirect to `/` with a single root overlay intent, preserving unrelated query keys. Account, cache and reader preference panels share one workspace-settings drawer; backup, WebDAV, replace rules, RSS and user management reuse their pre-existing canonical overlays.
+- **Historical implementation note.** `/local-store` and every `/settings?panel=…` legacy link redirected to `/` with a root intent. Later audits removed the generic workspace-settings drawer and now require backup links to reuse the WebDAV manager; this line is not current backup authority.
 - **Duplicate removal.** The previous full-page `Settings.vue` implementation no longer owns backup, WebDAV, RSS, replace-rule or user-management widgets. It now contains only the workspace settings body, while the old URLs remain working compatibility adapters.
 - **Close behavior.** `AppLayout` hydrates overlay query intents outside Reader and removes only `overlay` / `settingsPanel` after the corresponding overlay closes. Source overlay ownership remains independent.
 - **Manager visibility.** The sidebar now exposes the user-management overlay only when `profile.role === "admin"`, matching upstream manager-mode visibility. The legacy admin intent is retained so a pasted old link still receives the backend’s authoritative 403 for a normal user.
@@ -1172,13 +1251,13 @@ Allowed differences: Vue 3/Pinia dialog bodies, JWT/multi-user authorization, an
 
 ### 2026-07-12 P1-E visual/state re-audit: LocalStore, WebDAV and backup
 
-Status: implemented and validated on 2026-07-12. The prior route-convergence result remains valid, but its drawer-shell equivalence claim was corrected by this implementation.
+Status: file-manager shell/reset work implemented and validated on 2026-07-12. The 2026-07-22 focused contract supersedes only this section's decision to retain a separate backup dialog/list.
 
 | Concern | Fixed upstream behavior | Current OpenReader evidence | Classification / required result |
 |---|---|---|---|
 | LocalStore container | `Index.vue` mounts `LocalStore.vue` in an `el-dialog`, using the normal `dialogWidth`/`dialogTop` on desktop and `fullscreen` for the compact/mobile interface. Opening retains the Index scene. | `OverlayLocalStore.vue` uses an `el-drawer`: `rtl`, 82% desktop width; `btt`, 88% mobile height. Its `destroy-on-close` recreates `LocalStore.vue`, so the existing current-directory root reset is correct. | `must-fix` visual/interaction structure: preserve the shared overlay owner and root reset, but restore a centred desktop dialog and true mobile fullscreen dialog. |
 | WebDAV container and reset | `Index.vue` mounts `WebDAV.vue` in the same dialog/fullscreen pattern. Its `show` watcher calls `showWebdavFile('/')` on every open, so the root directory is the entry state. | `OverlayWebDAV.vue` uses the same 82%/88% drawer shell but does **not** destroy its browser. `WebDAVBrowser.vue` loads only on mount, leaving a previously visited directory active after close/reopen. | `must-fix` state and structure: dialog/fullscreen shell plus a root reload/reset on every open. Do not change its JWT, private-root, staged-preview or restore APIs. |
-| Backup trigger and restore | `Index.vue#backupToWebdav` asks whether to overwrite the backup before issuing the request. `WebDAV.vue#restoreFromWebdav` asks for confirmation before recovery and refreshes Index data afterwards. | `OverlayBackups.vue` presents a richer backup list, but `useOverlayBackups.run()` sends the write request immediately and its uploaded-package restore also writes immediately. The WebDAV-browser restore path already confirms and restores shared state. | `must-fix` action transition: keep the richer list as an allowed enhancement, but require an explicit overwrite confirmation before `triggerBackup()` and a recovery confirmation before an uploaded package is sent. Present it in the same dialog/fullscreen family. |
+| Backup trigger and restore | `Index.vue#backupToWebdav` asks before a direct request; `WebDAV.vue#restoreFromWebdav` confirms inside the sole file manager and refreshes Index afterwards. | `OverlayBackups.vue` still duplicates list/upload/download/restore already owned by `WebDAVBrowser`. | `must-fix` under the later audit: remove the duplicate manager; direct save keeps confirmation, while all restore/list operations remain in WebDAV. |
 | Workspace settings / account / cache | Upstream shows these Index controls inside its long-lived navigation; it does not define a separate LocalStore/WebDAV-style file dialog contract. | `OverlayWorkspaceSettings.vue` is a drawer with an extracted settings body. | `unknown`, deliberately out of this visual batch: retain root ownership and revisit its exact upstream layout with the sidebar/settings audit, rather than falsely applying the file-manager dialog contract. |
 
 Required contracts before implementation:
@@ -1190,9 +1269,9 @@ Required contracts before implementation:
 
 ### P1-E3 implementation record
 
-- **Dialog/fullscreen shell.** `OverlayLocalStore`, `OverlayWebDAV` and `OverlayBackups` now use the same centred desktop `el-dialog` family as the upstream workspace; their compact-interface state comes from `GlobalOverlayHost` and uses true Element Plus fullscreen rather than an 88%-height bottom drawer. The root Index workspace and legacy overlay route intents remain mounted underneath.
+- **Dialog/fullscreen shell.** `OverlayLocalStore` and `OverlayWebDAV` use the upstream-like centred desktop/fullscreen compact dialog family. `OverlayBackups` did too in this historical slice, but its continued ownership is superseded by the focused backup contract.
 - **Root entry state.** All three file-operation dialogs use `destroy-on-close`. LocalStore keeps its already-correct remount/root behavior; WebDAV now remounts and calls its existing root-list load each time it opens, eliminating the stale last-directory state.
-- **Destructive backup transitions.** `useOverlayBackups` accepts explicit preflight confirmations. The overlay now confirms before writing the WebDAV backup and before uploading a recovery package; cancellation performs neither network write nor state application. The richer backup-list/download UI remains an allowed OpenReader enhancement, while the upstream overwrite/recovery decision boundary is restored.
+- **Historical destructive-transition evidence.** `useOverlayBackups` proved confirmations prevent requests, but the later audit found the whole duplicate manager structurally wrong. Those confirmation assertions must move to the direct save action and WebDAV restore flow.
 - **Evidence.** Frontend unit contracts now cover dialog ownership/mobile fullscreen, WebDAV remount state, and both backup confirmation branches. `npm test` passed **350** tests and `npm run build` passed. `workspace-operation-contract.mjs` passed in Chrome at `1440×900`, `390×844`, and `360×800`, including desktop centring, compact fullscreen, root reload on WebDAV reopen, old-link intent cleanup, no sidebar click-through and no horizontal overflow. The current backend suite remains green (no backend code changed in this slice). Local image `openreader-local-check:workspace-p1-e3` (`sha256:9727051cb4aecd51e9f723a5c09a543d06f9691f4548e0a7c7b0178e0c5ca18e`, revision label `dirty-workspace-p1-e3`) passed `docker-volume-backup-smoke.sh`.
 - **Allowed differences / unfinished work.** User-private storage, staged import snapshots, JWT transport and the richer backup list remain deliberate OpenReader adaptations. Workspace settings, RSS, replace rules and user management retain their separately audited drawers until their own upstream visual/state batches; they were intentionally excluded from this file-operation migration.
 
@@ -1283,11 +1362,13 @@ Implementation record (2026-07-13): `ParseUMDWithLimits` now detects the reader-
 
 ### 2026-07-12 P2 backup restore data/safety re-audit
 
-Status: contract extracted from upstream `Index.vue#backupToWebdav`, `WebDAV.vue#restoreFromWebdav`, `WebdavController.kt`, and OpenReader's backup/restore paths; implemented and awaiting Docker-volume release validation.
+Status: archive **structure/budget preflight only** was implemented on 2026-07-12. A 2026-07-22 fixed-baseline re-audit found unresolved workspace, filename/field, generation, transaction and permission defects. The focused
+[`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md)
+supersedes this section wherever the earlier text called the complete ordinary backup/restore bridge implemented.
 
 | Concern | Fixed upstream behavior | Current OpenReader evidence | Required result |
 |---|---|---|---|
-| User decision and workspace transition | Upstream asks before overwriting a backup and before recovery; successful recovery refreshes the Index scene. | `OverlayBackups` and `WebDAVBrowser` already require confirmation, while `applyRestoreResult` refreshes settings/shelf state and server broadcasts restore events. | `aligned + allowed enhancement`: retain the dialog/list/download UI, explicit confirmations, multi-user scope and event refresh. This slice is backend archive hardening, not a visual rewrite. |
+| User decision and workspace transition | Upstream asks before the direct save request and before recovery; successful recovery refreshes the Index scene. | `OverlayBackups` and `WebDAVBrowser` both manage recovery, while `applyRestoreResult` refreshes settings/shelf state. | `must-fix` under the 2026-07-22 focused audit: keep confirmations, multi-user scope and refresh, but direct-save from Index and keep list/download/restore only in WebDAV. |
 | Restore input boundary | Upstream restores a WebDAV ZIP selected by the user. | Uploaded package restore performs unbounded `io.ReadAll`; WebDAV restore performs unbounded `os.ReadFile`. Raw WebDAV uploads have a size cap, but legacy mounted files and multipart restore bypass one shared restore policy. | `must-fix`: use one compressed-byte cap for both routes, reject oversized uploads/files before body allocation, and return a client-safe `413` or `400` without database writes. |
 | ZIP archive structure | Upstream backup consists of source, shelf, category, RSS, setting/progress and related JSON records. | `restoreLegadoBackupData` accepts arbitrary ZIP entry paths and loops three times using suffix matching; there is no entry-count/per-entry/total-expanded validation. Restore helpers each use unbounded `io.ReadAll`. | `must-fix`: normalize and validate every ZIP entry before dispatch, bound entry count, each JSON entry and total decoded bytes, and use one reader budget for every helper read. Preserve reader-dev/Legado/OpenReader filenames and allowed `bookProgress/` compatibility entries. |
 | Error and mutation semantics | The upstream client treats recovery as one confirmed operation followed by a refresh. | Current helper failures are commonly discarded (`n, _`), so malformed rows can yield a successful partial result without a diagnostic; existing idempotent upsert compatibility must remain. | `must-fix`: structural/budget/read failures fail before any restore mutation. Per-record legacy validation may remain best-effort only after a valid archive plan is accepted, and response counts keep their current schema. Do not delete existing user data or change backup JSON names. |
@@ -1300,7 +1381,7 @@ Required pre-implementation contracts:
 3. Reader-dev/Legado compatibility fixtures retain top-level and documented nested `bookProgress/` JSON handling; normal WebDAV backup/restore and restore-triggered sync events retain existing behavior.
 4. All helper reads share one archive budget; no raw ZIP filename, mount path, credential or untrusted JSON body appears in client error text.
 
-Implementation record: both restore endpoints require a ZIP and apply one compressed limit. `backupRestoreArchive` rejects unsafe paths, symlinks, duplicate canonical names and over-budget entry/count/expanded archives while fully reading every member before dispatch; the restore loops use those validated bytes. Structural errors return a client-safe `400`/`413` before a source, shelf, setting, category, RSS, progress, bookmark or rule can change. Existing per-record decoding remains best-effort after a valid archive plan, preserving legacy restore count semantics. `backup_restore_contract_test.go` adds malicious/no-mutation and route-size coverage; existing reader-dev/Legado/OpenReader fixtures retain their count/event behavior. Full Go/frontend checks and mounted-volume Docker smoke remain the release gate.
+Implementation record for the completed sub-slice: both restore endpoints require a ZIP and apply one compressed limit. `backupRestoreArchive` rejects unsafe paths, symlinks, duplicate canonical names and over-budget entry/count/expanded archives while fully reading every member before dispatch; structural errors return a client-safe `400`/`413` before mutation. This does **not** prove supported JSON decode/DB failure atomicity or actual reader-dev `bookmark.json`/`replaceRule.json` compatibility. The later focused contract replaces the former best-effort/content-success claim.
 
 ## P1-E2 pre-implementation audit: workspace storage, backup, RSS and user-space semantics
 
@@ -2349,7 +2430,7 @@ sidebar. It does not have a general Settings page or a settings Drawer:
 |---|---|---|---|
 | Generic configuration shell | `OverlayWorkspaceSettings.vue` mounts `Settings.vue` in a `global-workspace-settings-drawer`; the overlay store, `AppLayout`, router, tests and smoke script treat it as canonical. | `must-fix` | Delete this canonical Drawer, its state, and its Drawer-specific test assertions. No replacement general-settings page/drawer is permitted. |
 | Account identity/logout | The `用户空间` item opens the Drawer merely to show profile data and logout; service health is duplicated there and on the sidebar version action. | `must-fix` | Keep current username/logout in the persistent user-space section. Keep only the existing version/health action in the sidebar; do not retain an account detail surface solely to justify a Drawer. |
-| User-config backup | Sidebar `备份用户配置` calls `overlay.openBackup()`, which opens the full logical/portable backup dialog. This is not upstream's client-configuration snapshot. | `must-fix` | Replace it with a confirmed, explicit flush of OpenReader's authenticated `reader`, `shelf`, and `search` setting records. Those records contain the upstream-equivalent reader configuration/custom schemes, shelf preference, and search preference, so a separate unbounded config-file API is not needed. The full backup dialog remains only `保存备份`. |
+| User-config backup | Sidebar originally opened the full logical/portable dialog; the first correction changed it to three ordinary CAS saves. A stale CAS can still apply the server value and return truthy, so the UI may report a backup although this terminal was not persisted. | `must-fix` | Keep the confirmed explicit flush of authenticated `reader`, `shelf`, and `search`, but make it a force-current-user save distinct from background CAS. A separate unbounded config-file API is still unnecessary. Ordinary `保存备份` becomes the upstream-style confirmed direct action; it must not keep a second manager dialog. |
 | User-config restore | `syncUserConfig()` reloads profile, reader preferences, shelf/search preferences, bookshelf and cache statistics without upstream's confirmation. It currently does not intentionally distinguish configuration restore from a full shelf refresh. | `must-fix` | Retain the safe extra shelf/cache refresh as an OpenReader enhancement, but add the upstream confirmation and make the primary state transition explicit: rehydrate `reader`, `shelf`, and `search` from the current authenticated user before reporting success. |
 | Cache ownership | The same Drawer duplicates server/browser cache statistics and destructive actions that `AppLayout` already exposes in the sidebar. The server-cache half is a current-user, bounded OpenReader enhancement; upstream only has browser cache groups. | `must-fix` for duplication; `acceptable-change` for scoped server cache | Retain cache commands and counts only in the sidebar. Keep current-user server-cache accounting and browser cache groups; preserve their confirmation/error behavior. |
 | Reader preferences | `Settings.vue` embeds a second complete reader editor, including raw `el-slider` controls that conflict with the requested in-reader minus/value/plus controls. `ReaderSettingsPanel.vue` is already the authoritative reader surface. | `must-fix` | Remove the global reader editor and all of its duplicate upload/config/persistence wiring. Reader settings, including custom assets and persisted keys, remain owned by `ReaderSettingsPanel` only. |
@@ -2369,10 +2450,10 @@ This is a deliberate multi-user adaptation of upstream's four localStorage keys:
 | `searchConfig` | `search` user setting / preferences Pinia store | `technical-stack-equivalent`. |
 | Terminal-only page layout | Reader's local `pageMode` | `intentional-security/usability adaptation`: never overwrite a device-specific layout during configuration restore. |
 
-No SQLite migration, setting-key rename, cache/library path change, backup format
-change, or loss of custom reader assets is authorized by this slice. Existing
-WebDAV and backup overlays remain their own operations and continue to restore
-the same scoped user settings through their established backend contracts.
+No setting-key rename, cache/library path change or loss of custom reader assets is authorized by this slice.
+The WebDAV file manager remains an independent root operation. The duplicate backup manager is no longer
+authoritative: the 2026-07-22 focused backup contract requires direct ordinary/portable save actions and keeps
+list/upload/download/restore in the single WebDAV manager. Existing setting keys and caller-scoped roots remain.
 
 #### Required implementation order and tests
 
@@ -2524,6 +2605,28 @@ upsert；八路确定性并发 API 契约、Hub backpressure、网络挂起/离�
 `sha256:31c3432d2d93242cde73bd38af1ff72a6e645a80f87551d2f4293c45099bb8e9`。两个标签和两个
 平台清单均由 `imagetools inspect` 核验；发布后 Docker daemon 回拉因 GHCR 502 未能复跑远端
 制品的第二次卷 smoke，此网络限制已显式记录，不影响已完成的远端清单与本地候选证据。
+
+## 2026-07-22 书籍删除后的消费者收敛复审
+
+固定上游单本删除会重载 Index 书架，批量删除会清空选择并同时重载 BookManage 与根书架；Reader
+是独立路由，正常流程不会继续显示一本文档层面已经删除的书。当前 Go 单本/批量事务、用户隔离、
+远端缓存引用保护和私有导入目录清理已经满足并强化该数据结果，但前端 `bookshelf_delete` 只移除
+Pinia 书架行：本地阅读进度仍在，BookInfo/编辑/分组/书签/正文搜索仍持有旧书对象，另一客户端
+正在阅读时还会在退出钩子继续写已删除书的进度。
+
+OpenReader 的 WebSocket 多客户端属于允许的运行时增强，因此必须补成幂等的等价收敛事务：清除
+书架快照、浏览器章节和本地进度；只关闭命中删除 id 的 per-book 弹层；保留书架管理和其它书；
+活动 Reader 必须先禁止后续进度保存，再 `replace` 返回 Home。完整状态表、允许差异和测试先行
+闸门见 [`book-deletion-consumer-convergence-p1-contract.md`](book-deletion-consumer-convergence-p1-contract.md)。
+合同提取阶段未修改应用代码；随后实施结果如下。
+
+实施结果（2026-07-22）：direct、batch 与 WebSocket 删除已汇入一个 normalized/idempotent
+消费者事务，统一清除书架快照、浏览器章节和本地进度；异步缓存清理冻结接收事件时的用户 scope，
+不会因切换账号误清另一用户。根 overlay 只关闭命中书 id 的 BookInfo/编辑/分组 set/书签/表单/
+正文搜索，BookManage 与其它书保持可用。活动 Reader 在路由退出前挂起进度保存代际、丢弃迟到结果、
+停止自动阅读并 `replace` 回 Home。前端 534/534、Go 全量、生产构建均通过；新的真实 Go + SQLite +
+WebSocket 双 Chromium 合同在 1440×900、390×844、360×800 验证了三类目标弹层、Reader 返回、
+本地进度删除、删除后零 `PUT /api/progress`、无 API/控制台错误及无横向溢出。
 
 ## 2026-07-18 认证运行时 scope 与同步连接代际复审
 

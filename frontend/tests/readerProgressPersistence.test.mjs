@@ -118,6 +118,51 @@ test('does not apply or upload a transient progress snapshot while the reader wi
   controller.cancelScheduled()
 })
 
+test('suspends pending and in-flight progress after deletion until a new book resumes it', async () => {
+  let finishRemote
+  const saved = []
+  const controller = useReaderProgressPersistence({
+    minimumInterval: 0,
+    getPayload: () => ({
+      bookId: 7,
+      chapterId: 13,
+      chapterIndex: 3,
+      offset: 240,
+      percent: 0.325,
+      chapterPercent: 0.25,
+    }),
+    applyLocal: progress => saved.push(['local', progress.bookId]),
+    saveRemote: progress => new Promise(resolve => {
+      saved.push(['remote', progress.bookId])
+      finishRemote = () => resolve({ ...progress, updatedAt: 'server' })
+    }),
+    onSaved: progress => saved.push(['saved', progress.bookId]),
+  })
+
+  const inFlight = controller.save({ force: true })
+  await Promise.resolve()
+  controller.suspend()
+  finishRemote()
+  await inFlight
+  await controller.save({ force: true })
+
+  assert.deepEqual(saved, [
+    ['local', 7],
+    ['remote', 7],
+  ])
+
+  controller.resume()
+  const resumed = controller.save({ force: true })
+  await Promise.resolve()
+  finishRemote()
+  await resumed
+  assert.deepEqual(saved.slice(2), [
+    ['local', 7],
+    ['remote', 7],
+    ['saved', 7],
+  ])
+})
+
 test('background progress save queues one keepalive without a duplicate ordinary request', async () => {
   const previousWindow = globalThis.window
   const previousFetch = globalThis.fetch
@@ -154,6 +199,59 @@ test('background progress save queues one keepalive without a duplicate ordinary
     assert.equal(keepalive[0].url, '/api/progress')
     assert.equal(keepalive[0].options.keepalive, true)
     assert.equal(JSON.parse(keepalive[0].options.body).baseUpdatedAt, 'server-v1')
+    controller.cancelScheduled()
+  } finally {
+    globalThis.window = previousWindow
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('deduplicates the same background snapshot and confirms its keepalive response', async () => {
+  const previousWindow = globalThis.window
+  const previousFetch = globalThis.fetch
+  const keepalive = []
+  const saved = []
+  let resolveFetch
+  globalThis.window = {
+    localStorage: {
+      getItem: key => key === 'openreader_token' ? 'progress-token' : null,
+    },
+  }
+  globalThis.fetch = (url, options) => {
+    keepalive.push({ url, options })
+    return new Promise(resolve => { resolveFetch = resolve })
+  }
+  try {
+    const progress = {
+      bookId: 7,
+      chapterId: 13,
+      chapterIndex: 3,
+      offset: 240,
+      updatedAt: 'server-v2',
+    }
+    const controller = useReaderProgressPersistence({
+      minimumInterval: 0,
+      getPayload: () => ({ bookId: 7, chapterId: 13, chapterIndex: 3, offset: 240 }),
+      getBaseUpdatedAt: () => 'server-v1',
+      getStoredProgress: () => ({ updatedAt: 'local-v2' }),
+      getMode: () => 'scroll',
+      ensureClientId: () => 'client-a',
+      applyLocal: () => {},
+      saveRemote: async payload => payload,
+      onSaved: value => saved.push(value),
+    })
+
+    await controller.save({ force: true, background: true })
+    await controller.save({ force: true, background: true })
+    assert.equal(keepalive.length, 1, 'route navigation and unmount must share one keepalive')
+
+    resolveFetch({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => progress,
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.deepEqual(saved, [progress], 'an accepted keepalive must clear the optimistic pending state')
     controller.cancelScheduled()
   } finally {
     globalThis.window = previousWindow

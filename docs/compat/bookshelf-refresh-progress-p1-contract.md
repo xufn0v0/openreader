@@ -2,10 +2,12 @@
 
 固定基准：`changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。
 
-状态：2026-07-22 已完成上游复审、测试先行、实现、全量回归、三视口真实浏览器验证、
-挂载卷/备份门禁和本地双架构 Docker 发布。用户报告书架“刷新”不能刷新阅读进度，只有
-整页刷新后才能看到其它客户端已经保存的位置。本合同只修复书架列表中的进度收敛，不改变
-Reader 的进度保存、并发 CAS、WebDAV 镜像、书架排序或最新章节检查。
+状态：2026-07-22 用户实机回归后重新打开。第一批已完成上游复审、测试先行、实现、全量回归、
+三视口真实浏览器验证、挂载卷/备份门禁和本地双架构 Docker 发布；但该批浏览器 fixture 只覆盖
+`非 pending 的未来时间旧值`，没有覆盖 Reader 返回书架时由 keepalive 留下的真实
+`pendingSync`，也没有分别覆盖首页书架与 Reader 内书架两个可见刷新入口。用户再次确认：点击
+“刷新”不能同步阅读进度，整页刷新后才更新。因此旧的“已完成”结论无效，本合同重新进入
+`must-fix`。本轮仍不改变并发 CAS、WebDAV 镜像、书架排序或最新章节检查。
 
 ## 权威文件与状态转换
 
@@ -86,3 +88,44 @@ Reader 的进度保存、并发 CAS、WebDAV 镜像、书架排序或最新章�
   `imagetools inspect`，未使用云端构建。
 - 允许差异仍只有 OpenReader 的 pending/CAS 离线保护；未完成项是用户在真实多设备书架复验，
   以及全量重构矩阵中与本切片无关的后续模块。
+
+## 2026-07-22 实机回归复审
+
+| 项目 | 固定上游 / 用户合同 | 当前实现 | 新判定 |
+|---|---|---|---|
+| Reader 返回书架 | 上游保存进度后，书架刷新以 `getBookshelf` 响应整批替换 `durChapter*`。 | `goShelf()` 和 Reader 卸载都可走 `background:true`；`sendKeepAlive()` 在请求发出后立即返回成功，但不读取响应、不调用 `onSaved`，因此已经被服务器接收的快照仍可在 Pinia/localStorage 留作 `pendingSync`。 | **must-fix**：keepalive 响应在 SPA 仍存活时必须完成确认；同一次离开不得制造两个互相竞争的后台保存。 |
+| 显式刷新与 pending | 用户点击刷新后，可见章节、未读数、排序和时间必须在按钮完成前收敛；不得要求 reload。 | `reconcileShelfProgress()` 对较新的 pending 只异步触发 `syncLocalProgress(...).catch()`，`loadBooks()` 不等待结果便返回并显示旧 pending；旧测试只断言了纯函数。 | **must-fix**：显式刷新事务要等待 pending 的 CAS 结果并以最终赢家一次性提交书架、Reader store 与 scoped cache。 |
+| 两个刷新入口 | 首页和 Reader 内书架都应复用同一刷新语义。 | 两者都调用 `loadBooks({force:true,all:true})`，但旧 smoke 只点击首页按钮。 | **must-fix together**：同一 store 事务修复，分别做真实浏览器断言。 |
+| 普通后台刷新 | WebSocket 重连/元数据事件不能阻塞 UI，也不能把临时网络失败变成清空进度。 | 普通同步事件共享 `loadBooks()`，但没有“用户等待刷新”和“后台校准”的完成语义区分。 | **acceptable runtime adaptation**：后台调用可继续异步；只有显式按钮要求等待最终进度赢家。 |
+
+### 回归测试闸门
+
+1. 先用真实 Reader `返回书架` 产生 keepalive pending，证明响应成功时能清除 pending，并且同次离开
+   只发送一个最终快照。
+2. 同账号客户端 B 保存新位置，客户端 A 保留已提交但未确认/时钟偏移的 pending；首页点击刷新后，
+   按钮结束前必须显示 CAS 最终赢家，不 reload、不靠 WebSocket。
+3. 在 Reader 内打开书架并执行相同刷新，非当前书与当前书的已读章节、未读数、排序均使用同一
+   最终结果；活动正文不能被书架列表刷新偷偷跳章。
+4. 网络失败继续保留本地 pending 并明确报错；其他用户 scoped localStorage、书架缓存和进度不变。
+5. 1440×900、390×844、360×800 真实浏览器覆盖两入口，前端全量、构建和 Go 全量通过。
+
+## 2026-07-22 第二次实施与发布前验证记录
+
+- Reader 的 keepalive 保存现在按阅读位置指纹合并同一次路由离开/卸载产生的重复后台请求；
+  成功响应仍会经过 generation 门并调用既有 `onSaved`，从 Pinia 和 scoped localStorage 清除
+  已被服务器确认的 `pendingSync`。页面已切换到新用户/新阅读会话时，旧响应不会提交。
+- `bookshelf.loadBooks` 为可见刷新增加 `settleProgress` 事务语义。首页书架和 Reader 内书架
+  都要求等待 pending CAS；冲突直接接受服务器赢家并一次性写入书架、Reader store 和浏览器
+  缓存，不再先显示旧 pending、等下次整页加载才收敛。
+- 后台 WebSocket/前台自动校准仍保持非阻塞；显式同步失败会拒绝刷新、保留本地 pending 并
+  进入原有可见错误提示，不会把暂时断网解释为服务器删除了阅读位置。
+- `bookshelf-refresh-progress-contract.mjs` 使用真实 Go、SQLite 和 Chromium，在 1440×900、
+  390×844、360×800 分别验证首页和 Reader 内两个刷新入口：未来时间 pending 与远端更新
+  冲突时，每个入口只发出一次 CAS，最终显示服务器赢家；主文档不 reload，Reader 正文章节
+  和路由不跳转。WebSocket 在 fixture 中保持静默，因此结果不依赖推送补救。
+- 针对性 28 项测试、前端全量 537/537、Vite 生产构建和 Go 全量通过。本批未改 API、Go、
+  SQLite schema、持久目录、WebDAV 或备份格式。
+- 实现提交 `a54bd725991bc19535fb8263ab4a17efbc7d7f87` 已推送，并从本机发布
+  `ghcr.io/changshengyu/openreader:a54bd72` 与 `latest`；两标签指向 OCI index
+  `sha256:5caae8c4277459431c9265e159e85702d8b1433e11d4083af8fb413d0aeedb96`。候选镜像的新卷、
+  历史卷、重启、用户隔离和便携备份恢复全链通过；最终仍等待用户真实多设备书架复验。

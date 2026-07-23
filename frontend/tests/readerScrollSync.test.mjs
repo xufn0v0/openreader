@@ -10,6 +10,7 @@ function createController(overrides = {}) {
     isVerticalRead: ref(true),
     restoringPosition: ref(false),
     chapterLoading: ref(false),
+    isContinuousScrollRead: ref(true),
     progressVersion,
     syncCurrentChapter: () => calls.push(['sync-chapter']),
     maybeExtendChapterWindow: () => calls.push(['extend-window']),
@@ -108,5 +109,47 @@ test('settles a completed page animation even before its browser scroll event ar
 
   assert.equal(fixture.controller.flush(), true)
   assert.equal(fixture.controller.flush(), false)
+  assert.equal(fixture.progressVersion.value, 4)
+})
+
+test('captures one visible snapshot and reuses it for one stable settlement', () => {
+  const snapshot = { chapterIndex: 2, offset: 480 }
+  let captures = 0
+  const fixture = createController({
+    captureProgressSnapshot: () => {
+      captures += 1
+      return snapshot
+    },
+    syncCurrentChapter: value => fixture.calls.push(['sync-chapter', value]),
+    applyLocalProgress: value => fixture.calls.push(['local-progress', value]),
+  })
+
+  fixture.controller.handle()
+  assert.equal(captures, 1)
+  assert.deepEqual(fixture.calls, [
+    ['sync-chapter', snapshot],
+    ['extend-window'],
+    ['layout'],
+    ['local-progress', snapshot],
+    ['schedule', 500],
+  ])
+})
+
+test('single-chapter page settlement updates page geometry without scanning every paragraph', () => {
+  let captures = 0
+  const fixture = createController({
+    isContinuousScrollRead: ref(false),
+    captureProgressSnapshot: () => {
+      captures += 1
+      return { chapterIndex: 1, offset: 480 }
+    },
+  })
+
+  fixture.controller.flush()
+  assert.equal(captures, 0)
+  assert.deepEqual(fixture.calls, [
+    ['layout'],
+    ['schedule', 500],
+  ])
   assert.equal(fixture.progressVersion.value, 4)
 })
