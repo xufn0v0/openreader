@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"openreader/backend/middleware"
 	"openreader/backend/models"
+	assetservice "openreader/backend/services/assets"
 )
 
 func (s *Server) uploadAsset(c *gin.Context) {
@@ -36,6 +38,21 @@ func (s *Server) uploadAsset(c *gin.Context) {
 	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
 	if !allowedUploadExtension(kind, ext) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported file type"})
+		return
+	}
+	input, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file content does not match type"})
+		return
+	}
+	validationErr := assetservice.ValidateUpload(input, fileHeader.Size, kind, ext)
+	_ = input.Close()
+	if validationErr != nil {
+		if errors.Is(validationErr, assetservice.ErrImageDimensions) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "image dimensions are too large"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file content does not match type"})
 		return
 	}
 
@@ -144,48 +161,19 @@ func (s *Server) userUploadAssetReferenced(userID uint, url string) (bool, error
 }
 
 func uploadSizeLimit(kind string) int64 {
-	if kind == "font" {
-		return 32 * 1024 * 1024
-	}
-	return 8 * 1024 * 1024
+	return assetservice.SizeLimitForKind(kind)
 }
 
 func uploadKindDir(kind string) string {
-	switch kind {
-	case "cover":
-		return "covers"
-	case "background":
-		return "backgrounds"
-	case "font":
-		return "fonts"
-	default:
-		return "misc"
-	}
+	return assetservice.KindDirectory(kind)
 }
 
 func isUploadKindDir(kind string) bool {
-	switch kind {
-	case "covers", "backgrounds", "fonts", "misc":
-		return true
-	default:
-		return false
-	}
+	return assetservice.IsKindDirectory(kind)
 }
 
 func allowedUploadExtension(kind, ext string) bool {
-	imageExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
-	coverExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
-	fontExts := map[string]bool{".ttf": true, ".otf": true, ".woff": true, ".woff2": true}
-	switch kind {
-	case "cover":
-		return coverExts[ext]
-	case "background":
-		return imageExts[ext]
-	case "font":
-		return fontExts[ext]
-	default:
-		return imageExts[ext] || fontExts[ext]
-	}
+	return assetservice.AllowedExtension(kind, ext)
 }
 
 func randomHex(bytesLen int) string {

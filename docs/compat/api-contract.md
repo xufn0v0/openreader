@@ -40,7 +40,7 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Bookmarks | `/api/books/:id/bookmarks`, `/api/bookmarks/:id` | Bookmark CRUD and batch operations remain user/book scoped. |
 | Local store | `/api/local-store*` | All paths must stay rooted under configured local store/library paths. |
 | Import | `/api/imports/books/preview`, `/api/imports/books`, `/api/imports/txt` | Preview may return `importToken`; import must be able to reuse staged content. |
-| Uploads | `/api/uploads` | Uploaded assets must be validated, rooted under data uploads and user-scoped for new writes/deletes; legacy global upload URLs remain readable. See [`bookinfo-shelf-mutations-p2-contract.md`](bookinfo-shelf-mutations-p2-contract.md). |
+| Uploads | `/api/uploads` | Uploaded assets are content-validated before final write, rooted under data uploads and user-scoped for new writes/deletes; legacy global upload URLs remain readable. BookInfo ownership is in [`bookinfo-shelf-mutations-p2-contract.md`](bookinfo-shelf-mutations-p2-contract.md); implemented Reader upload/save/delete ordering, signature/dimension admission and the separate pending P2-B backup boundary are in [`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md). |
 | Cache | `/api/cache/stats`, `/api/cache`, `/api/books/:id/cache` | Cache operations must not delete unrelated user data. |
 | Replace rules | `/api/replace-rules*` | See the P2 replace-rule contract below: stable name-upsert order and upstream-visible plain/regex/scope semantics. |
 | RSS | `/api/rss/sources`, `/api/rss/articles` | Remote fetch limits and parser safety apply. |
@@ -143,6 +143,21 @@ Configuration defaults are additive: `OPENREADER_MAX_PORTABLE_BACKUP_BYTES=53687
 `OPENREADER_MAX_PORTABLE_ARCHIVE_EXPANDED_BYTES=536870912`. Portable archive parsing uses this
 independent per-file bound rather than the smaller interactive-upload cap; normal imports retain
 their own `OPENREADER_MAX_IMPORT_BYTES` policy.
+
+### P2-B portable appearance asset v2
+
+Status: runtime, contract tests, full suites and three-viewport real-browser restore are implemented
+on 2026-07-23; Docker volume/release gates remain. The exact format and transaction contract is
+[`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md).
+
+| Method / path | Implemented additive contract | Compatibility |
+|---|---|---|
+| `POST /api/backup/portable/trigger` | New packages return `format:"openreader-portable-v2"` plus `localBooks`, `assets`, and `legacyAssets`; v2 contains caller-referenced private cover/background/font bytes and uses opaque package placeholders. | Route/auth remain unchanged. Ordinary backups remain logical-only; existing v1 files remain restorable. Invalid/missing/cross-owner referenced assets are `409`, limits are `413`, and failure creates no final package. |
+| `GET /api/backup/list` | Detect v1/v2 from the bounded root manifest instead of inferring v1 from the filename prefix. | Existing `name/size/time` fields and download basename/root checks remain. Damaged or future portable versions must not be reported or restored as v1/logical. |
+| Both restore routes | v2 rewrites declared placeholders to newly allocated target-user URLs and returns `assets`/`legacyAssets`. Asset finalization and all rewritten setting/book rows use one SQLite transaction plus tested file compensation. | v1 follows its existing path. Multiple/unknown manifests, invalid assets or placeholders fail before mutation and emit no sync event. |
+
+The v2 asset subset also retains the current upload caps (8 MiB image, 32 MiB font) inside the
+existing portable global entry/expanded budgets and reruns extension/magic/image-dimension checks.
 
 ## P2 UserManage API contract
 

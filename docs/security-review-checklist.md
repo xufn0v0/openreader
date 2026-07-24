@@ -130,13 +130,53 @@ For each release, record which checklist sections were relevant and which tests/
   result, retains legacy global paths, and refuses to delete a Book or reader-setting
   reference. The Reader saves the unreferenced setting before its delete request and
   restores the local font/background state if that save fails.
-- [x] Upload size and extension allowlists are unchanged; rooted path checks reject
-  traversal, query and fragment variants without leaking a filesystem path.
+- [x] Upload size and extension allowlists remain compatible; Reader appearance P2-A
+  additionally checks bounded image/font signatures before publishing a file. Rooted path
+  checks reject traversal, query and fragment variants without leaking a filesystem path.
 
 Evidence: `backend/api/bookinfo_asset_contract_test.go`, upload/update API tests,
 `frontend/tests/overlayBookInfo.test.mjs`,
 `frontend/tests/readerAppearanceAssets.test.mjs`, and the P2 BookInfo real-browser
 contract (three viewports).
+
+## P2 Reader appearance asset runtime review
+
+- [x] Cover/background/font/misc uploads still enforce the existing 8 MiB/32 MiB
+  admission caps before content inspection and continue to derive the destination owner
+  from the authenticated JWT only.
+- [x] JPEG/PNG/GIF metadata is decoded through a 1 MiB bounded header reader; WebP uses
+  a bounded RIFF/chunk/dimension parser. Empty, truncated, extension-mismatched and
+  HTML/random-byte payloads fail with a path-free `400` before the final user directory
+  or file is created.
+- [x] Raster width/height and aggregate pixel count are bounded before a directly served
+  browser asset is published. TTF/OTF/WOFF/WOFF2 extensions must match their container
+  signature; uploaded bytes are never executed or parsed as application code.
+- [x] Reader upload success now requires the returned `reader` setting to contain the
+  exact new URL. Network/CAS failure restores only the still-current local attempt and
+  best-effort removes the unique unreferenced upload; it never overwrites a server-winning
+  state.
+- [x] Reader removal persists the reference change before physical deletion. `409`
+  means another current-user setting/book still references the file and is treated as
+  safe retention; legacy/global/external URLs are never auto-deleted.
+- [x] Real Go + Chromium upload/reload/failed-save cleanup/delete runs pass at
+  1440×900, 390×844 and 360×800; the affected BookInfo flow and Reader
+  desktop/mobile/iPad matrix also pass. Frontend 558/558, full Go tests and production
+  build are green.
+- [x] The local `9cae206` candidate passed new and historical mounted-volume,
+  restart, backup/portable restore, local-format and owner-isolation smoke. Locally
+  built amd64/arm64 `9cae206` and `latest` indexes were published and independently
+  resolved to `sha256:800cff1326caa8740f343cc233f7ffcd87ef38b38f744b47d1bc7712c27dc7c6`.
+- [ ] Logical/portable-v1 backups still contain URL strings only. The versioned, bounded,
+  cross-user-ID asset byte packaging/remapping contract is now extracted in
+  `docs/compat/portable-appearance-assets-p2b-contract.md`, but its failure tests and
+  runtime are not implemented. Until then, no release may claim cross-instance custom
+  asset restore.
+
+Targeted evidence: `backend/api/reader_appearance_assets_p2_contract_test.go`,
+`backend/api/bookinfo_asset_contract_test.go`,
+`frontend/tests/readerAppearanceAssets.test.mjs`, and
+`scripts/smoke/reader-appearance-assets-real-api-contract.mjs`,
+`docs/compat/reader-appearance-assets-p2-contract.md`.
 
 ## P1-E2 workspace storage audit
 
@@ -287,13 +327,32 @@ Current automated evidence covers archive structure/bounds, typed-content predec
 
 ## P1-E4 portable local archive backup review
 
-- [x] Portable packages are explicit `openreader-portable-v1` archives; ordinary reader-dev/Legado/OpenReader backup ZIPs do not gain `library/` data or change their meaning.
+- [x] Portable packages are explicitly versioned archives. New triggers generate v2; existing v1 remains restorable, and ordinary reader-dev/Legado/OpenReader backup ZIPs do not gain `library/`/appearance bytes or change their meaning.
 - [x] The archive reader rejects unsafe/duplicate/case-conflicting names, directories, symlinks, unknown logical entries, invalid manifest slots, unbounded compressed/member/total sizes and bad SHA-256 before logical restore dispatch.
 - [x] Original archives are streamed to a caller-private staging root, checked against the manifest, parsed under the portable per-entry budget, and never derive a destination path from an archive member or stored host path.
 - [x] Trigger and restore are caller scoped. A matching `local://` identity with a different/missing destination archive is a `409` before mutation; an identical existing archive is reused, so a package cannot overwrite another user's or an unrelated same-identity book.
 - [x] Type=1 local audio directories and missing/unsafe originals fail generation rather than being silently omitted. No JWT, WebDAV credential, archive member or host filesystem path appears in the API error or manifest.
 
 Evidence: `backend/services/backup/portable_test.go`, `backend/api/portable_backup_contract_test.go`, full backend suite, and `HISTORICAL_VOLUME=1 scripts/docker-volume-backup-smoke.sh` export/upload/fresh-volume/restart coverage.
+
+## P2-B portable appearance asset review
+
+- [x] V2 exports only exact current-user managed URLs referenced by Reader settings or
+  `Book.customCoverUrl`; missing, cross-owner, symlinked, oversized or magic-mismatched files
+  fail without a final package or path disclosure.
+- [x] Asset slots contain no source user ID/name/file name. Restore strictly validates the
+  canonical manifest, unknown fields/future versions, declared entries, size/hash/magic,
+  duplicate digest and placeholder closure before mutation.
+- [x] Target files use target-user random paths and no-overwrite promotion. A database failure
+  removes newly promoted files; a startup journal removes only crash-window files that are not
+  referenced by committed rows.
+- [x] V1 and ordinary logical ZIPs never interpret `openreader-asset://`; legacy asset URLs remain
+  strings and are reported rather than silently presented as portable bytes.
+
+Evidence: `backend/services/backup/portable_assets_test.go`,
+`backend/api/portable_appearance_assets_p2b_contract_test.go`, full Go/frontend/build gates, and
+the three-viewport real Go + Chromium portable asset smoke. Docker new/old volume execution is
+still required before publishing the release image.
 
 ## P2 replace-rule review
 

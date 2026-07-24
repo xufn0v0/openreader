@@ -673,3 +673,98 @@ nextPage / prevPage / scrollContent` 与当前 `useReaderPointer.js`、`useReade
   清单已分别核验一致。
 - 当前状态为 **Docker-published / awaiting device verification**。自动门禁只证明执行路径已
   回到固定上游结构，最终丝滑度仍由用户设备验收。
+
+## 2026-07-23 第十二次设置切换与当前位置连续性复审
+
+第十一次恢复根滚动宿主后，`Reader` 仍把“读取当前位置”放在 `reader.mode` 已经改变之后。
+这与固定上游的状态顺序相反：上游 `ReadSettings#setReadMethod()` 会先发出
+`readMethodChange`，`Reader#beforeReadMethodChange()` 同步保存当前可见段落，然后才写入新的
+`readMethod`；`pageType` 在整套 Kindle/正常配置生效前也会先走相同预捕获。随后
+`Reader` 的 `isSlideRead` watcher 重新分页，并优先 `showParagraph(currentParagraph, true)`，
+只有没有段落锚点时才退回 `showPage(currentPage, 0)`。
+
+配置方案和自动昼夜没有单独发出 `readMethodChange`，但它们会整套覆盖配置；一旦
+`isSlideRead` 改变，仍进入同一个“重新分页后优先恢复 `currentParagraph`”分支。上游滚动保存
+也持续维护 `currentParagraph`。因此 OpenReader 的等价实现不能只修“翻页方式”按钮，必须覆盖
+所有可能隐式改变有效阅读模式或滚动宿主的配置入口。
+
+### 状态与入口矩阵
+
+| 入口 | 固定上游状态顺序 | 当前 `99e3e43` | 第十二次判定 |
+|---|---|---|---|
+| 直接切换翻页方式 | 变更前同步保存当前可见 `h3,p`；变更后重分页并恢复同一段落。 | `setMode()` 先改 Pinia；默认 watcher 随后调用 `currentOffset()`。此时 computed 已指向新 mode/新宿主。 | **must-fix**：捕获顺序反了。 |
+| 正常 ↔ Kindle | `setPageType()` 在整套配置覆盖前触发段落预捕获，再触发 mode/pageMode 变化。 | store 一次同步改 `pageType/pageMode/mode/font/theme`；Reader 只事后观察 `mode` 和排版字段。 | **must-fix**：可能同时启动 mode restore 与 typography restore，后完成者覆盖前者。 |
+| 配置方案 | 方案整套覆盖；若横/竖分支变化，Reader 重分页并优先恢复已维护的当前段落。 | `setCustomConfig()` 可同时改 mode、pageMode、字体和段距，没有统一的 Reader 位置事务。 | **must-fix**：不能由多个 watcher 对同一批变更并发恢复。 |
+| 自动昼夜 | 系统主题选择默认白天/黑夜方案，语义与选择配置方案相同。 | `App.vue` 在 Reader 外部直接调用 `applyAutoTheme()` → `setCustomConfig()`。 | **must-fix**：面板 emit 无法覆盖这一入口，必须由 Reader/Store 边界统一处理。 |
+| 页面模式 | 改变 mini interface；由重排/窗口尺寸路径保持当前页。 | `pageMode` 可在 auto/mobile 间改变移动判定和 document/internal viewport 选择，但没有独立位置事务。 | **must-fix**：宿主改变时也要使用变更前锚点。 |
+| EPUB、音频、普通图片漫画 | 有效模式固定为非 slide 分支；配置中的 readMethod 不应重建文本章节窗口。 | `readerEffectiveMode()` 已做格式门禁，但 raw `reader.mode` watcher 仍会执行重建/恢复。 | **must-fix**：只在有效模式或有效宿主变化时执行文本模式事务。 |
+
+### 已确认的错误机制
+
+1. `useReaderMode()` 的 watcher 是默认 flush；回调执行时 `reader.mode` 已是新值。
+   `scrollViewport`、`isContinuousScrollRead` 和 `currentOffset()` 也都按新状态解释旧 DOM。
+2. 移动竖向 → flip 时，旧位置在 `document.scrollingElement`，事后读取却切到内部
+   `.reader-content`/`page`；flip → 竖向则可能读到根页面遗留的 `scrollTop`。两者都可能回到
+   本章开头或错误页。
+3. `restoreReadingPosition()` 的 `offset` 不是跨模式同一种量纲：flip 把它当页号，竖向文本把
+   它当章节文本位置。把旧模式 offset 直接交给新模式恢复，即使捕获时机正确也不等价。
+4. 配置方案/Kindle 会在一个同步批次内同时改变 mode 与字号、行高、段距；
+   `useReaderMode()` 和 `useReaderTypographySync()` 当前可并发执行两套异步恢复，没有代际或
+   单事务所有权。
+
+### 第十二批先失败测试与实施边界
+
+1. 建立统一的“设置布局事务”：在任何有效 mode/viewport/排版变更写入 DOM 前，从旧宿主同步
+   捕获 `{chapterIndex, paragraphPos, paragraph identity/viewport offset}`；重排后按段落锚点
+   恢复。只有锚点不存在时才允许退回旧页/章节百分比。
+2. 覆盖 `page ↔ flip`、`scroll/scroll2 ↔ flip`、normal ↔ Kindle、自定义方案、系统自动昼夜
+   和 auto ↔ mobile；每项都断言章节不变、恢复后首个可见段落不回退到章首。
+3. 同一同步批次内 mode、pageMode、字号、行高、段距同时变化时只允许一个恢复事务；较旧的
+   异步事务必须失效，不能在新事务完成后把页面拉回旧位置。
+4. 普通文本以段落位置为跨模式权威语义，不把 flip 页号与文本 offset 混用。EPUB/音频/普通
+   图片漫画仅在自身有效宿主实际改变时恢复，不因 raw mode 配置变化清空或重建内容。
+5. 390×844、360×800 和 iPad 1024×1366 真实浏览器从章节中段分别执行上述入口；记录变更前后
+   `data-pos`、章节索引、根/内部 `scrollTop`、工具层/设置面板并存和控制台错误。
+6. 本批不改变用户正在验收的 cubic 点击动画、分页步长、根滚动、原生手指/滚轮、配置值或
+   后端进度格式；它只修复设置变化造成的位置跳转和竞态。
+
+### 第十二批实施与发布前验证结果
+
+- `useReaderMode()` 现在观察“有效阅读模式 + 有效移动界面 + 排版字段”这一份布局状态，而不是
+  只在 raw `reader.mode` 写入后读取位置。Vue pre-flush 阶段从旧 mode 对应的 document/internal
+  viewport 同步捕获当前 `h3,p` 段落锚点；同一配置方案中 mode、pageMode、字号、字重、行高、
+  段距和宽度的同步写入只形成一个恢复事务。
+- 跨横竖模式不再传递不同量纲的 offset。锚点保存章节、段落 `data-pos`、DOM 顺序和百分比；
+  新布局稳定后优先恢复同一段落，缺失时才按同模式 offset 或跨模式 percent 回退。横向多栏
+  恢复后会检查目标实际可见性，并校正恰好落在下一栏边界的页码。
+- 配置事务带代际门禁；较旧异步恢复失效后不能再次校正页码或保存进度。原
+  `useReaderTypographySync()` 在 Reader 中只负责字体资源同步，排版位置恢复由统一事务拥有，
+  不再与 mode restore 竞跑。
+- `readerEffectiveMode()` 成为 watcher 的输入。EPUB、音频和普通图片漫画的有效模式未变化时，
+  修改 raw 阅读方式不会清空/重建内容；TTS 临时 page 分支仍通过有效模式事务和既有朗读段落
+  恢复合同验证。
+- 新增 `reader-settings-position-contract.mjs`，在 390×844、360×800、1024×1366 从章节中段
+  验证 page ↔ flip、整套配置方案（同时改变排版）、normal ↔ Kindle、系统自动昼夜及
+  auto ↔ mobile；每次以切换瞬间的当前可见段落为权威，工具层和设置面板保持并存。
+- 前端全量 **551/551**、Vite 生产构建和 Go 全量通过。真实 Chromium 通过设置位置、文本三模式、
+  桌面/双手机/自适应与强制移动 iPad、连续跨章、图片/漫画、音频和 TTS 合同。独立
+  `reader-epub-contract` 指向纯 Vite preview 时在导入 API 得到预期的代理 502，因此未把该次
+  启动计作 EPUB 产品回归；本批对固定格式“不因 raw mode 重建”的单元合同已通过，Docker 候选
+  仍须运行真实 Go 后端 EPUB 门禁。
+
+### 第十二批 Docker 发布记录
+
+- 实现提交：`a7254e3d224a0995d46688a4eab9efbeab2843d2`。
+- 本机 ARM64 候选通过普通持久卷重启/备份门禁，以及历史 TXT、EPUB、UMD、CBZ、相对缓存、
+  多用户隔离和便携备份恢复门禁。
+- 候选容器的真实 Go API + Chromium EPUB 合同在 1440×900、390×844、360×800 全部通过，
+  覆盖实际导入、目录、iframe 资源、位置恢复和浏览器返回书架。
+- 镜像：`ghcr.io/changshengyu/openreader:a7254e3`、`ghcr.io/changshengyu/openreader:latest`。
+  两个标签均指向 OCI 索引
+  `sha256:fd4c84bb9da97d4bbab39783d3949d610543195d169756cc2faa13a8e1c2722c`；
+  `linux/amd64` 为
+  `sha256:b86db78afb55dcfec0a9d1e6d1a9a7b78618abd402c0b4c9bb99d14b63c2b624`，
+  `linux/arm64` 为
+  `sha256:c58335b1d6f0beee1507e620fcd3459ac206cd0fce0dc7d49159c5d22dca3c12`。
+- 首次 GHCR blob 上传在第 19/23 项收到一次注册表 `404` 并中止，未将失败误报为发布成功；
+  完整重试成功后又分别反查两个远端标签，确认清单和摘要一致。

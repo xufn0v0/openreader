@@ -25,12 +25,12 @@
 | 本地导入、书仓、WebDAV | `BookController.kt`、`LocalBook.kt`、`TextFile.kt`、`EpubFile.kt`、`UmdFile.kt`、`CbzFile.kt`、`WebDAV.vue` | `OverlayBookImport.vue`、`LocalStore.vue`、`WebDAVBrowser.vue`、`OverlayStorageImport.vue`、`useStorageImportWorkflow.js`、`backend/services/localbook/*`、`engine/*_parser.go` | **P1-E1、P1-E2、P1-E3 已完成；P1-E4 固定 EPUB 目录和 CBZ 运行时纠正均已实现、验证并发布**：EPUB 目录按 href 去重，支持 TOC-only resource 和实际标题副作用；CBZ 保留 archive-first cover 与字典序图片章节，新导入预建私有不可变派生树。两格式的旧卷惰性恢复、原 archive 不变、portable backup 和用户隔离均已通过 Docker 门禁。 | [`epub-fixed-baseline-catalog-reader-contract.md`](epub-fixed-baseline-catalog-reader-contract.md)、[`reader-cbz-fixed-baseline-p0-contract.md`](reader-cbz-fixed-baseline-p0-contract.md)；其余格式/工作台后续矩阵不得重开已完成合同。 |
 | 外部 WebDAV 协议 | `WebdavController.kt` 的 `/reader3/webdav*`、Basic、OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE/MOVE/COPY/LOCK/UNLOCK | `backend/api/server.go`、`backend/api/webdav.go`、`middleware/webdav_auth.go`、`services/webdavfs` | **2026-07-22 已实施、全量验证并随 `544e1fb` 发布**：双前缀、Bearer/Basic、DAV 发现/列表、完整文件方法、调用者私有根、原子事务和逐组件 symlink 防护已通过 API/service/CORS、全量 Go/frontend/build、真实 Basic curl、三视口工作台、候选容器协议与新旧卷/便携备份门禁；现有 `/webdav` GET 适配器保留。 | [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md)；后续 WebDAV 修改不得削弱 caller scope、事务和 symlink 合同。 |
 | 用户、备份、RSS、替换规则、书签 | `UserManage.vue`、`WebDAV.vue`、`Rss*`、`ReplaceRule*`、`Bookmark*` 及对应 Kotlin 控制器 | `OverlayUserManagement.vue`、`WebDAVBrowser.vue`、`RSSManager.vue`、`OverlayReplaceRules.vue`、`OverlayBookmarks.vue`、Go API/services | **普通备份/恢复 bridge 的固定基线实现和自动回归已完成，待浏览器/Docker 发布门禁。** 第二套备份管理器已删除；单复数 alias、上游字段、原子生成、内容事务、进度新旧合并和 `canEditSources` 权限均已有合同测试。原始 WebDAV 协议、portable v1 及用户/RSS/规则/书签自身交互不重开。 | [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md)；Go、前端 534 项和 build 已通过，三视口因 Codex 沙箱额度未能启动 Chromium，旧卷 Docker/镜像发布仍待完成。 |
-| Reader：工具层、面板、正文、翻页 | `Reader.vue`、`Content.vue`、`ReadSettings.vue`、`PopCatalog.vue`、`BookShelf.vue`、`BookSource.vue` | `views/Reader.vue`、`components/reader/*`、`composables/useReader*`、`stores/reader.js` | **第十一次候选实现已通过自动门禁、等待实机**：移动 page/scroll/scroll2 普通文本恢复根文档滚动，内部正文不再形成第二滚动面；翻页互斥立即释放，单页结算不再扫描整章。`autoTheme/pageMode/Kindle` 恢复上游设置语义，并修复启动自动主题写回抢占远端设置读取的竞态。 | [`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md) 第十一次结果；文字/工具层/连续跨章/图片真实浏览器均通过，Docker 发布后由用户设备验证最终体感。 |
+| Reader：工具层、面板、正文、翻页 | `Reader.vue`、`Content.vue`、`ReadSettings.vue`、`PopCatalog.vue`、`BookShelf.vue`、`BookSource.vue` | `views/Reader.vue`、`components/reader/*`、`composables/useReader*`、`stores/reader.js` | **正文/翻页第十一次候选已通过自动门禁、等待实机；外观资产 P2-A 已随 `9cae206` 发布；P2-B runtime/测试/三视口已完成，Docker 待门禁**：新 portable v2 携带当前用户实际引用的封面/背景/字体并跨 user ID 重写；普通 ZIP 与已有 v1 不变。移动 page/scroll/scroll2 继续保持根文档滚动与点击分页。 | [`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md) 保持；P2-A 证据见 [`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md)，v2 格式/事务与当前实现证据见 [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md)。发布前仍需新旧卷 Docker 门禁。 |
 | Reader：EPUB、漫画/CBZ、音频、连续跨章、TTS | `Reader.vue`、`Content.vue`、本地格式解析类 | `ReaderChapterContent.vue`、`ReaderEpubContent.vue`、`ReaderAudioContent.vue`、`ReaderTTSBar.vue`、`useReaderChapterReady.js`、格式 parser / cache | **EPUB、CBZ、连续跨章、音频和 TTS 固定基准切片均已完成实现、三视口验证和 Docker 发布**：音频恢复上游结构、边界行为与真实 autoplay；TTS 恢复显式 voice、贴底栏、可取消跨章和关闭段落定位。 | [`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md) 及前三份格式合同；本批 frontend 444/444、Go/build、Reader 全矩阵通过，镜像 `5260efd`/`latest` 已发布。当前 volume 脚本受 Codex socket 授权额度阻断，兼容证据继承无后端/持久化差异的 `370d0f7` 已通过门禁。 |
 | Pinia 状态、缓存、同步、数据事务 | `plugins/vuex.js`、`plugins/cache.js`、后端 controller/model | `stores/*.js`、`utils/*cache*`、`backend/models`、`services`、`sync` | **书架、认证 scope 与阅读进度 P2 已完成并发布 `9f19d21`**：进度现由规范章节 + 数据库原子 CAS 决定唯一赢家，后台退出不重复请求；远端恢复不再经路由 watcher 回声保存。真实三视口双客户端收敛、冷恢复、格式与历史卷门禁均通过。 | [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)；后续选择下一未审查数据事务，不重开本合同已关闭的语义。 |
 | Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、`ReturnData.kt` | `backend/api/*.go`、`middleware/*.go`、前端 `api/*.js` | **按动作逐项复审；阅读进度与外部 WebDAV 协议均已发布**：WebDAV 现支持 Bearer/Basic 双认证、固定协议状态和同一用户根映射，候选容器协议、历史卷和便携备份门禁均已通过。其它模块仍以专项 API 合同为证，不能用本行概括宣称全 REST 完成。 | [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)、[`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md)。 |
 | 书源解析、RSS、远程抓取 | `AnalyzeRule*`、`Rss*`、`BookSourceController.kt` | `backend/engine/source_*.go`、`rss_parser.go`、fetcher | **CSS/JSONPath/XPath 主链、变量、错误透明化、元数据与真实浏览器书源流已完成；脚本入口维持显式安全差异**。RSS 三层工作台和有界抓取有独立合同。 | [`online-booksource-parser.md`](online-booksource-parser.md) 与 [`booksource-metadata-normalization-p2-contract.md`](booksource-metadata-normalization-p2-contract.md)；只为尚未抽取的规则/抓取动作建立新合同，不再标记整条主链“尚未验证”。 |
-| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | **`99e3e43` 已从本机完成并发布**：frontend 544/544、Go、build、文字/移动/iPad/连续/图片、候选容器真实 EPUB 三视口、新卷/历史卷/便携备份均通过；`99e3e43`/`latest` 共同指向 `sha256:345a32db535c95e601dd19152e635e47e15a8d4f9b02bbf38467eb8140ebae3b`。 | `openreader-regression`、`openreader-docker-release`；等待用户实机验证根滚动点击体感，不能以自动门禁替代设备结论。 |
+| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | **`9cae206` 已从本机完成并发布**：frontend 558/558、Go、build、外观资产与 BookInfo 真实三视口、Reader 桌面/手机/iPad、新卷与历史卷/便携备份均通过；`9cae206`/`latest` 共同指向 `sha256:800cff1326caa8740f343cc233f7ffcd87ef38b38f744b47d1bc7712c27dc7c6`。 | `openreader-regression`、`openreader-docker-release`；等待用户实机验证外观资产事务和既有根滚动点击体感，不能以自动门禁替代设备结论。 |
 
 ## P0 Reader 重新审查（已完成的源码证据）
 
@@ -90,3 +90,22 @@
 - 未计为通过：`reader-tts-contract.mjs` 与 `reader-audio-contract.mjs` 在创建浏览器上下文前被 macOS 终止（Chrome `SIGABRT`）；没有触发任何产品断言，且 TTS 的 `h3,p` 单元合同已通过。此环境限制必须在后续独立浏览器窗口重跑，不能作为完整 Reader P0 完成的证据。
 
 本批适合进行 Docker 的用户验收，范围仅是上述工具入口与文本阅读排版；EPUB、漫画、音频、TTS、连续跨章的最终 Reader P0 签收仍需完成各自的真实浏览器复跑。
+
+## 2026-07-23 Reader 设置变更位置事务复审
+
+| 模块 | 上游权威点 | 当前状态 | 裁决 | 后续测试 |
+|---|---|---|---|---|
+| 直接翻页方式切换 | `ReadSettings.vue#setReadMethod` 先 emit；`Reader.vue#beforeReadMethodChange` 先保存可见段落；`isSlideRead` 重分页后恢复该段落。 | `useReaderMode` 在 raw mode 已改变后从新宿主读取 offset。 | **错误重构 / must-fix** | page/scroll/scroll2 ↔ flip 中段切换保持章节与 `data-pos`。 |
+| Kindle、配置方案、自动昼夜 | 整套配置可同时改变阅读方式和排版；slide 分支变化后优先恢复已维护的 `currentParagraph`。 | mode restore 与 typography restore 可并发，`App.vue` 自动昼夜还绕过设置面板入口。 | **错误重构 / must-fix** | 同批多字段只执行一个可取消的位置事务；旧事务不得回拉。 |
+| 页面模式与有效滚动宿主 | mini interface/窗口重排后保持当前页；文本横竖模式分别使用既定宿主。 | auto/mobile 或横竖切换可能在捕获前改变 document/internal viewport。 | **错误重构 / must-fix** | 手机双尺寸与 iPad 验证根/内部 scrollTop 和首可见段落。 |
+| EPUB/音频/普通图片 | raw readMethod 不改变这些格式的有效非 slide 分支。 | raw `reader.mode` watcher 仍可重建/恢复。 | **技术栈适配过宽 / must-fix** | 仅有效 mode/宿主变化才运行事务，格式内容不被清空。 |
+
+本轮仅完成固定上游合同提取和当前实现映射，未修改应用或测试代码。权威细节见
+[`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md) 第十二次复审。
+
+实施后状态：上述四项 Reader 设置位置偏差已进入 **browser-validated**。统一布局事务在旧
+viewport 捕获段落、合并同批 mode/pageMode/排版变化、取消陈旧恢复，并按有效模式跳过固定格式
+的 raw mode 噪声。390×844、360×800、1024×1366 的直接模式、配置方案、Kindle、自动昼夜和
+页面模式合同通过。Docker 候选进一步通过真实后端 EPUB 三视口与普通/历史持久卷备份门禁，
+已发布 `a7254e3`/`latest`；远端 OCI 索引为
+`sha256:fd4c84bb9da97d4bbab39783d3949d610543195d169756cc2faa13a8e1c2722c`。

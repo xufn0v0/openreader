@@ -2643,3 +2643,72 @@ socket，旧 close 可清空新引用并启动重复重连，旧 message 可在�
 [`authenticated-runtime-scope-p2-contract.md`](authenticated-runtime-scope-p2-contract.md)。本阶段按
 inventory 门禁只修改文档；下一阶段先建立迟到 load/save/progress/category/profile 和 fake
 WebSocket generation 失败测试，再修改应用代码。
+
+## 2026-07-23 Reader 设置切换位置连续性复审
+
+固定上游在 `ReadSettings#setReadMethod/setPageType` 写入新阅读方式前，通过
+`readMethodChange → Reader#beforeReadMethodChange` 同步保存当前可见段落；`isSlideRead`
+变化后的重分页优先恢复该段落，才退回页码。配置方案与自动昼夜也可能整套改变阅读方式，
+最终仍由同一 `isSlideRead` 恢复分支处理。
+
+当前 `useReaderMode` 在 Pinia `mode` 已变化后才读取 `currentOffset()`，此时有效滚动宿主和
+offset 量纲都可能已经切换；同时 Kindle/配置方案会触发 mode 与 typography 两套异步恢复。
+该项从“技术栈等价”重开为 **must-fix**。完整入口矩阵、错误机制和测试先行门禁见
+[`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md) 的
+“第十二次设置切换与当前位置连续性复审”。审计阶段未修改应用代码。
+
+实施结果：Reader 已改为在旧 DOM/旧宿主中捕获段落锚点，并用一个带代际的布局事务合并有效
+mode、移动界面和排版字段变化；跨模式按段落恢复，缺失时按百分比回退，不再混用页号与文本
+offset。raw mode 不改变 EPUB/音频/普通图片的有效分支时不会重建内容。三视口设置切换合同、
+Reader 全量浏览器回归、前端 551 项、生产构建和 Go 全量均通过；真实后端 EPUB 门禁保留到
+本地 Docker 候选阶段。
+
+## 2026-07-23 Reader 自定义外观资产复审
+
+固定上游上传背景/字体后会立即写 Vuex 与浏览器缓存；当前 OpenReader 上传后只更新 Pinia，
+700ms 后才后台同步，却立即提示成功。设置请求失败或 CAS 冲突时，刷新会丢失用户刚选择的
+背景/字体并留下孤儿文件。当前删除链路已有正确的“先移除引用并保存、后删文件”方向，但把
+其它配置仍引用导致的 `409` 错误显示为整个设置动作失败；字体替换也不清理不再引用的旧资产。
+
+后端新路径/用户隔离/legacy 只读是应保留的安全适配，但现有上传只检查扩展名，测试也接受任意
+文本伪装的 `.png/.ttf`，不满足既有“拒绝扩展名伪造”合同。另一个旧审计缺口是：普通与
+portable v1 只保存自定义资产 URL 字符串，不携带 `data/uploads/users/...` 文件；跨实例或
+不同 user ID 恢复不能视为资产恢复完成。
+
+完整状态机、API/数据裁决和测试先行闸门见
+[`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md)。本轮 inventory
+只修改合同；P2-A 先实现日常上传/替换/删除一致性与内容校验，P2-B 另行设计版本化资产备份，
+不得把格式变更夹带进 runtime 修复。
+
+P2-A 真实后端测试进一步确认了两个实现级错误：自身 `settings_update` 会在设置 PUT 响应
+落定前启动竞争 load，使已经提交成功的资产保存被 operation guard 错判为 `null`；设置界面
+虽展示上游五个字体槽位，store 却曾拒绝 `hei/fangsong`。两项均纳入同一 P2-A 事务闸门：
+自身/较旧广播不得抢占保存，真正较新的远端时间戳必须在保存后补载；五个上游槽位完整保留，
+既有 `mono` 仅作为兼容槽位继续接受旧数据。
+
+实施结果（2026-07-23）：P2-A 已完成精确设置提交、广播合并、失败回滚/孤儿回收、引用
+`409` 安全保留、五字体槽位恢复及图片/字体内容签名校验。前端 558 项、Go、build、外观资产
+与 BookInfo 三视口、Reader 桌面/手机/iPad、新卷和历史卷均通过；本机发布
+`9cae206`/`latest`，远端 OCI index 为
+`sha256:800cff1326caa8740f343cc233f7ffcd87ef38b38f744b47d1bc7712c27dc7c6`。该镜像仍是
+P2-A 证据；后续 P2-B runtime 不反向改变 portable v1 的 URL-only 语义。
+
+### P2-B portable 资产审计（2026-07-23）
+
+固定上游 `WebdavController.backupToWebdav`/`BookController.saveToWebdav` 只合并逻辑
+JSON；`ReadSettings.vue`/`UserController.uploadFile` 虽把背景与字体保存在用户
+namespace，却没有把这些字节加入备份。当前 OpenReader portable v1 也只额外携带本地书
+原 archive。因此 P2-B 被裁决为明确版本化的 OpenReader 扩展，而不是上游格式修补。
+
+新合同固定 `openreader-portable-v2.json`、无源 user ID 的
+`openreader-asset://aNNNN` 占位符、只收集当前用户实际引用的新私有资产、legacy URL
+只保留字符串、跨 user ID 生成新目标 URL，以及资产 staging/最终随机文件/单 SQLite
+transaction/失败补偿。普通逻辑 ZIP 与 v1 均不改变，未来未知 portable 版本必须 fail
+closed，不能落入普通恢复只写书架。完整格式、API、限额、安全和测试先行闸门见
+[`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md)。
+
+实施进度（2026-07-23）：service/API 已生成和恢复 v2，普通 ZIP 与 v1 分支保持，
+manifest/资产/占位符/版本严格预检，跨 user ID 分配新 URL，并通过文件补偿和启动
+journal 收敛 SQLite/文件崩溃窗口。前端动作改名并报告资产/legacy 数量。Go 全量、
+前端 558 项、生产构建和三视口真实 Go + Chromium 跨用户恢复通过；Docker 新旧卷门禁
+与本地多架构发布尚待完成，因此当前不记录镜像标签。

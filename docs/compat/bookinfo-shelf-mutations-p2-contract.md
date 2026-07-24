@@ -72,3 +72,14 @@ data/uploads/users/<user-id>/<kind>/<timestamp>-<random>.<ext>
 
 在上述测试、API/数据合同与实现通过前，不允许把任一 BookInfo 字段动作标为完整
 P2 对齐，也不允许以清理孤儿文件为由批量删除旧 `data/uploads/`。
+
+## 2026-07-23 资产备份证据勘误
+
+本合同已经证明 BookInfo 新封面的用户归属、引用保护、legacy 只读和 mounted
+`data/` 卷升级，但没有证明普通逻辑备份或 `openreader-portable-v1` 携带上传文件。
+两种 ZIP 当前只保存 `customCoverUrl`/Reader setting 字符串；恢复到不同实例或
+不同 user ID 时可能成为失效引用。该缺口由
+[`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md)
+的 P2-B 统一处理，避免为封面与 Reader 字体/背景发明两套资产迁移格式。在 P2-B
+后续 P2-B 已实现 portable v2 的资产字节打包和跨 user ID 重写；普通逻辑 ZIP 与已有
+portable v1 仍仅按本段记录保存字符串。Docker 发布证据见 P2-B 合同的后续状态。
