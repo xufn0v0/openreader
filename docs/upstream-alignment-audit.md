@@ -8,6 +8,31 @@
 
 ## 当前结论
 
+- 2026-07-27：完成 Index 工作台认证会话隔离专项取证。`indexWorkspace` 当前没有账号 scope、
+  session generation 或 reset，旧搜索/探索结果及 intent 会跨注销/401 保留；Search 书源初始化、
+  本地搜索/导入、Explore 入口、临时阅读和 route BookInfo 的迟到回调还可能在换号后修改新账号
+  偏好/store、打开弹层或跳路由。固定上游的单 Index 现场保留继续作为交互基准，但其
+  `loginAuth/userNS → init(true)` 不清结果不能复制到 JWT 多账号环境。已建立
+  `index-authenticated-session-p1-contract.md`，并完成候选实现：同账号仅恢复 intent 并重取结果，
+  不同/未知账号回到干净书架，显式 logout 不恢复；旧 Search/Explore/sidebar/BookInfo/import/
+  临时阅读回调均不能提交到新账号。前端 611/611、build 与 Go 全量通过；三视口浏览器和 Docker
+  尚未完成。
+- 2026-07-27：重新审查上游 `Index.vue#scanCacheStorage/analyseLocalStorage/clearCache` 后，
+  修正多用户浏览器缓存的所有权和异步事务。总量只统计可证明属于调用账号的 key，书源/RSS
+  使用精确 scope，Reader 目录、章节正文和书架快照按已部署 key 形态归属；其它账号、未知格式、
+  子串碰撞和无归属旧章节正文失败关闭。统计/清理、提示和 busy 状态绑定
+  `scope+token+generation`，账号变化或较新刷新会淘汰旧结果；四个上游分组按钮始终显示。
+  scoped key、SQLite、API、挂载目录和备份均不变，无归属旧缓存保留但不再被任意登录账号认领。
+  聚焦 14 项、frontend 588/588、build 与 Go 全量通过；三视口脚本已完成，但首次无头 Chrome
+  外部权限申请因审批服务断线被拒，因此 browser/Docker gate 尚未完成。
+- 2026-07-27：按固定上游重新完成书内正文搜索专项。搜索输入从 Reader 替换后正文拆回原始章节，
+  恢复精确、区分大小写、允许重叠的 `indexOf(..., previous + 1)` 语义；legacy 结果补齐
+  Java/Kotlin UTF-16 索引与 ±20 片段。搜索行点击改为每次递增的 Reader intent，同一结果可重复
+  定位，同章不重载，跨章只做 history-neutral replace，连续模式先重建目标窗口。缺失书源在扫描
+  前明确失败；JWT、取消、有界扫描和 incomplete/truncated 提示保留。Go 全量、frontend
+  569/569、build、1440×900/390×844/360×800/iPad/连续浏览器及卷/备份门禁通过；本地双架构
+  `1aeffb9`/`latest` 已发布，OCI index 为
+  `sha256:f79e66be1087982f23c76c93a797d8e471f8ec3fd724098e28c6b48f75a18eb8`。
 - 2026-07-18：完成书内搜索结果完整性/取消复审和用户要求的“添加当前段落”书签。搜索前端现通过 `AbortSignal` 真正中止关闭、换词、切书和重置后的远程抓取，现代与 Reader3 后端入口统一传播请求上下文；密集章节不会静默丢匹配，不可用章节/安全截断保持显式警告。书签管理把旧“添加当前页”改为一个精确的当前焦点段落，普通文本和同源 EPUB iframe 均按阅读视口 32% 锚点定位，音频/图片不伪造段落。前端 423 项、后端全量、生产构建通过；主 Reader 与真实 EPUB 合同均在 1440×900、390×844、360×800 通过。
 
 | 模块 | 上游基准 | 当前状态 | 结论 |
@@ -15,9 +40,9 @@
 | 首页/书架 | `views/Index.vue`、`plugins/vuex.js` `updateShelfBook/setReadingBook` | 已恢复移动端侧边导航思路，正文区继续收敛为书架列表；已移除移动正文区搜索和行内操作按钮；已隐藏移动端无效网格/列表切换，并将分组栏宽度恢复为上游式自然留白滚动；分组 tab 已按上游只展示有书且显示状态开启的分组，数量回到书架标题统计，减少移动端横向挤压；桌面网格已改回上游式多列紧凑书籍项，并收紧移动端书籍行封面/间距，避免固定宽度撑出屏幕；已把书架列表重新包进上游式 `books-wrapper`，移动页头从可能撑宽的 grid 改为标题区和按钮区 flex 分配，按钮只在自身区域横向滚动，避免操作按钮参与扩大正文宽度；本批将书架 CSS 收敛为上游 `repeat(auto-fill, 360px)` 心智的自动书籍块，桌面 1440px 验证为三列 360px 书籍项且无横向溢出；移动端固定走单列书籍行，封面列使用视口 `clamp`，390px 验证 `scrollWidth === clientWidth` 且 7 本测试书全部在屏幕内；移动端标题行保持上游大标题和右侧轻量文字按钮，按钮只在自身区域滚动，不再撑大正文；书籍行继续保留上游右上角操作/未读角标语义，不改成单独占行；本批把旧书架列表偏好迁移回上游默认网格，避免升级后仍因历史偏好显示为“一书一行”；已按上游 `isNormalPage` 收敛 Kindle 模式首页头部，隐藏书海/RSS/编辑，切入 Kindle 时自动退出编辑态；已把书架 store 内部排序也改为合并本地 reader 进度，避免页面层和缓存/store 层排序短暂不一致；本批进一步让 store 里的书籍对象本身合并最新 reader 进度，返回书架和浏览器缓存读取时不再只靠页面层临时计算；本批同步维护所有书架缓存 key 中的单书进度、增删和分组归属，避免“全部/分组/未分组/缓存恢复”之间读到不同章节位置、旧书或错分组排序；本批按上游 `currentUserName` 命名空间心智为书架内存态增加用户 scope，登录/退出/切换账号会清空旧书架、旧分组和旧请求，避免新账号复用上一账号内存书架；多端 `bookshelf_update` 带单本 payload 时本地合并，`bookshelf_delete` 本地移除；分组增删改/排序新增 `category_update/category_delete/categories_update` 增量同步，无 payload 批量事件才防抖刷新书籍和分组，降低多客户端请求风暴；本批 websocket 连接成功后改为缓存优先加载书架/分组，不再每次重连都强制全量刷新，减少移动浏览器反复重连触发 too many requests 的风险；本批将本地书识别和搜索字段与搜索页共用，书架本地分组/搜索同时识别导入文件字段和 `local://` 地址；本批移除书架标题、分组、列表容器上的全局 `app-panel` 卡片语义，桌面恢复上游式 48px 白色书架容器和内部 `books-wrapper` 滚动，移动端覆盖为自然页面滚动，避免书架被 `100vh` 截断；本批继续对齐上游 `updateShelfBook` 合并语义，前端收到单本 `bookshelf_update` 时会保留已有 progress/shelfOrderAt，后端单本书架广播也统一返回列表同款 `progress + shelfOrderAt` payload，避免编辑、刷新目录、换源、导入等事件把其它客户端书架阅读章节和排序洗回旧值；本批将批量分组/批量删除也从空 `bookshelf_update` 改为明确增量 payload，批量分组广播更新后的书架列表项数组，批量删除广播 `deletedIds`，其它客户端不再因此强制全量刷新书架；本批将手动检查更新从全用户 scheduler 改为当前用户范围，并让接口返回/广播实际更新的书架列表项，前端刷新书架入口优先局部 upsert；本批把侧边栏搜索框回车收回为上游 `searchBook` 心智，统一进入远程搜书流程，不再在首页自创书架过滤语义，用户要求的本地书搜索继续保留为独立入口 | 继续真机验收移动端宽度和多端进度排序 |
 | `miniInterface` 判定 | `plugins/helper.js` `isMiniInterface`、`plugins/vuex.js` `setMiniInterface` | 已确认 `pageMode` 作为本机偏好，不进入服务端阅读设置 payload，且切换页面模式不再更新跨端设置同步时间戳；后端保存、读取、自动备份导出和 WebDAV/OpenReader 备份恢复都会剔除旧客户端提交的 `reader.pageMode/miniInterface`，避免手机模式被写成账号级设置后影响其它客户端；已将自动模式重新收敛到上游 `window.innerWidth <= 750` 的主要判定，不再因触屏/粗指针把 Windows 无痕或触控桌面误判为手机界面；本批补充 Android/iPhone/iPad/手机浏览器 UA 判定，覆盖 OPPO/XBrowser 等手机上报宽 CSS viewport 时被误判成桌面书架的问题；强制手机形态仍只由“手机模式”负责 | 继续跨设备验收，特别是 Windows 触屏/无痕模式和 OPPO/XBrowser |
 | 移动侧边栏/书架宽度 | `Index.vue` `navigation-wrapper`、`shelf-wrapper`、`bottom-icons` | 已使用 260px 侧栏、右滑打开/左滑关闭；已修正移动端分组栏 `width:100% + margin` 导致的横向溢出；已补齐上游侧栏底部 GitHub/夜间切换入口，并让夜间主题实际作用到 App 外壳；桌面侧栏宽度也对齐到 260px，侧栏标题、分区标题、按钮、用户信息全部改为完整显示/自然换行，不再用省略号；已按上游标题区补齐版本号信息位，复用后端 `/health`，点击可查看构建时间和 commit；已移除移动端打开侧栏时正文区整体平移，侧栏改为覆盖式浮层，避免书架主体被动态位移影响宽度；已收紧移动分组栏留白，改为 `calc(100% - 留白)`，不再使用 `width:auto + max-width:none` 造成部分浏览器横向撑宽；本批移动主内容区不再强用 `100vw/100dvw`，改为继承容器宽度，减少 XBrowser/手机动态视口导致的书架横向溢出；本批移动分组栏进一步回到完整容器宽度，书籍行用 `contain:inline-size` 限制内部长文本影响外层布局；本批侧边栏分组收回上游 `Index.vue` 心智，移除自造“搜索入口”分组，搜索框下只保留书源/本地搜索快捷按钮，书源设置补齐“探索书源、导入书源、远程书源、失效书源、调试书源”入口；本批继续去掉自造底部用户卡/同步胶囊，把同步状态保留在“后端设定”，用户入口保留在“用户空间”，底部 GitHub/夜间按钮恢复为上游固定底部入口；本批把侧边栏管理入口从图标按钮收回为上游式轻量文字标签，保留完整文字换行，不再把管理区做成后台工具按钮；本批将应用外壳和工作区改为 `border-box` 宽度模型，避免 `width:100% + 侧栏 padding` 形成被裁剪的超宽工作区；390px 验证侧栏宽 260、底部入口宽 188、页面无横向溢出 | 继续真机验收 |
-| 侧边栏用户空间/本地缓存 | `Index.vue` 用户空间、`clearBookSourceList/clearRssSources/clearChapterList/clearChapterContent` | 本批把用户空间收敛到上游侧栏心智：显示当前用户/默认空间，补齐“备份用户配置、同步用户配置、加载用户空间”入口，分别映射到真实备份弹层、重新拉取用户/设置/书架/分类/缓存统计、用户管理弹层；本地缓存分区展示真实缓存大小，已按上游分项统计并清理书源列表、RSS 源列表、章节列表、章节内容；书源/RSS 源列表现在走浏览器缓存并在源更新同步事件后失效，章节列表/章节内容继续按当前用户 scope 统计，旧版未带用户 scope 的章节正文缓存作为 legacy 浏览器缓存纳入清理 | 基本对齐，继续真机验收缓存清理和离线读取 |
+| 侧边栏用户空间/本地缓存 | `Index.vue` 用户空间、`clearBookSourceList/clearRssSources/clearChapterList/clearChapterContent` | 本批把用户空间收敛到上游侧栏心智：显示当前用户/默认空间，补齐“备份用户配置、同步用户配置、加载用户空间”入口，分别映射到真实备份弹层、重新拉取用户/设置/书架/分类/缓存统计、用户管理弹层；本地缓存分区展示真实缓存大小，已按上游分项统计并清理书源列表、RSS 源列表、章节列表、章节内容；书源/RSS 源列表现在走浏览器缓存并在源更新同步事件后失效；2026-07-27 复审后，统计和清理冻结当前 `scope+token`，四个动作始终可见，只处理可证明归属当前账号的 scoped key。旧版无 scope 章节正文因无法证明所有者而原样保留，但不会被任意登录账号读取、统计或清理 | 自动测试完成，等待三视口浏览器验收 |
 | 搜索/加书 | `Index.vue` `searchBook/loadMore`、`BookInfo.vue`、`AnalyzeUrl` | 远程搜索结果已先进入全局书籍信息再加入/阅读；按用户要求，本地书籍搜索独立于书源搜索，本批修复切入本地模式后不立即搜索的问题，确保已导入本地书和书仓文件都会刷新结果；本批把已导入本地书的识别与搜索文本抽成共享工具，搜索范围覆盖 `sourceId=0`、`local://`、原始文件名、书仓路径、目录文件、上传文件名等字段，避免手动导入书只因字段名不同而搜不到；切换“当前层/子目录”时会在本地模式下重新扫描；本批补齐远程结果列表、分组、查重、加书 payload 和 loading 状态对上游字段名的兜底，书名/地址/来源/最新章节同时识别 `title/name`、`bookUrl/url`、`sourceId/bookSourceId`、`sourceName/originName`、`latestChapter/latestChapterTitle/lastChapter`；远程搜索分页已按上游区分单源与多源：单源把 `page` 代入搜索 URL，多源通过 `lastIndex` 从后续书源继续并按目标结果量分批，前端“加载更多”按 `bookUrl` 追加去重，不再重搜并覆盖已有结果；旧 OpenReader 搜索下一页选择器仍兼容逐页跟随；`bookUrlPattern` 命中当前响应 URL 时会按详情规则直接生成搜索结果，未配置 pattern 且列表为空时也按上游回退详情解析，直接详情结果保留完整请求描述；搜索、书海、详情、目录、章节正文及其分页链接均执行上游 `URL, {method/body/headers/charset/retry/type}` 配置，支持 GET、POST 表单、POST JSON、动态页码请求头、指定字符集请求编码与响应解码、`escape` 参数、HTTP 失败重试、原始字节十六进制响应和相对地址解析，整段选项在搜索结果、书架书籍和章节记录中保持不丢失 | 基本对齐，继续真机验收 |
-| 书内搜索 | `components/SearchBookContent.vue` | 已有分页搜索、继续搜索、搜完全书、结果跳转；本批补齐正文搜索的分词按序匹配，用户用空格/标点输入多个片段时，同章内被正文隔开的内容也能命中，减少“搜不出来”的漏检；本批继续兼容上游正文搜索参数名 `keyword/size`，迁移入口或旧调用不再因为只传 `keyword` 而被当前 `/books/:id/search` 判为空查询；本批新增上游 `/reader3/searchBookContent` 兼容入口，支持 GET/POST、按 `url/bookUrl` 查书架书籍、`lastIndex + size` 分页，并返回上游 `isSuccess/data` 包裹格式；兼容响应补齐上游表格使用的 `resultText` 字段，同时保留跳转所需 `chapterIndex/resultCountWithinChapter` | 基本对齐，继续真机验收长篇搜索 |
+| 书内搜索 | `components/SearchBookContent.vue`、`Reader.vue#showSearchContent`、`BookController.searchBookContent/searchChapter` | 已按 2026-07-27 固定基准专项替换早期错误的分词/模糊扩展：现代与 Reader3 入口都搜索未应用 Reader 替换规则的原始正文，精确、区分大小写并允许重叠；legacy 返回完整 UTF-16 位置字段和 ±20 片段。App-level Dialog 保留同书状态，行选择通过可重复 Reader intent 定位，同章不重载、跨章不新增历史，连续模式先重建目标窗口；取消、有界扫描、完整性提示和“搜完全书”为显式允许增强。 | 自动与 Docker 门禁完成，使用 `1aeffb9`/`latest` 继续真机验收长篇搜索 |
 | 阅读器工具栏 | `views/Reader.vue` `showToolBar/showReadBar` | 移动端工具层进入阅读页时默认显示，中心点击在无面板时切换显隐；打开书架、书源、目录、设置、书签、正文搜索、缓存和书籍信息不会修改工具层状态，面板点击也不会穿透正文。移动面板已从底部 Drawer 改为与工具层并存的全宽工作区。桌面右侧快捷工具栏保持上游式单列圆形按钮；移动顶部、左右悬浮工具和底部进度/章节按钮顺序已按上游 mini-interface 对齐。正文和工具层使用容器宽度与 16px 对称留白；`Esc` 按上游返回书架 | 浏览器契约已覆盖默认显示、中心点击、面板并存/防穿透和 390×844、360×800 对称宽度 |
 | 阅读载入/章节进度 | `views/Reader.vue`、上游本地缓存与 `readingRecent` 体验 | 书籍信息、目录和章节正文已有浏览器缓存，阅读器书籍/目录缓存已按当前用户 scope 隔离；已让书签异步加载，不再阻塞正文显示；进入阅读时会先用本机已缓存的阅读现场恢复正文，服务端进度后台返回后只有在服务端确实更新、且用户尚未产生新的滚动/翻页操作时才校正位置，贴近上游 `readingRecent` 的即时体验并避免旧请求覆盖当前阅读；继续阅读入口显式携带 `resume=1`，阅读页会以最新进度为准，目录/书签/搜索等精确跳转不带该标记，仍按指定章节和位置跳转；离开阅读页和返回书架改为本地立即落盘、后台同步服务器，避免等待进度接口造成明显跳转延迟；空正文提示只在章节正文加载完成后显示，避免加载/缓存切换时闪出“暂无缓存内容”；已按上游保存位置逻辑补齐“可见段落所属章节”快照，连续滚动跨章时 `chapterIndex/chapterId/offset/chapterPercent/percent` 使用同一个可见章节计算，避免滚动到下一章后仍用旧章节长度保存位置；本批按上游 `currentUserName@readingRecent` 心智为本地 `progressByBook` 增加用户 scope，切换账号时不会把另一个账号同 ID 书籍的本地阅读位置带入当前书架；已补齐前端对 `X-OpenReader-Progress-Conflict` 的处理，本机刚产生的阅读进度遇到服务端 base 冲突时会用服务端最新 `updatedAt` 再同步一次，不再无条件用旧服务端进度覆盖本机当前阅读位置；本批补齐 `clientUpdatedAt`，即使旧本地 pending 没有 base，服务端也会拒绝比当前服务器进度更旧的章节内位置，避免其它设备已读位置被老缓存回写覆盖；已把 `progress_update` websocket 继续分发给当前阅读页，并让连续滚动/已加载章节跳转按 `offset` 找到段落位置，不再只有 `chapterPercent` 可用时才恢复章内位置；本批为进度保存和 websocket 广播补齐标签页级客户端 ID，本机保存后的服务端广播会被本机忽略，同浏览器其它标签页和其它设备仍会同步，减少阅读页自我回灌导致的二次定位和书架顺序抖动；本批将桌面当前章节进度滑块从旋转横向控件改成原生竖向 range，显示值继续来自 `currentChapterPercent()`，拖动后只定位当前章节内位置；本批进一步移除返回书架时的强制全量书架刷新，返回动作只做本地阅读进度立即落盘和后台软刷新，避免保存接口未返回前由旧服务端书架 payload 造成短暂旧序/加载感；本批把旧版未带用户 scope 的章节内进度收敛为一次性迁移，迁移到当前用户 scoped key 后删除 legacy key，避免旧本地进度长期参与后续账号的阅读位置判断；本批 `/books/:id` 也返回书架列表 item，详情页和阅读页初始加载会先按上游 `updateShelfBook` 语义与当前书架对象合并，再把详情响应和 `/progress` 中较新的进度写回书籍对象本身，不只依赖额外 `/progress` 请求；远程目录和正文已执行上游 `nextTocUrl/nextContentUrl`，多页目录按完整请求描述去重并统一重排索引，分页正文按链接顺序拼接后再执行替换规则；详情、目录、正文及后续分页使用重定向后的最终响应地址解析相对链接，URL 级请求头只作用于各自请求、不泄漏到下一页 | 继续真机验收返回书架再进入同一本书、多客户端同书阅读顺序 |
 | 阅读点击区 | `Reader.vue` `eventHandler/checkSelection/showTextOperate`、`ReadSettings.vue` `clickMethod/showClickZone/selectionAction` | 已补齐“下一页 / 自动 / 不翻页”；自动模式按上游区分左右滑动和上下滚动；已补齐上游“显示翻页区域”，阅读设置可关闭抽屉并展示上/中/下或左/中/右点击区域覆盖层；已补齐上游“选择文字”：阅读设置支持“操作弹窗/忽略”，正文选中文本后可添加过滤规则或当前章节书签，并走真实替换规则/书签接口；已放宽移动端轻触容差，避免手指轻微抖动被误判为滑动后吞掉中心点击，工具栏显隐继续按上游中心区域触发；本批补回桌面正文点击区，中心区域不翻页，非中心区域按左右滑动/上下滚动执行上一页下一页 | 基本对齐，继续真机验收点击区和选中文字 |
@@ -269,7 +294,23 @@
 
 - 首页移动端没有底部主导航，没有桌面窄侧栏常驻。
 - 书架正文区不被固定宽度、表格列、按钮组或长标题撑出屏幕。
-- 阅读页移动端默认只有正文；顶部栏、底部进度、目录/书签/搜索/设置/更多只在中心点击后出现。
+- 阅读页移动端进入时默认显示顶部栏、底部进度和工具层；中心点击按上游切换显隐，打开目录/书签/搜索/设置/更多不强制隐藏工具层。
 - 上下滚动模式手指滑动必须是原生滚动；固定步长翻页只来自点击上/下区域。
 - 新增按钮必须能对应上游组件职责；后端没有能力时隐藏或禁用并说明原因。
 - 文档和 `plan.md` 不得再保留“移动底部导航”这类已经被上游对齐否定的方案。
+
+- 2026-07-27：补齐固定上游根登录 Dialog/`loginAuth → Reader.init(true)` 在 JWT 多用户环境中的
+  安全等价状态机。当前 token 的 401 会先同步挂起旧 Reader 的进度、自动阅读、TTS、音频和缓存
+  generation，再移除凭证并清空账号 overlay；未认证时根壳不再渲染旧正文或工作台。重新登录同一
+  账号以新 Reader generation 原路加载，异账号或无法确认旧身份时返回书架，不再依赖硬刷新。
+  安全站内 returnTo 和迟到旧 401 抑制同时补齐。对应合同：
+  [reader-reauthentication-isolation-p0-contract.md](/Users/yuchangsheng/Documents/OpenReader-dev/docs/compat/reader-reauthentication-isolation-p0-contract.md)。
+- 2026-07-27：继续复审根全局弹层在登录失效与账号切换时的生命周期。固定上游由
+  `App.vue` 常驻持有 BookInfo、BookManage、BookGroup、Bookmark、RSS、ReplaceRule 和
+  UserManage，Index 持有 LocalStore/WebDAV；登录恢复通过 `loginAuth/userNS → init(true)`
+  重新读取当前用户空间。当前 OpenReader 已同步清 overlay 并卸载宿主，但多数弹层旧 Promise
+  仍可在卸载后 upsert 书架、写 Reader cache、应用 WebDAV 恢复、继续批处理/写后请求、弹消息、
+  导航或操作新 overlay。该项裁决为 JWT 多用户必需的 **must-fix**：所有弹层异步提交冻结
+  scope/token/component generation，session invalidation 与卸载统一淘汰；同账号重登也不恢复
+  Dialog 中间事务。当前阶段只完成合同取证，尚未改应用代码。对应合同：
+  [workspace-overlay-authenticated-session-p1-contract.md](/Users/yuchangsheng/Documents/OpenReader-dev/docs/compat/workspace-overlay-authenticated-session-p1-contract.md)。

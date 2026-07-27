@@ -24,6 +24,7 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Method | Path | Purpose | Compatibility notes |
 |---|---|---|---|
 | `GET` | `/api/health` | Health and build metadata. | OpenReader runtime addition; keep stable for Docker/probes. |
+| `GET`, `HEAD` | `/api/cover/:capability` | Serve a server-projected remote book cover through a same-origin, short-lived resource capability. | Implemented and published in `ceb4baa` on 2026-07-27. The path never accepts a raw URL or login JWT. Successful responses are bounded, type-verified and privately cacheable; malformed/tampered capabilities are `403`, unavailable/unsafe remote images are `404`. See [`book-cover-proxy-p2-contract.md`](book-cover-proxy-p2-contract.md). |
 | `POST` | `/api/auth/register` | Create user; first user becomes admin. | OpenReader multi-user addition. |
 | `POST` | `/api/auth/login` | Return JWT and user object. | OpenReader auth addition; invalid credentials return `401`. |
 
@@ -47,6 +48,28 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
 
+## P2 remote book-cover projection contract (implemented and published)
+
+Reader-dev projects remote book covers through a same-origin cached `/reader3/cover?path=...`
+resource and falls back to its bundled no-cover image. OpenReader keeps deployed REST paths and
+does not copy the upstream endpoint's public arbitrary-URL SSRF surface.
+
+Authenticated book/search/explore/source-candidate/temporary-reader responses retain the raw
+`coverUrl` and may add `coverResourceUrl`. A missing field means legacy/non-remote fallback, a
+non-empty value is a capability, and a present-empty value means the new server rejected the
+remote URL and the browser must not fall back to it. The new field is response-only: SQLite, parser state,
+source-change requests, sync persistence, exports, WebDAV and every backup format continue to
+contain the original URL. The frontend displays
+`customCoverUrl → coverResourceUrl → coverUrl → placeholder`.
+
+`GET|HEAD /api/cover/:capability` is intentionally public for browser image loading, but accepts
+only an opaque, purpose-separated, expiring server-issued capability. It applies HTTP(S)-only
+SSRF/DNS/dial/redirect validation, a 3-second timeout, an 8-MiB body limit, image magic checking,
+atomic per-user bounded cache writes and capability redaction in access logs. No source cookie,
+Authorization header, raw URL/query or host path is returned or logged. Complete endpoint,
+projection, cache, cleanup and failure semantics are fixed in
+[`book-cover-proxy-p2-contract.md`](book-cover-proxy-p2-contract.md).
+
 ## P2 raw WebDAV protocol contract
 
 Status: implemented and non-Docker validation complete on 2026-07-19. The complete compatibility, authentication,
@@ -67,14 +90,15 @@ it is not a new stored credential and should only be exposed through HTTPS.
 
 ## P2 reading-progress API contract
 
-Status: audited on 2026-07-18; implementation is pending. The complete route, concurrency,
-chapter-identity, WebSocket and existing-directory WebDAV mirror contract is
+Status: audited, implemented, full-regression validated and Docker-published as `9f19d21`
+on 2026-07-18. The complete route, concurrency, chapter-identity, WebSocket and
+existing-directory WebDAV mirror contract is
 [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md).
 
 The deployed `GET /api/progress/:bookID` and `PUT /api/progress` paths remain stable. The
-implementation must replace its non-atomic read/check/upsert sequence with a database CAS,
-derive chapter ID/title from the caller-owned book catalogue, preserve the existing `200` plus
-`X-OpenReader-Progress-Conflict: 1` compatibility response, and broadcast only after one winner
+implementation uses a database CAS, derives chapter ID/title from the caller-owned book catalogue,
+preserves the existing `200` plus
+`X-OpenReader-Progress-Conflict: 1` compatibility response, and broadcasts only after one winner
 commits. Existing `bookProgress/` or `legado/bookProgress/` directories regain upstream-compatible
 per-book JSON mirrors without weakening OpenReader's private WebDAV roots.
 
@@ -114,7 +138,10 @@ Source-facing routes retain their current response schemas. Only a real remote s
 
 ## P2 backup restore archive contract
 
-Status: **structure/budget preflight and logical content/transaction/permission compatibility implemented on 2026-07-22; browser/Docker release gate pending.** The archive bounds below remain authoritative. The upstream filename/field bridge, atomic generation/restore and source-edit capability contract are defined by
+Status: **structure/budget preflight, logical content/transaction/permission compatibility,
+three-viewport browser validation, fresh/historical Docker volume gates and the local amd64/arm64
+release are complete as of 2026-07-27.** The archive bounds below remain authoritative. The
+upstream filename/field bridge, atomic generation/restore and source-edit capability contract are defined by
 [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md).
 
 | Method / path | Request | Success / side effects | Errors / safety contract |
@@ -146,8 +173,9 @@ their own `OPENREADER_MAX_IMPORT_BYTES` policy.
 
 ### P2-B portable appearance asset v2
 
-Status: runtime, contract tests, full suites and three-viewport real-browser restore are implemented
-on 2026-07-23; Docker volume/release gates remain. The exact format and transaction contract is
+Status: runtime, contract tests, full suites, three-viewport real-browser restore, fresh/historical
+Docker volume gates and the local amd64/arm64 GHCR release are complete as of 2026-07-27. The exact
+format and transaction contract is
 [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md).
 
 | Method / path | Implemented additive contract | Compatibility |
@@ -499,12 +527,24 @@ an allowed OpenReader runtime adaptation.
 
 ## Reader book-content search contract
 
+Fixed-baseline correction audited on 2026-07-27: both routes search the original chapter text
+(`reader-dev` explicitly uses `useReplace=false`), use case-sensitive exact matching, and advance the
+next lookup from the previous match position plus one so overlapping matches are retained. Existing
+tests that require case-insensitive or punctuation/whitespace-normalized result creation do not prove
+upstream compatibility and must be replaced. OpenReader may retain bounded scans, cancellation and
+explicit partial-result metadata as documented safety adaptations.
+
 | Method / path | Request | Success / side effects | Auth and errors |
 |---|---|---|---|
-| `GET /api/books/:id/search` | `q` (or legacy `keyword`), optional `paged`, `lastIndex`, `chapterLimit`, `matchLimit`, `scanUntilMatch`, and local/remote work bounds. | Lists caller-owned book matches in source chapter order. A cursor always represents the last fully scanned chapter: all matches from that final chapter are returned before a later request can start at its successor. Response preserves `{ list, lastIndex, hasMore, total }` and additionally reports explicit `incomplete`, `unavailableChapters`, and `truncated` states. | JWT/current-book required; blank query `400`, foreign/missing book `404`. Request cancellation stops remote fetch scheduling without writing a false successful result. A returned incomplete page is `200` with a client-safe state, not a host/source error. |
-| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, `keyword`, `lastIndex`, `size` aliases. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Additive `incomplete`, `unavailableChapters`, and `truncated` data fields expose a safety-bound partial scan without breaking existing clients. | JWT required; legacy validation errors remain `isSuccess: false` messages for deployed Reader3 clients. Like the modern route, request cancellation must flow into chapter loading, stop later remote fetches, and return without fabricating a successful page. |
+| `GET /api/books/:id/search` | `q` (or legacy `keyword`), optional `paged`, `lastIndex`, `chapterLimit`, `matchLimit`, `scanUntilMatch`, and local/remote work bounds. | Lists caller-owned book matches in source chapter order from raw, non-replaced chapter text. Chapter matches are exact, case-sensitive, position-ascending and may overlap. A cursor always represents the last fully scanned chapter: all matches from that final chapter are returned before a later request can start at its successor. Response preserves `{ list, lastIndex, hasMore, total }` and additionally reports explicit `incomplete`, `unavailableChapters`, and `truncated` states. Offset/line/percent may remain additive Vue/Go navigation fields. | JWT/current-book required; blank query `400`, foreign/missing book `404`. A remote book whose configured source no longer exists fails before chapter scanning with `400 {"error":"未配置书源"}`. Request cancellation stops remote fetch scheduling without writing a false successful result. A returned incomplete page is `200` with a client-safe state, not a host/source error. |
+| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, `keyword`, `lastIndex`, `size` aliases. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Every list row includes `resultCountWithinChapter`, `resultText`, `chapterTitle`, `query`, `chapterIndex`, `queryIndexInResult`, and `queryIndexInChapter`; indexes and the at-most-20-unit excerpt radius use Java/Kotlin UTF-16 code-unit semantics. Additive incomplete fields remain allowed. | JWT required; validation, missing shelf book and missing configured source remain HTTP 200 `isSuccess:false` with the upstream Chinese `errorMsg`. Like the modern route, request cancellation must flow into raw chapter loading, stop later remote fetches, and return without fabricating a successful page. |
 
-OpenReader retains bounded remote/local scanning and case-insensitive normalized matching as runtime/security adaptations. A bound may never silently advance `lastIndex` past omitted same-chapter matches: it must set `truncated: true`, and the UI must say that results are incomplete. Unavailable remote content is likewise surfaced by `incomplete/unavailableChapters` rather than as a false “没有匹配内容”. The frontend must pass an `AbortSignal`; closing the search dialog, replacing its keyword/book, or resetting its state aborts the active transport request without treating the intentional abort as a visible search error. Closing and reopening the same book preserves completed keyword/results/scroll state, matching the upstream root-dialog lifecycle.
+Search result selection is a frontend event, not a new API request: the App-level Dialog emits one
+monotonic Reader intent for every row click. Re-selecting the same row must execute again. Live selection
+must not use `router.push` or add browser history; existing `chapter/line/match/q` URLs remain accepted for
+cold-start/deep-link compatibility and may be mirrored only with history-neutral replacement.
+
+OpenReader retains bounded remote/local scanning as a runtime/security adaptation; matching itself is the fixed-upstream exact, case-sensitive, overlapping algorithm and is not normalized. A bound may never silently advance `lastIndex` past omitted same-chapter matches: it must set `truncated: true`, and the UI must say that results are incomplete. Unavailable remote content is likewise surfaced by `incomplete/unavailableChapters` rather than as a false “没有匹配内容”. The frontend must pass an `AbortSignal`; closing the search dialog, replacing its keyword/book, or resetting its state aborts the active transport request without treating the intentional abort as a visible search error. Closing and reopening the same book preserves completed keyword/results/scroll state, matching the upstream root-dialog lifecycle.
 
 ## P1-B remote temporary-reader contract (implemented slice)
 

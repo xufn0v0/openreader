@@ -1,5 +1,51 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-07-27 P2 书内正文搜索固定上游复审
+
+固定上游 `SearchBookContent.vue`、`Reader.vue#showSearchContent` 与
+`BookController.searchBookContent` 的完整链路已重新提取并实施。App-level Dialog 和取消/有界
+扫描增强继续保留，四项结构级偏差已经纠正：
+
+- 搜索加载策略已与 Reader 显示正文拆分，恢复上游原始章节 `useReplace=false` 语义。
+- 后端和前端定位都恢复区分大小写、精确且从命中位置 `+1` 继续的重叠匹配。
+- Overlay 的 `router.push` 已由递增 Reader intent 取代；同一结果重复点击仍执行，不污染返回历史。
+- 远程书缺失书源会前置失败；legacy 结果补齐 UTF-16
+  `queryIndexInResult/queryIndexInChapter` 与 ±20 片段。
+
+本轮状态为 **implemented / full-regression-passed / Docker-published**。OpenReader 保留
+JWT/用户隔离、AbortController、有界扫描、incomplete/truncated 提示和 URL 冷启动兼容；
+现场选择已改为可重复消费的 Reader intent，兼容 URL 不再充当唯一事件通道。Go 全量、frontend
+569/569、生产构建、1440×900/390×844/360×800/iPad Reader 与连续模式浏览器合同均通过。
+本地候选卷/备份门禁通过，双架构 `1aeffb9`/`latest` 已发布到 OCI index
+`sha256:f79e66be1087982f23c76c93a797d8e471f8ec3fd724098e28c6b48f75a18eb8`。
+完整合同、先失败证据和实施记录见
+[`book-content-search-p2-contract.md`](book-content-search-p2-contract.md)。
+
+## 2026-07-27 P0 移动点击翻页绘制与空闲结算复审
+
+用户真实设备再次否定“动画公式和根滚动已对齐即可视为丝滑”的结论。固定上游默认使用 50×50
+PNG 平铺背景，普通竖向滚动的可见路径只写根 `scrollTop`；当前移动 document-scroll 仍把多层
+CSS 渐变、贯穿整章的 inset shadow 和整章高度亮度遮罩一起放进滚动绘制面，并在动画结束立即
+触发从章节开头查找可见段落。
+
+390×844、2401 段、章节 72%、6× CPU 降速的 Chromium trace 已把两类成本分离：当前绘制面的
+RasterTask 累计约 235ms；换成固定上游小纹理平铺、移动端无整章阴影、视口级亮度遮罩后约
+1.4ms。当前深位置一次结算读取 1736 次段落几何，延迟保存再次扫描，并出现 136ms Long Task。
+此外当前对所有移动模式响应地址栏高度 resize，而固定上游会忽略 `scroll/scroll2` 的该类变化。
+
+本项已按合同实施：移动正文恢复固定上游 50×50 PNG 平铺纹理并去除整章 shadow，亮度与自定义
+背景限制在视口绘制；纵向有序段落改为二分定位；动画结算延迟 100ms、远端进度保存延迟到
+1200ms 空闲期，新的 touchstart 可取消旧结算/保存；`scroll/scroll2` 忽略宽度未变的移动地址栏
+高度 resize。原生手指/滚轮连续滚动、点击分段、亮度和自定义背景继续作为用户要求保留。
+
+最终 6× CPU 浏览器合同在 390×844 默认、360×800 默认和 390×844 自定义暗背景三种场景得到
+0.58–1.66ms RasterTask、17 次总几何读取、18.6–18.7ms 最大可见帧间隔和 0 个可见窗口 Long
+Task；frontend 565/565、Go、生产构建及 Reader 文本/移动/iPad/连续/图片浏览器合同通过。完整
+本地构建的双架构镜像 `49a273e`/`latest` 已发布，OCI index 为
+`sha256:ba7dae01f4384fb740f6ca8552cdd6d226450644aeffec4f9146d4c9031268c7`，卷、portable
+v1/v2、跨用户和重启门禁通过；现等待真实手机体感。完整矩阵与实施边界见
+[`reader-mobile-page-click-p0-contract.md`](reader-mobile-page-click-p0-contract.md) 第十三次复审。
+
 ## 2026-07-23 P0 移动点击翻页全设置与滚动宿主复审
 
 `0a77632` 的真实设备验收仍未达到固定上游体感，因此此前把独立 `.reader-content` 认定为
@@ -126,26 +172,26 @@ The current risk is not framework selection. The risk is implementing from an ab
 |---|---|---|---|---|---|
 | Frontend scene structure | `web/src/views/Index.vue`, `web/src/views/Reader.vue`; router has `/` and `/reader`. | Canonical Index work stays at `/`; historical search/discover/source/settings/storage/detail URLs now preserve their intent through root-workspace redirects/overlays, while Reader remains a separate scene. | Vue Router has more compatibility routes than upstream, but they no longer create independent product pages. | `aligned` for extracted P1 scene convergence | Router redirect tests; browser flow search → BookInfo → read. |
 | Reader mobile toolbar state | `web/src/views/Reader.vue`: `showToolBar: true`; center tap toggles; panel open branches return without hiding toolbar. Mini flex ordering makes the final top order 首页→书架→书源→目录→设置 and adds 顶部/底部 to the left float zone. | `frontend/src/views/Reader.vue` keeps `mobileChromeVisible = ref(true)` and panel isolation; `ReaderMobileChrome.vue` now renders the final order and all five left float controls. | `aligned` for the 2026-07-17 mobile-controls slice; see [`reader-mobile-controls-p0-contract.md`](reader-mobile-controls-p0-contract.md). This does not close the wider Reader audit. | Keep source/unit contract and desktop/390/360 real DOM, scroll-action and panel-isolation assertions. |
-| Reader mobile panel structure | Primary shelf/source/catalog/settings use Element popovers; bookmarks/search-content are App-level dialogs; cache is an inline read-bar zone. | OpenReader uses `ReaderMobileWorkspacePanel.primary` for the four primary panels, shared root dialogs for bookmark/search/BookInfo, and an inline cache zone. | The full-width technical adaptation is viable, but current mutual-exclusion and global-dialog click-through claims need source/runtime evidence, not previous unit-test assumptions. | `partial` — re-audit in progress | Compare each panel transition to upstream and add browser evidence for every primary/global panel. |
-| Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Static values match, but no current proof establishes that every mode/tool state keeps left/right paragraph gaps equal. | `partial` — re-audit in progress | DOM geometry probe for page/body/paragraph left/right gaps within 1px across 390×844 and 360×800; ensure toolbar show/hide and panel changes do not shift content. |
+| Reader mobile panel structure | Primary shelf/source/catalog/settings use Element popovers; bookmarks/search-content are App-level dialogs; cache is an inline read-bar zone. | OpenReader uses `ReaderMobileWorkspacePanel.primary` for the four primary panels, shared root dialogs for bookmark/search/BookInfo, and an inline cache zone. | Full-width Vue 3 root panels preserve upstream tool-layer coexistence, A→B switching and click isolation; global dialogs remain independent. | `technical-stack-equivalent / browser-validated` | Keep every primary/global panel in the Reader mobile/iPad contract; do not restore bottom drawers or hide the tool layer. |
+| Reader mobile content geometry | Upstream mini `.chapter` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, `text-align: justify`; slide mode also uses 16px content margins. | Current mobile `.reader-page` uses `width: 100vw`, `padding: 0 16px`, `box-sizing: border-box`, and justified reader body/paragraphs. | Text/continuous/image/EPUB contracts now measure symmetric geometry across tool and panel states. Root-document vertical paging remains the later fixed-baseline correction. | `aligned / browser-validated` | Keep 390×844 and 360×800 left/right gap checks within 1px and ensure tool visibility never shifts content. |
 | Reader mobile progress | Upstream mini non-audio slider is 1-based `currentPage/totalPages` for the rendered document; whole-book chapter percentage remains a separate cache trigger. | Mobile now uses 1-based rendered pages, input/change draft semantics, no cross-chapter route seek, real scroll/scroll2 page state and an audio-hidden single-row footer. | `aligned` for the 2026-07-17 progress slice — [`reader-mobile-progress-p0-contract.md`](reader-mobile-progress-p0-contract.md). Smooth whole-book display percentage is an allowed adaptation. | Keep unit plus text/audio/continuous browser contracts at desktop/390/360. |
 | Reader scrolling vs click paging | Upstream has page/scroll modes with discrete click navigation; its rAF writes only the scroll position and does not synchronously run chapter/layout settlement in the final draw. | User requested continuous native finger/wheel scrolling while click paging remains segmented. The sixth mobile slice now commits the target in the final rAF and moves chapter/window/layout/progress settlement into a cancellable later task. | Native continuity remains an `acceptable-change`; the measured final-frame hitch is fixed for this slice (4× CPU longest animation rAF about 35ms → 0.88ms). | Keep unit cancellation/after-paint contract; 4× CPU Chrome trace plus 390/360 `page/scroll/scroll2` continuity and click paging regression. |
 | Reader settings controls | Upstream uses controls that are easier to distinguish visually; user requested minus/value/plus controls instead of current easy-to-mis-tap slider behavior. | Current setting stepper exists but must be rechecked against upstream layout/state. | Allowed UX adaptation, but values/defaults/state must match upstream. | `acceptable-change` | Unit tests for value bounds; browser setting interaction test. |
 | Reader content formats | Upstream `Content.vue` handles text, images/comic-like content, EPUB iframe documents, audio-related branches, read-aloud, and cross-chapter behavior. `EpubFile.kt` additionally treats `BookChapter.startFragmentId`/`endFragmentId` and the next chapter URL as EPUB content boundaries. | Current `ReaderChapterContent.vue` handles text/images/volume blocks, CBZ image resources, EPUB iframe resources, a dedicated audio branch for `type === 1` chapters, and the extracted TTS/read-bar state machine. | E4 keeps the image-only first EPUB spine cover and now preserves NAV/NCX fragment directory entries, signed XHTML slices, exact `(resourcePath, resourceFragment)` matching, same-resource slice navigation and cross-XHTML chapter transitions. CSP/capability protection remains the allowed Go/Vue security adaptation. | `aligned` for E4-EPUB-2 | [`epub-fragment-p1e4-contract.md`](epub-fragment-p1e4-contract.md), parser/API/migration/security tests, and `reader-epub-contract.mjs` at 1440/390/360. |
-| BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent `BookDetail.vue` route structure has been removed from the product path; search/discover/route actions are centralized; Reader opens plain BookInfo without injecting toolbar shortcut actions. Five-entry Browser/API evidence now verifies the shared action state machine. Shelf-only metadata mutations remain a separate P2 semantic boundary. | `aligned` for P1-B entry/action flow; `partial` only for P2 shelf-field mutations | Keep the single action contract; audit cover/edit/follow/local-refresh/cache mutations against their data/sync side effects. |
+| BookInfo | Upstream has one `web/src/components/BookInfo.vue` used from workspace and reader flows. | Current has shared `BookInfoDialog.vue` / `BookInfoPanel.vue` / `OverlayBookInfo.vue`; the old `/books/:id` URL redirects to the Index workspace and opens the shared dialog. | The independent product route is gone; five entry paths share one action state machine. Shelf metadata/cover edits, CAS, sync and cache side effects were subsequently completed under the P2 metadata contract. | `aligned` | Keep the shared entry/action and [`book-edit-metadata-p2-contract.md`](book-edit-metadata-p2-contract.md) tests; do not reintroduce a second BookInfo flow. |
 | Bookshelf/BookManage/BookGroup | Upstream: `BookShelf.vue`, `BookManage.vue`, `BookGroup.vue` under Index workspace. | Current: `Home.vue`, `OverlayBookManagement.vue`, `OverlayBookGroups.vue`, unified scoped BookGroup projection and Category/BookCategory assignment model. | The 2026-07-22 refresh-progress slice now makes a successful full network shelf response authoritative over confirmed client progress while retaining only genuine pending writes. BookGroup still persists and manages all built-ins/custom filters and `bookGroup.json` round-trip; many-to-many custom categories remain an allowed data adaptation. | `aligned` for refresh-progress and completed BookGroup contracts; `acceptable technical adaptation` for pending/CAS and many-to-many categories | [`bookshelf-refresh-progress-p1-contract.md`](bookshelf-refresh-progress-p1-contract.md), [`book-group-p2-contract.md`](book-group-p2-contract.md). |
 | Mobile Index sidebar | Upstream sidebar width/drag/fixed bottom buttons are defined by `Index.vue` and related CSS. | `AppLayout.vue` and `useAppMobileNavigation.js` now separate 260px visual width from the 270px gesture window, with bottom controls outside the scroll container. | The user-requested stable bottom controls during drag are an explicit OpenReader UX adaptation; the extracted upstream interaction contract is browser-validated. | `aligned` for extracted P1 sidebar slice | Mobile drag/fixed-bottom/shelf-geometry smoke at 390×844 and 360×800. |
 | Search/explore/source flow | Upstream Index integrates search/explore/source and BookInfo transitions. | Root workspace owns Search/Explore bodies and source overlays; historical URLs are compatibility intents, and shared BookInfo owns the handoff. | API clients and OpenReader multi-user extensions remain, but no separate page flow remains. | `aligned` for extracted P1 scene convergence | Search → result group → BookInfo → add/read browser test. |
 | Online source parsing | Upstream reader3-compatible source semantics live across `AnalyzeRule` plus `BookList/BookInfo/BookChapterList/BookContent`. | Current Go parser executes the extracted CSS/JSONPath/XPath/regex/composite/replace/pagination subsets, bounded persisted `@put`/`@get` variables, and redacted parser errors. Dynamic headers and `loginCheckJs` now fail before any request rather than being silently ignored. | `{{...}}`/arbitrary JavaScript remain explicit security-gated unsupported behavior; this is not a silent parsing gap. | `aligned` for extracted P2 parser + explicit security difference | Parser/request-isolation and source-debug/error-redaction contracts; browser source flow. |
-| Local import catalog parsing | Upstream `BookController.kt` imports local files through `Book.initLocalBook(...)` and `LocalBook.getChapterList(...)`; TXT parsing uses `TextFile.kt` with a 512-KiB detection probe, enabled-rule reverse scoring with a one-match threshold, direct Java multiline matching, `前言`, and deterministic 10-KiB no-TOC pseudo chapters. Preview leaves a prepared local asset that confirmation saves without a second full parse. | Go matches the extracted TXT rules and reuses immutable user-scoped staged bytes. The frontend now isolates preview generations/cancels obsolete requests, while a versioned rule/hash-bound parsed snapshot lets direct/LocalStore/WebDAV confirmation consume the successful preview without a second full parse. Old two-file stages upgrade lazily and failed imports compensate their new archive. | The stale response and duplicate parse defects from the 2026-07-18 re-audit are resolved; see [`local-book-import-catalog-p0-contract.md`](local-book-import-catalog-p0-contract.md). Materialized chapter caches remain an allowed Go adaptation. | `aligned` for preview lifecycle and extracted TXT matcher; `partial` for wider non-TXT parser semantics | Retain deferred-response, snapshot/old-stage/bounds/compensation tests and three-viewport TXT/EPUB smoke; continue UMD/CBZ semantic audit separately. |
+| Local import catalog parsing | Upstream `BookController.kt` imports local files through `Book.initLocalBook(...)` and `LocalBook.getChapterList(...)`; TXT parsing uses `TextFile.kt` with a 512-KiB detection probe, enabled-rule reverse scoring with a one-match threshold, direct Java multiline matching, `前言`, and deterministic 10-KiB no-TOC pseudo chapters. Preview leaves a prepared local asset that confirmation saves without a second full parse. | Go matches the extracted TXT rules and reuses immutable user-scoped staged bytes. The frontend isolates preview generations, while a versioned rule/hash-bound parsed snapshot lets direct/LocalStore/WebDAV confirmation consume the successful preview without a second full parse. EPUB/UMD/CBZ have focused fixed-baseline contracts; old PDF/Markdown data stays readable without UI expansion. | Stale responses, duplicate parsing and format-specific catalogue/resource differences have all been addressed; materialized chapter caches remain an allowed Go adaptation. | `aligned for extracted formats` | Retain TXT snapshot tests plus EPUB/UMD/CBZ parser/API/browser and historical-volume contracts. |
 | Replace rules/content cleanup | Upstream `ReplaceRule.vue`, `ReplaceRuleForm.vue`, `Reader.vue`, `ReplaceRuleController.kt`. | Current Go endpoints and overlays exist. | Default-mode, list/application order, regex flags/failure handling, form validation, manager shell and selected-text editor flow have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Rule-semantics API tests; selected-text editor contract; browser manager/editor smoke. |
 | Bookmarks | Upstream `Bookmark.vue`, `BookmarkForm.vue`, `Reader.vue`, `BookmarkController.kt`. | Current ID-backed bookmark APIs and root overlays exist. | Form/manager ownership, paragraph context, stale-offset fallback, creation order and request validation have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Bookmark context/jump/API contracts; three-viewport dialog smoke. |
 | Bookmark manager add-current-paragraph | Upstream bookmark creation is reached from Reader selected-text operations; `Bookmark.vue` itself has no create button. | Reader freezes one exact 32%-anchor paragraph from normal text or a same-origin EPUB iframe; the manager exposes “添加当前段落”. Audio/image/error/empty content has no fake fallback, and selected-text creation remains available. | User explicitly requested this path to avoid keeping the selection-operation popup enabled. | `intentional-redesign / completed 2026-07-18` | [`reader-bookmark-current-page-redesign.md`](reader-bookmark-current-page-redesign.md); 423 frontend tests plus main Reader and real EPUB browser contracts at 1440×900/390×844/360×800. |
-| RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition, reset/refresh ordering and compact fullscreen behavior have been rebuilt; persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | RSS fixture/parser tests; source/article browser smoke. |
-| WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P2 storage UI/import audit found CBZ reachability and LocalStore result-gate differences despite the prior path/security alignment. | `partial` | Storage UI/import contract, path traversal tests, upload/list/import browser smoke, Docker volume smoke. |
-| External WebDAV protocol | Upstream `WebdavController.kt` exposes `/reader3/webdav*`, Basic authentication, discovery headers and OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE/MOVE/COPY/LOCK/UNLOCK. | Current raw `/webdav/*` is a Bearer-only workspace transport with a non-standard GET directory listing; OPTIONS/PROPFIND/COPY/LOCK/UNLOCK and the upstream alias are absent. | The workspace/backup/import slices remain complete, but external WebDAV-client compatibility is genuinely unimplemented. Existing missing-path GET is correctly read-only; path validation can still follow symlinks. | `must-fix P2 protocol slice` | [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md): dual auth/prefix, DAV XML/status, no-read-side-effect, symlink-safe mutations, browser/curl and mounted-volume gates. |
-| Backup/restore | Upstream backup flows and reader-dev formats require extraction. | Current OpenReader backup service and Legado restore exist. | Must preserve OpenReader data and document reader-dev/Legado import semantics. | `unknown` | Restore testdata; backup list/download/restore tests. |
-| Auth/user management | Upstream user management components include `AddUser.vue`, `UserManage.vue`; OpenReader adds JWT. | Current JWT/multi-user/admin endpoints retain a root Dialog and protected administrator adaptation, but use 3-character unrestricted usernames, 6-character passwords, one merged storage permission, incomplete user cleanup and a global BookSource model. | JWT and protected `admin` are allowed runtime/security adaptations; the listed input, authorization, deletion and source-ownership differences are not aligned. | `partial` — [`user-management-p2-contract.md`](user-management-p2-contract.md) extracted; implementation/tests pending | Input contract, protected-account API, independent WebDAV/LocalStore route authorization, full user data/file deletion and admin/non-admin browser smoke. |
+| RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition and compact fullscreen behavior are rebuilt. The 2026-07-27 lifecycle batch removed blank-name fallback and same-URL duplicate creation, added source/sort/filter/page request ownership, and made source/article deletion transactional. Persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | [`rss-source-lifecycle-p2-contract.md`](rss-source-lifecycle-p2-contract.md), RSS fixture/parser tests and delayed source-switch browser smoke. |
+| WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P1-E3 restored root labels, current-directory lifecycle, LocalStore result gate and distinct importable formats; private roots, immutable preview tokens and bounded writes remain allowed security/runtime adaptations. | `aligned for extracted workspace flow` | [`workspace-storage-import-p1e3-contract.md`](workspace-storage-import-p1e3-contract.md), path tests, three-viewport storage smoke and Docker volume gate. |
+| External WebDAV protocol | Upstream `WebdavController.kt` exposes `/reader3/webdav*`, Basic authentication, discovery headers and OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE/MOVE/COPY/LOCK/UNLOCK. | Both `/webdav/*` and `/reader3/webdav/*` accept Bearer/Basic and implement DAV discovery, listing and file methods through symlink-safe `webdavfs`; the deployed `/webdav` directory GET adapter remains. | Caller-private roots, bounded atomic writes and non-persistent LOCK are explicit security/runtime adaptations. | `aligned / Docker-published` | [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md); keep Basic curl, CORS, symlink and mounted-volume contracts. |
+| Backup/restore | Upstream logical backup and WebDAV restore use reader-dev singular artifacts, progress files and one file manager. | OpenReader emits/accepts upstream and old OpenReader aliases, plans bounded content before one transaction, keeps one WebDAV manager, and exposes separately versioned portable v1/v2 extensions. | Logical format/fields/merge/permission semantics are aligned; portable archives are explicit OpenReader extensions. | `aligned + intentional portable extension / Docker-published` | [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md), [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md), browser and new/old volume gates. |
+| Auth/user management | Upstream `AddUser.vue`/`UserManage.vue` impose account rules, separate WebDAV/LocalStore rights, protected default namespace and complete namespace deletion. | OpenReader uses JWT, protected administrators, ASCII account/password rules, independent rights and transactional row/file deletion. Book sources are global with explicit edit permission instead of per-user source files. | Account/UI/storage behavior is aligned; protected admin/JWT and global source ownership are documented multi-user data-model adaptations, so no no-op per-user source buttons are fabricated. | `aligned for extracted P2 + intentional source redesign` | [`user-management-p2-contract.md`](user-management-p2-contract.md), admin/non-admin browser, route authorization, deletion and Docker user-volume tests. |
 | Docker/runtime | Upstream ships Java/Gradle/Docker variants. | Current single Go binary + frontend dist in Alpine, env-driven volumes. Official Node/Go/Alpine base digests are pinned; CA roots are copied from the Go builder and the Go binary embeds IANA time-zone data, so the final stage has no mutable registry/APK package step. | Intentional deployment redesign. The digest pinning and embedded runtime assets are an allowed reproducibility/security adaptation; mounted-volume behavior remains unchanged. | `intentional-redesign` | `PUSH=0 ./scripts/docker-build-push.sh`; `scripts/docker-volume-backup-smoke.sh`. |
 
 ## Immediate parser contract: TXT local import catalog rules
@@ -313,7 +359,7 @@ Upstream authority: `web/src/components/BookInfo.vue` used from the single `Inde
 | Search/discover actions | Search/discover previews no longer create `完整详情` actions that route to `book-detail`. | Aligned with shared BookInfo flow. | `aligned` |
 | Reader action | `useReaderPanels.openBookInfo()` no longer adds a `完整详情` route action. | Aligned with shared BookInfo flow. | `aligned` |
 | Shelf edit action | `Home.vue.goEditBook()` opens the shared edit dialog. | Aligned with workspace dialog responsibility. | `aligned` |
-| Action ownership | Upstream `BookInfo.vue` owns only BookInfo-native actions: add to shelf for non-shelf books, cover upload, local-book update, follow/update switch, and group setting. Current OpenReader centralizes allowed search/discover and old-link compatibility actions in `bookInfoOverlayActions.js`; Reader no longer injects toolbar shortcut actions. | Contextual action policy is now centralized. Broader Index-scene placement remains pending. | `aligned` for this slice |
+| Action ownership | Upstream `BookInfo.vue` owns only BookInfo-native actions: add to shelf for non-shelf books, cover upload, local-book update, follow/update switch, and group setting. Current OpenReader now routes Home/Search/Discover/Reader/old-link entries directly to the sole `OverlayBookInfo`; the obsolete zero-reference contextual action builder was removed under [`bookinfo-action-ownership-cleanup-p1-contract.md`](bookinfo-action-ownership-cleanup-p1-contract.md). | Action policy is owned by the one visible BookInfo transaction; Reader does not inject toolbar shortcut actions. | `aligned` |
 | Search/discover existing-book preview | Upstream uses the same BookInfo dialog fed through the Index workspace event bus; it does not route to a separate detail scene. Current Search/Discover correctly open the shared overlay and use shared action policy for `查看详情`/`继续阅读`/add actions. | Old-link and “read after add” compatibility are generated by shared action policy rather than local label construction. | `aligned` for this slice |
 | Route compatibility action | Upstream has no `/books/:id`; OpenReader keeps it only as old-link compatibility. `AppLayout.vue` uses the shared read-action builder while opening the shared overlay. | Acceptable compatibility action is centralized. | `aligned` |
 | Reader BookInfo actions | Upstream Reader opens the same `BookInfo.vue` for the current reading book by emitting `showBookInfoDialog` with the merged shelf book; reader toolbar buttons such as catalog/bookmarks/settings remain separate controls. | OpenReader Reader BookInfo must open the shared overlay with the current book/progress/status only. It must not inject catalog/bookmark/search/source/cache/settings shortcut buttons into BookInfo. | `must-fix` |
@@ -362,7 +408,8 @@ Required implementation before claiming P1 BookInfo parity:
 
 ### 2026-07-07 action-policy implementation note
 
-- `frontend/src/utils/bookInfoOverlayActions.js` centralizes contextual search/discover and old-link BookInfo action labels.
+- Home/Search/Discover/Reader/AppLayout directly open the sole `OverlayBookInfo`; the former contextual
+  action builder has been deleted as unreachable code.
 - Search/Discover no longer hand-write `查看详情` / `继续阅读` / `加入书架` / `加入并阅读` / `开始阅读` labels.
 - `/books/:id` old-link compatibility uses the shared read-action builder.
 - Reader-specific toolbar shortcuts are not upstream BookInfo actions and have been removed from `useReaderPanels.openBookInfo()`; Reader now opens a plain shared BookInfo overlay like upstream.
@@ -674,7 +721,7 @@ Authoritative upstream files:
 | Bookmark ownership | Reader merges the reading/shelf book and asks the root App `Bookmark` dialog to open. The root dialog filters the global bookmark collection to that book. Reader itself owns the content positioning after receiving the selected bookmark. | `Reader.vue` now routes the current merged reading book through `useOverlayStore.openBookmark()`. It retains only position-scoped bookmark creation/note mutation with `trackItems:false`; `OverlayBookmarks` is the unique list/edit/import/delete UI/data owner. | `aligned` for UI ownership; position-scoped creation is a required reader responsibility. | Reader action opens exactly one global bookmark dialog with the current book; no Reader-local bookmark workspace remains; selected bookmark closes dialog and preserves reader route semantics. |
 | Bookmark dialog shell | Upstream uses App-level `el-dialog`, `dialogWidth` on desktop and `fullscreen` on mini interface; its title is `<book> 书签管理` with import, table selection, batch delete, jump, and edit. | `OverlayBookmarks` now uses one App-level `el-dialog`: 880px desktop width, `fullscreen` mini mode, title/import action, table selection, batch delete, jump, and edit. The old Reader workspace/drawer and card panel have been removed. | `aligned` | 1440×900 dialog width/title/action contract; 390×844/360×800 fullscreen dialog rect; verify no bottom drawer and no duplicate dialog. |
 | Bookmark data adaptation | Upstream stores bookmarks globally and filters by name/author; save/delete/import refresh the shared collection. | OpenReader keeps authenticated per-book APIs and user-scoped data, with `useBookBookmarks` update events. This is required for Go/multi-user isolation. | `acceptable-change` | Same-book and cross-book jump/import/delete tests; ensure one active data owner and refresh event path. |
-| Search ownership | Reader asks the root App `SearchBookContent` dialog to open with the current book. A chosen result emits `showSearchContent`; Reader loads/rebuilds the target chapter then finds/highlights the requested occurrence. | Reader now opens `useOverlayStore.openSearchBookContent()` and no longer owns a search panel or `useBookContentSearch` instance. The global dialog owns the sole search state and routes the existing `chapter`, `line`, `match`, `percent`, and `q` query fields back to Reader. | `aligned` | Reader action opens only global search dialog; result closes it, preserves route compatibility, then uses existing route-sync highlighting. |
+| Search ownership | Reader asks the root App `SearchBookContent` dialog to open with the current book. A chosen result emits `showSearchContent`; Reader loads/rebuilds the target chapter then finds/highlights the requested occurrence. | Reader opens `useOverlayStore.openSearchBookContent()` and no longer owns a search panel or `useBookContentSearch` instance. The global dialog owns the sole search state and emits a monotonic Pinia intent for every selected row; same-chapter jumps do not mutate the route, cross-chapter jumps use history-neutral replace, and old query URLs remain cold-start compatible. | `aligned` | Reader action opens only the global search dialog; each result selection closes it and executes once, including repeated selection of the identical row. |
 | Search dialog shell | Upstream uses root `el-dialog`, fullscreen on mini interface. The header is the search input; results are a table; footer provides load-more, restore-last-position when relevant, and cancel. | `OverlayBookContentSearch` now uses one App-level `el-dialog`: header input, tabular results, load-more, existing full-scan enhancement, saved-scroll restoration, cancel, and mini fullscreen. The old narrow drawer and Reader workspace/card UI have been removed. | `aligned` | Desktop/mobile dialog geometry and no-drawer assertion; search input/header, result selection, load-more, cancellation, and previous-result scroll restoration tests. |
 | Search pagination/API | Upstream posts a book URL, keyword, and `lastIndex`; its result rows carry chapter/result text and a next cursor. | OpenReader uses a per-book authenticated route plus richer `chapter/line/match/percent/q` navigation metadata, remote/local paging guards, and scoped result cache. | `acceptable-change` | Preserve current API/data fields and route compatibility while replacing only UI ownership/shell. No backend route change is required in this slice. |
 | Cache ownership | `showCacheContent()` toggles an inline `.cache-content-zone` within Reader's bottom `.read-bar`. It shows `后面50章`, `后面100章`, `后面全部`; while active it replaces actions with status and cancel. On mini interface this zone is part of the bottom reader bar, not a dialog. | `showCacheContentZone` is now the Reader state. `ReaderDesktopProgress` positions `ReaderCachePanel` beside the desktop progress control, and `ReaderMobileChrome` places it inside the bottom bar. It preserves 50/100/all/status/cancel and toggles without closing the tool layer. | `aligned` | Cache action toggles a single inline zone, does not open workspace/drawer or hide chrome, preserves 50/100/all/cancel and status, and remains reachable at desktop/mobile target viewports. |
@@ -711,7 +758,7 @@ Authoritative upstream files:
 | Dialog/state ownership | One root dialog owns keyword, result list, cursor, saved result-list scroll, load-more and result selection. It is fullscreen on mini interface; Reader only consumes a chosen result. | `OverlayBookContentSearch` + `useBookContentSearch` own one root Element Plus dialog and Reader consumes route result metadata. | `aligned` | Keep root/fullscreen/no-drawer and saved-scroll contracts. |
 | Cursor/result completeness | A page may exceed the requested size when its final scanned chapter has more matches: all of that chapter's matches are returned before `lastIndex` advances. No same-chapter matches are silently skipped. | `collectContentMatches` caps `perChapterLimit`/`matchLimit` while setting `lastIndex` to that chapter, so the next request begins at the following chapter and permanently loses the remaining matches in a dense chapter. | `must-fix` | Dense single-chapter fixture must return all matches up to an explicit visible safety cap, mark any safety truncation, and never claim the cursor can recover skipped matches. |
 | Cancellation | Browser disconnect stops subsequent upstream chapter work. A partial response is not represented as a successful completed page. | Modern `/books/:id/search` calls `loadChapterText` with `context.Background()`, so a closed dialog/request can still keep fetching remote chapters. | `must-fix` | Cancelled request fixture proves no later remote chapter is requested and no successful stale result is delivered. |
-| Search matching/result fields | Upstream searches raw chapter text in source order, returns chapter title/index, match ordinal, excerpt/result text, and position data which Reader uses to locate the result after its target chapter has loaded. | OpenReader adds case-insensitive/punctuation-normalized matching and per-book route metadata (`chapter`, `line`, `match`, `percent`, `q`). These are acceptable only if result order/ordinal and post-load locating remain stable. | `acceptable-change` | Exact, normalized, multi-match and cross-chapter fixtures; result selection loads the target chapter then highlights the requested occurrence. |
+| Search matching/result fields | Upstream searches raw chapter text in source order, returns chapter title/index, match ordinal, excerpt/result text, and UTF-16 position data which Reader uses to locate the result after its target chapter has loaded. | OpenReader now uses the same exact, case-sensitive, overlapping search and ±20 UTF-16-unit legacy excerpt/index semantics. Additive byte offset/line/percent remain internal Vue/Go navigation metadata. | `aligned + additive metadata` | Raw-vs-replaced, case/punctuation, overlapping, supplementary-character index, multi-match and cross-chapter fixtures pass. |
 | Errors and unavailable chapters | Missing book/keyword/end are visible user messages; a chapter that cannot provide content does not corrupt the cursor for following chapters. | Modern API has normal REST status codes, but unavailable remote chapters currently collapse into an indistinguishable empty result. | `must-fix` | A partially unavailable scan reports a client-safe incomplete-search state; an all-unavailable scan must not show a false “没有匹配内容”. |
 | Legacy compatibility | `/reader3/searchBookContent` accepts GET/POST URL/bookUrl aliases and returns `isSuccess/data.list/lastIndex`. | OpenReader preserves both methods as an adapter. | `aligned` adapter | Keep existing legacy route tests while modern-route tests cover current UI. |
 
@@ -1073,7 +1120,9 @@ Required tests before implementation:
 1. Controller/UI: BookGroup set mode with no selected rows must show `请选择书籍分组`, make no request, and leave the dialog/book unchanged; selected multi-category save remains valid.
 2. API: category/book id validation rejects foreign ids without changing any row; category batch updates remain atomic and emit the scoped shelf event after commit.
 3. API/files: single and batch delete remove the caller's progress/bookmarks/category rows, remote cache file and direct-import `library/data/<user>/<book>` archive, while preserving another user's rows/cache/archive and local-store/WebDAV originals.
-4. Browser/store: direct and sync-driven book deletion remove scoped/legacy browser chapter cache entries, not merely the shelf-list cache.
+4. Browser/store: direct and sync-driven book deletion remove the captured user's scoped browser chapter
+   cache entries, not merely the shelf-list cache. Unscoped upstream-era entries have no provable owner and
+   are preserved but never read or claimed by an authenticated account.
 5. API: two users with remote cached chapters receive isolated `/cache/stats`; one user's `DELETE /cache` leaves the other user's cache path/database state intact and does not expose a filesystem path.
 6. API: per-book/batch cache clear is transactional from the caller's view and broadcasts only after durable state; concurrent/shared cache-path cleanup never removes a file still referenced by another chapter.
 7. API/files: remote refresh, source change and local refresh prune superseded derived cache entries after commit while retaining original imports and recovering progress/bookmark chapter ids where indices remain valid.
@@ -1088,7 +1137,7 @@ Status: implemented and validated on 2026-07-11. This is the first P1-D4 slice; 
 - **Owned request boundary.** Batch and export endpoints now require every supplied book id to belong to the authenticated user. A foreign/missing id produces a current-user `404` before any batch mutation or export occurs; foreign category ids remain a `400` validation error.
 - **Post-commit deletion cleanup.** Single and batch deletion capture remote cache references and a direct-import archive while rows still exist, commit SQLite deletion first, then prune only remote files with no remaining chapter reference and only the owner's `library/data/<user>/<book>` archive. This preserves another user's cache/archive and never treats LocalStore/WebDAV sources as delete targets.
 - **Scoped server cache.** `/api/cache/stats` and `DELETE /api/cache` now operate on the current user's remote books, omit the host cache directory, clear chapter rows transactionally, remove only unreferenced physical files, and broadcast a current-user shelf refresh after durable state changes. Per-book/batch cache writes and clears now broadcast refreshed shelf items as well.
-- **BookGroup and browser cache.** The BookGroup **set** flow rejects empty selections with `请选择书籍分组`, retaining the dialog/book state. Direct, batch, and sync-driven shelf removal clear known scoped/legacy browser chapter-cache keys after server deletion or sync receipt.
+- **BookGroup and browser cache.** The BookGroup **set** flow rejects empty selections with `请选择书籍分组`, retaining the dialog/book state. Direct, batch, and sync-driven shelf removal clear the captured account's scoped browser chapter-cache keys after server deletion or sync receipt. The later 2026-07-27 cache-scope contract preserves but does not consume or delete unowned upstream-era keys.
 - **Local export.** A single archived local book now returns its original source file for TXT/EPUB commands, matching upstream. Legacy/local rows with no safe archived original retain the existing derived TXT/EPUB fallback; JSON and multi-book ZIP stay documented OpenReader interoperability extensions.
 - **Evidence.** New Go lifecycle contracts verify cross-user cache isolation, reference-safe cleanup, private archive deletion, original-file export, and foreign-id rejection. Frontend contracts verify group selection and browser-cache invalidation. Full backend tests pass; frontend tests pass (322), production build passes, and `book-management-dialog-contract.mjs` passes at 1440×900, 390×844 and 360×800, including preselection, empty-group rejection, dialog/sidebar coexistence and overflow checks.
 - **Remaining P1-D4-B.** The upstream SSE cache progress/disconnect-cancel interaction has not been restored; the current bounded REST behavior remains under review and must not be treated as a completed parity decision.
@@ -2455,6 +2504,35 @@ The WebDAV file manager remains an independent root operation. The duplicate bac
 authoritative: the 2026-07-22 focused backup contract requires direct ordinary/portable save actions and keeps
 list/upload/download/restore in the single WebDAV manager. Existing setting keys and caller-scoped roots remain.
 
+### 2026-07-27 P1 Index local-cache scope re-audit
+
+Status: implementation and automated gates complete; real-browser gate pending.
+
+Focused contract:
+[`index-local-cache-scope-p1-contract.md`](./index-local-cache-scope-p1-contract.md).
+
+The fixed upstream keeps four browser-cache actions directly in the persistent
+Index sidebar. OpenReader's sidebar ownership is structurally aligned and its
+current-user server-cache action remains an allowed Go/multi-user enhancement.
+The current browser implementation is not yet safe to retain unchanged:
+
+- total statistics include every account and unknown key in the shared browser
+  store;
+- source/RSS grouping ignores account scope, chapter grouping reads scope during
+  asynchronous iteration, and group clear can therefore delete another account's
+  cache;
+- unscoped upstream-era chapter content is treated as owned by every signed-in
+  account and may be copied into that account's scoped cache;
+- overlapping stats/clear operations have no scope+token generation gate, so an
+  old account response may overwrite a new account's sidebar state.
+
+The required correction keeps all current scoped key formats and persistent data
+unchanged. It freezes identity at operation start, counts/deletes only provably
+current-user keys, excludes unowned legacy chapter content from authenticated
+reads, and applies the existing authenticated-operation guard pattern to stats,
+clear results, messages and busy state. Tests must be written before application
+code and must include a real multi-account browser-cache fixture.
+
 #### Required implementation order and tests
 
 1. Replace the stale static tests first: old `/settings` routes must retain their
@@ -2644,6 +2722,55 @@ socket，旧 close 可清空新引用并启动重复重连，旧 message 可在�
 inventory 门禁只修改文档；下一阶段先建立迟到 load/save/progress/category/profile 和 fake
 WebSocket generation 失败测试，再修改应用代码。
 
+实施结果：`24feff5` 已为用户资料、Reader 设置、shelf/search 偏好、进度、分类和 WebSocket
+连接补齐不可变 scope/token/operation generation；旧请求和旧 socket 回调不能提交到新会话。
+原合同未覆盖活动 Reader 组件本身，不能据此宣称 401 页面生命周期已经隔离。
+
+## 2026-07-27 Reader 登录失效与账号切换隔离复审
+
+固定上游在 `NEED_LOGIN` 时显示根登录 Dialog 并把 `loginAuth` 设为 false；登录成功后保存 token、
+同步当前用户本地状态，并让 Reader `init(true)` 重新加载。当前 OpenReader 的 401 rejected-token
+保护和 store/WS operation generation 已正确，但 `App.vue` 优先按 Reader 路由渲染，token 清空
+后仍保留旧正文；全局 overlay Pinia 状态也会在新用户登录后重新挂载。
+
+更关键的是 `AuthDialog` 先写入新账号 token 再 `window.location.reload()`，旧 Reader 的 pagehide、
+visibility/unmount 强制保存可能按新 scope 写本地进度，并尝试以新 token 提交旧书位置。该问题必须
+在 token 变化前同步挂起旧 Reader，再卸载私有 DOM/弹层；同账号以新 generation 原路重载，不同
+账号返回书架。完整状态机、允许差异和测试先行门禁见
+[`reader-reauthentication-isolation-p0-contract.md`](reader-reauthentication-isolation-p0-contract.md)。
+本轮 inventory 只修改文档，应用代码尚未变更。
+
+候选实施结果：认证失效现在先同步挂起旧 Reader generation，再移除 token、清空用户 store 和
+账号相关 overlay；未认证根场景不再渲染私有 Reader/workspace DOM。登录不再硬刷新：同账号按
+新 generation 保留 URL 重载，异账号或未知旧身份返回书架。只有仍匹配本地当前 token 的 401
+可以创建认证事件，站内 returnTo 经过开放重定向校验。聚焦 30 项、frontend 599/599、生产构建
+和 Go 全量均通过；本地服务端口审批因工作区额度不足被拒绝，因此三视口真实浏览器与 Docker
+发布尚未计为完成。
+
+## 2026-07-27 Index 工作台认证会话隔离复审
+
+Reader 隔离完成后继续审查同一 authenticated shell，确认 `indexWorkspace` 没有账号 scope、
+session generation 或 reset：搜索/探索结果、来源 intent、分页、滚动位置和 revision 会越过
+注销/401 保留。当前远程搜索的 scene revision 只能处理同会话切场景，不能证明账号切换安全；
+本地搜索完全没有请求戳。
+
+更严重的是旧 Search 书源初始化可在组件卸载后修改新账号的共享搜索偏好，旧 Explore 入口响应
+可把新账号切入上一账号的来源与结果，迟到的本地导入、临时阅读会话和 route BookInfo 还可能
+分别写入新书架内存、跳转旧会话路由或重新打开已清理弹层。`App.vue` 目前也只阻塞 Reader：
+认证 Dialog 写入新 token 后，Index 会在账号判定与路由清理前短暂重新挂载。
+
+固定上游仍以单一 Index 保存结果现场，并在 `loginAuth/userNS` 变化时 `init(true)`；但它不清
+`searchResult` 是单命名空间缺口，不能复制到 JWT 多账号环境。目标语义确定为：被动失效立即
+隐藏并清空结果，同账号只恢复 intent 并重新请求，不同/未知账号回到干净书架，显式 logout
+不恢复现场；所有迟到 callback 同时冻结 scope、token、user/workspace generation 和场景 revision。
+完整矩阵与测试先行顺序见
+[`index-authenticated-session-p1-contract.md`](index-authenticated-session-p1-contract.md)。
+inventory 提交后已按测试先行完成候选实现：工作台拥有非持久 session generation 和最小挂起
+intent；同账号仅恢复 intent 并重取结果，不同/未知账号与显式 logout 回到干净书架；认证路由
+settled 前 Reader/Index 均保持阻塞。Search、Explore、侧栏书源、route BookInfo、本地导入和
+临时阅读交接均有身份/会话提交门。前端 611/611、生产构建与 Go 全量通过；三视口真实浏览器及
+Docker 仍待完成，当前不得标为最终发布。
+
 ## 2026-07-23 Reader 设置切换位置连续性复审
 
 固定上游在 `ReadSettings#setReadMethod/setPageType` 写入新阅读方式前，通过
@@ -2707,8 +2834,55 @@ transaction/失败补偿。普通逻辑 ZIP 与 v1 均不改变，未来未知 p
 closed，不能落入普通恢复只写书架。完整格式、API、限额、安全和测试先行闸门见
 [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md)。
 
-实施进度（2026-07-23）：service/API 已生成和恢复 v2，普通 ZIP 与 v1 分支保持，
+实施结果（2026-07-27）：service/API 已生成和恢复 v2，普通 ZIP 与 v1 分支保持，
 manifest/资产/占位符/版本严格预检，跨 user ID 分配新 URL，并通过文件补偿和启动
 journal 收敛 SQLite/文件崩溃窗口。前端动作改名并报告资产/legacy 数量。Go 全量、
-前端 558 项、生产构建和三视口真实 Go + Chromium 跨用户恢复通过；Docker 新旧卷门禁
-与本地多架构发布尚待完成，因此当前不记录镜像标签。
+前端 558 项、生产构建和三视口真实 Go + Chromium 跨用户恢复通过；Docker 新卷与
+历史 TXT/EPUB/UMD/CBZ/相对缓存、用户隔离、v1/v2 跨卷恢复及重启门禁通过。本机发布
+`54a528f`/`latest`，远端 amd64/arm64 OCI index 为
+`sha256:047f9636a78604a1d5320da2972d0b16256b95d47253320b79095eaf6101a571`。
+
+## 2026-07-27 远程书籍封面代理复审
+
+固定上游 `main.js#getImagePath/getCover` 会把书架、BookInfo 和 Reader 的远程
+HTTP(S)/协议相对封面交给 `GET /reader3/cover?path=...`；`BookController#getBookCover`
+以 3 秒超时抓取、按 URL MD5 写入 `storage/cache`，并让空 URL、失败请求和懒加载错误
+退回 404/内置 `noCover`。该方法并不注入书源 header/cookie；此前把封面缺口描述为
+“缺少书源请求头”不准确，现予以更正。
+
+审查时 OpenReader 的 `bookCoverUrl()` 会让浏览器直接请求第三方，且书架、BookInfo、
+移动管理分别用 CSS `background-image`；只要 URL 字符串非空就隐藏占位，远端失败会
+留下透明空白。该项从共享 BookInfo 已对齐的结论中拆出，裁决为独立
+**must-fix**，并已在本轮重新实现。
+
+上游公开 `path` 端点没有 SSRF、重定向、大小和图片类型限制，不能复制。OpenReader
+现保留原始 `coverUrl`，仅在可见响应增加三态 `coverResourceUrl`；后者使用不暴露
+URL/query 的短期同源 capability，执行私网/DNS/dial/重定向校验、3 秒/8 MiB 限额、
+图片 magic、原子 per-user 有界缓存和日志脱敏。前端所有封面入口统一使用该投影并在
+失败时显示占位；字段存在但为空明确阻止浏览器回退到被拒绝的原始 URL。
+完整 API、数据、状态和测试先行门禁见
+[`book-cover-proxy-p2-contract.md`](book-cover-proxy-p2-contract.md)。失败测试、实现、
+Go/frontend/build、三视口真实 API 浏览器和 Docker 新旧卷门禁均已完成；应用提交
+`ceb4baa` 已由本机发布为同名标签与 `latest`，OCI index 为
+`sha256:c5cace40e21a9b30b4f2f7cdd9219a59ff16525b173bcf79d5994e950ff56fd2`。
+
+## 2026-07-27 工作台全局弹层认证会话隔离复审
+
+前置认证合同已经在凭证移除前关闭全部 overlay，并在重新认证路由落定前卸载
+`GlobalOverlayHost`；本次继续向各弹层内部取证，确认 Vue 卸载不会取消已发出的 Promise。除
+StorageImport/上传预览的局部 generation、BookManage cache job cancel、ReplaceRule/UserManage
+同组件 request counter 外，BookInfo、书架/分组/书签管理、LocalStore、WebDAV、Source、RSS、
+替换规则、用户管理和备份操作均没有冻结账号 scope/token。
+
+其中 BookInfo、StorageImport、WebDAV 恢复和 UserManage 是最高风险：A 的迟到响应可在 B 会话
+upsert 书架、写 Reader cache、应用全局恢复结果、继续批量/写后请求、改变管理列表或重新操作
+overlay。其它弹层也可产生旧 toast、下载、导航和 loading 写入。固定上游通过根 Dialog 与
+`loginAuth/userNS → init(true)` 表达“重新加载当前用户空间”，但普通 Promise 没有跨用户
+generation；这是上游单命名空间缺口，不能复制到 JWT 多账号运行时。
+
+本批裁决为 **must-fix** 的前端安全适配：复用短生命周期 identity operation guard，叠加现有
+revision/abort/timer 机制，在每个跨 await 提交与后续请求前复查，并在 session invalidation/
+scope dispose 时淘汰。弹层中间事务不随同账号重登恢复，用户手动重开后从当前账号重新加载。
+完整矩阵、状态机和测试先行闸门见
+[`workspace-overlay-authenticated-session-p1-contract.md`](workspace-overlay-authenticated-session-p1-contract.md)。
+合同提取阶段不修改应用代码。

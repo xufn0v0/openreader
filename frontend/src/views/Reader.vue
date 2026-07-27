@@ -2,7 +2,7 @@
   <main
     ref="shellEl"
     class="reader-shell"
-    :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible, 'mini-interface': isMobileReader, 'document-scroll': usesDocumentScroll }]"
+    :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible, 'mini-interface': isMobileReader, 'document-scroll': usesDocumentScroll, 'has-custom-background': Boolean(reader.customBgImage) }]"
     :style="readerStyle"
   >
     <ReaderDesktopTools
@@ -169,7 +169,7 @@
             :audio-title="chapter?.title || book?.title || ''"
             :audio-book-title="book?.title || ''"
             :audio-author="book?.author || ''"
-            :audio-cover-url="book?.customCoverUrl || book?.coverUrl || ''"
+            :audio-cover-url="bookCoverUrl(book)"
             :audio-autoplay="audioAutoplay"
             :epub-style="epubStyleText"
             :viewport-height="readerViewportHeight"
@@ -394,6 +394,7 @@ import { refreshBook, refreshLocalBook } from '../api/books'
 import { getRemoteReaderChapterContent, getRemoteReaderSession } from '../api/remoteReader'
 import { listSources } from '../api/sources'
 import { deleteAsset, uploadAsset } from '../api/uploads'
+import { bookCoverUrl } from '../utils/bookCover'
 import ReaderChapterContent from '../components/reader/ReaderChapterContent.vue'
 import ReaderClickZones from '../components/reader/ReaderClickZones.vue'
 import ReaderDesktopWorkspacePanel from '../components/reader/ReaderDesktopWorkspacePanel.vue'
@@ -450,6 +451,7 @@ import { useReaderRouteSync } from '../composables/useReaderRouteSync'
 import { useReaderScrollSync } from '../composables/useReaderScrollSync'
 import { useReaderSelectedTextActions } from '../composables/useReaderSelectedTextActions'
 import { useReaderSelection } from '../composables/useReaderSelection'
+import { useReaderContentSearchIntent } from '../composables/useReaderContentSearchIntent'
 import { useReaderSearchNavigation } from '../composables/useReaderSearchNavigation'
 import { useReaderShelf } from '../composables/useReaderShelf'
 import { useReaderToc } from '../composables/useReaderToc'
@@ -1063,12 +1065,17 @@ const {
   windowWidth,
   getScrollStep: scrollStep,
   getViewportWidth: currentViewportWidth,
+  shouldIgnoreHeightOnlyResize: () => (
+    isMobileReader.value
+    && ['scroll', 'scroll2'].includes(effectiveReaderMode.value)
+  ),
 })
 const {
   jumpToFirstSearchMatch,
   jumpToLine,
   jumpToMatch: jumpToSearchMatch,
   jumpToParagraph,
+  jumpToResult: jumpToSearchResult,
   jumpToRouteLine,
 } = useReaderSearchNavigation({
   keyword: computed(() => String(route.query.q || '')),
@@ -1086,10 +1093,21 @@ const {
   getRouteQuery: () => route.query,
   navigate: replaceReaderPositionWithoutReload,
   loadChapter: (index, loadOptions) => loadChapter(index, 0, loadOptions),
+  isContinuousScrollRead,
+  rebuildContinuousWindow: index => computeShowChapterList({
+    anchorIndex: index,
+    activate: true,
+  }),
   canMatchBookmark: () => chapterFormat.value === 'text',
   onBookmarkNotFound: () => ElMessage.error('无法定位内容所在段落'),
   flashParagraph,
   saveProgress: () => saveCurrentProgress(),
+})
+useReaderContentSearchIntent({
+  request: computed(() => overlay.searchBookContentJump),
+  book,
+  bookId,
+  jumpToResult: jumpToSearchResult,
 })
 const {
   cancelPageAnimation,
@@ -1099,6 +1117,7 @@ const {
   isVerticalScrollSyncSuppressed,
   nextPage,
   paragraphByChapterPosition,
+  preparePageInput,
   previousPage,
   scrollToBottom,
   scrollToTop,
@@ -1130,6 +1149,7 @@ const {
   navigate: query => router.replace(readerRouteLocation(query)),
   saveProgress: () => saveCurrentProgress(),
   scheduleProgressSave: delay => scheduleProgressSave(delay),
+  cancelProgressSave: () => cancelProgressSave(),
   onVerticalPageSettled: () => settleVerticalPageScroll(),
 })
 isVerticalPageScrollSyncSuppressed = isVerticalScrollSyncSuppressed
@@ -1554,6 +1574,7 @@ const {
   suppressContentClick,
   consumeSuppressedContentClick,
   cancelPageAnimation,
+  preparePageInput,
   nextPage,
   previousPage,
   toggleChrome: toggleReaderChrome,
@@ -1951,6 +1972,13 @@ useReaderPageLifecycle({
   },
   onPageHide: handleReaderPageHide,
   onVisibilityChange: handleReaderVisibilityChange,
+  onSessionInvalidated: () => {
+    suspendProgressSaving()
+    stopAutoReading()
+    ttsStop()
+    cancelCachingContent()
+    audioAutoplay.value = false
+  },
   onProgressUpdated: handleProgressUpdated,
   onBookDataUpdated: handleReaderBookDataUpdated,
   onReplaceRulesUpdated: handleReplaceRulesUpdated,
@@ -2303,24 +2331,23 @@ function readError(err, fallback) {
   --reader-content-width: calc(var(--reader-frame-width) - 130px);
   --reader-left-x: calc(50vw - var(--reader-frame-width) / 2 - 68px);
   --reader-right-x: calc(50vw + var(--reader-frame-width) / 2 + 10px);
-  --paper-texture:
-    radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.34), transparent 30%),
-    radial-gradient(circle at 74% 30%, rgba(126, 95, 38, 0.06), transparent 34%),
-    repeating-linear-gradient(90deg, rgba(118, 90, 36, 0.026) 0 1px, transparent 1px 7px);
+  --reader-body-texture: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyAgMAAABjUWAiAAAADFBMVEXr5djn4dTp49bt59rT6LKxAAACnElEQVQozw3NUUwScRzA8d8R6MF8YMIx8uk47hDSJbj14IPzOGc7jPLvwTGg5uAYDbe2tt56cLtznvEnS6yDqCcEaWi91DvrbLJZz7b1aFtz1aO+2OZWvn+/+4CHeB6BMYaqBLfjPNRY6RFT2JJYby+uAk4WUTrtlmJ4hgPYb2q1XGDQjaK8pgJHvqNaAX+KyuIkDXpgQinb46nOulnn4b5laUHTxLfseeArAoNOeJlOIjdoal0n1FA7tKFv5roK+YaHOqP3P0XyKHPHY+MhTRe5uCZnKhtJKw2eSrSoBDPLtpZuNcFNJcFyiCMxOaaHIfXz1e8HQbWLySrBQ4x0x1qlhnHlnz2HQEC6TNb0gTHXa7IKhcaHqkE015hk9whA0YeWiLIXf7Fa2CZo3DjqjB4tTuF8jIcbfcEx5z/w4sXpQhXW+ju0cqh7icTFmRMaG+v6CIvTjcSpHcH8JEsF3EPh3fRthYdVLLgI2fWXm85/pGFE4l046s70L+yKCcirGFR+jbpy3kMmiCGHrSezVONsn1RBixncyk2PcVWk7DlgxHo8iZwDyq5uAUD854dZhdIFYzKoQig2haUKi1lVufz2RZUZPZ41n/hrOQB6h0Hhg8I367FNoEHgeM/KY7szSeQwD8q2WE3HM35ZLl0K1MJiOtHIkBclRQUwZnyOWcNsRQQgVLj1PSqkjF9DsoOSaSg3iinKzvfmgsNFFfpP/2T3GLGvL4fHEfwIX1sVvXcPqLztehWGcfn9nI2U9nTfCgJPe/jFPLZwgVEzimBgAm0VIyK2tt1cE/AzQdLK+SxLSQ4aDCZnnId94OG2S1XwvnTbNk/ZnhyRCQT+sZM6z9g6LXL1BOBe+zJySiFkHAINCtnQokbCJ/apCv0foqPiZVfhpywAAAAASUVORK5CYII=");
+  --paper-texture: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyAgMAAABjUWAiAAAACVBMVEX28ef48+n69esoK7jYAAAB4UlEQVQozw2OsW4bQQxEhwLXkDrysGdEqRRgVShfQQq8wOr2jD0jSpXCLvwXbtKfADlFqgSwC/9ljqweZgYzQFnb/QGepYhA9jzmTc1WaSEtQpbFgjWATI00ZZtIckXx8q2Oe5yEByBy+RHOTcM+VVTadULsvxvRC/q8WTwgcWGD+Mnaqa0oy2gw2pKFzK+PzEsus5hP9AHojKslVynLlioVTBEN8cjDNnZoR1uMGTiZAAN47HxMtEkGUE9b8HWzkqNX5Lpk0yVziAJOs46rK1pG/xNuXLjz95fSDoJE5IqG23MAYPtWoeWPvfVtIV/Ng9oH3W0gGMPIOqd4MK4QZ55dV61gOb8Zxp7I9qayaGxp6Q91cmC0ZRdBwEQVHWzSAanlZwVWc9yljeTCeaHjBVvlPSLeyeBUT2rPdJegQI103jVS3uYkyIx1il6mslMDedZuOkwzolsagvPuQAfp7cYg7k9V1NOxfq64PNSvMdwONV4VYEmqlbpZy5OAakRKkjPnL4CBv5/OZRgoWHBmNbxB0LgB1I4vXFj93UoF2/0TPEsWwV9EhbIiTPqYoTHYoMn3enTDjmrFeDTIzaL1bUC/PBIMuF+vSSYSaxoVt90EO3Gu1zrMuMRGUk7Ffv3L+A931Gsb/yBoIgAAAABJRU5ErkJggg==");
   min-height: 100vh;
   display: grid;
   justify-content: center;
-  background:
-    linear-gradient(90deg, rgba(124, 99, 43, 0.16), transparent 18%, transparent 82%, rgba(124, 99, 43, 0.16)),
-    repeating-linear-gradient(0deg, rgba(105, 83, 35, 0.035) 0 1px, transparent 1px 6px),
-    var(--reader-body-bg);
+  background-color: var(--reader-body-bg);
+  background-image: var(--reader-body-texture);
+  background-repeat: repeat;
 }
 
 /* ---- 正文 ---- */
 .reader-page {
   background-color: var(--reader-bg);
   background-image: var(--reader-bg-image, var(--paper-texture));
-  background-size: cover; background-position: center;
+  background-position: 0 0;
+  background-repeat: repeat;
+  background-size: auto;
   color: var(--reader-text);
   border-left: 1px solid rgba(109,95,55,0.28);
   border-right: 1px solid rgba(109,95,55,0.28);
@@ -2449,6 +2476,7 @@ function readError(err, fallback) {
   box-sizing: border-box;
   padding: 0 16px;
   text-align: justify;
+  box-shadow: none;
 }
 
 .reader-shell.mini-interface .reader-page-head { display: none; }
@@ -2487,6 +2515,17 @@ function readError(err, fallback) {
   height: auto;
   min-height: 100dvh;
   overflow: visible;
+}
+
+.reader-shell.mini-interface.document-scroll .reader-page::after {
+  position: fixed;
+}
+
+.reader-shell.mini-interface.document-scroll.has-custom-background .reader-page {
+  background-attachment: fixed;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 .reader-shell.mini-interface.flip .reader-page {

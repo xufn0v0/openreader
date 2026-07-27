@@ -10,6 +10,53 @@ Use this checklist for security-sensitive changes and release reviews.
 - [ ] User-owned rows are scoped by authenticated user ID.
 - [ ] Batch operations cannot affect another user’s data.
 
+## P1 Index authenticated-session isolation (2026-07-27 candidate; browser gate pending)
+
+- [x] Session invalidation suspends or resets Index state before token removal. Visible search/explore rows,
+  pagination, loading, scroll, book objects, parser variables and local paths are removed synchronously.
+- [x] A suspended scene contains only a minimal non-persistent intent. It can be restored only when the JWT
+  subject proves the same user; a different or unknown account discards it and settles canonical Home before
+  the authenticated shell is unblocked. Explicit logout never preserves it.
+- [x] Search, Explore, sidebar source hydration, route BookInfo, local import and temporary-reader handoff freeze
+  authenticated scope/token plus user/workspace generation as applicable. Old callbacks cannot write another
+  account's Pinia/preferences, open overlays, show operation feedback or change routes.
+- [x] Workspace request stamps include the non-persistent session generation in addition to mode/revision.
+  Explore chooser recovery uses a one-shot pending flag, preventing both missed pre-mount recovery and later
+  replay after returning from Reader.
+- [x] Tokens remain only in short-lived operation closures and are not copied to Pinia, suspended intent, URL,
+  local/session storage, events, logs or errors. Existing same-origin `safeReturnTo()` validation remains.
+- [x] No API, JWT format, SQLite row, mounted path, backup/WebDAV format or server authorization rule changed.
+- [ ] Real Chromium must still exercise delayed Search/Explore/BookInfo callbacks across same- and
+  different-account reauthentication at 1440×900, 390×844 and 360×800. Docker release remains gated on it.
+
+Evidence: `frontend/tests/indexWorkspaceState.test.mjs`,
+`frontend/tests/authenticatedRuntimeScope.test.mjs`,
+`frontend/tests/indexSessionIsolationWiring.test.mjs`,
+`frontend/tests/appSidebarSearch.test.mjs`,
+`frontend/tests/workspaceContinuationContract.test.mjs`, and
+[`docs/compat/index-authenticated-session-p1-contract.md`](compat/index-authenticated-session-p1-contract.md).
+
+## P1 browser-cache account isolation (2026-07-27 implementation; browser gate pending)
+
+- [x] Browser cache statistics read value bytes only after an exact key-shape check proves ownership by the
+  scope captured at operation start; other users, anonymous keys, unknown formats and substring collisions fail closed.
+- [x] Source/RSS and chapter group clearing receives the captured scope explicitly and deletes only exact
+  current-user keys. Book deletion and BookManage cleanup use the same frozen scoped chapter prefix.
+- [x] Unscoped upstream-era chapter text is neither read, copied, counted nor removed by an authenticated account.
+  It is preserved as unowned rebuildable cache; no first-login owner claim can disclose one account's text to another.
+- [x] Server/browser stats, clear confirmations, result messages and busy state use scope+token+generation ownership.
+  An old operation cannot commit after another refresh or authentication change.
+- [x] No JWT, token or cache payload is logged or persisted by the operation guard; token material remains only in
+  a short-lived closure and cache values are never surfaced in labels/errors.
+- [ ] Real Chromium must still verify current-user totals, delayed-request retirement and scoped deletion at
+  1440×900, 390×844 and 360×800. The focused script exists, but its first external launch request was rejected
+  after the approval service disconnected; no alternate launch path was used.
+
+Evidence: `frontend/tests/localCacheStatsScope.test.mjs`,
+`frontend/tests/appCacheManagement.test.mjs`,
+`frontend/tests/bookChapterCacheScope.test.mjs`, and
+[`docs/compat/index-local-cache-scope-p1-contract.md`](compat/index-local-cache-scope-p1-contract.md).
+
 ## SSRF and remote fetches
 
 - [ ] Source/RSS/cover/WebDAV remote URLs validate scheme.
@@ -18,6 +65,31 @@ Use this checklist for security-sensitive changes and release reviews.
 - [ ] Response body size is bounded.
 - [ ] Private network access is considered when server-side fetches are user-controlled.
 - [ ] Headers/cookies are not logged.
+
+## P2 remote book-cover proxy review (2026-07-27 implemented and published)
+
+- [x] Public image route accepts only an opaque, purpose-separated, expiring server-issued
+  capability; it never accepts a caller-supplied raw URL or login JWT in path/query.
+- [x] Capability contents do not reveal the original URL/query, user/source identity or
+  credentials and the complete token segment is redacted from access logs.
+- [x] HTTP(S)-only URL, DNS and actual dial addresses reject private/loopback/link-local/
+  multicast/unspecified/metadata ranges; every redirect is revalidated and capped at three.
+- [x] Fetch has a 3-second total timeout and 8-MiB body cap, accepts only verified raster
+  magic, rejects non-2xx/HTML/truncated content and never forwards Cookie/Authorization/
+  source credentials.
+- [x] Per-user cache paths are rooted and symlink-safe; writes are atomic/coalesced, cache
+  hits are revalidated, aggregate bytes are bounded and user/global cleanup cannot cross scope.
+- [x] Raw `coverUrl` remains the only persisted/exported value. `coverResourceUrl` cannot
+  enter SQLite, sync persistence, Book/Chapter variables, WebDAV, exports or backups.
+- [x] Public GET/HEAD errors and frontend fallback never expose URL, query, host path or
+  credentials and never turn a cover failure into auth invalidation or source suppression.
+
+Target contract and required tests:
+[`docs/compat/book-cover-proxy-p2-contract.md`](compat/book-cover-proxy-p2-contract.md).
+Evidence: cover service/API/middleware contracts, frontend URL/component contracts, cover-service
+race/vet, real Go + Chromium three-viewport smoke, local new/historical volume and portable
+backup gates. Locally published `ceb4baa`/`latest` resolve to OCI index
+`sha256:c5cace40e21a9b30b4f2f7cdd9219a59ff16525b173bcf79d5994e950ff56fd2`.
 
 ## Path traversal and files
 
@@ -166,11 +238,11 @@ contract (three viewports).
   restart, backup/portable restore, local-format and owner-isolation smoke. Locally
   built amd64/arm64 `9cae206` and `latest` indexes were published and independently
   resolved to `sha256:800cff1326caa8740f343cc233f7ffcd87ef38b38f744b47d1bc7712c27dc7c6`.
-- [ ] Logical/portable-v1 backups still contain URL strings only. The versioned, bounded,
-  cross-user-ID asset byte packaging/remapping contract is now extracted in
-  `docs/compat/portable-appearance-assets-p2b-contract.md`, but its failure tests and
-  runtime are not implemented. Until then, no release may claim cross-instance custom
-  asset restore.
+- [x] Logical/portable-v1 backups still contain URL strings only, while portable v2 uses
+  the separately versioned, bounded, cross-user-ID asset byte packaging/remapping
+  contract in `docs/compat/portable-appearance-assets-p2b-contract.md`. Its failure
+  tests, runtime, real-browser restore, fresh/historical volume gates and local
+  amd64/arm64 release are complete.
 
 Targeted evidence: `backend/api/reader_appearance_assets_p2_contract_test.go`,
 `backend/api/bookinfo_asset_contract_test.go`,
@@ -351,8 +423,9 @@ Evidence: `backend/services/backup/portable_test.go`, `backend/api/portable_back
 
 Evidence: `backend/services/backup/portable_assets_test.go`,
 `backend/api/portable_appearance_assets_p2b_contract_test.go`, full Go/frontend/build gates, and
-the three-viewport real Go + Chromium portable asset smoke. Docker new/old volume execution is
-still required before publishing the release image.
+the three-viewport real Go + Chromium portable asset smoke. Fresh and historical Docker volume
+execution passed, and local amd64/arm64 tags `54a528f`/`latest` were published at OCI index
+`sha256:047f9636a78604a1d5320da2972d0b16256b95d47253320b79095eaf6101a571`.
 
 ## P2 replace-rule review
 
@@ -467,3 +540,26 @@ Evidence: `backend/api/user_management_p2_contract_test.go`,
 `backend/api/workspace_storage_access_contract_test.go`,
 `backend/db/db_test.go`, `frontend/tests/overlayUserManagement.test.mjs`, and
 `frontend/tests/workspaceOperationRouteContract.test.mjs`.
+
+## P0 Reader reauthentication isolation review
+
+- [x] A 401 can invalidate the session only when the rejected Bearer token still exactly matches the current
+      local token; late responses from a logged-out or superseded account are ignored.
+- [x] The pending startup-auth event is consumed once without persisting or logging its token; the Reader
+      invalidation event contains only a non-persistent generation.
+- [x] Reader progress, pagehide/visibility/unmount keepalive, automatic reading, TTS, audio intent and chapter
+      caching are suspended before credentials change.
+- [x] Unauthenticated Reader/workspace routes render no previous book, chapter, catalogue, cover, bookmark,
+      search result or global overlay DOM.
+- [x] Account-owned overlay objects and pending selection promises are settled and cleared on session reset.
+- [x] Same-account reauthentication mounts a new Reader generation; another or unknown identity returns to
+      the shelf and cannot reuse the old database book ID.
+- [x] Login return paths accept only same-origin absolute paths beginning with one `/`; protocol and
+      scheme-relative redirects fail closed to `/`.
+- [x] No API, SQLite schema, cache root, persistent setting, JWT lifetime or ownership rule changed.
+
+Evidence: `frontend/tests/authenticatedRuntimeScope.test.mjs`,
+`frontend/tests/readerPageLifecycle.test.mjs`,
+`frontend/tests/readerReauthenticationWiring.test.mjs`, frontend 599/599,
+the production build and full Go tests. Three-viewport browser confirmation and Docker publication remain
+open because the local-server external permission request was rejected when the workspace reported no credits.

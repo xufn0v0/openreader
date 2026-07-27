@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { normalizeDeletedBookIds } from '../utils/bookDeletion.js'
 
-export const useOverlayStore = defineStore('overlay', {
-  state: () => ({
+function defaultOverlayState() {
+  return {
     bookInfoVisible: false,
     bookInfoBook: null,
     bookInfoOptions: {},
@@ -30,6 +30,8 @@ export const useOverlayStore = defineStore('overlay', {
     bookmarkFormResolve: null,
     searchBookContentVisible: false,
     searchBook: null,
+    searchBookContentJump: null,
+    searchBookContentJumpSerial: 0,
     localStoreVisible: false,
     rssVisible: false,
     webdavVisible: false,
@@ -37,8 +39,17 @@ export const useOverlayStore = defineStore('overlay', {
     replaceRulesVisible: false,
     replaceRuleEditorDraft: null,
     replaceRuleEditorRequest: 0,
-  }),
+  }
+}
+
+export const useOverlayStore = defineStore('overlay', {
+  state: defaultOverlayState,
   actions: {
+    resetSessionState() {
+      this.finishBookAddCategories()
+      this.finishBookmarkForm({ saved: false, reason: 'session-invalidated' })
+      this.$patch(defaultOverlayState())
+    },
     openBookInfo(book, options = {}) {
       this.bookInfoBook = book
       this.bookInfoOptions = options
@@ -154,6 +165,19 @@ export const useOverlayStore = defineStore('overlay', {
       this.searchBook = book
       this.searchBookContentVisible = true
     },
+    requestSearchBookContentJump(result, query = '') {
+      if (!this.searchBook || !result || typeof result !== 'object') return false
+      this.searchBookContentJumpSerial += 1
+      this.searchBookContentJump = {
+        requestId: this.searchBookContentJumpSerial,
+        bookId: this.searchBook.id ?? null,
+        bookUrl: this.searchBook.bookUrl || this.searchBook.url || '',
+        query: String(query || '').trim(),
+        result: { ...result },
+      }
+      this.searchBookContentVisible = false
+      return true
+    },
     openReplaceRules() {
       this.replaceRulesVisible = true
     },
@@ -202,6 +226,10 @@ export const useOverlayStore = defineStore('overlay', {
         matched = true
         this.searchBookContentVisible = false
         this.searchBook = null
+      }
+      if (deleted.has(Number(this.searchBookContentJump?.bookId))) {
+        matched = true
+        this.searchBookContentJump = null
       }
       if (targets(this.bookInfoBook)) {
         matched = true

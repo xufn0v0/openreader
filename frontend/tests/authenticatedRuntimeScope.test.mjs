@@ -50,6 +50,7 @@ function tokenFor(userId, nonce = '') {
 
 const storage = new MemoryStorage()
 const timerCallbacks = new Map()
+const dispatchedEvents = []
 let timerSerial = 0
 globalThis.localStorage = storage
 globalThis.window = {
@@ -57,7 +58,13 @@ globalThis.window = {
   location: { protocol: 'http:', host: 'openreader.test' },
   addEventListener() {},
   removeEventListener() {},
-  dispatchEvent() {},
+  dispatchEvent(event) {
+    dispatchedEvents.push({
+      type: event?.type || '',
+      detail: event?.detail,
+      tokenAtDispatch: storage.getItem('openreader_token'),
+    })
+  },
   setTimeout(callback) {
     timerSerial += 1
     timerCallbacks.set(timerSerial, callback)
@@ -90,6 +97,8 @@ const { useBookshelfStore } = await vite.ssrLoadModule('/src/stores/bookshelf.js
 const { usePreferencesStore } = await vite.ssrLoadModule('/src/stores/preferences.js')
 const { useReaderStore } = await vite.ssrLoadModule('/src/stores/reader.js')
 const { useUserStore } = await vite.ssrLoadModule('/src/stores/user.js')
+const { useOverlayStore } = await vite.ssrLoadModule('/src/stores/overlay.js')
+const { useIndexWorkspaceStore } = await vite.ssrLoadModule('/src/stores/indexWorkspace.js')
 const { useSync } = await vite.ssrLoadModule('/src/composables/useSync.js')
 
 function activateUser(userId, nonce = '') {
@@ -101,6 +110,7 @@ function activateUser(userId, nonce = '') {
 function freshStores(userId = 1) {
   storage.clear()
   timerCallbacks.clear()
+  dispatchedEvents.length = 0
   activateUser(userId, 'initial')
   setActivePinia(createPinia())
   return {
@@ -108,6 +118,8 @@ function freshStores(userId = 1) {
     preferences: usePreferencesStore(),
     reader: useReaderStore(),
     user: useUserStore(),
+    overlay: useOverlayStore(),
+    workspace: useIndexWorkspaceStore(),
   }
 }
 
@@ -508,6 +520,174 @@ test('a delayed profile response cannot overwrite a later login profile', { conc
     await loading
 
     assert.deepEqual(user.profile, { id: 2, username: 'user-b', canAccessStore: false })
+  })
+})
+
+test('session clearing invalidates the mounted reader before removing its token and resets account overlays', { concurrency: false }, async () => {
+  const { overlay, user, workspace } = freshStores(1)
+  workspace.beginSearch({ keyword: '用户 A 搜索', sourceId: 8, searchType: 'single' })
+  workspace.replaceResultRows([{ title: '用户 A 结果', bookUrl: 'https://private.example/a' }])
+  const bookmarkResult = overlay.openBookmarkForm(
+    { id: 101, title: '用户 A 的书' },
+    { chapterIndex: 3 },
+  )
+  const categoryResult = overlay.selectBookAddCategories([7])
+  overlay.openBookInfo({ id: 101, title: '用户 A 的书' })
+  overlay.openSearchBookContent({ id: 101, title: '用户 A 的书' })
+  overlay.openStorageImport('local-store', ['user-a.epub'])
+
+  const initialGeneration = user.sessionGeneration
+  user.clearSession()
+
+  const invalidation = dispatchedEvents.find(event => event.type === 'openreader:session-invalidated')
+  assert.ok(invalidation)
+  assert.match(invalidation.tokenAtDispatch, /^ey/)
+  assert.equal(user.token, '')
+  assert.equal(user.invalidatedScope, 'user:1')
+  assert.equal(user.readerSessionBlocked, true)
+  assert.equal(user.sessionGeneration, initialGeneration + 1)
+  assert.equal(overlay.bookInfoVisible, false)
+  assert.equal(overlay.bookInfoBook, null)
+  assert.equal(overlay.searchBookContentVisible, false)
+  assert.equal(overlay.searchBook, null)
+  assert.equal(overlay.storageImportVisible, false)
+  assert.equal(overlay.storageImportRequest, null)
+  assert.equal(workspace.mode, 'shelf')
+  assert.deepEqual(workspace.resultRows, [])
+  assert.deepEqual(workspace.suspendedSession, {
+    mode: 'search',
+    search: {
+      keyword: '用户 A 搜索',
+      mode: 'remote',
+      searchType: 'single',
+      group: '',
+      sourceId: 8,
+      concurrent: 24,
+    },
+  })
+  assert.deepEqual(await bookmarkResult, { saved: false, reason: 'session-invalidated' })
+  assert.equal(await categoryResult, null)
+})
+
+test('a pending startup 401 opens reauthentication once after localStorage has already dropped the token', { concurrency: false }, () => {
+  const rejectedToken = tokenFor(5, 'expired')
+  const { user } = freshStores(5)
+  user.token = ''
+  storage.removeItem('openreader_token')
+  window.__openreaderAuthRequired = { reason: 'session', rejectedToken }
+
+  user.requireLogin('session', rejectedToken)
+  const generation = user.sessionGeneration
+  assert.equal(user.authDialogVisible, true)
+  assert.equal(user.readerSessionBlocked, true)
+  assert.equal(user.invalidatedScope, '')
+
+  user.requireLogin('session', rejectedToken)
+  assert.equal(user.sessionGeneration, generation)
+  delete window.__openreaderAuthRequired
+})
+
+test('reauthentication keeps the reader blocked until same-account or account-switch routing is settled', { concurrency: false }, async () => {
+  const { user } = freshStores(1)
+  user.clearSession()
+  const invalidatedGeneration = user.sessionGeneration
+
+  await withAPI('post', async () => ({
+    data: {
+      token: tokenFor(2, 'login'),
+      user: { id: 2, username: 'user-b' },
+    },
+  }), async () => {
+    const result = await user.login('user-b', 'password')
+    assert.equal(result.sameAuthenticatedScope, false)
+    assert.equal(result.previousScope, 'user:1')
+    assert.equal(result.currentScope, 'user:2')
+    assert.equal(user.readerSessionBlocked, true)
+    assert.equal(user.sessionGeneration, invalidatedGeneration + 1)
+  })
+
+  user.completeReauthentication()
+  assert.equal(user.readerSessionBlocked, false)
+})
+
+test('same-account reauthentication is identified without exposing either token', { concurrency: false }, async () => {
+  const { user, workspace } = freshStores(7)
+  workspace.beginSearch({ keyword: '同账号恢复', sourceId: 3, searchType: 'single' })
+  workspace.replaceResultRows([{ title: '必须丢弃的旧结果' }])
+  user.requireLogin('session')
+
+  await withAPI('post', async () => ({
+    data: {
+      token: tokenFor(7, 'renewed'),
+      user: { id: 7, username: 'user-seven' },
+    },
+  }), async () => {
+    const result = await user.login('user-seven', 'password')
+    assert.deepEqual({
+      sameAuthenticatedScope: result.sameAuthenticatedScope,
+      previousScope: result.previousScope,
+      currentScope: result.currentScope,
+    }, {
+      sameAuthenticatedScope: true,
+      previousScope: 'user:7',
+      currentScope: 'user:7',
+    })
+    assert.equal(JSON.stringify(result).includes(tokenFor(7, 'initial')), false)
+    assert.equal(user.readerSessionBlocked, true)
+    assert.equal(workspace.mode, 'search')
+    assert.equal(workspace.search.keyword, '同账号恢复')
+    assert.deepEqual(workspace.resultRows, [])
+    assert.equal(workspace.suspendedSession, null)
+  })
+})
+
+test('different-account reauthentication discards the suspended Index scene', { concurrency: false }, async () => {
+  const { user, workspace } = freshStores(7)
+  workspace.showExploreResults([{ title: '用户 A 探索结果' }], {
+    sourceId: 77,
+    sourceName: '用户 A 来源',
+    url: 'https://private.example/explore',
+    name: '用户 A 入口',
+  })
+  user.requireLogin('session')
+
+  await withAPI('post', async () => ({
+    data: {
+      token: tokenFor(8, 'renewed'),
+      user: { id: 8, username: 'user-eight' },
+    },
+  }), async () => {
+    const result = await user.login('user-eight', 'password')
+    assert.equal(result.sameAuthenticatedScope, false)
+    assert.equal(workspace.mode, 'shelf')
+    assert.deepEqual(workspace.resultRows, [])
+    assert.deepEqual(workspace.explore, {
+      sourceId: '',
+      sourceGroup: '',
+      url: '',
+      name: '',
+      sourceName: '',
+    })
+    assert.equal(workspace.suspendedSession, null)
+  })
+})
+
+test('explicit logout never restores an old Index scene after the same user logs in again', { concurrency: false }, async () => {
+  const { user, workspace } = freshStores(11)
+  workspace.beginSearch({ keyword: '退出前搜索', sourceId: 5, searchType: 'single' })
+  user.logout()
+
+  await withAPI('post', async () => ({
+    data: {
+      token: tokenFor(11, 'again'),
+      user: { id: 11, username: 'user-eleven' },
+    },
+  }), async () => {
+    const result = await user.login('user-eleven', 'password')
+    assert.equal(result.sameAuthenticatedScope, true)
+    assert.equal(workspace.mode, 'shelf')
+    assert.equal(workspace.search.keyword, '')
+    assert.equal(workspace.suspendedSession, null)
   })
 })
 
