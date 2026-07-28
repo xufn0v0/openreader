@@ -13,6 +13,7 @@ import (
 	"openreader/backend/services/audioreader"
 	"openreader/backend/services/backup"
 	"openreader/backend/services/bookgroups"
+	"openreader/backend/services/booksources"
 	"openreader/backend/services/cbzreader"
 	"openreader/backend/services/chapterimage"
 	"openreader/backend/services/coverimage"
@@ -30,6 +31,7 @@ type Server struct {
 	scheduler      *scheduler.Scheduler
 	backupSvc      *backup.Service
 	bookGroups     *bookgroups.Service
+	bookSources    *booksources.Service
 	audioReader    *audioreader.Service
 	cbzReader      *cbzreader.Service
 	chapterImages  *chapterimage.Service
@@ -49,6 +51,7 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 		scheduler:      sched,
 		backupSvc:      backupSvc,
 		bookGroups:     bookgroups.New(database),
+		bookSources:    booksources.New(database),
 		audioReader:    audioreader.New(cfg, database),
 		cbzReader:      cbzreader.New(cfg, database),
 		chapterImages:  chapterimage.New(cfg, database),
@@ -85,7 +88,9 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 	protected.PUT("/settings/:key", server.updateUserSetting)
 	protected.GET("/admin/users", server.listUsers)
 	protected.POST("/admin/users", server.createUser)
+	protected.POST("/admin/users/sources/reset", server.resetUserSources)
 	protected.POST("/admin/users/batch-delete", server.deleteUsers)
+	protected.POST("/admin/users/:id/sources/default", server.setUserSourcesAsDefault)
 	protected.PUT("/admin/users/:id", server.updateUser)
 	protected.PUT("/admin/users/:id/password", server.resetUserPassword)
 	protected.POST("/admin/cleanup-inactive", server.cleanupInactiveUsers)

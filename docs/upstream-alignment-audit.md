@@ -312,5 +312,33 @@
   仍可在卸载后 upsert 书架、写 Reader cache、应用 WebDAV 恢复、继续批处理/写后请求、弹消息、
   导航或操作新 overlay。该项裁决为 JWT 多用户必需的 **must-fix**：所有弹层异步提交冻结
   scope/token/component generation，session invalidation 与卸载统一淘汰；同账号重登也不恢复
-  Dialog 中间事务。当前阶段只完成合同取证，尚未改应用代码。对应合同：
+  Dialog 中间事务。合同取证后已分 P1-A/P1-B 覆盖全部账号私有工作台弹层：确认框换号不再
+  dispatch，迟到回调不再写书架/Reader/cache/ref、应用恢复、继续队列/reload、下载、导航、
+  广播或提示；保留现有 abort、request revision、timer 和 BookManage 长期 cache job 语义。
+  前端 626/626、生产构建、Go 全量与差异检查通过；三视口重新认证浏览器门和 Docker 待完成。
+  对应合同：
   [workspace-overlay-authenticated-session-p1-contract.md](/Users/yuchangsheng/Documents/OpenReader-dev/docs/compat/workspace-overlay-authenticated-session-p1-contract.md)。
+- 2026-07-27：重新审查书源所有权后，撤销本文件早期“书源为全局管理能力”及
+  `sources_update` 应全账号广播的判断。固定上游把活动书源持久化在每个用户 namespace；
+  默认书源只在用户私有文件不存在时复制一次。当前无 `user_id` 的 `BookSource` 会让普通
+  用户跨账号 CRUD、搜索/探索、换源和备份恢复，管理员列表的 `sourceCount` 也只是重复
+  全局总数；默认恢复还会删除被既有书籍引用的 source ID。该差异裁决为错误重构和
+  **must-fix**，不能继续作为多用户技术适配保留。非破坏性迁移、owner-scoped API、默认
+  reconcile、UserManage 两个动作、备份和双账号发布闸门见：
+  [book-source-ownership-p2-contract.md](/Users/yuchangsheng/Documents/OpenReader-dev/docs/compat/book-source-ownership-p2-contract.md)。
+- 2026-07-27：完成书源所有权 P2-S1 数据地基。新增用户—书源关联、namespace 和事务
+  migration marker；旧全局源升级时只建立每用户/默认关联，不复制源、不改书籍或失败缓存
+  source ID。显式空列表有独立 marker，注入关联写失败会回滚并可在下次启动重试。当前
+  handlers 尚未切到 owner-scoped repository，因此这批不能单独视为隔离完成，也不发布
+  Docker；后续 P2-S2 必须一次覆盖 CRUD、搜索/探索、书籍/Reader/scheduler 与用户级广播。
+- 2026-07-27：完成书源所有权 P2-S2a 内部 service。默认源只在 namespace 首次读取时
+  继承一次，显式空集合保持为空；CRUD 以用户关联作为访问边界，共享旧快照的编辑执行
+  写时复制并只重映射目标用户书籍/失败缓存，删除也只按目标用户引用判定和解绑。契约测试
+  覆盖双用户共享、默认后改、目标变量清理和跨用户保留。REST、搜索/探索、Reader、
+  scheduler、备份和用户级广播尚未接线，因此仍不发布 Docker、不宣称隔离完成。
+- 2026-07-27：完成 P2-S2b 书源管理/调试 API 接线。现有 `/api/sources*` 路径、成功
+  payload 和错误文案保持兼容，但 CRUD、清空、批量、导入/导出、默认、调试、失效源与
+  `usedBookCount` 全部改为当前用户关联；同名导入改按上游 `bookSourceUrl` 身份，批量写
+  使用单事务，默认文件原子替换并在 DB 失败时补偿。保存默认额外要求管理员，恢复默认只
+  reconcile 当前账号，`sources_update` 不再全账号广播。双账号 API 契约和完整 API 回归
+  已通过；搜索/探索、书籍/Reader/scheduler、备份及管理员联动仍未接线，所以不发布 Docker。

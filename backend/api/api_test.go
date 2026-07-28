@@ -22,6 +22,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/text/encoding/simplifiedchinese"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"openreader/backend/config"
 	readerdb "openreader/backend/db"
@@ -70,6 +72,7 @@ func setupTestServerWithConfig(t *testing.T, configure func(*config.Config)) (*g
 	if err := readerdb.AutoMigrate(database); err != nil {
 		t.Fatal(err)
 	}
+	registerLegacyBookSourceFixtureBridge(t, database)
 
 	hub := readersync.NewHub()
 	sched := scheduler.New(database, 1)
@@ -78,6 +81,72 @@ func setupTestServerWithConfig(t *testing.T, configure func(*config.Config)) (*g
 	router := gin.New()
 	server := RegisterRoutes(router, cfg, database, hub, sched, backupSvc)
 	return router, server
+}
+
+func registerLegacyBookSourceFixtureBridge(t *testing.T, database *gorm.DB) {
+	t.Helper()
+	const callbackName = "test:legacy-book-source-owner-fixtures"
+	if err := database.Callback().Create().After("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil || tx.Statement.Schema == nil || tx.Statement.Schema.Name != "BookSource" {
+			return
+		}
+		if managed, ok := tx.Get("openreader:book-sources:managed-create"); ok && managed == true {
+			return
+		}
+		sourceIDs := createdBookSourceIDs(tx.Statement.ReflectValue)
+		if len(sourceIDs) == 0 {
+			return
+		}
+		fixtures := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true})
+		var userIDs []uint
+		if err := fixtures.Model(&models.User{}).Order("id asc").Pluck("id", &userIDs).Error; err != nil {
+			tx.AddError(err)
+			return
+		}
+		for _, userID := range userIDs {
+			if err := fixtures.Clauses(clause.OnConflict{DoNothing: true}).
+				Create(&models.BookSourceNamespace{UserID: userID}).Error; err != nil {
+				tx.AddError(err)
+				return
+			}
+			for _, sourceID := range sourceIDs {
+				if err := fixtures.Clauses(clause.OnConflict{DoNothing: true}).
+					Create(&models.UserBookSource{UserID: userID, SourceID: sourceID}).Error; err != nil {
+					tx.AddError(err)
+					return
+				}
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createdBookSourceIDs(value reflect.Value) []uint {
+	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
+		if value.IsNil() {
+			return nil
+		}
+		value = value.Elem()
+	}
+	if !value.IsValid() {
+		return nil
+	}
+	if value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
+		ids := make([]uint, 0, value.Len())
+		for index := 0; index < value.Len(); index++ {
+			ids = append(ids, createdBookSourceIDs(value.Index(index))...)
+		}
+		return ids
+	}
+	if value.Kind() != reflect.Struct {
+		return nil
+	}
+	id := value.FieldByName("ID")
+	if !id.IsValid() || !id.CanUint() || id.Uint() == 0 {
+		return nil
+	}
+	return []uint{uint(id.Uint())}
 }
 
 func authHeader(t *testing.T, router *gin.Engine) string {
@@ -685,40 +754,64 @@ func TestBackupIncludesUserData(t *testing.T) {
 	}
 }
 
-func TestAdminUsersIncludesGlobalSourceCount(t *testing.T) {
+func TestAdminUsersIncludesProjectedPerUserSourceCount(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
 
-	var user models.User
-	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+	var admin models.User
+	if err := server.db.Where("username = ?", "testuser").First(&admin).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := server.db.Model(&user).Update("role", "admin").Error; err != nil {
+	if err := server.db.Model(&admin).Update("role", "admin").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := server.db.Create(&models.BookSource{Name: "源一", Enabled: true}).Error; err != nil {
+	adminAuth := token
+	createSourceThroughAPI(t, router, adminAuth, `{"name":"管理员源一","baseUrl":"https://admin-source-one.example","enabled":true}`)
+	createSourceThroughAPI(t, router, adminAuth, `{"name":"管理员源二","baseUrl":"https://admin-source-two.example","enabled":true}`)
+	saveDefault := httptest.NewRequest(http.MethodPost, "/api/sources/default/save", nil)
+	saveDefault.Header.Set("Authorization", adminAuth)
+	saveDefaultResponse := httptest.NewRecorder()
+	router.ServeHTTP(saveDefaultResponse, saveDefault)
+	if saveDefaultResponse.Code != http.StatusOK {
+		t.Fatalf("save projected defaults = %d %s", saveDefaultResponse.Code, saveDefaultResponse.Body.String())
+	}
+	uninitialized := registerSourceContractAccount(t, router, "countprojected")
+	empty := registerSourceContractAccount(t, router, "countemptyuser")
+	if err := server.db.Create(&models.BookSourceNamespace{UserID: empty.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := server.db.Create(&models.BookSource{Name: "源二", Enabled: true}).Error; err != nil {
-		t.Fatal(err)
-	}
+	createSourceThroughAPI(t, router, adminAuth, `{"name":"管理员源三","baseUrl":"https://admin-source-three.example","enabled":true}`)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
-	req.Header.Set("Authorization", token)
+	req.Header.Set("Authorization", adminAuth)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("admin users: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var users []struct {
+		ID          uint   `json:"id"`
 		Username    string `json:"username"`
 		SourceCount int64  `json:"sourceCount"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
 		t.Fatal(err)
 	}
-	if len(users) != 1 || users[0].Username != "testuser" || users[0].SourceCount != 2 {
-		t.Fatalf("unexpected admin users response: %+v", users)
+	counts := make(map[uint]int64, len(users))
+	for _, user := range users {
+		counts[user.ID] = user.SourceCount
+	}
+	if counts[admin.ID] != 3 || counts[uninitialized.ID] != 2 || counts[empty.ID] != 0 {
+		t.Fatalf("per-user source counts = %v, users=%+v", counts, users)
+	}
+	var namespaceCount int64
+	if err := server.db.Model(&models.BookSourceNamespace{}).
+		Where("user_id = ?", uninitialized.ID).
+		Count(&namespaceCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if namespaceCount != 0 {
+		t.Fatalf("admin list initialized projected user namespace: %d", namespaceCount)
 	}
 }
 
@@ -797,6 +890,12 @@ func TestAdminUserManagementActions(t *testing.T) {
 	if err := server.db.Create(&models.UserSetting{UserID: managed.ID, Key: "reader", Value: `{}`}).Error; err != nil {
 		t.Fatal(err)
 	}
+	managedSource, err := server.bookSources.Create(managed.ID, models.BookSource{
+		Name: "待删用户私有源", BaseURL: "https://deleted-user-source.example", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	deleteReq := httptest.NewRequest(http.MethodPost, "/api/admin/users/batch-delete", strings.NewReader(fmt.Sprintf(`{"ids":[%d]}`, managed.ID)))
 	deleteReq.Header.Set("Content-Type", "application/json")
@@ -846,6 +945,21 @@ func TestAdminUserManagementActions(t *testing.T) {
 		"user settings": func() int64 {
 			var count int64
 			_ = server.db.Model(&models.UserSetting{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"source associations": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.UserBookSource{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"source namespace": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.BookSourceNamespace{}).Where("user_id = ?", managed.ID).Count(&count).Error
+			return count
+		},
+		"private source snapshot": func() int64 {
+			var count int64
+			_ = server.db.Model(&models.BookSource{}).Where("id = ?", managedSource.ID).Count(&count).Error
 			return count
 		},
 	} {
@@ -3149,7 +3263,7 @@ func TestExportSourcesSupportsSelectedIDs(t *testing.T) {
 	}
 }
 
-func TestRemoteSourceImportUpdatesExistingByName(t *testing.T) {
+func TestRemoteSourceImportUsesBookSourceURLIdentity(t *testing.T) {
 	router, server := setupTestServer(t)
 	token := authHeader(t, router)
 
@@ -3174,27 +3288,36 @@ func TestRemoteSourceImportUpdatesExistingByName(t *testing.T) {
 	req.Header.Set("Authorization", token)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"updated":1`) {
-		t.Fatalf("remote source import should update existing source, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"imported":1`) ||
+		!strings.Contains(w.Body.String(), `"updated":0`) {
+		t.Fatalf("remote source import should keep a different URL as a separate source, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var count int64
 	if err := server.db.Model(&models.BookSource{}).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("expected no duplicate source, got %d", count)
+	if count != 2 {
+		t.Fatalf("same-name different-URL sources were collapsed, got %d", count)
 	}
-	var updated models.BookSource
-	if err := server.db.First(&updated, existing.ID).Error; err != nil {
+	var unchanged models.BookSource
+	if err := server.db.First(&unchanged, existing.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if updated.BaseURL != "https://new.example" || updated.Charset != "gbk" ||
-		updated.Header != "@js:return dynamicHeaders()" ||
-		updated.LoginURL != "https://new.example/login" || updated.LoginCheckJS != "check()" ||
-		updated.LastUpdateTime != 1740000000000 || updated.Weight != 9 || updated.RespondTime != 1357 ||
-		updated.Enabled {
-		t.Fatalf("source was not updated correctly: %+v", updated)
+	if unchanged.BaseURL != "https://old.example" || unchanged.Charset != "utf-8" || !unchanged.Enabled {
+		t.Fatalf("existing URL identity was mutated: %+v", unchanged)
+	}
+	var imported models.BookSource
+	if err := server.db.Where("base_url = ?", "https://new.example").First(&imported).Error; err != nil {
+		t.Fatal(err)
+	}
+	if imported.Name != "同名源" || imported.Charset != "gbk" ||
+		imported.Header != "@js:return dynamicHeaders()" ||
+		imported.LoginURL != "https://new.example/login" || imported.LoginCheckJS != "check()" ||
+		imported.LastUpdateTime != 1740000000000 || imported.Weight != 9 || imported.RespondTime != 1357 ||
+		imported.Enabled {
+		t.Fatalf("new URL identity was not imported correctly: %+v", imported)
 	}
 }
 
@@ -8248,16 +8371,23 @@ func TestRestoreWebDAVBackupImportsBookshelf(t *testing.T) {
 	if progress.ChapterIndex != 3 || progress.Offset != 120 {
 		t.Fatalf("unexpected restored progress: %+v", progress)
 	}
+	var user models.User
+	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
+		t.Fatal(err)
+	}
 	var source models.BookSource
-	if err := server.db.First(&source, existingSource.ID).Error; err != nil {
+	if err := server.db.Model(&models.BookSource{}).
+		Joins("JOIN user_book_sources ON user_book_sources.source_id = book_sources.id").
+		Where("user_book_sources.user_id = ? AND user_book_sources.detached = ? AND book_sources.base_url = ?",
+			user.ID, false, "https://new-source.example").
+		First(&source).Error; err != nil {
 		t.Fatal(err)
 	}
 	if source.BaseURL != "https://new-source.example" || source.Charset != "gbk" || source.Enabled {
 		t.Fatalf("unexpected restored source update: %+v", source)
 	}
-	var user models.User
-	if err := server.db.Where("username = ?", "testuser").First(&user).Error; err != nil {
-		t.Fatal(err)
+	if source.ID == existingSource.ID {
+		t.Fatalf("URL identity restore reused the old-URL snapshot: old=%d restored=%d", existingSource.ID, source.ID)
 	}
 	var setting models.UserSetting
 	if err := server.db.Where("user_id = ? AND key = ?", user.ID, "search").First(&setting).Error; err != nil {
