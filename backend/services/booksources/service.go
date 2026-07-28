@@ -3,8 +3,10 @@ package booksources
 import (
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -16,6 +18,7 @@ var (
 	ErrSourceInUse             = errors.New("book source is in use")
 	ErrNoDefault               = errors.New("default book sources are not configured")
 	ErrNamespaceNotInitialized = errors.New("user book sources are not initialized")
+	sourceNamespaceInitMu      sync.Mutex
 )
 
 type ImportResult struct {
@@ -33,7 +36,11 @@ type RestoreUsersResult struct {
 	Skipped  int `json:"skipped"`
 }
 
-const managedCreateSessionKey = "openreader:book-sources:managed-create"
+const (
+	managedCreateSessionKey       = "openreader:book-sources:managed-create"
+	namespaceInitRetryLimit       = 10
+	namespaceInitRetryBaseBackoff = 10 * time.Millisecond
+)
 
 type sourceInUseError struct {
 	count int
@@ -67,17 +74,44 @@ func (s *Service) EnsureNamespace(userID uint) error {
 	if s == nil || s.db == nil {
 		return errors.New("book source service is unavailable")
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var initialized int64
-		if err := tx.Model(&models.BookSourceNamespace{}).
-			Where("user_id = ?", userID).
-			Count(&initialized).Error; err != nil {
-			return err
-		}
-		if initialized > 0 {
+	initialized, err := s.namespaceInitialized(userID)
+	if err != nil || initialized {
+		return err
+	}
+
+	// Two root-workspace requests can discover the same new user at once.
+	// SQLite cannot upgrade both deferred read transactions to writers, so the
+	// loser receives SQLITE_BUSY immediately even with busy_timeout configured.
+	// Serialize only the rare initialization path, then recheck after waiting.
+	sourceNamespaceInitMu.Lock()
+	defer sourceNamespaceInitMu.Unlock()
+	initialized, err = s.namespaceInitialized(userID)
+	if err != nil || initialized {
+		return err
+	}
+
+	for attempt := 0; attempt < namespaceInitRetryLimit; attempt++ {
+		err = s.initializeNamespace(userID)
+		if err == nil {
 			return nil
 		}
+		if !isSQLiteWriteContention(err) || attempt == namespaceInitRetryLimit-1 {
+			return err
+		}
+		time.Sleep(time.Duration(attempt+1) * namespaceInitRetryBaseBackoff)
+		initialized, checkErr := s.namespaceInitialized(userID)
+		if checkErr == nil && initialized {
+			return nil
+		}
+		if checkErr != nil && !isSQLiteWriteContention(checkErr) {
+			return checkErr
+		}
+	}
+	return err
+}
 
+func (s *Service) initializeNamespace(userID uint) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
 		if userID != 0 {
 			var defaults []models.UserBookSource
 			if err := tx.Where("user_id = ? AND detached = ?", 0, false).
@@ -103,6 +137,14 @@ func (s *Service) EnsureNamespace(userID uint) error {
 		return tx.Clauses(clause.OnConflict{DoNothing: true}).
 			Create(&models.BookSourceNamespace{UserID: userID}).Error
 	})
+}
+
+func isSQLiteWriteContention(err error) bool {
+	var sqliteError sqlite3.Error
+	if !errors.As(err, &sqliteError) {
+		return false
+	}
+	return sqliteError.Code == sqlite3.ErrBusy || sqliteError.Code == sqlite3.ErrLocked
 }
 
 func (s *Service) ListActive(userID uint) ([]models.BookSource, error) {

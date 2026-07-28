@@ -1,11 +1,12 @@
 # P2 书源所有权、默认快照与用户管理联动合同
 
-状态：2026-07-27 完成固定上游取证与当前实现审查；P2-S1 的关联表、namespace、
-可重试迁移标记和旧卷事务迁移，P2-S2a 的 owner-scoped service，P2-S2b 的书源
-管理/调试 REST，以及 P2-S2c 的搜索、探索、远程书、Reader、正文/缓存和 scheduler
-运行时消费者以及 P2-S3 的管理员计数、目标用户设默认、批量重置和账号删除联动已经
-测试先行实施；P2-S4 的固定上游备份/WebDAV/缓存合同、实现与自动回归也已完成，
-**真实浏览器和 Docker 发布门仍未完成**。本合同不把旧的全局查询或测试视为正确性依据。
+状态：**P2-S1…P2-S4 implemented / full-regression-passed / Docker-published**。关联表、
+namespace、可重试旧卷迁移、owner-scoped service、管理/调试/搜索/探索/Reader/scheduler
+消费者、管理员默认动作、备份/WebDAV/缓存隔离均已测试先行实施；双账号三视口和专门的
+旧全局源 Docker 迁移/COW/备份恢复门已完成。实现与测试提交 `0db752e` 已从本机发布，
+`0db752e`/`latest` 共同指向
+`sha256:83f53fe3aa523fc1196454d4c5f1d413648eb72ad1e87c83c838e7200859207e`。
+本合同不把旧的全局查询或测试视为正确性依据。
 
 固定上游：
 
@@ -427,6 +428,65 @@ P2-S4 测试顺序：
   书架及后续 artifact 且不发事件。旧的全表名称导入和全用户变量清理 helper 已删除。
 - 前端读取键已改为 `bookSourceList@source-owner-v1@<scope>`；旧键永不回显，但缓存统计、
   分组清理和 `sources_update` 仍可只针对当前账号清除新旧两键。
-- 自动证据：沙箱外完整 `go test ./...` 通过；前端 `628/628` 和 Vite production build
+- 自动证据：沙箱外完整 `go test ./...` 通过；前端 `636/636` 和 Vite production build
   通过；fixed-baseline、portable v1/v2、双用户导出/恢复、COW、显式空、权限 skip、
-  数据库回滚和缓存键契约均已覆盖。真实三视口双账号浏览器与 Docker 新旧卷仍是发布前门禁。
+  数据库回滚和缓存键契约均已覆盖。
+- 真实证据：隔离 Go 实例且不拦截 `/api`，在 1440×900、390×844、360×800 验证 A/B
+  SourceManager 只显示自己的源；A 的 versioned source cache 可见并可单独清到空，旧键不读取、
+  其他账号新旧键保留由同一缓存合同锁定；三视口均无横向溢出，移动侧栏保持 260px 隐藏几何。
+  同一实例的真实 logical backup 下载内容只含 A 源，A 改名后恢复为归档值，B 源保持不变。
+- 补门同时捕获并修复了登录根渲染竞态：登录路由现在保持挂载直到成功回调完成路由与账号
+  settle，B 注销后登录 A 会直接收敛到 `/`，不再卡在 `/login` 或“正在恢复当前账号…”。
+  Docker 新旧卷、重启和多架构发布仍是最后门禁。
+
+### P2-S4 Docker 发布门二次复审（2026-07-28）
+
+本轮只复审发布证据，不修改应用代码。固定上游没有 OpenReader Docker，因此产品合同仍以
+同一用户 namespace 的 `bookSource.json` 备份/恢复语义为准；Docker 门负责证明当前
+SQLite/目录适配在真实升级卷中没有改变该语义。
+
+| 证据层 | 当前实际覆盖 | 缺口与裁决 |
+|---|---|---|
+| 通用新卷 smoke | 第一位注册用户、portable v1/v2 外观资产、跨用户本地书、重启与备份恢复。 | 没有通过 `/api/sources` 创建任何书源；ZIP 中的 `bookSource.json` 为空或缺席都无法区分。**不能证明**管理员旧 WebDAV 根只导出自己的书源，也不能证明普通用户私有根。 |
+| 通用历史卷 fixture | `create-old-volume-fixture` 先运行当前 `AutoMigrate`，此时 `book-source-ownership-v1` marker 已写入；之后才创建两个用户。fixture 只有本地书，`Book.SourceID=0`，没有 `BookSource`、`SourceFailure` 或旧全局书源引用。 | 这不是旧全局书源数据库。容器启动时不会执行所需的旧源 ownership 数据迁移。既有 `HISTORICAL_VOLUME=1` 只证明本地书归档、相对缓存和用户书架隔离，**不能关闭 P2-S1/P2-S4 升级门**。 |
+| 通用历史卷备份 | 普通历史用户的 logical/portable 文件写入私有根，并可恢复到新账号；另一用户本地书不泄漏。 | 没有源行可泄漏，不能证明 active/detached 过滤、COW、源绑定或 `bookSource.json` owner scope。 |
+| 已发布 `a90d10b` | 包含 P2-S1…S4 实现，且通用新卷/历史卷 smoke 已通过。 | 镜像可继续作为专项验证对象，但“书源 ownership Docker 门完成”仍是未经证明的声明。必须增加专项 fixture/assertion 后重建同源码候选；不能用已经发布本身倒推门禁通过。 |
+
+专项测试合同：
+
+1. 历史 fixture 必须在关闭数据库前放入至少两个旧全局 `BookSource`，让两个既有用户的
+   远程书和失败记录保留旧 `source_id`；随后移除 ownership 关联表、namespace 表和迁移
+   marker，使镜像首次启动真实执行 `book-source-ownership-v1`。本地书夹具与旧列删除继续
+   保留，不能把旧卷缩窄成只服务本模块的假数据库。
+2. 首次启动后，两个历史账号和默认 namespace 都应得到旧全局源的 active association，
+   原书籍/失败记录 ID 不改。A 编辑共享源必须触发 COW：A 的列表、远程书和失败记录切到
+   新快照，B 与默认模板仍保留原快照。
+3. A、B 的 logical 与 portable ZIP 分别只包含各自 active sources；detached 不导出。
+   A 恢复自己的 ZIP 后恢复 A 的源状态，B 的列表、书籍和 source ID 不变。
+4. 新卷同时创建管理员和普通用户的不同书源。管理员备份继续写 `data/webdav/` 旧根，
+   普通用户备份写 `data/webdav/users/<safe-name>/`；两类 logical/portable ZIP 都只能
+   包含调用者书源，恢复后不得交叉修改。
+5. 停止并重启同一容器卷后重复核对源列表、COW 结果、书籍绑定、迁移 marker 和备份根；
+   再检查用户 0、A、B 的 association/namespace，不能仅靠 API 返回“没看到泄漏”。
+6. 专项脚本必须可独立运行并清理临时容器/卷，失败时保留明确阶段错误。通过后再运行完整
+   Go、frontend、build、通用新旧卷门；最后才把矩阵改为 Docker-published。
+
+### P2-S4 Docker 发布结果（2026-07-28）
+
+- `create-old-volume-fixture` 现在保留既有 TXT/EPUB/UMD/CBZ/相对缓存/双用户本地书，
+  同时加入两个旧全局源、两个跨用户共享旧源 ID 的远程书和两条失败缓存；关闭前移除
+  ownership 表、namespace 和 marker，确保镜像首次启动真实执行迁移。
+- `scripts/docker-source-ownership-smoke.sh` 在新卷验证管理员旧根、普通用户私有根、
+  logical/portable 精确 `bookSource.json`、恢复隔离与重启；在旧卷验证迁移前结构、迁移后
+  user 0/A/B association、书籍/失败 ID 保留、首次共享源 COW、双用户 ZIP、恢复与最终
+  SQLite owner 关系。
+- 测试开发中明确修正两条错误假设：恢复可能为 A 创建同 URL/名称的私有快照，因此后续编辑
+  不必重复换 ID；`SourceFailure` 是不进入备份的派生缓存，A 恢复可清 A，但不得清 B。最终
+  断言通过 association 而不是全表同名查询解析身份。
+- 精确本地候选 `0db752e` 通过 ownership 专项 smoke、通用新卷 smoke 和加入旧全局源后的
+  通用历史卷 smoke；Go 全量、frontend `639/639` 和 production build 同时通过。
+- 本机发布的 `ghcr.io/changshengyu/openreader:0db752e` 与 `:latest` 均包含
+  `linux/amd64`、`linux/arm64`，远端 OCI index 为
+  `sha256:83f53fe3aa523fc1196454d4c5f1d413648eb72ad1e87c83c838e7200859207e`。
+  P2-S1…S4 至此关闭；后续书源修改必须保留本专项门，不再把物理 `book_sources.name`
+  当作跨 namespace 唯一身份。

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,116 @@ import (
 	readerdb "openreader/backend/db"
 	"openreader/backend/models"
 )
+
+func TestEnsureNamespaceSerializesConcurrentFirstAccess(t *testing.T) {
+	database := sourceServiceDatabase(t)
+	user := createSourceUser(t, database, "source-concurrent-initialize")
+	services := []*Service{New(database), New(database)}
+
+	var arrivals atomic.Int32
+	release := make(chan struct{})
+	const callbackName = "openreader:test:concurrent-namespace"
+	if err := database.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "user_book_sources" {
+			return
+		}
+		arrival := arrivals.Add(1)
+		if arrival == 2 {
+			close(release)
+		}
+		if arrival <= 2 {
+			select {
+			case <-release:
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer database.Callback().Query().Remove(callbackName)
+
+	errorsByRequest := make(chan error, 2)
+	var requests sync.WaitGroup
+	for index := range 2 {
+		requests.Add(1)
+		go func(service *Service) {
+			defer requests.Done()
+			errorsByRequest <- service.EnsureNamespace(user.ID)
+		}(services[index])
+	}
+	requests.Wait()
+	close(errorsByRequest)
+	for err := range errorsByRequest {
+		if err != nil {
+			t.Fatalf("concurrent first access returned %v", err)
+		}
+	}
+
+	var namespaces int64
+	if err := database.Model(&models.BookSourceNamespace{}).
+		Where("user_id = ?", user.ID).
+		Count(&namespaces).Error; err != nil {
+		t.Fatal(err)
+	}
+	if namespaces != 1 {
+		t.Fatalf("namespace rows = %d, want 1", namespaces)
+	}
+}
+
+func TestEnsureNamespaceRetriesReadUpgradeBlockedByConcurrentWriter(t *testing.T) {
+	database := sourceServiceDatabase(t)
+	service := New(database)
+	user := createSourceUser(t, database, "source-initialize-retry")
+
+	namespaceRead := make(chan struct{})
+	writerLocked := make(chan struct{})
+	var intercepted atomic.Bool
+	const callbackName = "openreader:test:namespace-write-contention"
+	if err := database.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "user_book_sources" || !intercepted.CompareAndSwap(false, true) {
+			return
+		}
+		close(namespaceRead)
+		select {
+		case <-writerLocked:
+		case <-time.After(2 * time.Second):
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer database.Callback().Query().Remove(callbackName)
+
+	writerDone := make(chan error, 1)
+	go func() {
+		<-namespaceRead
+		writerDone <- database.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&models.User{}).
+				Where("id = ?", user.ID).
+				UpdateColumn("updated_at", time.Now().UTC()).Error; err != nil {
+				return err
+			}
+			close(writerLocked)
+			time.Sleep(150 * time.Millisecond)
+			return nil
+		})
+	}()
+
+	if err := service.EnsureNamespace(user.ID); err != nil {
+		t.Fatalf("first access under unrelated write contention returned %v", err)
+	}
+	if err := <-writerDone; err != nil {
+		t.Fatalf("concurrent writer returned %v", err)
+	}
+	var namespaces int64
+	if err := database.Model(&models.BookSourceNamespace{}).
+		Where("user_id = ?", user.ID).
+		Count(&namespaces).Error; err != nil {
+		t.Fatal(err)
+	}
+	if namespaces != 1 {
+		t.Fatalf("namespace rows = %d, want 1", namespaces)
+	}
+}
 
 func TestInitializeCopiesDefaultOnceAndPreservesExplicitEmptyNamespace(t *testing.T) {
 	database := sourceServiceDatabase(t)

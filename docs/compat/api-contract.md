@@ -15,6 +15,12 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 - Concurrent first writes to the same authenticated `settings/:key` use the existing `(user_id,key)` unique key as
   an atomic upsert. They retain validation, stale-base conflict behavior, response shape and scoped sync events;
   a normal same-user startup race must never expose a UNIQUE error as `500`.
+- Concurrent authenticated startup reads such as `GET /api/sources` and `GET /api/explore/sources` may both
+  initialize the caller's book-source namespace. Every pooled SQLite connection must therefore inherit WAL and
+  a 5000 ms busy timeout, while all in-process book-source service instances serialize the rare uninitialized
+  namespace transaction. A bounded retry handles SQLite's immediate `BUSY/LOCKED` result when that read transaction
+  must upgrade behind an unrelated writer; ordinary initialization contention must retain the existing successful
+  response schemas instead of exposing `database is locked` as `500`.
 - `PUT /api/settings/:key` may receive additive `force:true` only for the confirmed “备份用户配置” action.
   It bypasses stale-base comparison for that authenticated user's legal `reader/shelf/search` row only; ordinary
   background writes keep CAS. Explicit restore never creates a missing row as a side effect of reading it.
@@ -138,9 +144,9 @@ Source-facing routes retain their current response schemas. Only a real remote s
 
 ## P2 backup restore archive contract
 
-Status: **structure/budget preflight, logical content/transaction/permission compatibility and the
-previous browser/Docker gates are complete; P2-S4 source ownership implementation and automated tests
-are complete, while its new browser/release gates remain open.** The archive bounds below remain authoritative. The upstream filename/field bridge,
+Status: **structure/budget preflight, logical content/transaction/permission compatibility, P2-S4
+source ownership implementation, automated tests, dual-account browser and dedicated
+ownership-upgrade Docker gates are complete and published in `0db752e`.** The archive bounds below remain authoritative. The upstream filename/field bridge,
 atomic generation/restore and source-edit capability contract are defined by
 [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md).
 
@@ -197,11 +203,13 @@ existing portable global entry/expanded budgets and reruns extension/magic/image
 Status: account/permission/deletion behavior was implemented on 2026-07-17 from fixed reader-dev
 `UserManage.vue`, `AddUser.vue`, and `UserController.kt`; the P2-S1 through P2-S3 ownership pass on
 2026-07-27 subsequently replaced the global-source assumption with per-user active/detached
-associations and restored the upstream administrator source actions.
+associations and restored the upstream administrator source actions. The 2026-07-28 re-audit restored
+the persisted `lastLoginAt` contract and kept `lastActiveAt` as a response-only compatibility alias.
 
 | Method / path | Request | Success / side effects | Auth and errors |
 |---|---|---|---|
-| `GET /api/admin/users` | None. | Returns manager-visible rows with stable current fields: `id`, `username`, `role`, limits/capabilities/counts, `lastActiveAt`, and `createdAt`. `sourceCount` is the target user's active-source count; an uninitialized namespace projects the current default count without creating rows. | JWT administrator only. A non-admin gets `403` `{"error":{"code":"FORBIDDEN","message":"admin access required"}}`; no user rows leak. |
+| `POST /api/auth/login` | Existing `{username,password}` body. | After credentials succeed, advances the compatible persisted `last_active_at` value, then returns both canonical `user.lastLoginAt` and deprecated `user.lastActiveAt` with the same instant. A failed credential check changes no time. | Existing login error contract remains; persistence failure is `500` and no token response is emitted. Existing usernames and password hashes remain valid. |
+| `GET /api/admin/users` | None. | Returns manager-visible rows with stable current fields: `id`, `username`, `role`, limits/capabilities/counts, canonical `lastLoginAt`, deprecated alias `lastActiveAt`, and `createdAt`. Both time fields are the same persisted value. `sourceCount` is the target user's active-source count; an uninitialized namespace projects the current default count without creating rows. | JWT administrator only. A non-admin gets `403` `{"error":{"code":"FORBIDDEN","message":"admin access required"}}`; no user rows leak. |
 | `POST /api/admin/users` | `{username,password,canEditSources?,canAccessStore?,canAccessWebdav?,bookLimit?,sourceLimit?}`. `role` may be absent or `user`; `admin` is rejected. | `201` creates exactly one ordinary user and broadcasts one `users_update` after commit. New LocalStore/WebDAV permissions default to `true` unless explicitly set; results expose effective `canAccessStore` and `canAccessWebdav`. Existing administrator rows are never changed/migrated. | Administrator only. Username must be at least 5 ASCII letters/digits and not `default`; password must be at least 8 characters. Invalid input/role assignment `400`; duplicate `409`. |
 | `PUT /api/admin/users/:id` | Any explicit subset of ordinary-user capability/limit fields, including independent `canAccessStore` and `canAccessWebdav`. | Updates only supplied fields, returns effective permissions, then broadcasts one post-commit update. Updating either workspace permission never changes the other. | Administrator only. `403` when `:id` is an administrator, `404` missing id, `400` malformed body. |
 | `PUT /api/admin/users/:id/password` | `{password}` with at least eight characters. | Changes one ordinary user's password and broadcasts once. | Administrator only. `403` for administrator target, `404` missing id, `400` invalid password/body. |
@@ -243,18 +251,36 @@ This API shape is an allowed Go/JWT adaptation: reader-dev returns an empty chap
 
 ## P2 replace-rule API contract
 
-Status: extracted 2026-07-11 from fixed `reader-dev` `ReplaceRuleController.kt`, `ReplaceRule.vue`, `ReplaceRuleForm.vue`, and `Reader.vue`. OpenReader keeps REST/SQLite/JWT routes but must preserve the user-visible rule pipeline.
+Status: re-extracted and implemented 2026-07-28 from fixed `reader-dev` `ReplaceRuleController.kt`,
+`ReplaceRule.vue`, `ReplaceRuleForm.vue`, `ReplaceRule.kt`, and `Reader.vue`. The focused current
+contract is [`replace-rule-fixed-baseline-p2-contract.md`](replace-rule-fixed-baseline-p2-contract.md).
+OpenReader keeps REST/SQLite/JWT routes but must preserve exact field bytes and the user-visible rule
+pipeline.
+
+The implementation now uses one `services/replacerules` engine for `/test` and Reader content,
+preserves exact accepted string bytes, lists/applies by `id ASC`, and emits no batch update event
+when every input row was skipped and no durable write occurred. Regex execution is bounded to
+32 capture groups, 20,000 matches per rule/chapter and `max(input, 64 MiB)` output; overflow preserves
+the complete input to that rule and stops the Reader pipeline. Focused API/engine tests plus the
+full Go suite pass; Docker volume publication evidence is recorded in the focused contract.
 
 | Method / path | Request and validation | Success / side effects | Auth and errors |
 |---|---|---|---|
-| `GET /api/replace-rules` | None. | Returns only the caller's rules in stable insertion order (`id ASC`), never update-time order. Compatibility output retains `enabled` plus legacy-readable `isEnabled`. | JWT required; `500` only for a read failure. |
-| `POST /api/replace-rules` | `{name, pattern, replacement, scope, isRegex, enabled|isEnabled}`. Name, pattern and scope are required; a missing `isRegex` means plain text; regex must compile under the reader-compatible case-insensitive mode. | Current-user name-upsert. Appending returns `201`; replacing the existing same-name row in place returns `200`, without moving pipeline order. Emits `replace_rules_update` after commit. | JWT required; `400` for missing fields/invalid regex; no cross-user lookup. |
+| `GET /api/replace-rules` | None. | Returns only the caller's rules in stable insertion order (`id ASC`), never `sort_order` or update-time order. Compatibility output retains `enabled` plus legacy-readable `isEnabled`. | JWT required; `500` only for a read failure. |
+| `POST /api/replace-rules` | `{name, pattern, replacement, scope, isRegex, enabled|isEnabled}`. Exact empty name, pattern and scope are rejected; accepted strings are not trimmed. A missing `isRegex` means plain text; regex must compile under the bounded RE2 subset. Request body ≤ 512 KiB; hidden group ≤ 800 bytes. | Current-user exact-name upsert. Appending returns `201`; replacing the earliest existing same-name row in place returns `200`, without moving pipeline order. Emits `replace_rules_update` after commit. | JWT required; `400` for missing/oversized fields, invalid or unsupported regex; no cross-user lookup. |
 | `PUT /api/replace-rules/:id` | Same validated fields. | Updates only the owned ID and does not change its stable position. Emits one post-commit update event. | JWT required; `400` invalid body/regex, `404` missing/foreign ID, `409` when renaming to another existing current-user name. |
-| `POST /api/replace-rules/batch` | JSON array. Blank name/pattern rows retain the upstream-compatible `skipped` result. Every accepted rule must have a scope and valid plain/regex mode before any accepted row is written. | Transactional current-user name-upsert in input order, returning `{rules,created,updated,skipped}`. A malformed regex rejects the batch without a partial accepted-row write. | JWT required; `400` malformed array/regex/scope, `500` before a failed transaction can mutate state. |
-| `POST /api/replace-rules/test` | `{pattern,replacement,isRegex,text}` using the same compiler/mode as real Reader content. | Returns `{input,output,changed}` only; no persistence or sync event. | JWT required; `400` invalid regex or missing pattern/text. |
-| `DELETE /api/replace-rules/:id`, `POST /api/replace-rules/batch-delete` | Existing ID paths/payload. | Delete only owned rows, retain ordered `deletedIds`, and emit after durable deletion. | JWT required; single missing/foreign ID is `404`; invalid empty batch is `400`. |
+| `POST /api/replace-rules/batch` | JSON array ≤ 16 MiB/2,000 rows. Exact empty name/pattern rows retain the upstream-compatible `skipped` result; whitespace is data, not blank normalization. Every accepted rule must have an explicit scope and valid plain/regex mode before any accepted row is written. | Transactional current-user exact-name upsert in input order, returning `{rules,created,updated,skipped}`. A malformed regex rejects the batch without a partial accepted-row write. | JWT required; `400` malformed/oversized array, regex or scope, `500` before a failed transaction can mutate state. |
+| `POST /api/replace-rules/test` | `{pattern,replacement,isRegex,text}` using the same compiler/mode as real Reader content; request body ≤ 4 MiB, decoded text ≤ 1 MiB and output ≤ 8 MiB. | Returns `{input,output,changed}` only; no persistence or sync event. | JWT required; `400` invalid regex, missing pattern/text, field limit or execution overflow. |
+| `DELETE /api/replace-rules/:id`, `POST /api/replace-rules/batch-delete` | Existing ID paths/payload; batch body ≤ 128 KiB/2,000 IDs. | Delete only owned rows, retain ordered `deletedIds`, and emit after durable deletion. | JWT required; single missing/foreign ID is `404`; invalid/oversized batch is `400`. |
 
-Reader content applies enabled matching rules only to text chapters, in the same listed order: plain text changes the first occurrence; regex changes every case-insensitive occurrence. EPUB and audio content bypass the pipeline. A legacy persisted empty scope remains global only to avoid breaking existing OpenReader data; any successful edit/import writes an explicit non-empty scope.
+Reader content applies enabled matching rules only to text chapters, in the same listed order: plain
+text changes the first occurrence; regex changes every case-insensitive occurrence. Scope comparison
+is exact; an explicit second segment, including an empty one, must equal the exact book URL. For the
+accepted RE2 pattern subset, replacement-string expansion must match JavaScript `String.replace`.
+An execution overflow keeps every earlier rule result, keeps the overflowing rule's input intact and
+stops later rules; no truncated result is returned. EPUB and audio content bypass the pipeline. A
+legacy persisted empty scope remains global only to avoid breaking existing OpenReader data; any
+successful edit/import writes an explicit non-empty scope.
 
 ## P1-D4 shelf-operation API contract
 
@@ -613,10 +639,12 @@ does not authorize access.
 Search, explore, remote-book, change-source, Reader content/cache and scheduler consumers now resolve the same
 association service. New/read-by-selection operations require caller-active enabled sources, while an existing
 caller-owned book may continue resolving its caller-detached snapshot; a foreign source id is treated as missing
-before any remote request. Administrator source-count/default/reset/delete consumers are implemented; only
-backup/WebDAV restore plus the browser/release gates remain pending for the ownership module.
-Until those consumers and dual-account browser checks pass, the implemented management/runtime API slices are not
-a Docker release gate by themselves.
+before any remote request. Administrator source-count/default/reset/delete and owner-scoped
+logical/portable/WebDAV backup/restore consumers are implemented. No API method, body, success schema,
+status or error envelope is changed by the remaining Docker work: the dedicated smoke invokes the
+stable routes above and compares actual source IDs/lists plus ZIP members before and after restart.
+Until the old-global-source fixture, COW, administrator-root/regular-root and restore-isolation checks
+pass together, the implemented management/runtime API slices are not sufficient release evidence.
 
 ## P1 bookshelf latest-chapter timestamp contract (2026-07-22 extracted)
 

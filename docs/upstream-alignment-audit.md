@@ -8,23 +8,32 @@
 
 ## 当前结论
 
-- 2026-07-27：完成 Index 工作台认证会话隔离专项取证。`indexWorkspace` 当前没有账号 scope、
-  session generation 或 reset，旧搜索/探索结果及 intent 会跨注销/401 保留；Search 书源初始化、
-  本地搜索/导入、Explore 入口、临时阅读和 route BookInfo 的迟到回调还可能在换号后修改新账号
-  偏好/store、打开弹层或跳路由。固定上游的单 Index 现场保留继续作为交互基准，但其
-  `loginAuth/userNS → init(true)` 不清结果不能复制到 JWT 多账号环境。已建立
-  `index-authenticated-session-p1-contract.md`，并完成候选实现：同账号仅恢复 intent 并重取结果，
-  不同/未知账号回到干净书架，显式 logout 不恢复；旧 Search/Explore/sidebar/BookInfo/import/
-  临时阅读回调均不能提交到新账号。前端 611/611、build 与 Go 全量通过；三视口浏览器和 Docker
-  尚未完成。
+- 2026-07-28：关闭工作台全部账号私有 Overlay 的认证会话隔离浏览器门。BookInfo 加书、
+  书仓导入、WebDAV 恢复、书源/RSS 保存和用户创建均让 A 写请求跨越认证失效，再以同账号续登
+  或 B 账号登录释放旧响应；`1440×900`、`390×844`、`360×800` 全部确认旧 toast、业务事件和
+  写后 reload 为零，手动重开只读取当前账号。门禁同时抓到 RSS `新增` 将 `null` 草稿交给字段
+  提取而抛错的真实回归；现已按上游 falsy 默认对象状态转换修复，并保留 OpenReader 已记录的
+  空标题差异。frontend 645/645、production build、Go 全量和差异检查通过，运行时进入本批
+  Docker 发布闸门。新旧挂载卷通过后，本机已发布 `342d736` 与 `latest`，共同指向
+  amd64/arm64 OCI index
+  `sha256:1643625269f5a04f867c56da9e3bee04c1318d807e73ca6fc0913ab408645921`。
+- 2026-07-28：关闭 Index 工作台认证会话隔离的最后浏览器门。固定上游的单 Index 现场保留继续
+  作为交互基准，但其 `loginAuth/userNS → init(true)` 不清结果不能复制到 JWT 多账号环境。
+  当前 401 会同步卸载 authenticated shell、清空结果并只挂起最小 intent；同账号以续签 token
+  从空结果重取，不同/未知账号回到干净书架，显式 logout 不恢复。真实 Search/Explore 请求在
+  A 账号悬挂、token 已先从 storage 删除后触发认证，迟到 success/error 均不能写结果、弹 toast、
+  开 overlay 或跳 Reader。`1440×900`、`390×844`、`360×800` 全部通过，同账号 Search 只显示
+  续签后的新结果，异账号 Explore 只显示 B 的书架且不重开 chooser。前端 643/643、build 与
+  Go 全量通过；运行时已包含在本机发布的 `59e11a9`。
 - 2026-07-27：重新审查上游 `Index.vue#scanCacheStorage/analyseLocalStorage/clearCache` 后，
   修正多用户浏览器缓存的所有权和异步事务。总量只统计可证明属于调用账号的 key，书源/RSS
   使用精确 scope，Reader 目录、章节正文和书架快照按已部署 key 形态归属；其它账号、未知格式、
   子串碰撞和无归属旧章节正文失败关闭。统计/清理、提示和 busy 状态绑定
   `scope+token+generation`，账号变化或较新刷新会淘汰旧结果；四个上游分组按钮始终显示。
   scoped key、SQLite、API、挂载目录和备份均不变，无归属旧缓存保留但不再被任意登录账号认领。
-  聚焦 14 项、frontend 588/588、build 与 Go 全量通过；三视口脚本已完成，但首次无头 Chrome
-  外部权限申请因审批服务断线被拒，因此 browser/Docker gate 尚未完成。
+  聚焦契约、frontend、build 与 Go 全量继续通过；`index-cache-scope-contract.mjs` 已在
+  `1440×900`、`390×844`、`360×800` 验证 owner-v1 网络水合、旧 key 不读取、当前账号独占统计/
+  清理、迟到 generation 淘汰和零水平溢出。运行时已包含在后续 `59e11a9` 发布镜像中。
 - 2026-07-27：按固定上游重新完成书内正文搜索专项。搜索输入从 Reader 替换后正文拆回原始章节，
   恢复精确、区分大小写、允许重叠的 `indexOf(..., previous + 1)` 语义；legacy 结果补齐
   Java/Kotlin UTF-16 索引与 ±20 片段。搜索行点击改为每次递增的 Reader intent，同一结果可重复
@@ -40,7 +49,7 @@
 | 首页/书架 | `views/Index.vue`、`plugins/vuex.js` `updateShelfBook/setReadingBook` | 已恢复移动端侧边导航思路，正文区继续收敛为书架列表；已移除移动正文区搜索和行内操作按钮；已隐藏移动端无效网格/列表切换，并将分组栏宽度恢复为上游式自然留白滚动；分组 tab 已按上游只展示有书且显示状态开启的分组，数量回到书架标题统计，减少移动端横向挤压；桌面网格已改回上游式多列紧凑书籍项，并收紧移动端书籍行封面/间距，避免固定宽度撑出屏幕；已把书架列表重新包进上游式 `books-wrapper`，移动页头从可能撑宽的 grid 改为标题区和按钮区 flex 分配，按钮只在自身区域横向滚动，避免操作按钮参与扩大正文宽度；本批将书架 CSS 收敛为上游 `repeat(auto-fill, 360px)` 心智的自动书籍块，桌面 1440px 验证为三列 360px 书籍项且无横向溢出；移动端固定走单列书籍行，封面列使用视口 `clamp`，390px 验证 `scrollWidth === clientWidth` 且 7 本测试书全部在屏幕内；移动端标题行保持上游大标题和右侧轻量文字按钮，按钮只在自身区域滚动，不再撑大正文；书籍行继续保留上游右上角操作/未读角标语义，不改成单独占行；本批把旧书架列表偏好迁移回上游默认网格，避免升级后仍因历史偏好显示为“一书一行”；已按上游 `isNormalPage` 收敛 Kindle 模式首页头部，隐藏书海/RSS/编辑，切入 Kindle 时自动退出编辑态；已把书架 store 内部排序也改为合并本地 reader 进度，避免页面层和缓存/store 层排序短暂不一致；本批进一步让 store 里的书籍对象本身合并最新 reader 进度，返回书架和浏览器缓存读取时不再只靠页面层临时计算；本批同步维护所有书架缓存 key 中的单书进度、增删和分组归属，避免“全部/分组/未分组/缓存恢复”之间读到不同章节位置、旧书或错分组排序；本批按上游 `currentUserName` 命名空间心智为书架内存态增加用户 scope，登录/退出/切换账号会清空旧书架、旧分组和旧请求，避免新账号复用上一账号内存书架；多端 `bookshelf_update` 带单本 payload 时本地合并，`bookshelf_delete` 本地移除；分组增删改/排序新增 `category_update/category_delete/categories_update` 增量同步，无 payload 批量事件才防抖刷新书籍和分组，降低多客户端请求风暴；本批 websocket 连接成功后改为缓存优先加载书架/分组，不再每次重连都强制全量刷新，减少移动浏览器反复重连触发 too many requests 的风险；本批将本地书识别和搜索字段与搜索页共用，书架本地分组/搜索同时识别导入文件字段和 `local://` 地址；本批移除书架标题、分组、列表容器上的全局 `app-panel` 卡片语义，桌面恢复上游式 48px 白色书架容器和内部 `books-wrapper` 滚动，移动端覆盖为自然页面滚动，避免书架被 `100vh` 截断；本批继续对齐上游 `updateShelfBook` 合并语义，前端收到单本 `bookshelf_update` 时会保留已有 progress/shelfOrderAt，后端单本书架广播也统一返回列表同款 `progress + shelfOrderAt` payload，避免编辑、刷新目录、换源、导入等事件把其它客户端书架阅读章节和排序洗回旧值；本批将批量分组/批量删除也从空 `bookshelf_update` 改为明确增量 payload，批量分组广播更新后的书架列表项数组，批量删除广播 `deletedIds`，其它客户端不再因此强制全量刷新书架；本批将手动检查更新从全用户 scheduler 改为当前用户范围，并让接口返回/广播实际更新的书架列表项，前端刷新书架入口优先局部 upsert；本批把侧边栏搜索框回车收回为上游 `searchBook` 心智，统一进入远程搜书流程，不再在首页自创书架过滤语义，用户要求的本地书搜索继续保留为独立入口 | 继续真机验收移动端宽度和多端进度排序 |
 | `miniInterface` 判定 | `plugins/helper.js` `isMiniInterface`、`plugins/vuex.js` `setMiniInterface` | 已确认 `pageMode` 作为本机偏好，不进入服务端阅读设置 payload，且切换页面模式不再更新跨端设置同步时间戳；后端保存、读取、自动备份导出和 WebDAV/OpenReader 备份恢复都会剔除旧客户端提交的 `reader.pageMode/miniInterface`，避免手机模式被写成账号级设置后影响其它客户端；已将自动模式重新收敛到上游 `window.innerWidth <= 750` 的主要判定，不再因触屏/粗指针把 Windows 无痕或触控桌面误判为手机界面；本批补充 Android/iPhone/iPad/手机浏览器 UA 判定，覆盖 OPPO/XBrowser 等手机上报宽 CSS viewport 时被误判成桌面书架的问题；强制手机形态仍只由“手机模式”负责 | 继续跨设备验收，特别是 Windows 触屏/无痕模式和 OPPO/XBrowser |
 | 移动侧边栏/书架宽度 | `Index.vue` `navigation-wrapper`、`shelf-wrapper`、`bottom-icons` | 已使用 260px 侧栏、右滑打开/左滑关闭；已修正移动端分组栏 `width:100% + margin` 导致的横向溢出；已补齐上游侧栏底部 GitHub/夜间切换入口，并让夜间主题实际作用到 App 外壳；桌面侧栏宽度也对齐到 260px，侧栏标题、分区标题、按钮、用户信息全部改为完整显示/自然换行，不再用省略号；已按上游标题区补齐版本号信息位，复用后端 `/health`，点击可查看构建时间和 commit；已移除移动端打开侧栏时正文区整体平移，侧栏改为覆盖式浮层，避免书架主体被动态位移影响宽度；已收紧移动分组栏留白，改为 `calc(100% - 留白)`，不再使用 `width:auto + max-width:none` 造成部分浏览器横向撑宽；本批移动主内容区不再强用 `100vw/100dvw`，改为继承容器宽度，减少 XBrowser/手机动态视口导致的书架横向溢出；本批移动分组栏进一步回到完整容器宽度，书籍行用 `contain:inline-size` 限制内部长文本影响外层布局；本批侧边栏分组收回上游 `Index.vue` 心智，移除自造“搜索入口”分组，搜索框下只保留书源/本地搜索快捷按钮，书源设置补齐“探索书源、导入书源、远程书源、失效书源、调试书源”入口；本批继续去掉自造底部用户卡/同步胶囊，把同步状态保留在“后端设定”，用户入口保留在“用户空间”，底部 GitHub/夜间按钮恢复为上游固定底部入口；本批把侧边栏管理入口从图标按钮收回为上游式轻量文字标签，保留完整文字换行，不再把管理区做成后台工具按钮；本批将应用外壳和工作区改为 `border-box` 宽度模型，避免 `width:100% + 侧栏 padding` 形成被裁剪的超宽工作区；390px 验证侧栏宽 260、底部入口宽 188、页面无横向溢出 | 继续真机验收 |
-| 侧边栏用户空间/本地缓存 | `Index.vue` 用户空间、`clearBookSourceList/clearRssSources/clearChapterList/clearChapterContent` | 本批把用户空间收敛到上游侧栏心智：显示当前用户/默认空间，补齐“备份用户配置、同步用户配置、加载用户空间”入口，分别映射到真实备份弹层、重新拉取用户/设置/书架/分类/缓存统计、用户管理弹层；本地缓存分区展示真实缓存大小，已按上游分项统计并清理书源列表、RSS 源列表、章节列表、章节内容；书源/RSS 源列表现在走浏览器缓存并在源更新同步事件后失效；2026-07-27 复审后，统计和清理冻结当前 `scope+token`，四个动作始终可见，只处理可证明归属当前账号的 scoped key。旧版无 scope 章节正文因无法证明所有者而原样保留，但不会被任意登录账号读取、统计或清理 | 自动测试完成，等待三视口浏览器验收 |
+| 侧边栏用户空间/本地缓存 | `Index.vue` 用户空间、`clearBookSourceList/clearRssSources/clearChapterList/clearChapterContent` | 本批把用户空间收敛到上游侧栏心智：显示当前用户/默认空间，补齐“备份用户配置、同步用户配置、加载用户空间”入口，分别映射到真实备份弹层、重新拉取用户/设置/书架/分类/缓存统计、用户管理弹层；本地缓存分区展示真实缓存大小，已按上游分项统计并清理书源列表、RSS 源列表、章节列表、章节内容；书源/RSS 源列表现在走浏览器缓存并在源更新同步事件后失效；2026-07-27 复审后，统计和清理冻结当前 `scope+token`，四个动作始终可见，只处理可证明归属当前账号的 scoped key。旧版无 scope 章节正文因无法证明所有者而原样保留，但不会被任意登录账号读取、统计或清理 | 自动测试与 1440×900、390×844、360×800 浏览器门均完成；运行时已包含在 `59e11a9` |
 | 搜索/加书 | `Index.vue` `searchBook/loadMore`、`BookInfo.vue`、`AnalyzeUrl` | 远程搜索结果已先进入全局书籍信息再加入/阅读；按用户要求，本地书籍搜索独立于书源搜索，本批修复切入本地模式后不立即搜索的问题，确保已导入本地书和书仓文件都会刷新结果；本批把已导入本地书的识别与搜索文本抽成共享工具，搜索范围覆盖 `sourceId=0`、`local://`、原始文件名、书仓路径、目录文件、上传文件名等字段，避免手动导入书只因字段名不同而搜不到；切换“当前层/子目录”时会在本地模式下重新扫描；本批补齐远程结果列表、分组、查重、加书 payload 和 loading 状态对上游字段名的兜底，书名/地址/来源/最新章节同时识别 `title/name`、`bookUrl/url`、`sourceId/bookSourceId`、`sourceName/originName`、`latestChapter/latestChapterTitle/lastChapter`；远程搜索分页已按上游区分单源与多源：单源把 `page` 代入搜索 URL，多源通过 `lastIndex` 从后续书源继续并按目标结果量分批，前端“加载更多”按 `bookUrl` 追加去重，不再重搜并覆盖已有结果；旧 OpenReader 搜索下一页选择器仍兼容逐页跟随；`bookUrlPattern` 命中当前响应 URL 时会按详情规则直接生成搜索结果，未配置 pattern 且列表为空时也按上游回退详情解析，直接详情结果保留完整请求描述；搜索、书海、详情、目录、章节正文及其分页链接均执行上游 `URL, {method/body/headers/charset/retry/type}` 配置，支持 GET、POST 表单、POST JSON、动态页码请求头、指定字符集请求编码与响应解码、`escape` 参数、HTTP 失败重试、原始字节十六进制响应和相对地址解析，整段选项在搜索结果、书架书籍和章节记录中保持不丢失 | 基本对齐，继续真机验收 |
 | 书内搜索 | `components/SearchBookContent.vue`、`Reader.vue#showSearchContent`、`BookController.searchBookContent/searchChapter` | 已按 2026-07-27 固定基准专项替换早期错误的分词/模糊扩展：现代与 Reader3 入口都搜索未应用 Reader 替换规则的原始正文，精确、区分大小写并允许重叠；legacy 返回完整 UTF-16 位置字段和 ±20 片段。App-level Dialog 保留同书状态，行选择通过可重复 Reader intent 定位，同章不重载、跨章不新增历史，连续模式先重建目标窗口；取消、有界扫描、完整性提示和“搜完全书”为显式允许增强。 | 自动与 Docker 门禁完成，使用 `1aeffb9`/`latest` 继续真机验收长篇搜索 |
 | 阅读器工具栏 | `views/Reader.vue` `showToolBar/showReadBar` | 移动端工具层进入阅读页时默认显示，中心点击在无面板时切换显隐；打开书架、书源、目录、设置、书签、正文搜索、缓存和书籍信息不会修改工具层状态，面板点击也不会穿透正文。移动面板已从底部 Drawer 改为与工具层并存的全宽工作区。桌面右侧快捷工具栏保持上游式单列圆形按钮；移动顶部、左右悬浮工具和底部进度/章节按钮顺序已按上游 mini-interface 对齐。正文和工具层使用容器宽度与 16px 对称留白；`Esc` 按上游返回书架 | 浏览器契约已覆盖默认显示、中心点击、面板并存/防穿透和 390×844、360×800 对称宽度 |
@@ -55,7 +64,7 @@
 | 目录定位 | `PopCatalog.vue` + `Reader.vue` 当前章节定位 | 已按上游目录弹层补齐倒序/顺序、顶部、底部、刷新入口；打开目录和切换顺序都会重新定位当前章节；本批打开目录前先按当前可见段落同步章节索引，连续滚动跨章后目录定位不再落到旧章节；本批将阅读器目录弹层里自造的搜索框改为默认关闭，移动端“目录”按钮只打开目录并定位当前章，不再自动聚焦输入框或弹出键盘，回到上游 `PopCatalog.vue` 的目录心智；书籍详情页保留显式开启的目录搜索，避免复用组件造成管理页退化；本批补齐上游 `gotoChapter` 对当前章也执行跳转的语义，点击目录中的当前章节会回到本章开头/目标位置，而不是只关闭目录 | 基本对齐，继续真机验收 |
 | 本地书目录规则 | `Index.vue` 导入本地书目录规则、`PopCatalog.vue` 修改目录规则、`TextFile.kt` `tocUrl` | 已补齐真实 `tocRule` 字段和后端解析路径：TXT/TEXT/MD 导入时可填写目录行正则，刷新本地书时可传入新规则并持久化到书籍；本地章节缓存缺失重建也复用该规则；本批补齐 EPUB3 Nav 与 EPUB2 NCX 目录读取，并实现上游 `spin+toc / spin<toc / spin / toc+spin / toc<spin / toc` 六种章节顺序与标题组合规则；直接上传预览、正式导入、本地书仓/WebDAV 逐本确认、书籍详情和阅读器目录都可以选择规则，刷新后会真实重建章节和缓存；TXT 自动识别覆盖数字分隔符标题、英文 Chapter/Section/Part、正文标题、特殊符号标题等上游默认样式，并兼容常见上游 lookbehind 前缀规则；`/api/txt-toc-rules` 对齐上游 `getTxtTocRules`，导入弹窗可从默认规则下拉选择并继续手动编辑正则。当前 TXT 实现仍使用 Go 正则，复杂 Java lookbehind 组合规则不冒充支持 | TXT 与 EPUB 主规则基本对齐，继续真书兼容验收 |
 | 书签管理 | `components/Bookmark.vue`、`BookmarkForm.vue` | 已有添加、编辑、删除、跳转；已补齐上游书签管理里的选择、批量删除、导入 JSON 入口，阅读器内抽屉和全局书签抽屉共用同一组件；导入与批量删除已按上游 `saveBookmarks/deleteBookmarks` 的一次请求语义接入事务型批量接口，删除严格限制当前用户与当前书籍，成功后只广播一次 `bookmarks_update`；本批补齐 `bookmarks_update` 用户级同步事件，另一客户端新增/编辑/删除当前书书签后，阅读器书签抽屉和全局书签抽屉会按 `bookId` 防抖刷新 | 基本对齐，继续真机验收导入格式和多端书签同步 |
-| 替换规则 | `components/ReplaceRule.vue`、`ReplaceRuleForm.vue` | 全局弹层已有新增、编辑、启停、删除、规则测试；已按上游补齐导入 JSON、选择和批量删除，导入兼容上游 `isEnabled` 字段，并按上游 `saveReplaceRules` 语义以名称原位更新同名规则、创建新规则、跳过无效规则；批量删除走当前用户范围内的单次事务接口；每次批量操作只广播一次 `replace_rules_update`，另一客户端收到后阅读器会防抖刷新当前章节，打开中的替换规则弹层会自动刷新列表，本机操作只通知阅读器刷新，避免弹层重复拉取 | 基本对齐，继续真机验收导入格式和多端规则生效 |
+| 替换规则 | `components/ReplaceRule.vue`、`ReplaceRuleForm.vue`、`Reader.vue#filterContent/showTextFilterPrompt` | 2026-07-28 固定基准重新推翻旧“基本对齐”判断并完成测试先行重建：manager 只保留上游五列表格、导入、批量删除/选择数/取消，editor 恢复四字段、双 checkbox 和固定标题，旧新增/刷新/逐行删除/测试器/mobile cards 删除；Reader 选中文字直达共享 editor。导入/保存不伪造或 trim，list/apply/backup 按 `id ASC`，scope 精确比较，restore 按 exact name/archive order；受支持 RE2 pattern 使用 JavaScript replacement string 语义，无 durable mutation 不广播。JWT/SQLite、legacy 空 scope、隐藏兼容 API，以及 RE2 的 32 捕获组/20,000 匹配/有界输出单独记录为允许差异；超限不返回部分正文。 | frontend 649/649、Go/build、四视口 manager 与桌面/手机/iPad Reader、新旧卷均通过；`a7abcdd`/`latest` index `sha256:93840cf72e9a0a783333ac5ab485551d892e42b9bf2e8eb2e2a1039e56b5dd53` 已发布 |
 | 书籍信息 | `components/BookInfo.vue` | 已复核书架、搜索、书海、阅读器均走全局 `openBookInfo`，详情页直接复用 `BookInfoPanel`；已补齐上游书名下方分类/标签信息层，并把“设置分组”放回分组属性行；已按上游补齐真实 `customCoverUrl`，书籍信息封面上传不再覆盖书源原始 `coverUrl`，书籍信息背景、公共封面和书架列表统一按 `customCoverUrl || coverUrl` 展示，备份恢复也保留自定义封面，上传类型收敛为 jpg/png/jpeg；本批补齐共享面板对上游字段的兼容兜底，标题/来源/最新章节/分类/章节数同时识别 `title/name`、`sourceName/originName/origin`、`lastChapter/latestChapterTitle/durChapterTitle`、`chapterCount/totalChapterNum` 等字段，避免搜索/书海/备份对象进入全局弹层时信息缺失；本批将全局书籍信息弹窗从详情页式左右布局收敛为上游 `BookInfo.vue` 的纵向信息弹窗：封面模糊横幅在上、书名和分类居中、属性和简介纵向排列，详情页继续保留完整管理页布局；本批继续拆开弹窗和详情页职责，弹窗隐藏章节数、阅读进度、浏览器缓存和搜索状态标签等详情页扩展字段，只保留上游书籍信息层；追更开关也按上游收回到“最新”属性行右侧；本批进一步移除全局书籍信息弹窗底部默认管理动作区，不再把继续阅读、正文搜索、书签、刷新目录、换源、缓存、删除等详情页/阅读器/书架管理职责塞进 `BookInfo`；本地书“更新”按上游放回来源属性行，并继续走真实刷新本地书和 reader cache 同步；书籍详情页的编辑、封面、追更、分组、刷新目录、修改本地目录规则和换源继续保留在详情页职责内 | 基本对齐，继续真机验收本地书更新和搜索/书海 actions |
 | 书架管理 | `components/BookManage.vue`、`BookGroup.vue` | 已有全局弹层；批量删除、批量添加/移除分组走上游主操作区，缓存/清缓存/导出等扩展真实能力收进“更多批量操作”，移动端不再堆叠全部按钮；分组管理已按上游保护语义只允许删除空分组，非空分组不再被删除并解绑书籍；已补齐分组显示/隐藏开关，隐藏只影响书架分组 tab，不改变书籍所属分组；移动端书架管理卡片封面复用全局封面规则；本批把“设置分组”的未分组选项收进表格，继续贴近上游选择后确认的弹层心智；本批把书籍管理搜索也接入共享本地书搜索字段，批量管理本地导入书时可按文件名/书仓路径命中；本批将缓存按钮文案收敛为上游语义的“缓存到服务器 / 缓存到浏览器”，不再在按钮上写固定章节数量；本批将分组管理从自定义卡片行收回到上游 `BookGroup.vue` 的表格结构，添加/编辑分组均使用弹窗输入；分组排序也从立即上移/下移收敛为上游式拖拽排序草稿和“保存排序”；本批继续对齐上游 `BookManage.vue` 章节列，远程书会展示服务器缓存章节数和浏览器缓存章节数，单书缓存/清缓存后本地书架 item 立即更新计数；本批补齐上游单书“导出为 TXT / 导出为 Epub”的真实正文导出，批量 TXT/Epub 会打包 zip，原数据导出继续保留为 JSON；本地书也按上游保留“缓存到浏览器 / 删除浏览器缓存”，只有服务器缓存限制远程书，书籍信息弹层同步显示/操作本地书浏览器缓存；当前后端与各管理入口均通过 `book_categories + categoryIds` 维护真实多分组，旧 `categoryId` 只作为兼容字段保留 | 基本对齐，继续真机验收移动端 |
 | 书源管理 | `components/BookSource.vue`、首页书源入口 | 基础管理、导入预览、远程预览、三段调试、失效检测、批量启停/删除、批量设置分组、恢复默认已有；移动端按上游 footer 语义补齐“已选择/批量删除/检测书源/取消”，启停/分组/停用失败收进“更多批量操作”；失效检测已对齐上游搜索词、1000-15000ms 超时和 3-15 并发配置，超时 Context 会真实传到 HTTP request 并取消慢请求，不再只是提前返回后让请求留在后台；阅读器/详情页换源面板已有上游式书源分组数量展示；书源管理页分组筛选已改为 `分组名 (数量)`；本批补齐侧边栏入口到书源页的动作响应，`action=import` 会打开书源 JSON 文件选择，`action=debug` 会打开第一个可用书源的三段调试弹层；已按上游“书源为全局管理能力”的语义补齐 `sources_update` websocket 广播，新增/编辑/删除/清空/批量/导入/远程导入/保存默认/恢复默认后，其他客户端书源页会防抖刷新列表，默认快照变更会同步刷新状态；已补齐全局弹层 `sourceRows` 监听，打开中的书籍信息会同步刷新书源名，避免管理页与书籍信息源名不一致；本批补齐换源候选对上游字段名的兼容，显示、去重和切源 payload 共用 `sourceId/bookSourceId`、`bookUrl/url`、`title/name`、`sourceName/originName` 兜底；本批进一步按上游 `BookSource.vue` 补齐候选来源 `latestChapterTitle` 和搜索耗时 `time`，前端换源面板恢复“来源(数量) + 分组 + 刷新/加载更多 + 来源行”的结构，并在打开/刷新后自动滚动定位当前来源；本批继续把阅读器和详情页的换源面板收回到上游结构，移除自造的“搜索书名或别名”“书籍信息”和搜索统计文案，候选请求只按当前书、分组和分页加载，“加载更多”不再因当前页 `hasMore=false` 被灰掉；全局书籍信息弹窗不再承载换源抽屉；书源导出已从内部数据库模型改为上游 `BookSource` 字段结构，属性规则和 URL 占位符会在 `a@href/{{key}}` 与内部格式之间双向转换，同时保留 `rules/charset` 扩展字段供 OpenReader 无损回导；`enabledExplore` 已作为独立字段贯通导入、编辑、持久化、备份/恢复和导出，关闭发现不会影响普通搜索，整体 `enabled=false` 仍作为总开关；`customOrder` 已贯通导入、编辑、备份/恢复和导出，书源列表、搜索、书海、换源候选、失效检测和默认快照统一按 `customOrder + id` 稳定排序，并把 `originOrder` 带回搜索结果；`concurrentRate` 已贯通导入、编辑、数据库、备份/恢复和上游格式导出，并在搜索、书海、详情、目录、正文及分页请求中真实限速；上游 `ruleBookInfo.tocUrl` 已按真实两段请求执行：先加载详情页解析目录地址，再加载目录页，空结果回退详情页本身，旧直接 URL 配置继续兼容；搜索/书海结果更新时间规则已真实解析并在结果卡片展示；正文图片样式 `contentImageStyle=FULL` 已在 HTML 正文图片中生效，阅读器按全宽图片展示；书源编辑器已把真实执行的 `bookUpdateTime/exploreBookUpdateTime`、`bookInfoInit/canRename`、卷名/VIP/章节更新时间、`contentReplaceRegex` 和 `contentImageStyle` 从“兼容字段”提示中移出，仍未执行的 JS/Web/sourceRegex 继续明确标为兼容 | 基本对齐，继续真机验收移动端和多端书源变更 |
@@ -318,6 +327,11 @@
   前端 626/626、生产构建、Go 全量与差异检查通过；三视口重新认证浏览器门和 Docker 待完成。
   对应合同：
   [workspace-overlay-authenticated-session-p1-contract.md](/Users/yuchangsheng/Documents/OpenReader-dev/docs/compat/workspace-overlay-authenticated-session-p1-contract.md)。
+- 2026-07-28：上述全局弹层会话隔离的最终 Overlay 浏览器门已经签收。测试夹具先修正整页
+  导航覆盖续登 token、错误书源旧入口、响应式重复节点和移动搜索侧栏收起动作；随后真实抓到
+  并修复 RSS 手动新增 `null` 草稿崩溃。最终 BookInfo、StorageImport、WebDAV、Source、RSS、
+  UserManage 六条 pending 写流程在 1440/390/360 三视口全部通过，旧 toast/event/reload 为零，
+  手动重开只见当前账号数据。frontend 645/645、production build、Go 全量和差异检查通过。
 - 2026-07-27：重新审查书源所有权后，撤销本文件早期“书源为全局管理能力”及
   `sources_update` 应全账号广播的判断。固定上游把活动书源持久化在每个用户 namespace；
   默认书源只在用户私有文件不存在时复制一次。当前无 `user_id` 的 `BookSource` 会让普通
@@ -342,3 +356,10 @@
   使用单事务，默认文件原子替换并在 DB 失败时补偿。保存默认额外要求管理员，恢复默认只
   reconcile 当前账号，`sources_update` 不再全账号广播。双账号 API 契约和完整 API 回归
   已通过；搜索/探索、书籍/Reader/scheduler、备份及管理员联动仍未接线，所以不发布 Docker。
+- 2026-07-28：线上确认运行 `59e11a9` 后继续复审夜间实际文字层。固定上游允许任意
+  自定义方案成为“黑夜默认”，而第三轮实现只让非 custom preset 进入内容面接管，导致
+  “纯黑、无图”的自定义夜间页面仍可能保留普通 `mark/span` 或 EPUB 作者白底。当前改为按
+  最终夜间页面颜色与背景图判定：内置和纯黑自定义方案共享纯白文字/透明后代，背景图和非黑
+  自定义夜间继续保留。frontend 644/644、Go/build、TXT 桌面/两手机/iPad 和真实 EPUB
+  1440/390/360 已通过；本机新卷和历史卷门通过后发布 `3ee3a82`/`latest`，amd64/arm64
+  OCI index 为 `sha256:23454f80db395e45c660e41b9fe5a314936be89a0acbe27eeab0e4761a332f18`。

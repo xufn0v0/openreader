@@ -190,8 +190,8 @@ The current risk is not framework selection. The risk is implementing from an ab
 | RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition and compact fullscreen behavior are rebuilt. The 2026-07-27 lifecycle batch removed blank-name fallback and same-URL duplicate creation, added source/sort/filter/page request ownership, and made source/article deletion transactional. Persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | [`rss-source-lifecycle-p2-contract.md`](rss-source-lifecycle-p2-contract.md), RSS fixture/parser tests and delayed source-switch browser smoke. |
 | WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P1-E3 restored root labels, current-directory lifecycle, LocalStore result gate and distinct importable formats; private roots, immutable preview tokens and bounded writes remain allowed security/runtime adaptations. | `aligned for extracted workspace flow` | [`workspace-storage-import-p1e3-contract.md`](workspace-storage-import-p1e3-contract.md), path tests, three-viewport storage smoke and Docker volume gate. |
 | External WebDAV protocol | Upstream `WebdavController.kt` exposes `/reader3/webdav*`, Basic authentication, discovery headers and OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE/MOVE/COPY/LOCK/UNLOCK. | Both `/webdav/*` and `/reader3/webdav/*` accept Bearer/Basic and implement DAV discovery, listing and file methods through symlink-safe `webdavfs`; the deployed `/webdav` directory GET adapter remains. | Caller-private roots, bounded atomic writes and non-persistent LOCK are explicit security/runtime adaptations. | `aligned / Docker-published` | [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md); keep Basic curl, CORS, symlink and mounted-volume contracts. |
-| Backup/restore | Upstream logical backup and WebDAV restore use reader-dev singular artifacts, progress files and one file manager, all under the current user namespace. | OpenReader emits/accepts upstream and old aliases, plans bounded content before one transaction and has published portable v1/v2 extensions, but user backups still export/restore the global `BookSource` table. | Non-source logical artifacts and portable extensions remain validated; source artifact ownership is reopened and must become caller-scoped. | `P2 source ownership must-fix; other artifacts Docker-published` | [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md), [`book-source-ownership-p2-contract.md`](book-source-ownership-p2-contract.md), [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md). |
-| Auth/user management | Upstream `AddUser.vue`/`UserManage.vue` impose account rules, separate WebDAV/LocalStore rights, protected default namespace, private/default source actions and complete namespace deletion. | OpenReader uses JWT, protected administrators, ASCII account/password rules, independent rights and transactional row/file deletion, but `BookSource` is still one global table and the two user-source actions are absent. | Account/UI/storage slice is aligned; global source ownership is now confirmed as an isolation bug, not an intentional redesign. | `P2 account slice aligned; source ownership must-fix` | [`user-management-p2-contract.md`](user-management-p2-contract.md), [`book-source-ownership-p2-contract.md`](book-source-ownership-p2-contract.md), migration/API/browser/Docker dual-account gates. |
+| Backup/restore | Upstream logical backup and WebDAV restore use reader-dev singular artifacts, progress files and one file manager, all under the current user namespace. | OpenReader emits/accepts upstream and old aliases, plans bounded content before one transaction, keeps one WebDAV manager and adds separately named portable v1/v2 extensions. Logical/portable export and restore resolve only the authenticated user’s active source namespace; detached/cross-owner source metadata does not leak. | Fixed-baseline ZIP/UI/transaction behavior and P2-S4 source ownership are both closed. Private WebDAV roots, bounded archive validation, portable assets and detached-source safety are explicit Go/multi-user adaptations. | `aligned / Docker-published` | [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md), [`book-source-ownership-p2-contract.md`](book-source-ownership-p2-contract.md), [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md); `f44447f` revalidated the specialized ownership and general new/old-volume gates. |
+| Auth/user management | Upstream `AddUser.vue`/`UserManage.vue` impose account rules, a shared desktop/mobile table, exact last-login data, separate WebDAV/LocalStore rights, protected default namespace, private/default source actions and complete namespace deletion. | JWT/admin protection, account rules, independent permissions, transactional deletion and user/default source ownership remain. `f44447f` restored the one-table desktop/mobile structure, fixed mobile columns, exact core column/footer order, explicit cancel and persisted `lastLoginAt`; `lastActiveAt` remains only an equal compatibility alias. | Core product flow is aligned. Protected administrator semantics, source-edit permission and REST/JWT representation are documented multi-user/runtime adaptations. | `aligned / Docker-published` | [`user-management-p2-contract.md`](user-management-p2-contract.md), [`book-source-ownership-p2-contract.md`](book-source-ownership-p2-contract.md); Go/frontend/build, 1440/1024/390/360 browser and new/old-volume gates passed for `f44447f`. |
 | Docker/runtime | Upstream ships Java/Gradle/Docker variants. | Current single Go binary + frontend dist in Alpine, env-driven volumes. Official Node/Go/Alpine base digests are pinned; CA roots are copied from the Go builder and the Go binary embeds IANA time-zone data, so the final stage has no mutable registry/APK package step. | Intentional deployment redesign. The digest pinning and embedded runtime assets are an allowed reproducibility/security adaptation; mounted-volume behavior remains unchanged. | `intentional-redesign` | `PUSH=0 ./scripts/docker-build-push.sh`; `scripts/docker-volume-backup-smoke.sh`. |
 
 ## Immediate parser contract: TXT local import catalog rules
@@ -2600,6 +2600,16 @@ code and must include a real multi-account browser-cache fixture.
 跨账号，且默认恢复会删除仍被书籍引用的 source ID。后续按“旧卷迁移 → owner-scoped
 API/运行时 → 默认/UserManage → 备份/浏览器/Docker”四个测试先行切片实施。
 
+实施与发布结果（2026-07-28）：P2-S1…S4 已全部关闭。关系迁移、COW、管理/搜索/Reader/
+scheduler、管理员默认动作、logical/portable/WebDAV 备份恢复和 versioned 浏览器缓存均按
+用户 namespace 运行。二次发布审计发现旧通用 fixture 没有全局远程书源且已经写入迁移 marker，
+因此新增真实旧全局源、跨用户远程书/失败引用和独立
+`docker-source-ownership-smoke.sh`。精确候选 `0db752e` 通过旧卷首次迁移、user 0/A/B
+association、COW、管理员旧根、普通用户私有根、双用户 ZIP、恢复、重启和最终 SQLite 检查，
+并通过通用新旧卷、Go 全量、frontend 639/639 与 production build。本机发布的
+`0db752e`/`latest` amd64/arm64 OCI index 为
+`sha256:83f53fe3aa523fc1196454d4c5f1d413648eb72ad1e87c83c838e7200859207e`。
+
 ## 2026-07-17 书架一致性与阅读器运行时复审
 
 本轮固定上游复审记录在
@@ -2755,6 +2765,97 @@ visibility/unmount 强制保存可能按新 scope 写本地进度，并尝试以
 和 Go 全量均通过；本地服务端口审批因工作区额度不足被拒绝，因此三视口真实浏览器与 Docker
 发布尚未计为完成。
 
+2026-07-27 的真实浏览器补门发现候选实现仍有一处根渲染竞态：`AuthForm` 的
+`user.login()` 先写 token，`App.vue` 又先判断 `isLoggedIn`、最后才判断登录路由，导致原
+`Login.vue` 在发出 `success` 并完成 `router.replace()` 前被替换成
+`AppLayout + Login.vue`。首次登录会停留在 `/login?returnTo=/`，已有失效 scope 的账号切换
+则会停在“正在恢复当前账号…”。固定合同是登录页必须保持同一个挂载实例，直到成功回调完成
+安全路由和 `completeReauthentication()`；登录路由优先级必须高于 authenticated shell，
+且登录页不得嵌入私有 `AppLayout`。先增加根模板顺序失败测试，再调整 `App.vue`，最后重新运行
+真实双账号三视口门禁。
+
+补门实施结果：根模板现在首先保留 `isLoginRoute` 的公开 `router-view`，认证 Reader/workspace
+只在非登录路由分支挂载；测试先证明旧顺序失败，再锁定登录路由必须排在 authenticated shell
+之前。隔离真实后端中首次登录和 B→A 账号切换均直接收敛到 `/`，不再出现嵌套 Login 或永久
+“正在恢复当前账号…”。1440×900、390×844、360×800 的双账号书源/缓存/备份恢复验证通过；
+Docker 升级卷与发布门仍待执行。
+
+## 2026-07-28 Reader 文本位置语义选择器复审
+
+原总矩阵中“书源入口、`h3` 标题、长词断行尚未实现”的当前证据已经过期：桌面/移动书源
+按钮可打开同一面板，普通/卷/错误章节均为 `h3[data-pos="0"]`，标题排版和段落断行也已
+恢复固定上游值。逐 consumer 检索仍发现 `useReaderNavigation#paragraphByChapterPosition`
+保留 7 月 13 日标题重构前的 `h1[data-pos]`。该函数参与已有连续章节的目录/书签字符位置
+跳转和进度恢复，因此不是无效文本。
+
+本轮裁决为单点 `must-fix`：位置节点序列统一为
+`h3[data-pos], [data-reader-block][data-pos]`，保持现有“最后一个 `data-pos <= offset`”
+算法、章节顶部回退、路由和持久字段不变。先让静态 consumer 合同和行为测试在旧代码失败，
+再实施并跑文本/连续阅读浏览器门。完整合同见
+[`reader-text-position-selector-p0-contract.md`](reader-text-position-selector-p0-contract.md)。
+
+实施已完成：旧代码分别在静态 consumer 合同和已加载连续章节 `goChapter(index, offset)`
+行为合同中失败；选择器切换为实际渲染的 `h3[data-pos]` 后聚焦 9/9、frontend 641/641、
+production build、Go 全量、文本模式与连续阅读真实浏览器合同均通过。本批不改变 API/数据，
+暂不单独发布 Docker，将与下一 Reader 完整切片合并。
+
+## 2026-07-28 Reader 移动夜间模式正文对比度复审
+
+固定上游的浏览器自动夜间与 Reader 月亮按钮都调用 `setNightTheme`，一次应用命名为“黑夜默认”
+或“白天默认”的完整方案；普通 preset 也不会继续读取 custom 背景图/颜色。当前 OpenReader
+只有系统自动切换会应用完整方案，Reader 和 Index 月亮按钮只换 preset，并把新主题反写进原活动
+方案；`fontColor` 与 custom 背景图又会跨 preset 保留，因此可出现暗字暗底或亮图亮字。
+
+本批裁决为 **must-fix**：统一全部昼夜入口的完整方案状态转换；custom 资源只在 custom 主题
+生效；普通正文、EPUB 和 Audio 共享经 WCAG `4.5:1` 检查后的有效正文色。用户保存颜色保持不变，
+只有渲染在对比不足时选取安全色。这是上游状态转换修复叠加用户明确要求的可读性增强。完整矩阵、
+允许差异与测试门见
+[`reader-night-contrast-p0-contract.md`](reader-night-contrast-p0-contract.md)。本轮 inventory
+完成后已按测试先行实施：浏览器自动主题、Reader 与 Index 月亮按钮现共用完整方案切换；
+custom 资源不再污染 preset；普通章节、EPUB、Audio 与阅读操作层共用经过 `4.5:1` 门槛
+保护的语义文字色。用户保存的颜色不被重写。夜间控件面与强调色采用独立语义变量，这是用户
+要求的可读性增强，日间仍保留上游 `#ed4259`。
+
+后端全量、前端 `636/636` 与 production build 均通过。390×844、360×800 的真实 TXT/EPUB
+验证中，正文对比度为 `9.29:1`，普通控件为 `8.91:1`；EPUB iframe 与普通正文颜色一致，
+设置面板和移动工具层保持并存且无控制台错误。系统媒体查询入口由 store/bootstrap 自动测试
+覆盖，手动月亮入口由真实浏览器覆盖。第一轮由提交及镜像 `cca1320` 发布，随后被用户实机
+复验判定为未达到纯黑白目标。
+
+`cca1320` 发布后的用户实机反馈证明上述验收目标仍不完整：`#2d2d2d + #d8d4c8` 虽满足
+WCAG，却不是用户要求的纯黑正文面与白字；`.reader-shell` 还无条件加载日间纸张纹理，
+EPUB `html` 背景也可能被书内 CSS 覆盖；真实浏览器还确认透明 iframe 画布会实际显示为白色。
+固定上游本身使用 `content_6/body_6` 暗纹理和
+`#666666` 字体，因此本轮不是简单复制上游，而是用户明确要求的 `intentional-redesign`。
+第二轮合同锁定内置夜间 `#000000 + #ffffff`、正文与外壳无纹理、EPUB 显式绘制同一页面背景；
+custom 主题继续尊重用户资源。详见同一夜间对比度合同的“第二轮实机反馈与修订合同”。
+
+第二轮已测试先行实现。真实浏览器先复现了“iframe 根透明但画布仍为白色、白字不可见”，
+随后确认修复后的 TXT 与 EPUB 在 390×844、360×800 都由实际 shell/page/iframe/html/body
+绘制 `rgb(0,0,0)`，标题和段落为 `rgb(255,255,255)`，所有阅读背景图均为 `none`，无控制台
+错误。自动深色入口继续由与手动入口相同的 store 动作驱动。最终后端全量、前端 `639/639`
+与 production build 均通过。实现提交 `a90d10b` 已推送 `main`；本地新卷 smoke 通过
+portable v1/v2 assets、跨用户、重启和备份恢复，历史卷 smoke 通过 TXT、EPUB、UMD、CBZ、
+相对缓存与 owner isolation。GHCR `a90d10b` 和 `latest` 已发布，均指向 amd64/arm64 OCI
+索引 `sha256:c0480023418b94d06f55baa8e25e3976f7aa4e9b86b8ba4854ca136d99be1b3e`。
+本批状态为 **Docker-published / awaiting device verification**。
+
+第三轮针对“外层已经黑、实际文字层仍有浅色面”的实机反馈重新取证。固定上游和第二轮实现
+都没有清除 EPUB `main/div/section/span/table` 等作者内容层的背景、渐变和文字颜色，普通
+HTML 的 `mark/span` 后代也缺少内置夜间强制合同。实现提交 `4d40487` 增加明确
+`built-in-night` 状态：内置夜间最终文字固定为 `#ffffff`；普通正文后代透明叠加纯黑页面；
+EPUB bridge 保存作者 inline value/priority，以 `important` 可逆接管现存和新增后代的前景、
+背景图与阴影，退出夜间后原样恢复。custom 夜间继续尊重用户颜色、背景和 WCAG 保护。
+
+Docker 发布门另外复现首次登录时 `GET /api/explore/sources` 与设置保存并发导致的 SQLite
+读事务升级 `database is locked`。`f9723ad` 串行化跨 Service 首次初始化，`9a13d8e`
+仅对 SQLite `BUSY/LOCKED` 做有限重试；两个确定性测试分别覆盖同命名空间并发和无关写事务
+占锁，不改变路由、响应或数据库结构。最终 Go 全量、frontend `640/640`、production build、
+普通正文桌面/手机/iPad、EPUB 1440×900/390×844/360×800、新卷及历史卷门禁全部通过。
+`9a13d8e`/`latest` 已由本机发布 amd64/arm64 OCI 索引
+`sha256:777bcb96fa59d718b413b22756b3b30696b891bed7826930af168ce15d0e6bed`。
+本批状态为 **Docker-published / awaiting device verification**；其余 Reader/P2 审查继续。
+
 ## 2026-07-27 Index 工作台认证会话隔离复审
 
 Reader 隔离完成后继续审查同一 authenticated shell，确认 `indexWorkspace` 没有账号 scope、
@@ -2776,8 +2877,16 @@ session generation 或 reset：搜索/探索结果、来源 intent、分页、�
 inventory 提交后已按测试先行完成候选实现：工作台拥有非持久 session generation 和最小挂起
 intent；同账号仅恢复 intent 并重取结果，不同/未知账号与显式 logout 回到干净书架；认证路由
 settled 前 Reader/Index 均保持阻塞。Search、Explore、侧栏书源、route BookInfo、本地导入和
-临时阅读交接均有身份/会话提交门。前端 611/611、生产构建与 Go 全量通过；三视口真实浏览器及
-Docker 仍待完成，当前不得标为最终发布。
+临时阅读交接均有身份/会话提交门。该候选当时通过前端 611/611、生产构建与 Go 全量，但三视口
+真实浏览器及 Docker 尚未完成，因此当时没有标为最终发布；后续闭环记录如下。
+
+2026-07-28 已补齐最终真实浏览器门：`index-session-isolation-contract.mjs` 在
+`1440×900`、`390×844`、`360×800` 真实运行 Search/Explore 组件，并按实际 Axios 顺序先删除
+token 再派发认证事件。A 的悬挂 Search success 和 Explore error 在失效后均无法提交；同账号
+只以续签 token 重取 Search，新账号只显示 B 书架且不重开 Explore chooser。无旧结果、toast、
+overlay、临时 Reader 跳转或水平溢出。当前 frontend 643/643、production build 与 Go 全量通过；
+运行时代码已包含在本机发布的 `59e11a9`，本合同状态改为
+**aligned / Docker-published**。
 
 ## 2026-07-23 Reader 设置切换位置连续性复审
 
@@ -2898,4 +3007,94 @@ BookManage、BookGroup、Bookmark、LocalStore、Source、ReplaceRule、RSS、�
 均使用同一 scope/token/lifecycle operation 门，并保留原有 request revision、AbortController、
 timer 和长期 cache job 语义。确认框期间换号不再 dispatch，迟到响应不能写 store/ref/cache、
 导航、关闭弹层、下载、广播、提示或启动写后 reload。前端 626/626、生产构建、Go 全量与
-`git diff --check` 已通过；三视口 401/重新认证真实浏览器门和 Docker 仍待完成。
+`git diff --check` 已通过。2026-07-28 已新增真实 Overlay 浏览器门，使用 pending A 请求、
+同账号续登/异账号换号和手动重开，覆盖 BookInfo、StorageImport、WebDAV、Source、RSS、
+UserManage；最新自动门为 frontend 643/643、生产构建与 Go 全量通过。首次浏览器执行已进入
+StorageImport 并修正“整页导航重复注入 A token”的测试夹具缺陷；最终三视口复跑因 macOS
+沙箱外 Chromium 审批通道中断尚未完成，故本切片仍是 candidate，Docker 仍待完成。
+
+## 2026-07-28 Reader 纯黑自定义夜间内容面复审
+
+线上已确认运行 `59e11a9` 后，用户仍观察到黑色阅读背景上的实际文字承载层不是黑色。第四轮
+取证确认第三轮把内容面接管条件错误地绑定到 `theme !== "custom"`；固定上游却允许任意
+自定义方案成为“黑夜默认”。因此 `theme: custom + themeType: night + customBgColor:
+#000000 + 无背景图` 虽已绘制纯黑页面，普通 `mark/span` 和 EPUB 作者后代仍不会进入接管。
+
+本轮改为按最终渲染面判定：只有语义夜间、不透明纯黑页面且无背景图才共享白字/透明后代
+合同；自定义图片和非黑夜间继续保持用户资源。frontend 644/644、Go、build、TXT
+桌面/两手机/iPad 及真实 EPUB 1440/390/360 回归通过。完整矩阵、失败测试和验证证据见
+[`reader-night-contrast-p0-contract.md`](reader-night-contrast-p0-contract.md)。本机新卷和
+历史卷门通过后已发布 `3ee3a82`/`latest`，amd64/arm64 OCI index 为
+`sha256:23454f80db395e45c660e41b9fe5a314936be89a0acbe27eeab0e4761a332f18`。
+
+第五轮用户复验时，线上 `/api/health` 实际仍返回 `59e11a9`，并未运行上述修复，也未运行
+随后包含该修复的 `342d736`。因此本轮先关闭交付链缺口：Compose 增加
+`pull_policy: always`，README 固化 pull、force-recreate、health-check 三步更新门。应用源码
+未再次修改；同一源码的 frontend 645/645、Go/build、TXT 与真实 EPUB 三视口、新旧卷复验
+通过。本机已发布 `9048831`/`latest`，共同指向 amd64/arm64 OCI index
+`sha256:f021b995611b961441ed3a2cb0cb06860c41b18c90fd444f6901dcab938fa6f6`。站点只有在
+`/api/health` 返回 `9048831` 后才能继续设备验收；单纯浏览器刷新不构成升级。
+
+## 2026-07-28 RSS 新增编辑器状态转换复审
+
+工作台 Overlay 会话隔离真实浏览器门进入 RSS `新增` 分支后，发现此前 RSS 生命周期结论
+漏掉了一个直接影响用户的空值状态：固定上游 `RssSourceList.vue#editRssSource(false)` 会先
+把 falsy 参数替换成完整的新源默认对象，再打开编辑器；当前
+`RSSManager.vue#openEditor()` 却把默认 `null` 直接交给高级字段提取函数，最终在
+`hasOwnProperty.call(null, field)` 抛错，导致新增弹窗完全不出现。
+
+该差异重新判为 **must-fix**。实现前合同已补入
+[`rss-source-lifecycle-p2-contract.md`](rss-source-lifecycle-p2-contract.md)：修复只能做
+null-safe 草稿归一化，保留已记录的空标题差异以及 `singleUrl=true/articleStyle=0/
+enabled=true/enableJs=true` 等手动新增默认值；同时补充稳定的私有弹层根标识，供重新登录
+生命周期门精确证明旧编辑器已销毁。完成条件是失败单测、RSS pending-write 换号场景和
+Overlay 六场景三视口全门，而不是仅证明点击不再抛错。
+
+实施结果（2026-07-28）：`openEditor()` 已先把 falsy 新源 sentinel 归一化为空对象，再读取
+基础和高级字段；手动新增继续保留 `singleUrl=true/articleStyle=0/enabled=true/enableJs=true`
+默认值，编辑既有源不变。RSS 编辑器新增稳定私有弹层根标识。失败单测转绿后，frontend
+645/645、production build、Go 全量及差异检查通过；Overlay 六场景在 1440×900、390×844、
+360×800 全部通过，RSS 迟到 A 写入没有 toast、事件或 reload，手动重开只显示 B 数据。
+本地 `342d736` 候选随后通过普通与历史挂载卷/备份门，并由本机发布为同名标签与 `latest`；
+amd64/arm64 OCI index 为
+`sha256:1643625269f5a04f867c56da9e3bee04c1318d807e73ca6fc0913ab408645921`。
+
+## 2026-07-28 ReplaceRule P2 固定基准重新复审
+
+历史 ReplaceRule 记录不能继续作为完成证明。重新逐行核对固定
+`reader-dev@fa22f271849d45f93349ae1636223e27b16a4691` 后确认，`57b1dc0` 只把 manager
+外壳从 Drawer 改成 Dialog，内部仍沿用最初 OpenReader 设计：额外新增、刷新、逐行删除、
+测试器、pattern/replacement/regex 列和移动 cards 都不是上游结构；编辑器宽度、标题、
+checkbox 与 footer 也不一致。
+
+数据路径同样存在旧测试未覆盖的偏差：
+
+- 导入为缺失 name 的行伪造 `导入规则 N`，并 trim pattern；
+- 前后端保存 trim name/pattern/scope，破坏上游精确字符串规则；
+- list、Reader 与 backup 使用 `sort_order,id`，而固定上游按 JSON 数组位置执行并忽略
+  entity `order`；
+- `书名;` 被当成任意 URL，固定上游会要求空第二段精确等于 book URL；
+- restore 以 pattern 合并并用 pattern 伪造 name，固定上游身份是精确 name；
+- Go replacement string 尚未证明与 JavaScript `String.replace` 的 `$` token 语义一致。
+
+本轮已建立
+[`replace-rule-fixed-baseline-p2-contract.md`](replace-rule-fixed-baseline-p2-contract.md)，将上述
+项目全部重判为 `must-fix`。JWT/SQLite ID、批量事务、post-write WebSocket、字段大小限制和
+RE2 拒绝不安全/不支持表达式保留为明确技术或安全适配；`sort_order` 仅保留持久化/导出，
+不得再控制 Web Reader pipeline。下一阶段必须先替换会固化当前错误结构的测试，再实施代码；
+合同提交前未修改应用代码。
+
+### 固定基准重建结果
+
+合同 pass 后已先增加失败测试，再重建应用。manager/editor 恢复固定上游 Dialog、表格、
+表单、默认值和 sibling 状态；Reader 选中文字直达同一 editor。导入与 REST 保留精确
+name/pattern/scope，按输入总数确认并由服务端只跳过精确空行；list/apply/backup 改为
+`id ASC`，scope 精确分段，restore 按 exact name 和 archive order。新的有界 RE2 引擎对
+受支持 pattern 实现 JavaScript replacement-string token 语义；无 durable write 的
+all-skipped batch 不广播。
+
+frontend 649/649、Go 全量和 production build 通过。专项浏览器在
+1440×900、1024×1366、390×844、360×800 覆盖 manager/editor/import/toggle/batch，
+工作台三视口和 Reader 桌面/手机/iPad 选中文字流程也通过。RE2 pattern 子集、JWT/SQLite、
+legacy 空 scope 及隐藏兼容 API 是唯一明确允许差异；Docker mounted-volume/backup 门在提交后
+执行。

@@ -95,7 +95,9 @@ Docker new/old volume proof remains a release gate.
 
 ## P2-S1 book-source ownership association migration
 
-Status: implemented and migration-tested on 2026-07-27; API/runtime isolation remains pending.
+Status: **implemented, migration/browser/Docker validated and published in `0db752e`**. The
+2026-07-28 evidence audit reopened the old fixture, then added a true global-source database and
+closed the dedicated migration/COW/backup/restart gate before publication.
 
 - Existing `book_sources` rows remain in place. The additive `user_book_sources` table records active
   or detached visibility, while `book_source_namespaces` distinguishes uninitialized users from an
@@ -109,7 +111,23 @@ Status: implemented and migration-tested on 2026-07-27; API/runtime isolation re
   stays absent until a default template exists.
 - Contract evidence:
   `backend/db/book_source_ownership_migration_contract_test.go`. Source CRUD/search/reader/backup
-  must not use these associations until P2-S2 switches all consumers together.
+  now use these associations through P2-S2…S4.
+- The release fixture must represent the actual old format, not a database that has already recorded
+  `book-source-ownership-v1`: it contains `users`, global `book_sources`, caller-owned books and
+  `source_failures` referencing those source IDs, while `user_book_sources`,
+  `book_source_namespaces` and the migration marker do not exist. Opening that mounted volume must
+  create associations for every existing user and user zero without rewriting any old source/book/
+  failure ID.
+- The fixture remains additive to the established TXT/EPUB/UMD/CBZ/relative-cache old-volume data.
+  It must not delete or simplify those records to make the ownership test easier.
+- Required Docker evidence is API-visible COW plus stopped-volume SQLite inspection: one user's edit
+  remaps only that user's association/book/failure; the other user and default template retain the old
+  snapshot. Logical and portable archives from administrator legacy root and regular-user private root
+  must contain only caller-active sources, survive restore and remain isolated after restart.
+- Final evidence: `scripts/docker-source-ownership-smoke.sh` and both modes of
+  `scripts/docker-volume-backup-smoke.sh` pass against the locally built `0db752e` image. The remote
+  amd64/arm64 index is
+  `sha256:83f53fe3aa523fc1196454d4c5f1d413648eb72ad1e87c83c838e7200859207e`.
 
 ## P2 invalid-source runtime cache
 
@@ -286,16 +304,30 @@ Implementation evidence: uploaded and WebDAV recovery read a bounded compressed 
 
 ## P2 replace-rule persistence compatibility
 
-Status: implemented with an additive, non-destructive schema migration; mounted-volume verification is pending for this slice.
+Status: fixed-baseline persistence contract implemented and regression-tested on 2026-07-28. The
+additive schema is retained; ordering and restore identity now follow the fixed contract. See
+[`replace-rule-fixed-baseline-p2-contract.md`](replace-rule-fixed-baseline-p2-contract.md).
 
 - Existing `replace_rules` rows stay in the same SQLite table with the same `id`, `user_id`, `name`, `pattern`, `replacement`, `scope`, `is_regex`, `enabled`, and timestamps. AutoMigrate only adds `group_name` and `sort_order DEFAULT 0`; no row is deleted, deduplicated, rewritten, or moved during startup.
-- Reader-visible execution and backup order is `sort_order ASC, id ASC`. Every old row has the same zero order and therefore retains its historical insertion order; reader-dev imports can preserve explicit `group/order` without disturbing old rows.
+- Reader-visible list, execution and backup order is `id ASC`, the SQLite equivalent of the upstream
+  JSON array insertion order. `sort_order` remains stored/exported for round-trip compatibility but
+  must not reorder the fixed Web Reader pipeline.
 - Old rows whose nullable `is_regex` value is absent are interpreted as upstream's plain-text default (`false`) at read/execution time. This corrects a prior OpenReader default without changing the stored nullable value.
 - Old rows with an empty scope remain global only as a read-compatibility shim for already-deployed OpenReader data. The new editor/API requires an explicit scope; the next successful edit/import writes `*` (or a book-specific scope) instead of another empty value.
-- Backup restore accepts both `enabled` and legacy `isEnabled`. Missing `isRegex` restores as plain text; empty legacy scope stays readable through the shim. No new table/column and no `data/`, `cache/`, or `library/` path is introduced.
-- New/updated inputs are bounded (name 120 bytes, scope 800 bytes, pattern 16 KiB, replacement 64 KiB) and regular expressions are compiled before a write. A rejected write leaves existing rows and mounted volumes untouched.
+- Backup restore accepts both `enabled` and legacy `isEnabled`. It processes archive rows in order and
+  upserts by the caller's exact rule name, not pattern. Missing/empty names or patterns are skipped,
+  never synthesized; missing `isRegex` restores as plain text and an external empty scope becomes
+  explicit `*`. Restore accepts at most 2,000 rows and prevalidates every non-empty row before its
+  first write, so invalid field/RE2/capture data participates in the existing whole-backup rollback.
+  No new table/column and no `data/`, `cache/`, or `library/` path is introduced.
+- New/updated inputs are bounded (name 120 bytes, hidden group 800 bytes, scope 800 bytes,
+  pattern 16 KiB, replacement 64 KiB, regex captures 32) and regular expressions are compiled before
+  a write. A rejected API or restore write leaves existing rows and mounted volumes untouched.
 
-Required evidence: `backend/api/replace_rules_contract_test.go` covers defaults, ordering, scope compatibility and invalid regex rejection; full backend tests cover backup/restore. A Docker volume/backup smoke remains required before publishing this slice.
+Required evidence: rewritten tests must cover exact whitespace preservation, ID order despite nonzero
+`sort_order`, exact scope second-segment behavior, name-based ordered restore, invalid-row skipping,
+JavaScript replacement tokens and old duplicate-name preservation. Full backend/frontend/browser and
+Docker mounted-volume/backup gates remain required before publishing this slice.
 
 ## P1-D4 book deletion, cache and refresh lifecycle
 
@@ -685,3 +717,25 @@ Docker release. See `bookshelf-last-check-time-p1-contract.md`.
 Required release evidence: scoped cache/progress unit contracts, real
 two-client WebSocket deletion at desktop and both mobile viewports, full
 frontend/backend/build gates, and the unchanged mounted-volume/backup smoke.
+
+## P2 UserManage last-login compatibility (2026-07-28)
+
+- No table, column, index, file, mounted directory or backup member is added or rewritten.
+  The deployed `users.last_active_at` column is retained as the compatible storage location;
+  successful login now gives that value its reader-dev `lastLoginAt` meaning.
+- Existing non-zero values remain readable and are not backfilled. A zero value remains a valid
+  legacy state and renders blank until the account successfully logs in.
+- `lastLoginAt` is the canonical new API field. `lastActiveAt` remains an equal response alias so
+  old clients do not break; no persisted JSON or SQLite field is renamed.
+- Failed credentials do not change the value. Successful registration initializes it like
+  reader-dev's `User` default, and later successful logins advance it.
+- User deletion, inactive-cleanup compatibility, backup/restore, WebDAV roots and every
+  `data/`, `cache/`, and `library/` path remain unchanged.
+
+Required release evidence: focused login/list API contract, full Go and frontend tests, production
+build, one-table UserManage browser smoke at 1440×900, 1024×1366, 390×844 and 360×800, followed by
+the unchanged Docker volume/backup compatibility gate.
+
+Release evidence completed with `f44447f`: both ordinary and historical volume scripts passed,
+including restart, portable v1/v2 assets, cross-user isolation, TXT/EPUB/UMD/CBZ and relative-cache
+fixtures. No migration or mounted data rewrite was observed.

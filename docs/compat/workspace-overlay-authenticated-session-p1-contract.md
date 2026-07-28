@@ -2,8 +2,8 @@
 
 固定基准：`changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。
 
-状态：2026-07-27 已完成固定上游取证、P1-A/P1-B 实施与自动门禁；真实浏览器和 Docker
-发布闸门尚未完成。
+状态：2026-07-28 已完成固定上游取证、P1-A/P1-B 实施、自动门禁、真实浏览器
+`6 场景 × 3 视口` 最终签收和本地 Docker 发布。
 
 本合同承接：
 
@@ -196,3 +196,33 @@ scope + bearer token identity + component/session generation + operation key rev
   构建、Go 全量和 `git diff --check` 通过。
 - P1-A/P1-B 当前均为自动门禁候选。真实浏览器需覆盖 1440×900、390×844、360×800 的
   401/同账号重登/异账号切换；该闸门完成前不把本合同标记为最终验收，也不发布 Docker。
+
+## 9. 2026-07-28 真实浏览器最终门
+
+- 新增 `scripts/smoke/workspace-overlay-session-isolation-contract.mjs`，使用一个浏览器顺序运行
+  BookInfo 加书、StorageImport、WebDAV 恢复、Source 保存、RSS 保存和 UserManage 新增六条
+  真实 Overlay 流程，避免并发创建多个 Chromium 导致设备压力。
+- 每条流程让 A 的写请求保持 pending，触发与 Axios 401 拦截器相同的根认证失效事件，完成
+  同账号续登或 B 账号登录后才释放 A 的旧响应。断言覆盖：账号私有弹层保持关闭、旧 toast/
+  业务事件/写后 reload 为零、B 书架不被替换，以及手动重开只显示当前账号请求的数据。
+- 默认覆盖 `1440×900`、`390×844`、`360×800`。为降低设备排障时的单次浏览器压力，可用
+  `OVERLAY_SCENARIOS=book-info,storage-import` 和
+  `OVERLAY_VIEWPORTS=390x844` 选择受控子集；完整签收仍必须不带过滤运行全矩阵。
+- 首次执行发现并修正三项测试合同问题：整页导航只能在 storage 无 token 时注入初始 A
+  token；书源兼容入口必须使用 `/sources` 而不是不存在的
+  `/settings?panel=sources`；移动搜索按上游保持侧栏打开，测试在点击结果前显式点击工作区收起。
+- 真实执行同时发现一个产品回归：RSS `openEditor()` 把手动新增的 `null` sentinel 直接传给
+  高级字段提取，抛出 `TypeError` 并使新增弹窗无法出现。固定上游会先把 falsy 值归一化为
+  新源默认对象；OpenReader 已恢复该状态转换，并给编辑器增加稳定的私有弹层根标识。
+- 最终不带过滤运行完整矩阵，输出覆盖：
+  `1440x900`、`390x844`、`360x800` 各自的
+  `book-info/storage-import/webdav-restore/source-save/rss-save/user-create=ok`，并确认
+  `staleToasts=0 staleEvents=0 staleReloads=0 manualReopen=current-account`。
+- 当前自动门：frontend `645/645`、Vite production build、Go `go test ./...` 与
+  `git diff --check` 全部通过。本合同由 **candidate** 转为
+  **implemented / browser-validated / Docker-published**。
+- 本地候选 `ghcr.io/changshengyu/openreader:342d736` 通过 portable v1、portable v2
+  assets、cross-user、restart，以及历史 TXT/EPUB/UMD/CBZ、relative-cache 和
+  owner-isolation 两套挂载卷门禁。随后从本机发布 `342d736` 与 `latest`；二者共同指向
+  amd64/arm64 OCI index
+  `sha256:1643625269f5a04f867c56da9e3bee04c1318d807e73ca6fc0913ab408645921`。

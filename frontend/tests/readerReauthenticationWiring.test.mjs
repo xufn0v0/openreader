@@ -16,11 +16,12 @@ const router = source('../src/router/index.js')
 const user = source('../src/stores/user.js')
 
 test('the root shell never renders authenticated Reader content while its session is blocked', () => {
-  assert.match(app, /v-if="isReader && isLoggedIn && !authenticatedSessionBlocked"/)
+  assert.match(app, /<router-view v-if="isLoginRoute"\s*\/>/)
+  assert.match(app, /v-else-if="isReader && isLoggedIn && !authenticatedSessionBlocked"/)
   assert.match(app, /<router-view\s+:key="readerSessionKey"/)
   assert.match(app, /v-else-if="isReader"[\s\S]*?reader-auth-blocked/)
   assert.match(app, /v-else-if="isLoggedIn && !authenticatedSessionBlocked"/)
-  assert.match(app, /<router-view v-else-if="isLoginRoute"/)
+  assert.doesNotMatch(app, /<router-view v-else-if="isLoginRoute"/)
   assert.match(app, /v-else class="workspace-auth-blocked"/)
   assert.match(app, /readerSessionKey/)
 })
@@ -43,6 +44,11 @@ test('session clearing dispatches invalidation before token removal and resets o
   assert.match(
     user,
     /dispatchSessionInvalidated\([\s\S]*?this\.token = ''[\s\S]*?useOverlayStore\(\)\.resetSessionState\(\)/,
+  )
+  assert.match(
+    user,
+    /clearSession\(\{\s*suspendWorkspace:\s*true,\s*tokenHint:\s*rejectedToken\s*\}\)/,
+    'the rejected request token must survive the interceptor storage-removal order as a scope-only hint',
   )
 })
 

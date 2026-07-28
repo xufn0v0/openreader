@@ -106,7 +106,7 @@ async function installApiMocks(page, readerSettings = {}) {
       return route.fulfill(json({
         chapter: { id: 11, index: 0, title: '第一章' },
         content: [
-          '春风过处，纸页微明。',
+          '春风过处，<mark>浏览器默认浅色标记面</mark><span>纸页微明。</span>',
           '这一段用于验证移动端阅读正文左右留白对称，并保持两端对齐。',
           '点击中央区域应当只在没有面板时切换工具层。',
         ].concat(Array.from({ length: 48 }, (_, index) => (
@@ -526,11 +526,11 @@ async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen,
   const chooser = page.locator('.el-message-box').last()
   await chooser.getByRole('button', { name: '添加过滤规则', exact: true }).click()
 
-  const editor = page.locator('.el-dialog').filter({ hasText: '新增替换规则' }).last()
+  const editor = page.locator('.replace-rule-editor-dialog').last()
   await editor.waitFor({ state: 'visible', timeout: 10000 })
   assert(await page.locator('.global-replace-dialog').count() === 0, `${viewport.width}: selected text must open only the direct editor, not the rule manager`)
 
-  const pattern = editor.locator('.el-form-item').filter({ hasText: '匹配正则或文本' }).locator('input')
+  const pattern = editor.locator('.el-form-item').filter({ hasText: /^规则$/ }).locator('input')
   const scope = editor.locator('.el-form-item').filter({ hasText: '替换范围' }).locator('input')
   assert(await pattern.inputValue() === selectedText, `${viewport.width}: direct editor must retain the exact selected text`)
   assert((await scope.inputValue()).startsWith('移动阅读契约测试;'), `${viewport.width}: direct editor must retain the active book scope`)
@@ -549,11 +549,12 @@ async function assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen,
     await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
     assert(await page.locator('.reader-mobile-top.visible').count() === 1, `${viewport.width}: selected-text editor click must not pass through to reader chrome`)
   } else {
-    assert(geometry.width >= 500 && geometry.width <= 540, `desktop: selected-text editor width ${geometry.width}`)
+    const expectedWidth = Math.min(1000, Math.max(750, viewport.width * 0.7))
+    assertClose(geometry.width, expectedWidth, 1, 'desktop: selected-text editor must use the shared upstream width')
     assert(await page.locator('.reader-left-rail').count() === 1, 'desktop: selected-text editor must preserve reader rails')
   }
 
-  await editor.getByRole('button', { name: '取消', exact: true }).click()
+  await editor.getByRole('button', { name: '取 消', exact: true }).click()
   await editor.waitFor({ state: 'hidden', timeout: 10000 })
   assert(await page.locator('.global-replace-dialog').count() === 0, `${viewport.width}: closing the direct editor must not reveal a manager`)
 }
@@ -1010,6 +1011,64 @@ async function assertInlineDesktopCacheZone(page) {
   assert(state.visibleDrawers === 0, 'desktop: cache must not use a drawer')
 }
 
+async function assertBuiltInNightTextSurface(page, viewport, { mobile }) {
+  const nightToggle = mobile
+    ? page.locator('.reader-mobile-float-right.visible button[title="夜间模式"]')
+    : page.locator('.reader-right-rail button[title="夜间模式"]')
+  await nightToggle.click()
+  await page.waitForFunction(() => document.querySelector('.reader-shell')?.classList.contains('black-night-surface'))
+
+  const state = await page.evaluate(() => {
+    const shell = document.querySelector('.reader-shell')
+    const page = document.querySelector('.reader-page')
+    const paragraph = document.querySelector('.reader-body [data-reader-block]')
+    const mark = paragraph?.querySelector('mark')
+    const span = paragraph?.querySelector('span')
+    const style = element => window.getComputedStyle(element)
+    return {
+      shellBackground: style(shell).backgroundColor,
+      shellImage: style(shell).backgroundImage,
+      pageBackground: style(page).backgroundColor,
+      pageImage: style(page).backgroundImage,
+      paragraphColor: style(paragraph).color,
+      paragraphBackground: style(paragraph).backgroundColor,
+      markColor: style(mark).color,
+      markBackground: style(mark).backgroundColor,
+      spanColor: style(span).color,
+      spanBackground: style(span).backgroundColor,
+    }
+  })
+  const expected = {
+    shellBackground: 'rgb(0, 0, 0)',
+    shellImage: 'none',
+    pageBackground: 'rgb(0, 0, 0)',
+    pageImage: 'none',
+    paragraphColor: 'rgb(255, 255, 255)',
+    paragraphBackground: 'rgba(0, 0, 0, 0)',
+    markColor: 'rgb(255, 255, 255)',
+    markBackground: 'rgba(0, 0, 0, 0)',
+    spanColor: 'rgb(255, 255, 255)',
+    spanBackground: 'rgba(0, 0, 0, 0)',
+  }
+  for (const [key, value] of Object.entries(expected)) {
+    assert(state[key] === value, `${viewport.width}: built-in night ${key} expected ${value}, got ${state[key]}`)
+  }
+
+  const dayToggle = mobile
+    ? page.locator('.reader-mobile-float-right.visible button[title="日间模式"]')
+    : page.locator('.reader-right-rail button[title="日间模式"]')
+  await dayToggle.click()
+  await page.waitForFunction(() => !document.querySelector('.reader-shell')?.classList.contains('black-night-surface'))
+  const restoredMarkBackground = await page.locator('.reader-body [data-reader-block] mark')
+    .evaluate(element => window.getComputedStyle(element).backgroundColor)
+  assert(restoredMarkBackground !== 'rgba(0, 0, 0, 0)', `${viewport.width}: day mark surface must restore`)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForSelector('.reader-body [data-reader-block]', { timeout: 10000 })
+  if (mobile) {
+    await page.waitForSelector('.reader-mobile-top.visible', { timeout: 10000 })
+  }
+}
+
 async function assertSettingsRowGeometry(page, viewport) {
   const geometry = await page.evaluate(() => {
     const firstRow = document.querySelector('.settings-body .setting-row')
@@ -1190,6 +1249,8 @@ async function assertSettingsBackgroundGeometry(page, viewport) {
       deleteRight: deleteStyle?.right ?? '',
       deleteColor: deleteStyle?.color ?? '',
       hasCardOverlay: Boolean(document.querySelector('.bg-image-option, .bg-image-delete')),
+      ownsBlackNightSurface: document.querySelector('.reader-shell')?.classList.contains('black-night-surface') || false,
+      pageBackgroundImage: window.getComputedStyle(document.querySelector('.reader-page')).backgroundImage,
     }
   })
   assertClose(geometry.previewWidth, 36, 1, `${viewport.width}: settings background preview width`)
@@ -1197,11 +1258,13 @@ async function assertSettingsBackgroundGeometry(page, viewport) {
   assert(geometry.uploadLeft !== null && geometry.previewRight !== null, `${viewport.width}: missing settings background upload geometry`)
   assert(geometry.uploadLeft >= geometry.previewRight, `${viewport.width}: settings background upload should follow preview inline`)
   assert(geometry.uploadTop >= geometry.previewTop - 1 && geometry.uploadTop <= geometry.previewBottom + 1, `${viewport.width}: settings background upload should stay on preview row`)
-  assert(geometry.uploadColor === 'rgb(237, 66, 89)', `${viewport.width}: settings background upload color ${geometry.uploadColor}`)
+  assert(geometry.uploadColor === 'rgb(255, 117, 137)', `${viewport.width}: settings background upload color ${geometry.uploadColor}`)
   assert(geometry.deleteTop === '-6px', `${viewport.width}: settings background delete top ${geometry.deleteTop}`)
   assert(geometry.deleteRight === '-6px', `${viewport.width}: settings background delete right ${geometry.deleteRight}`)
-  assert(geometry.deleteColor === 'rgb(237, 66, 89)', `${viewport.width}: settings background delete color ${geometry.deleteColor}`)
+  assert(geometry.deleteColor === 'rgb(255, 117, 137)', `${viewport.width}: settings background delete color ${geometry.deleteColor}`)
   assert(geometry.hasCardOverlay === false, `${viewport.width}: settings background should not keep card overlay classes`)
+  assert(geometry.ownsBlackNightSurface === false, `${viewport.width}: custom image night must preserve its authored surface`)
+  assert(geometry.pageBackgroundImage !== 'none', `${viewport.width}: custom image night must retain its selected background image`)
 }
 
 async function readerGeometry(page) {
@@ -1265,6 +1328,7 @@ async function runDesktopViewport(browser) {
   await installApiMocks(page)
   await page.goto(readerUrl, { waitUntil: 'networkidle' })
   await page.waitForSelector('.reader-body p', { timeout: 10000 })
+  await assertBuiltInNightTextSurface(page, viewport, { mobile: false })
   await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: false })
   const selectedBookmarkText = await createBookmarkFromSelectedText(page, viewport, { fullscreen: false })
   await page.locator('.reader-left-rail button[title="书架"]').click()
@@ -1334,6 +1398,7 @@ async function runViewport(browser, viewport) {
     throw new Error(`${error.message}\nState: ${JSON.stringify(state, null, 2)}\nFailures: ${failures.join('\n')}`)
   }
   await page.waitForSelector('.reader-body p', { timeout: 10000 })
+  await assertBuiltInNightTextSurface(page, viewport, { mobile: true })
   await assertSelectedTextReplaceRuleEditor(page, viewport, { fullscreen: true, touch: true })
   const selectedBookmarkText = await createBookmarkFromSelectedText(page, viewport, { fullscreen: true, touch: true })
 
@@ -1395,6 +1460,72 @@ async function runViewport(browser, viewport) {
   assertClose(hiddenChromeGeometry.paragraphLeft, initialGeometry.paragraphLeft, 1, `${viewport.width}: toolbar hide should not shift paragraph left`)
   assertClose(hiddenChromeGeometry.paragraphRight, initialGeometry.paragraphRight, 1, `${viewport.width}: toolbar hide should not shift paragraph right`)
 
+  assert(failures.length === 0, failures.join('\n'))
+  await context.close()
+}
+
+async function runCustomBlackNightViewport(browser, viewport, themeType = 'night') {
+  const context = await browser.newContext({ viewport })
+  await context.addInitScript((token) => {
+    window.localStorage.setItem('openreader_token', token)
+  }, fakeToken())
+  const page = await context.newPage()
+  const failures = []
+  page.on('console', (message) => {
+    if (message.type() !== 'error') return
+    const text = message.text()
+    if (text.includes('/ws/sync') && text.includes('WebSocket connection')) return
+    failures.push(text)
+  })
+  page.on('pageerror', error => failures.push(error.message))
+  await installApiMocks(page, {
+    theme: 'custom',
+    themeType,
+    customBodyColor: '#000000',
+    customPopupColor: '#121212',
+    customBgColor: '#000000',
+    customBgImage: '',
+    customBgImageList: [],
+    fontColor: '#333333',
+  })
+  await page.goto(readerUrl, { waitUntil: 'networkidle' })
+  await page.waitForSelector('.reader-body [data-reader-block]', { timeout: 10000 })
+  await page.waitForFunction(() => document.querySelector('.reader-shell')?.classList.contains('black-night-surface'))
+  const state = await page.evaluate(() => {
+    const style = element => window.getComputedStyle(element)
+    const shell = document.querySelector('.reader-shell')
+    const page = document.querySelector('.reader-page')
+    const paragraph = document.querySelector('.reader-body [data-reader-block]')
+    const mark = paragraph?.querySelector('mark')
+    const span = paragraph?.querySelector('span')
+    return {
+      shellBackground: style(shell).backgroundColor,
+      shellImage: style(shell).backgroundImage,
+      pageBackground: style(page).backgroundColor,
+      pageImage: style(page).backgroundImage,
+      paragraphColor: style(paragraph).color,
+      paragraphBackground: style(paragraph).backgroundColor,
+      markColor: style(mark).color,
+      markBackground: style(mark).backgroundColor,
+      spanColor: style(span).color,
+      spanBackground: style(span).backgroundColor,
+    }
+  })
+  const expected = {
+    shellBackground: 'rgb(0, 0, 0)',
+    shellImage: 'none',
+    pageBackground: 'rgb(0, 0, 0)',
+    pageImage: 'none',
+    paragraphColor: 'rgb(255, 255, 255)',
+    paragraphBackground: 'rgba(0, 0, 0, 0)',
+    markColor: 'rgb(255, 255, 255)',
+    markBackground: 'rgba(0, 0, 0, 0)',
+    spanColor: 'rgb(255, 255, 255)',
+    spanBackground: 'rgba(0, 0, 0, 0)',
+  }
+  for (const [key, value] of Object.entries(expected)) {
+    assert(state[key] === value, `${viewport.width}: custom black ${themeType} ${key} expected ${value}, got ${state[key]}`)
+  }
   assert(failures.length === 0, failures.join('\n'))
   await context.close()
 }
@@ -1596,6 +1727,10 @@ async function main() {
     await runDesktopViewport(browser)
     await runViewport(browser, { width: 390, height: 844 })
     await runViewport(browser, { width: 360, height: 800 })
+    await runCustomBlackNightViewport(browser, { width: 1440, height: 900 })
+    await runCustomBlackNightViewport(browser, { width: 390, height: 844 })
+    await runCustomBlackNightViewport(browser, { width: 360, height: 800 })
+    await runCustomBlackNightViewport(browser, { width: 390, height: 844 }, 'day')
     await runIPadAdaptiveViewport(browser, { width: 1024, height: 1366 })
     await runIPadAdaptiveViewport(browser, { width: 1366, height: 1024 })
     await runIPadForcedMobileViewport(browser, { width: 1024, height: 1366 })

@@ -2,7 +2,7 @@
   <main
     ref="shellEl"
     class="reader-shell"
-    :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible, 'mini-interface': isMobileReader, 'document-scroll': usesDocumentScroll, 'has-custom-background': Boolean(reader.customBgImage) }]"
+    :class="[effectiveReaderMode, { 'mobile-chrome-visible': mobileChromeVisible, 'mini-interface': isMobileReader, 'document-scroll': usesDocumentScroll, 'has-custom-background': reader.theme === 'custom' && Boolean(reader.customBgImage), 'black-night-surface': usesBlackNightContentSurface }]"
     :style="readerStyle"
   >
     <ReaderDesktopTools
@@ -172,6 +172,7 @@
             :audio-cover-url="bookCoverUrl(book)"
             :audio-autoplay="audioAutoplay"
             :epub-style="epubStyleText"
+            :built-in-night="usesBlackNightContentSurface"
             :viewport-height="readerViewportHeight"
             @reload="reloadChapter"
             @epub-load="handleEpubLoad"
@@ -466,6 +467,12 @@ import { clearBookBrowserChapterCache, loadBrowserChapterContent } from '../util
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
+import {
+  isBlackNightReaderSurface,
+  readerTextShadow,
+  resolveReaderSurface,
+  resolveReaderTextColor,
+} from '../utils/readerThemeContrast'
 import {
   readerBookmarkText,
   selectedTextBookmarkContext,
@@ -1200,21 +1207,72 @@ const fontStack = computed(() => {
   return readerFontStack(reader.fontFamily, reader.customFontsMap)
 })
 
+const usesCustomReaderTheme = computed(() => reader.theme === 'custom')
+const effectiveReaderBackgroundImage = computed(() => (
+  reader.theme === 'custom' && reader.customBgImage ? reader.customBgImage : ''
+))
+const effectiveReaderSurface = computed(() => resolveReaderSurface({
+  theme: reader.theme,
+  themeType: reader.themeType,
+  themeBackground: reader.currentTheme.bg,
+  themeBody: usesCustomReaderTheme.value
+    ? reader.customBodyColor
+    : reader.currentTheme.body,
+  themePopup: usesCustomReaderTheme.value
+    ? reader.customPopupColor
+    : reader.currentTheme.popup,
+  customBackgroundImage: effectiveReaderBackgroundImage.value,
+}))
+const effectiveReaderBackgroundColor = computed(() => effectiveReaderSurface.value.pageColor)
+const effectiveReaderBodyColor = computed(() => effectiveReaderSurface.value.bodyColor)
+const effectiveReaderPopupColor = computed(() => effectiveReaderSurface.value.popupColor)
+const usesBlackNightContentSurface = computed(() => isBlackNightReaderSurface({
+  pageColor: effectiveReaderSurface.value.pageColor,
+  pageImage: effectiveReaderSurface.value.pageImage,
+}))
+const effectiveReaderTextColor = computed(() => resolveReaderTextColor({
+  requestedColor: reader.fontColor,
+  themeTextColor: reader.currentTheme.text,
+  backgroundColor: effectiveReaderBackgroundColor.value,
+  themeType: reader.themeType,
+  hasBackgroundImage: Boolean(effectiveReaderBackgroundImage.value),
+  builtInNight: usesBlackNightContentSurface.value,
+}))
+const effectiveReaderPopupTextColor = computed(() => resolveReaderTextColor({
+  requestedColor: effectiveReaderTextColor.value,
+  themeTextColor: reader.currentTheme.text,
+  backgroundColor: effectiveReaderPopupColor.value,
+  themeType: reader.themeType,
+}))
+const effectiveReaderTextShadow = computed(() => readerTextShadow({
+  textColor: effectiveReaderTextColor.value,
+  hasBackgroundImage: Boolean(effectiveReaderBackgroundImage.value),
+}))
+
 const readerStyle = computed(() => ({
   '--reader-font-family': fontStack.value,
   '--reader-font-size': `${reader.fontSize}px`,
   '--reader-heading-size': `${Math.round(reader.fontSize * 1.36)}px`,
-  '--reader-body-bg': reader.customBodyColor || '#d9c27f',
-  '--reader-popup-bg': reader.customPopupColor || 'rgba(255, 252, 239, 0.94)',
-  '--reader-bg': reader.currentTheme.bg,
-  '--reader-text': reader.fontColor || reader.currentTheme.text,
+  '--reader-body-bg': effectiveReaderBodyColor.value,
+  '--reader-body-bg-image': effectiveReaderSurface.value.bodyImage,
+  '--reader-popup-bg': effectiveReaderPopupColor.value,
+  '--reader-bg': effectiveReaderBackgroundColor.value,
+  '--reader-bg-image': effectiveReaderSurface.value.pageImage,
+  '--reader-text': effectiveReaderTextColor.value,
+  '--reader-popup-text': effectiveReaderPopupTextColor.value,
+  '--reader-text-shadow': effectiveReaderTextShadow.value,
+  '--reader-page-border': effectiveReaderSurface.value.pageBorder,
+  '--reader-page-shadow': effectiveReaderSurface.value.pageShadow,
+  '--reader-control-bg': reader.themeType === 'night' ? '#303030' : 'rgba(255, 255, 255, 0.5)',
+  '--reader-control-border': reader.themeType === 'night' ? '#565656' : 'rgba(0, 0, 0, 0.1)',
+  '--reader-accent': reader.themeType === 'night' ? '#ff7589' : '#ed4259',
+  '--reader-active-text': reader.themeType === 'night' ? '#7ed8d4' : '#0f5451',
   '--reader-font-weight': reader.fontWeight,
   '--reader-brightness': `${reader.brightness}%`,
   '--reader-dim-opacity': Math.max(0, 1 - reader.brightness / 100),
   '--reader-line-height': reader.lineHeight,
   '--reader-paragraph-space': `${reader.paragraphSpace}em`,
   '--reader-read-width': `${reader.columnWidth}px`,
-  '--reader-bg-image': reader.customBgImage ? `url(${reader.customBgImage})` : '',
   '--reader-animate-duration': `${reader.animateDuration}ms`,
   '--reader-tts-bottom-space': ttsReadBarLayoutActive.value
     ? `${ttsConfigExpanded.value ? 280 : 80}px`
@@ -1248,10 +1306,15 @@ const epubStyleText = computed(() => `
   *:focus {
     outline: none !important;
   }
-  html {
+  html,
+  body {
     min-height: 100%;
-    color: ${reader.fontColor || reader.currentTheme.text};
-    background: transparent;
+    color: ${effectiveReaderTextColor.value} !important;
+    text-shadow: ${effectiveReaderTextShadow.value};
+    background-color: ${effectiveReaderBackgroundColor.value} !important;
+    background-image: none !important;
+  }
+  html {
     font-family: ${fontStack.value};
     font-size: ${reader.fontSize}px;
     font-weight: ${reader.fontWeight};
@@ -1259,10 +1322,45 @@ const epubStyleText = computed(() => `
   body {
     min-height: 100%;
     margin: 0 !important;
-    color: inherit;
-    background: transparent !important;
+    color: inherit !important;
     font: inherit;
   }
+  body :where(p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption, td, th) {
+    color: inherit !important;
+  }
+  ${usesBlackNightContentSurface.value ? `
+  html,
+  body {
+    color-scheme: dark;
+  }
+  html::before,
+  html::after,
+  body::before,
+  body::after {
+    color: inherit !important;
+    -webkit-text-fill-color: currentColor !important;
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+  body :where(*) {
+    color: inherit !important;
+    -webkit-text-fill-color: currentColor !important;
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+  }
+  body :where(*)::before,
+  body :where(*)::after {
+    color: inherit !important;
+    -webkit-text-fill-color: currentColor !important;
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+  }
+  ` : ''}
   body p {
     margin-top: ${reader.paragraphSpace}em !important;
     margin-bottom: ${reader.paragraphSpace}em !important;
@@ -2337,23 +2435,22 @@ function readError(err, fallback) {
   display: grid;
   justify-content: center;
   background-color: var(--reader-body-bg);
-  background-image: var(--reader-body-texture);
+  background-image: var(--reader-body-bg-image);
   background-repeat: repeat;
 }
 
 /* ---- 正文 ---- */
 .reader-page {
   background-color: var(--reader-bg);
-  background-image: var(--reader-bg-image, var(--paper-texture));
+  background-image: var(--reader-bg-image);
   background-position: 0 0;
   background-repeat: repeat;
   background-size: auto;
   color: var(--reader-text);
-  border-left: 1px solid rgba(109,95,55,0.28);
-  border-right: 1px solid rgba(109,95,55,0.28);
-  box-shadow:
-    inset 24px 0 44px rgba(90, 71, 28, 0.05),
-    inset -24px 0 44px rgba(90, 71, 28, 0.05);
+  text-shadow: var(--reader-text-shadow, none);
+  border-left: 1px solid var(--reader-page-border);
+  border-right: 1px solid var(--reader-page-border);
+  box-shadow: var(--reader-page-shadow);
   height: 100vh;
   overflow: hidden;
   box-sizing: content-box;
@@ -2368,6 +2465,24 @@ function readError(err, fallback) {
   z-index: 4;
   background: rgba(0, 0, 0, var(--reader-dim-opacity));
   pointer-events: none;
+}
+
+.reader-shell.black-night-surface .reader-content,
+.reader-shell.black-night-surface .reader-body,
+.reader-shell.black-night-surface .reader-body :deep(.chapter-content) {
+  color: #ffffff !important;
+  background-color: #000000 !important;
+  background-image: none !important;
+  color-scheme: dark;
+}
+
+.reader-shell.black-night-surface .reader-body :deep([data-reader-block]),
+.reader-shell.black-night-surface .reader-body :deep([data-reader-block] *) {
+  color: #ffffff !important;
+  -webkit-text-fill-color: currentColor !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
 }
 
 .reader-page-head {
@@ -2403,7 +2518,7 @@ function readError(err, fallback) {
   text-align: center;
 }
 .reader-chapter-end:focus-visible {
-  outline: 2px solid #ed4259;
+  outline: 2px solid var(--reader-accent, #ed4259);
   outline-offset: 2px;
 }
 .reader-shell.scroll .reader-body::after,
@@ -2440,12 +2555,12 @@ function readError(err, fallback) {
 }
 
 .reader-shell :deep(.el-drawer) {
-  color: var(--reader-text);
+  color: var(--reader-popup-text, var(--reader-text));
   background: var(--reader-popup-bg);
 }
 
 .reader-shell :deep(.el-drawer__header) {
-  color: var(--reader-text);
+  color: var(--reader-popup-text, var(--reader-text));
   margin-bottom: 14px;
 }
 
@@ -2561,7 +2676,7 @@ function readError(err, fallback) {
   height: auto;
   min-height: 0;
   padding: calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
-  color: var(--reader-text);
+  color: var(--reader-popup-text, var(--reader-text));
 }
 
 .reader-shell.mini-interface .reader-mobile-primary-shelf,
@@ -2590,8 +2705,8 @@ function readError(err, fallback) {
 
 .reader-shell.mini-interface .reader-mobile-primary-title {
   width: fit-content;
-  color: #ed4259;
-  border-bottom: 1px solid #ed4259;
+  color: var(--reader-accent, #ed4259);
+  border-bottom: 1px solid var(--reader-accent, #ed4259);
   font-family: -apple-system, "Noto Sans", "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 18px;
   font-weight: 400;
@@ -2604,7 +2719,7 @@ function readError(err, fallback) {
   justify-content: flex-end;
   gap: 0 15px;
   min-width: 0;
-  color: #ed4259;
+  color: var(--reader-accent, #ed4259);
   font-size: 14px;
   line-height: 26px;
 }
