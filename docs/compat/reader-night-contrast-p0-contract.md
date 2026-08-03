@@ -546,3 +546,104 @@ WebKit、浏览器强制深色和 EPUB 独立合成层。
 - 全量 `reader-mobile-contract` 已到达独立的 Bookmark 跳转流程后失败；这是正在进行的
   Bookmark 第二轮上游复审门，不是夜间内容面失败。本轮用新增的聚焦入口隔离证明夜间
   合同，Bookmark 浏览器门会在恢复该模块时继续处理。
+
+### 第八轮 Docker 发布结果（2026-08-02）
+
+- 实现提交 `6fde5abf3c5e9507c0a82d5f221b68674b318cce` 已推送 `main`；镜像从该提交的
+  干净 detached worktree 本地构建，未包含工作区中尚未完成的 Bookmark 复审改动。
+- 已发布 `ghcr.io/changshengyu/openreader:6fde5ab` 与 `:latest`，两者共同指向
+  amd64/arm64 OCI index
+  `sha256:4ace53462bc85e5f05e4441a5d250edd96f5b72d406b0ab109830501a129c4c0`。
+- amd64 manifest 为
+  `sha256:4d87fcbdad834f75a30dac5a030dafd14823d0a5134da69776790dbfa7f33a23`；
+  arm64 manifest 为
+  `sha256:c975509039663632ff69b87f92df42086b75c17a9668f5edfdeea32a1ba2c6ea`。
+- 同一干净提交的本地 arm64 候选已通过 portable v1、portable v2 assets、
+  cross-user、restart，以及历史 TXT/EPUB/UMD/CBZ、relative-cache、owner-isolation
+  全部持久化门。
+- `docker buildx imagetools inspect` 能够连续读取上述两个 tag 及其同一 digest；
+  当次本机 Docker daemon 的 `docker pull` 路径三次收到 GHCR `502 Bad Gateway`，
+  因此卷门使用同提交本地加载镜像完成。该外部 registry 拉取抖动不改变已发布
+  manifest 和本地验证结果，但设备部署时仍应以实际 `docker compose pull` 成功为准。
+
+## 第九轮实机反馈：部署版本仍停留在透明穿透合同（2026-08-02）
+
+用户再次报告黑色阅读背景下的实际文字承载层仍不是黑色。线上
+`GET https://openreader.yuchsh.top/api/health` 本轮返回：
+
+- `version: b78d39c`
+- `commit: b78d39c4cb8bed0a7dfc8ec1f0f69dbf243309c8`
+- `buildDate: 2026-07-28T13:58:52Z`
+
+该版本正是第七轮实现：结构层是纯黑，但 `p/mark/span` 与 EPUB 后代仍依赖透明背景穿透；
+用户本次现象与第八轮修复前的已知缺口完全一致。第八轮显式文字节点黑底从 `6fde5ab` 才进入
+镜像，并已包含在 `f2f0d6e`。GHCR 已重新核验：`latest` 与 `f2f0d6e` 共同指向
+amd64/arm64 OCI index
+`sha256:cfaba7d453bde2a4b44198aa57ef8ef5ecbaa3b4cce0ab77b4c816311455c736`。
+
+当前源码再次以真实 Go API EPUB 在 1440×900、390×844、360×800 通过：父页面、iframe、
+`html/body/main/card/text/table/cell` 均为纯黑背景、纯白文字，退出夜间恢复作者白底/渐变。
+因此本轮裁决为 **deployment-blocked-device-verification**，不新增应用实现。部署端必须拉取并
+强制重建，且只有健康接口返回不早于 `6fde5ab` 时，才进入第八轮设备验收；如果仍返回
+`b78d39c`，浏览器刷新、清缓存或切换夜间按钮均无法得到第八轮代码。
+
+本轮随后由本机发布包含第八轮修复及书内搜索第二轮重建的 `1801037` 与 `latest`，OCI index
+为 `sha256:5d2fdb171e734d5debece77f91ae31495fc1ba7ee9eec28c88aa2b3f41eeeee5`。设备部署后的
+最终验收值应为 `/api/health.version === "1801037"`；在此之前的黑夜反馈仍属于旧容器。
+
+## 第十轮实机反馈：GHCR 已更新但运行容器再次未替换（2026-08-02）
+
+用户再次指出黑色阅读背景下的实际文字承载层仍不是黑色。本轮重新读取线上健康接口，结果仍为：
+
+- `version: b78d39c`
+- `commit: b78d39c4cb8bed0a7dfc8ec1f0f69dbf243309c8`
+- `buildDate: 2026-07-28T13:58:52Z`
+
+同时重新读取 GHCR，`ghcr.io/changshengyu/openreader:latest` 与不可变标签
+`ghcr.io/changshengyu/openreader:5459f02` 均指向包含第八轮不透明纯黑文字面的
+amd64/arm64 OCI index：
+
+`sha256:a8d04ee3e5f6aac3e2a41b908da175e17b7a57e1fb440df51677f35d9496afe9`。
+
+源码与镜像内容再次确认：普通正文 `[data-reader-block]` 及其后代使用
+`background-color: #000000 !important`、`color: #ffffff !important`；EPUB 注入样式和
+后端 bridge 同样把实际后代节点接管为纯黑并在退出夜间后恢复作者样式。故本次现象仍与
+`b78d39c` 的透明穿透合同完全一致，不构成新应用实现缺口。
+
+本轮裁决继续为 **deployment-blocked-device-verification**。部署时应固定拉取
+`5459f02` 并强制重建，而不是仅刷新浏览器或再次启动旧容器；只有线上
+`/api/health.version === "5459f02"` 后，才开始复验实际文字节点。如果健康值仍为
+`b78d39c`，则页面必然仍在执行旧静态资源。
+
+## 第十一轮实机反馈：正文文字面现象与线上旧版本再次吻合（2026-08-02）
+
+用户进一步明确：黑色阅读背景已经生效，但实际文字所在的背景不是黑色。本轮在不修改应用
+代码的 inventory 阶段再次执行禁缓存健康检查，线上仍返回：
+
+- `version: b78d39c`；
+- `commit: b78d39c4cb8bed0a7dfc8ec1f0f69dbf243309c8`；
+- `buildDate: 2026-07-28T13:58:52Z`。
+
+该现象与版本边界完全一致：`b78d39c` 只把 Reader 结构层设为纯黑，普通正文
+`p/mark/span` 与 EPUB 的实际后代节点仍使用透明背景；`6fde5ab` 才把这些文字承载节点改为
+自身 `background-color: #000000 !important`。当前源码仍保有该实现及相应 TXT/EPUB
+测试，未发现应再次覆盖的应用层差异。
+
+同一时点重新检查 GHCR，`latest` 与 `5459f02` 均指向包含 `6fde5ab` 的 amd64/arm64 OCI
+index `sha256:a8d04ee3e5f6aac3e2a41b908da175e17b7a57e1fb440df51677f35d9496afe9`。
+因此本轮继续裁决为 `deployment-blocked-device-verification`：不得把旧容器的已知现象误判为
+当前源码的新缺口，也不得为了掩盖发布链问题重复叠加 CSS。下一次设备验收必须同时满足：
+
+1. 使用新的不可变镜像标签执行 pull 和 force recreate；
+2. 站点 `/api/health.version` 不早于 `6fde5ab`；
+3. 浏览器重新加载后再检查普通正文文字块和 EPUB 实际后代节点；
+4. 若这三个条件满足后仍复现，再采集具体书籍格式、节点标签/class 和完整祖先 computed
+   background 链，进入新的应用实现审查。
+
+### 当前推荐部署镜像
+
+BookInfo 第二轮批次随后由本机发布为 `ghcr.io/changshengyu/openreader:7f7e2ef` 与
+`:latest`；两者共同指向 amd64/arm64 OCI index
+`sha256:c1017da51c0e121e75add217be6979a2b6bba9bfd9c676590dd892644cf4702c`，并包含始于
+`6fde5ab` 的普通正文和 EPUB 实际文字节点不透明纯黑修复。设备本轮应固定拉取
+`7f7e2ef`，并只在站点 `/api/health.version === "7f7e2ef"` 后开始夜间复验。

@@ -573,17 +573,44 @@ tests that require case-insensitive or punctuation/whitespace-normalized result 
 upstream compatibility and must be replaced. OpenReader may retain bounded scans, cancellation and
 explicit partial-result metadata as documented safety adaptations.
 
+Second-audit correction on 2026-08-02: “exact” also applies to the query value itself. The fixed
+upstream forwards `keyword` unchanged and rejects only a zero-length string; it does not trim leading,
+trailing, or all-space queries. The modern Vue/Go path and Reader selection intent must therefore
+preserve the same raw value end to end. See
+[`book-content-search-fixed-baseline-second-audit-p2-contract.md`](book-content-search-fixed-baseline-second-audit-p2-contract.md).
+
 | Method / path | Request | Success / side effects | Auth and errors |
 |---|---|---|---|
-| `GET /api/books/:id/search` | `q` (or legacy `keyword`), optional `paged`, `lastIndex`, `chapterLimit`, `matchLimit`, `scanUntilMatch`, and local/remote work bounds. | Lists caller-owned book matches in source chapter order from raw, non-replaced chapter text. Chapter matches are exact, case-sensitive, position-ascending and may overlap. A cursor always represents the last fully scanned chapter: all matches from that final chapter are returned before a later request can start at its successor. Response preserves `{ list, lastIndex, hasMore, total }` and additionally reports explicit `incomplete`, `unavailableChapters`, and `truncated` states. Offset/line/percent may remain additive Vue/Go navigation fields. | JWT/current-book required; blank query `400`, foreign/missing book `404`. A remote book whose configured source no longer exists fails before chapter scanning with `400 {"error":"未配置书源"}`. Request cancellation stops remote fetch scheduling without writing a false successful result. A returned incomplete page is `200` with a client-safe state, not a host/source error. |
-| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, `keyword`, `lastIndex`, `size` aliases. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Every list row includes `resultCountWithinChapter`, `resultText`, `chapterTitle`, `query`, `chapterIndex`, `queryIndexInResult`, and `queryIndexInChapter`; indexes and the at-most-20-unit excerpt radius use Java/Kotlin UTF-16 code-unit semantics. Additive incomplete fields remain allowed. | JWT required; validation, missing shelf book and missing configured source remain HTTP 200 `isSuccess:false` with the upstream Chinese `errorMsg`. Like the modern route, request cancellation must flow into raw chapter loading, stop later remote fetches, and return without fabricating a successful page. |
+| `GET /api/books/:id/search` | Raw `q` (or legacy `keyword`), optional `paged`, `lastIndex`, `chapterLimit`, `matchLimit`, `scanUntilMatch`, and local/remote work bounds. Alias selection must not trim the selected query. | Lists caller-owned book matches in source chapter order from raw, non-replaced chapter text. The unchanged query participates in exact, case-sensitive, position-ascending and overlapping matching and is returned unchanged in every row. A cursor always represents the last fully scanned chapter: all matches from that final chapter are returned before a later request can start at its successor. Response preserves `{ list, lastIndex, hasMore, total }` and additionally reports explicit `incomplete`, `unavailableChapters`, and `truncated` states. Offset/line/percent may remain additive Vue/Go navigation fields. | JWT/current-book required; a truly zero-length query is `400`, while leading/trailing/all-space values are valid exact queries. Foreign/missing book is `404`. A remote book whose configured source no longer exists fails before chapter scanning with `400 {"error":"未配置书源"}`. Request cancellation stops remote fetch scheduling without writing a false successful result. A returned incomplete page is `200` with a client-safe state, not a host/source error. |
+| `GET` / `POST /api/reader3/searchBookContent` | Existing `url`/`bookUrl`, raw `keyword`, `lastIndex`, `size` aliases. URL normalization remains allowed, but `keyword` is never trimmed. | Keeps legacy `{ isSuccess, data: { list, lastIndex, hasMore, total } }` response and upstream URL lookup behavior. Every list row includes `resultCountWithinChapter`, `resultText`, `chapterTitle`, the unchanged `query`, `chapterIndex`, `queryIndexInResult`, and `queryIndexInChapter`; indexes and the at-most-20-unit excerpt radius use Java/Kotlin UTF-16 code-unit semantics. Additive incomplete fields remain allowed. | JWT required; zero-length keyword, missing shelf book and missing configured source remain HTTP 200 `isSuccess:false` with the upstream Chinese `errorMsg`; whitespace-only keyword is valid. Like the modern route, request cancellation must flow into raw chapter loading, stop later remote fetches, and return without fabricating a successful page. |
 
 Search result selection is a frontend event, not a new API request: the App-level Dialog emits one
 monotonic Reader intent for every row click. Re-selecting the same row must execute again. Live selection
 must not use `router.push` or add browser history; existing `chapter/line/match/q` URLs remain accepted for
-cold-start/deep-link compatibility and may be mirrored only with history-neutral replacement.
+cold-start/deep-link compatibility and may be mirrored only with history-neutral replacement. The Dialog,
+Pinia intent, Reader matcher and cold-start route must not trim or otherwise normalize the query.
 
 OpenReader retains bounded remote/local scanning as a runtime/security adaptation; matching itself is the fixed-upstream exact, case-sensitive, overlapping algorithm and is not normalized. A bound may never silently advance `lastIndex` past omitted same-chapter matches: it must set `truncated: true`, and the UI must say that results are incomplete. Unavailable remote content is likewise surfaced by `incomplete/unavailableChapters` rather than as a false “没有匹配内容”. The frontend must pass an `AbortSignal`; closing the search dialog, replacing its keyword/book, or resetting its state aborts the active transport request without treating the intentional abort as a visible search error. Closing and reopening the same book preserves completed keyword/results/scroll state, matching the upstream root-dialog lifecycle.
+
+## BookInfo and result-card remote add contract
+
+The 2026-08-02 fixed-baseline BookInfo audit corrected the ownership of two distinct upstream actions.
+Search/Explore result cards own the category-confirmed add action; an unshelved BookInfo owns a direct
+add action and must not open the category chooser. Both actions may share the same authenticated
+mutation utility and stable OpenReader endpoint, but they do not share the same visible state machine.
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `POST /api/books/remote` | `{title,bookUrl,sourceId,author?,coverUrl?,intro?,kind?,wordCount?,sourceName?,variable?,categoryId?,categoryIds?}`. Result-card confirmation supplies its selected positive category IDs. BookInfo direct add supplies no positive category ID; an omitted or empty category list means an ungrouped new book. | A new URL is parsed and created as `201` with the authoritative shelf projection, chapters and exactly the requested positive category memberships. An existing caller-owned URL returns `200` without duplicating the book. If the request has no positive category selection, an existing book's memberships are preserved; category clearing remains the explicit category endpoint's responsibility. Every successful durable mutation emits one caller-scoped shelf update. | JWT and a caller-visible enabled source are required. Required-field/category/variable validation and source parsing failures retain the existing safe `400 {error,code?,stage?}` forms; internal persistence failures are `500`. No other user's same URL or category is visible or mutated. |
+
+Frontend ownership rules:
+
+- Search/Explore result-card “加入书架” stops card navigation, opens `设置分组`, starts no write on
+  `暂不加入`, and calls the endpoint only after `确定`.
+- Unshelved BookInfo “加入书架” calls the endpoint directly, never opens the chooser, remains on the
+  current Index or temporary Reader route, and upserts only the returned server projection.
+- Opening a result cover only opens the shared BookInfo; opening result body may create a temporary
+  Reader session. Neither preview action persists a shelf book.
 
 ## P1-B remote temporary-reader contract (implemented slice)
 
@@ -604,7 +631,7 @@ the desktop and two mobile browser flows on 2026-07-13.
 
 - Session IDs are high-entropy opaque values, held server-side only; they are never JWTs, never appear in a source URL, never enter backup/WebDAV/export data, and use `Cache-Control: no-store`. The implemented idle TTL is 30 minutes and the absolute lifetime is four hours. Expiration returns `410`, never a silent account/session logout.
 - The source snapshot and fetchable variable state stay server-side. The frontend receives only presentation metadata, an opaque session id, and the existing opaque variable needed for a later explicit add-to-shelf; it never turns that field into a request URL. Temporary sessions deliberately do **not** save browser-local or server progress, and must not call `/progress/:bookId`, bookmark, cache, category, source-change, refresh, or any other shelf-ID endpoint with a fabricated ID.
-- Search and Explore must call this same session creation endpoint and use the same reader route form, e.g. `/reader/remote/:sessionId`; neither flow may call `POST /books/remote` until the user explicitly chooses the canonical BookInfo “加入书架” action. Adding later remains the existing category-confirmed transaction and can forward the returned opaque `variable` field.
+- Search and Explore must call this same session creation endpoint and use the same reader route form, e.g. `/reader/remote/:sessionId`; neither preview nor result-body reading may call `POST /books/remote`. Persistence starts only from an explicit result-card or BookInfo “加入书架” action. The result card confirms categories first; BookInfo adds directly. Both may forward the returned opaque `variable` field.
 - Reader controls that require a durable shelf record (bookmark creation, group editing, cache/clear cache, durable progress, source change/refresh) must be either temporarily unavailable with an explicit “加入书架后可用” state or receive a separately documented temporary-session contract. They must never fail as a hidden `404` caused by a synthetic book ID.
 
 Implemented tests: `backend/api/remote_reader_contract_test.go` proves user isolation, content loading and zero Book/Chapter/Progress/Bookmark writes. `scripts/smoke/remote-reader-contract.mjs` proves Search cover → BookInfo, Search body → temporary Reader, and zero persistent writer requests at 1440×900, 390×844 and 360×800. Remaining API test coverage is listed in P1-B follow-up: request validation before fetch; expiry; safe parser error redaction; cancellation; source-failure cache; and variable propagation across multiple chapters.

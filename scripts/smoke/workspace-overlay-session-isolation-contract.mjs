@@ -518,7 +518,7 @@ async function assertPrivateOverlaysClosed(page, viewport, scenario, phase) {
 
 async function assertNoStaleToast(page, viewport, scenario) {
   const forbidden = {
-    'book-info': ['已加入书架', 'A 原会话待加入书籍'],
+    'book-info': ['加入书架成功', 'A 原会话待加入书籍'],
     'storage-import': ['导入 1 本', 'A 延迟导入书籍'],
     'webdav-restore': ['恢复完成'],
     'source-save': ['书源已新增'],
@@ -563,15 +563,12 @@ async function beginBookInfoOperation(session) {
   await page.getByText(state.shelfA.title, { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
   await runSidebarSearch(page, viewport, '会话隔离')
   const title = 'A 原会话待加入书籍'
-  const row = page.locator('.result-card').filter({ has: page.getByText(title, { exact: true }) })
+  const row = page.locator('.remote-result-book').filter({ has: page.getByText(title, { exact: true }) })
   await row.waitFor({ state: 'visible', timeout: 10_000 })
   await row.locator('.book-cover-shared').click()
   const dialog = page.locator('.book-info-dialog')
   await dialog.waitFor({ state: 'visible', timeout: 10_000 })
   await dialog.getByRole('button', { name: '加入书架', exact: true }).click()
-  const categories = page.locator('.book-add-category-dialog')
-  await categories.waitFor({ state: 'visible', timeout: 10_000 })
-  await categories.getByRole('button', { name: '确定', exact: true }).click()
 }
 
 async function beginStorageImportOperation(session) {
@@ -689,7 +686,7 @@ async function reopenCurrentOverlay(session) {
   const { page, state, viewport } = session
   state.phase = 'manual-reopen'
   if (state.scenario === 'book-info') {
-    const row = page.locator('.result-card').filter({
+    const row = page.locator('.remote-result-book').filter({
       has: page.getByText('A 续登搜索新数据', { exact: true }),
     })
     await row.locator('.book-cover-shared').click()
