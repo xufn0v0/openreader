@@ -6,6 +6,13 @@
 
 状态：**aligned / Docker-published / awaiting-device-verification**
 
+> 2026-08-05 设备反馈后的勘误：`60984b6` 本批曾在 scoped Home 样式下通过移动几何合同；
+> `c851c5f` 为让搜索/探索结果复用同一书架样式，将 `Home.vue` 的外部样式从 scoped 改为全局，
+> 暴露了既有全局 `.mobile-shell .app-page { padding: 18px 14px 82px; }` 的高优先级覆盖。
+> 390px 视口中的普通书架行因此实测只有 362px，左右各错误保留 14px，违反本合同“移动
+> shelf 去除外层 padding、书籍行宽等于视口”的固定基准。原 Docker 状态不再代表当前
+> `latest` 的移动书架几何已经对齐。
+
 本文件只审查普通 Index 书架的标题、编辑搜索、分组标签、书籍卡片、加载/空态、昼夜和响应式
 布局。书架网络新鲜度、阅读进度、最后更新时间、BookManage、BookGroup manager、BookInfo、搜索/
 探索结果页已经有独立合同，不因本文件重复打开。
@@ -138,6 +145,20 @@
 | 空态 | 自造 el-empty/三套文案 | `must-fix` | 恢复空 wrapper |
 | 夜间 | shelf/tab 仍硬编码白色 | `must-fix` | 恢复固定上游夜间表面和文字层 |
 
+## 3.1 2026-08-05 发布后移动宽度回归合同
+
+| 层 | 固定上游 | `c851c5f` 生产构建实测 | 判定与修复边界 |
+|---|---|---|---|
+| 移动 shelf 根层 | `<=750px` 时外层左右 padding 为 `0` | `.shelf-page` 同时命中全局 `.mobile-shell .app-page`，最终左右 padding 为 `14px` | `must-fix`：书架场景显式覆盖通用 app-page padding，不删除其他页面需要的通用移动间距 |
+| 书籍列表/行 | list 为纵向 flex；每行 `box-sizing:border-box;width:100%;padding:10px 20px`，行外框等于视口宽度 | 390px 视口行外框为 362px；缩窄量精确等于 `14px × 2` | `must-fix`：390/360 下分别恢复 390/360px；行内部 20px padding 不变 |
+| 标题/分组 | 标题左右 inset 24px，分组左右 margin 24px | 额外叠加根层 14px，最终可见位置整体内缩 | `must-fix`：恢复相对视口 24px，而不是相对 14px 内缩容器再加 24px |
+| 搜索/探索结果复用 | 上游结果场景可复用普通 shelf 几何 | 全局共享样式本身可保留，但不能改变普通 Home shelf 的最终 cascade | `technical-stack-equivalent`：保留一份共享样式；以场景选择器锁定普通/结果书架的上游最终几何 |
+| 阅读器内书架 | 独立 Reader Popover 合同，不受 Index `.app-page` 控制 | 当前 Reader 根层仍为 100vw；本次 28px 回归不来自 Reader | `not part of this regression`：补内层宽度浏览器断言，避免只检查根层 |
+
+测试顺序固定为：先让现有 `bookshelf-visible-layout-contract.mjs` 在 390px 报出
+`mobile row width 362`；再修最终 CSS cascade；最后要求 1440×900、1024×1366、390×844、
+360×800 全部通过，并增加 Reader 内书架根层、内容层、列表层的宽度/inset 观测。
+
 ## 4. 先测后改闸门
 
 ### 4.1 单元与静态合同
@@ -226,3 +247,36 @@ TXT、EPUB、UMD、CBZ、相对 cache、owner isolation、普通/portable backup
 
 本批只签收普通书架可见布局。设备侧仍需验证真实书目长度、封面与自定义分组组合；BookManage、
 BookGroup、BookInfo、书架 freshness、进度和 `lastCheckTime` 继续由各自已关闭合同约束。
+
+## 8. 2026-08-05 移动宽度回归修复结果
+
+- `home-shelf.css` 在 `<=750px` 使用书架场景选择器
+  `.app-shell.mobile-shell .shelf-page` 明确恢复 `padding: env(safe-area-inset-top) 0 0`；
+  它只覆盖普通/搜索/探索共享的 shelf 场景，不删除其他 `.app-page` 需要的通用移动间距。
+- 静态合同先在旧 CSS 上失败，再随修复转绿；真实生产构建合同先稳定复现
+  `390: mobile row width 362`，修复后 390×844/360×800 的书籍行分别恢复为 390/360px。
+- `reader-mobile-contract.mjs` 额外观察 Reader 内书架的根层、主内容层、列表层和卡片层：
+  根层/主内容层保持 100vw，列表只扣除自身已记录内边距，卡片必须填满列表。该独立 Reader
+  场景没有受到 Index CSS 回归或本次修复影响。
+- 验证：frontend `701/701`、Go `go test ./...`、Vite production build、
+  `git diff --check`；书架 1440×900/1024×1366/390×844/360×800、Reader 移动合同和
+  Index 搜索/探索工作台合同全部通过。
+
+上述应用门禁完成后进入发布；实际镜像与未执行门禁记录如下。设备端仍需使用新镜像复核真实书目。
+
+## 9. 2026-08-05 Docker 发布结果
+
+实现提交 `7971e232bcc0226b595f448d965e3997ef735f42` 已推送 `main`。镜像由本机
+OrbStack 完成 amd64/arm64 构建并直接上传 GHCR，没有使用云端构建：
+
+- `ghcr.io/changshengyu/openreader:7971e23`
+- `ghcr.io/changshengyu/openreader:latest`
+- OCI index：`sha256:5b16cf1cab8a3d4750e69a8e9632450195c829be99047bbb5d0de4ca598b6f0a`
+- amd64 manifest：`sha256:1d92ef5e7e2aa37a2833fca90227c9179ee4f1bc2aaa38877ee5af127a873cac`
+- arm64 manifest：`sha256:57e4a8adc0903f7582f5a1b9da048a2170bb46ac013b882533f588d437bd2940`
+
+mounted-volume/backup 脚本本轮**未执行**：镜像发布后，Codex 对 Docker 容器门禁的主机审批因
+当前审批额度耗尽被平台拒绝，并明确禁止用替代命令绕过。该项不能写成通过。本批只修改前端 CSS、
+静态/浏览器测试与文档，没有修改 Go、SQLite、迁移、`data/`、`cache/`、`library/` 或
+backup/restore；最近一批 `c851c5f` 的同一持久化代码已经通过新旧卷门，但这只能作为继承证据，
+不能替代本镜像尚未执行的门禁。设备端可先验证移动书架宽度，审批额度恢复后补跑该镜像的卷门。
