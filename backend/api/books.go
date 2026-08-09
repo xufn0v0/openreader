@@ -1373,8 +1373,13 @@ func (s *Server) refreshLocalBook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "local source file not found"})
 		return
 	}
-	data, err := os.ReadFile(sourcePath)
+	legacyLimits := engine.LegacyLocalBookParseLimits()
+	data, err := readBoundedLocalBookSource(sourcePath, legacyLimits.MaxArchiveBytes)
 	if err != nil {
+		if errors.Is(err, engine.ErrLocalBookParseLimit) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": engine.ErrLocalBookParseLimit.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read local source file"})
 		return
 	}
@@ -2749,7 +2754,8 @@ func (s *Server) rebuildLocalChapterText(book models.Book, chapter *models.Chapt
 	if !ok {
 		return ""
 	}
-	data, err := os.ReadFile(sourcePath)
+	legacyLimits := engine.LegacyLocalBookParseLimits()
+	data, err := readBoundedLocalBookSource(sourcePath, legacyLimits.MaxArchiveBytes)
 	if err != nil {
 		return ""
 	}
@@ -3100,20 +3106,46 @@ func replaceRuleAppliesToBook(scope string, book models.Book) bool {
 
 func (s *Server) checkUpdates(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
-	count, updatedBookIDs := s.scheduler.CheckNowForUser(userID)
-	items := make([]bookListItem, 0, len(updatedBookIDs))
-	if len(updatedBookIDs) > 0 {
+	result, err := s.scheduler.CheckNowForUserDetailed(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "检查书籍更新失败"})
+		return
+	}
+	items := make([]bookListItem, 0, len(result.UpdatedBookIDs))
+	updatedBooks := make(map[uint]models.Book, len(result.UpdatedBookIDs))
+	if len(result.UpdatedBookIDs) > 0 {
 		var books []models.Book
-		if err := s.db.Where("user_id = ? AND id IN ?", userID, updatedBookIDs).Find(&books).Error; err == nil {
-			for _, book := range books {
-				items = append(items, s.bookShelfListItem(userID, book))
+		if err := s.db.Where("user_id = ? AND id IN ?", userID, result.UpdatedBookIDs).Find(&books).Error; err != nil || len(books) != len(result.UpdatedBookIDs) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "检查书籍更新失败"})
+			return
+		}
+		for _, book := range books {
+			updatedBooks[book.ID] = book
+		}
+		for _, bookID := range result.UpdatedBookIDs {
+			book, exists := updatedBooks[bookID]
+			if !exists {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "检查书籍更新失败"})
+				return
 			}
+			items = append(items, s.bookShelfListItem(userID, book))
+		}
+	}
+	s.pruneUnreferencedRemoteCachePaths(result.SupersededCachePaths)
+	for _, bookID := range result.ReplacedBookIDs {
+		if book, exists := updatedBooks[bookID]; exists {
+			_, _ = s.chapterImages.RemoveBook(book)
 		}
 	}
 	if len(items) > 0 {
 		_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": items})
-	} else if count > 0 {
-		_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update"})
 	}
-	c.JSON(http.StatusOK, gin.H{"newChapters": count, "books": items})
+	c.JSON(http.StatusOK, gin.H{
+		"checked":         result.Checked,
+		"updated":         result.Updated,
+		"failed":          result.Failed,
+		"newChapters":     result.NewChapters,
+		"replacedBookIds": result.ReplacedBookIDs,
+		"books":           items,
+	})
 }

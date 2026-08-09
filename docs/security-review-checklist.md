@@ -59,12 +59,97 @@ Evidence: `frontend/tests/localCacheStatsScope.test.mjs`,
 
 ## SSRF and remote fetches
 
-- [ ] Source/RSS/cover/WebDAV remote URLs validate scheme.
-- [ ] Redirect count is bounded.
-- [ ] Request timeout is set.
-- [ ] Response body size is bounded.
-- [ ] Private network access is considered when server-side fetches are user-controlled.
-- [ ] Headers/cookies are not logged.
+- [x] Shared Source/RSS URLs validate absolute HTTP(S), host, port and userinfo before transport; the
+  independently published cover fetcher has its own stricter capability/target policy. WebDAV remote-client
+  behavior remains governed by its separate protocol contract.
+- [x] Shared Source/RSS redirects are explicitly bounded to five and every redirect URL is revalidated.
+- [x] Shared Source/RSS requests have a configurable 15-second safe default timeout and preserve earlier caller cancellation.
+- [x] Shared Source/RSS response bodies are bounded to 16 MiB before charset, HTML/XML/JSON or binary processing.
+- [x] Shared Source/RSS private, loopback, link-local, metadata and special-use targets are denied by default;
+  DNS answers, redirects and actual dials are revalidated, and deployment exceptions require the administrator-only
+  exact-host/IP/CIDR allowlist.
+- [x] Shared Source/RSS public errors redact URL query, userinfo, headers/cookies, request/response body and
+  proxy credentials; cross-origin redirects strip credential-bearing headers.
+
+### P2-N1 shared Source/RSS fetch boundary (2026-08-09 published)
+
+P2-N1 is implemented and published as `981bca7` / `latest`, OCI index
+`sha256:02160e0797b3371fdfadccb550b8766d412c3e09df632ba1e36d192b26eb500d`. Focused race tests,
+full Go/frontend/build, real CSS/JSONPath/XPath/RSS browser flows and fresh/historical mounted-volume gates passed.
+
+### P2-N2 shared Source/RSS private-network boundary (2026-08-09 published)
+
+P2-N2 is implemented and published as `d198c2e` / `latest`, OCI index
+`sha256:021817e602aa589c1583ec7ccb65828172c1a2afe1e038e23651dd51c455fcc1`. The sole administrator variable
+`OPENREADER_SOURCE_NETWORK_ALLOWLIST` is fail-closed; direct and explicit HTTP/SOCKS requests validate target and
+proxy endpoint independently, reject mixed DNS and rebinding, pin validated IPs at dial/handshake time, and ignore
+ambient process proxies. Docker public/host-gateway/loopback/exact-host/restart fixtures plus fresh/historical
+mounted-volume, portable backup and restart gates passed. FlClash fake-IP ranges remain denied unless the deployment
+administrator explicitly allows them; this is documented rather than silently weakening the default policy.
+
+### P2 source-debug streaming boundary (2026-08-09 published)
+
+- [x] `POST /api/sources/:id/debug/stream` requires Bearer auth and an active current-user source association;
+  JWT is never placed in a query parameter, event, local source draft or history record.
+- [x] Current source persistence remains a separate permission-checked create/update before streaming. The stream
+  and all three legacy `/test*` probes are read-only and never write `source_failures`, cache, shelf, variables or sync events.
+- [x] Request context cancellation stops the active remote transport and later stages, emits no fake `end`, and
+  does not classify user cancellation as source failure.
+- [x] Events are bounded to 128 entries/64 KiB, have strict sequence/elapsed metadata and exactly one terminal;
+  errors redact URL query/userinfo, headers/cookies, response body, parser variables, JWT, WebDAV credentials and host paths.
+- [x] The shared source fetcher continues to enforce HTTP(S), timeout, body, redirect, DNS/private-network and proxy
+  policy. JavaScript/WebView rules remain stored but are not executed and produce a safe unsupported-code event.
+- [x] Browser local source/history keys include schema and authenticated account scope; switching accounts cannot
+  restore another user's drafts. Generated JSON keeps reader-dev fields plus the same lossless `rules` extension
+  used by the backend exporter, without embedding auth material.
+
+Evidence: `backend/api/source_debug_second_audit_contract_test.go`,
+`backend/services/sourcedebug/service_test.go`, frontend source-debug/editor/state contracts,
+`scripts/smoke/source-debug-contract.mjs`, focused race, full Go/vet, frontend 724/724, production build,
+fresh/historical volume gates and locally published `f8f263d`/`latest`.
+
+### P1 temporary remote-Reader session boundary (2026-08-09 published)
+
+- [x] `POST /api/reader/remote-sessions` accepts one JSON value within 64 KiB; declared and chunked oversized bodies fail with a safe 413 before source lookup or transport.
+- [x] Session IDs use 32 random bytes and are bound to the authenticated user. Unknown, foreign and LRU-evicted IDs are indistinguishable 404s; natural expiry remains 410 without being confused with JWT expiry.
+- [x] Idle lifetime is 30 minutes and absolute lifetime is four hours. Per-session (8 MiB), per-user (8 sessions/32 MiB) and process (128 sessions/128 MiB) retention budgets use deterministic LRU eviction; bounded expiry markers preserve 410 without retaining source snapshots.
+- [x] Retained-byte estimation includes the complete server-side source snapshot, book and chapters. Source rules, headers/cookies, login state, proxy credentials and resolved fetch URLs are never serialized to the client.
+- [x] Content requests trust only the server catalogue index/URL. Malformed indices do not renew a lease; successful parser variables commit atomically to the book/current chapter while other chapters remain isolated.
+- [x] Cancellation produces no synthetic success/error body, variable commit, source-failure row, shelf/cache/database/file write or sync event. Typed transport failures alone enter the caller-scoped short-lived failure cache, and API errors redact raw rules, credentials, response content and URL query/fragment.
+- [x] The session remains memory-only and cannot enter SQLite, chapter cache, browser persistence, backup/WebDAV or shelf WebSocket events. Durable controls continue to require an explicit add-to-shelf action.
+
+Evidence: `backend/services/remotereader/store_contract_test.go`,
+`backend/api/remote_reader_second_audit_contract_test.go`, the full Go/race/vet gates,
+`scripts/smoke/remote-reader-contract.mjs`,
+`scripts/smoke/source-parser-workflow-contract.mjs`, and
+[`docs/compat/remote-reader-session-fixed-baseline-second-audit-p1-contract.md`](compat/remote-reader-session-fixed-baseline-second-audit-p1-contract.md).
+Local amd64/arm64 build, GHCR digest readback and fresh/historical mounted-volume/backup gates passed for `30dbe53`/`latest`, OCI index `sha256:9c07871ef7d3c8d99733fcecea205336576c081db651dada13eaeedafda76365`.
+
+## P2 RSS requested-page and import review (2026-08-09 implementation)
+
+- [x] Every source, article, import update and page cache write is scoped to the
+  authenticated user. Same URLs in another account are unrelated, and source
+  import commits or rolls back as one transaction before its sync event.
+- [x] The visible refresh endpoint accepts only pages `1..100000`; a requested
+  `sortUrl` must resolve to the owned source base/sort options and an arbitrary
+  outside URL is rejected before transport. Standard feed page greater than one
+  performs no network request.
+- [x] Batch import is capped at 8 MiB and 5000 records, skips blank identities,
+  preserves input order, and submits only the frontend's explicitly selected
+  rows. Safe select-all excludes `@js:` and `webView:` records without dropping
+  safe index zero.
+- [x] Article cache upsert is transactional and preserves hidden read/favourite
+  state; visible content is sanitized and a delayed source/page or old-account
+  result cannot commit into the current dialog.
+- [x] The shared `engine` source fetcher applies the P2-N1 response, redirect,
+  timeout, retry, URL and redaction boundaries and the separately published P2-N2
+  private-address/DNS/proxy policy. The RSS visible-workspace slice does not own those
+  transport contracts, but all RSS fetches consume them.
+
+Evidence: `backend/api/rss_requested_page_contract_test.go`,
+`backend/services/rss/service_test.go`, the existing RSS parser/content tests,
+frontend RSS contracts, and `scripts/smoke/rss-workspace-contract.mjs` at four
+viewports. Full contract: [`docs/compat/rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md`](compat/rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md).
 
 ## P2 remote book-cover proxy review (2026-07-27 implemented and published)
 
@@ -257,7 +342,16 @@ Targeted evidence: `backend/api/reader_appearance_assets_p2_contract_test.go`,
 - [x] LocalStore, WebDAV and generated backups resolve to private descendants for regular users while the administrator retains the preserved legacy root. Cross-user access is denied without moving/deleting mounted data.
 - [x] Direct and storage-backed preview/import uses user-scoped random staged tokens; confirmation consumes the staged bytes, foreign/expired tokens fail closed, and successful/expired stages are removed.
 - [x] Direct local-book upload, LocalStore/WebDAV upload, preview and confirmation reads are capped by `OPENREADER_MAX_IMPORT_BYTES` (128 MiB by default) before staging or parser work. LocalStore/WebDAV writes stage beside the target and rename only after the bounded copy succeeds.
-- [ ] Archive entry/expanded-size and parser-work limits still need explicit bounds; stage cleanup must also run without a later user request.
+- [x] Archive entry/expanded-size、UMD/PDF parser work 和跨用户 stage cleanup 已有显式上限；cleanup
+  在启动时执行并每小时重复，不依赖下一次用户请求。
+- [x] TXT/Markdown 已把原始输入、解码后文本、自定义规则长度和最终章节数接入统一 parser limits；
+  prepared snapshot 采用通用章节上限，历史本地归档刷新/缓存重建也在完整分配前执行 1GiB legacy
+  input ceiling。parser 错误不消费重试 stage、不产生书籍行或暴露宿主路径。证据见
+  `docs/compat/local-text-parser-budget-p2-contract.md` 及对应 engine/importer/API/config tests。
+
+P2 本地 parser 预算已由本机发布为 `e7f168e` / `latest`，OCI index
+`sha256:8d64bbb187f65c433388bddc5385ce68d42e8b40d9b397787e4c1d354c892dac`；三视口真实导入和
+fresh/historical mounted-volume/portable-backup 门均通过。
 
 Evidence for the checked items: `backend/api/workspace_storage_access_contract_test.go`, `backend/api/workspace_import_stage_contract_test.go`, `backend/api/import_size_contract_test.go`, `frontend/tests/webdavAuthContract.test.mjs`, full Go/frontend test suites and production frontend build. This remains not a storage/backup release approval.
 
@@ -565,3 +659,44 @@ Evidence: `frontend/tests/authenticatedRuntimeScope.test.mjs`,
 `frontend/tests/readerReauthenticationWiring.test.mjs`, frontend 599/599,
 the production build and full Go tests. Three-viewport browser confirmation and Docker publication remain
 open because the local-server external permission request was rejected when the workspace reported no credits.
+
+## P2 WebSocket synchronization security review (2026-08-09 extracted)
+
+- [x] Browser handshakes reject an Origin whose host differs from request Host; the ordinary HTTP CORS reflection
+      path cannot authorize a cross-site WebSocket. Same-origin and Origin-less diagnostic clients remain usable.
+- [x] Missing, invalid and deleted-user JWTs return the same safe 401 before a Hub client is registered. The existing
+      query-token transport remains redacted as `/ws/sync?<redacted>` and is never copied into an event/error.
+- [x] The protocol is server-to-client only. A client text/binary frame is bounded and closed with policy violation;
+      it is never parsed as a trusted event, relayed, persisted or used to trigger another client's store action.
+- [x] Durable business events remain scoped to their owner. `users_update` reaches administrators and each affected
+      user only; an unrelated ordinary account cannot learn another batch's user IDs.
+- [x] Failed/rolled-back REST mutations emit nothing; Hub backpressure closes stale clients and reconnect continues
+      to reconcile through authenticated REST rather than trusting a missed event stream.
+
+Evidence: `backend/api/websocket_sync_p2_contract_test.go`, `backend/sync/hub_test.go`,
+`backend/middleware/access_log_test.go`, `frontend/tests/authenticatedRuntimeScope.test.mjs`, the full Go/frontend
+gates, focused race and a real two-client synchronization smoke at 1440×900, 390×844 and 360×800. See
+[`compat/websocket-sync-p2-contract.md`](compat/websocket-sync-p2-contract.md).
+
+## P1 source-manager second-audit security review (2026-08-09)
+
+- [x] `usedBookNames` is response-only and produced by one query scoped to the authenticated user; another user's
+      shelf names cannot enter the source manager projection.
+- [x] Unknown reader-dev top-level fields are stored only as inert JSON under the reserved
+      `__openreaderSourceExtra` rule key and restored on export; parser/runtime code ignores that key and never
+      executes dormant JavaScript/WebView content.
+- [x] Dangerous object keys (`__proto__`, `prototype`, `constructor`) are rejected from the preservation envelope;
+      canonical source fields cannot be overridden by preserved extras.
+- [x] Local source JSON imports are capped at 16 MiB and fail with 413 before JSON decoding; the multipart request
+      is also bounded with explicit overhead.
+- [x] Remote source preview continues through the shared SSRF-safe fetcher with scheme/host, redirect, timeout,
+      response-size, DNS/rebinding, private-network and credential constraints.
+- [x] Failure-cache categories expose only fixed safe labels and do not reveal JWTs, cookies, source headers,
+      query strings, response bodies, WebDAV credentials or host filesystem paths.
+- [x] The implementation changes no SQLite schema, filesystem path, backup/WebDAV format or destructive migration;
+      existing source ownership, usage guard, mutation transaction and durable-only broadcast remain active.
+
+Evidence: `backend/api/book_source_ownership_api_contract_test.go`,
+`backend/services/sourcecompat/export.go`, `frontend/tests/bookSourceEditor.test.mjs`,
+`frontend/tests/sourceScriptTransparencyContract.test.mjs`, full Go/frontend gates, focused/full race, `go vet`,
+and `scripts/smoke/source-workspace-contract.mjs` at four viewports.

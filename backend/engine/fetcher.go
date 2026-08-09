@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -22,7 +23,19 @@ import (
 	"golang.org/x/text/transform"
 )
 
-var defaultClient = &http.Client{Timeout: 12 * time.Second}
+const (
+	defaultSourceRequestTimeout = 15 * time.Second
+	defaultMaxSourceResponse    = int64(16 * 1024 * 1024)
+	defaultMaxSourceRedirects   = 5
+	defaultMaxSourceRetries     = 3
+)
+
+var defaultClient atomic.Pointer[http.Client]
+var configuredSourceFetchLimits atomic.Pointer[SourceFetchLimits]
+var sourceHTTPClientOverrides struct {
+	sync.Mutex
+	frames []*sourceHTTPClientOverride
+}
 var sourceProxyPattern = regexp.MustCompile(`^(http|socks4|socks5)://(.+):([0-9]{2,5})(?:@([^@]*)@([^@]*))?$`)
 var sourceRateLimiters sync.Map
 
@@ -30,6 +43,91 @@ var sourceRateLimiters sync.Map
 // a remote source request. Parser/configuration errors deliberately do not
 // carry this marker, so callers do not suppress a source for a bad rule.
 var ErrSourceRequest = errors.New("source request failed")
+
+var (
+	ErrUnsafeSourceURL     = errors.New("unsafe source URL")
+	ErrSourceResponseLimit = errors.New("source response exceeds limit")
+	ErrSourceRedirectLimit = errors.New("source redirect limit exceeded")
+	errSourceTransport     = errors.New("source transport failed")
+	errSourceResponseRead  = errors.New("failed to read source response")
+)
+
+// SourceFetchLimits configures the shared book-source and RSS transport. The
+// values are process-local runtime policy and never enter persistent data.
+type SourceFetchLimits struct {
+	Timeout          time.Duration
+	MaxResponseBytes int64
+	MaxRedirects     int
+	MaxRetries       int
+}
+
+type redactedSourceFetchError struct {
+	kind  error
+	cause error
+}
+
+type sourceHTTPClientOverride struct {
+	client *http.Client
+	active bool
+}
+
+func (err *redactedSourceFetchError) Error() string {
+	return err.kind.Error()
+}
+
+func (err *redactedSourceFetchError) Unwrap() []error {
+	if err.cause == nil || err.cause == err.kind {
+		return []error{err.kind}
+	}
+	return []error{err.kind, err.cause}
+}
+
+func init() {
+	defaultClient.Store(defaultSourceHTTPClient())
+	limits := normalizeSourceFetchLimits(SourceFetchLimits{})
+	configuredSourceFetchLimits.Store(&limits)
+}
+
+func defaultSourceHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout:   defaultSourceRequestTimeout,
+		Transport: newDefaultSourceRoundTripper(),
+	}
+}
+
+func normalizeSourceFetchLimits(limits SourceFetchLimits) SourceFetchLimits {
+	if limits.Timeout <= 0 {
+		limits.Timeout = defaultSourceRequestTimeout
+	}
+	if limits.MaxResponseBytes <= 0 {
+		limits.MaxResponseBytes = defaultMaxSourceResponse
+	}
+	if limits.MaxRedirects <= 0 {
+		limits.MaxRedirects = defaultMaxSourceRedirects
+	}
+	if limits.MaxRetries <= 0 {
+		limits.MaxRetries = defaultMaxSourceRetries
+	}
+	return limits
+}
+
+func currentSourceFetchLimits() SourceFetchLimits {
+	if limits := configuredSourceFetchLimits.Load(); limits != nil {
+		return *limits
+	}
+	return normalizeSourceFetchLimits(SourceFetchLimits{})
+}
+
+// ConfigureSourceFetchLimits installs the runtime policy. The restore closure
+// is useful for focused tests; production calls this once during startup.
+func ConfigureSourceFetchLimits(limits SourceFetchLimits) func() {
+	normalized := normalizeSourceFetchLimits(limits)
+	installed := &normalized
+	previous := configuredSourceFetchLimits.Swap(installed)
+	return func() {
+		configuredSourceFetchLimits.CompareAndSwap(installed, previous)
+	}
+}
 
 type sourceRateLimiter struct {
 	serial     chan struct{}
@@ -39,15 +137,39 @@ type sourceRateLimiter struct {
 	windowUsed int
 }
 
-func SetHTTPClient(client *http.Client) func() {
-	previous := defaultClient
+// SetHTTPClientForTesting installs a transport fixture. Production code must
+// never call it because the injected client intentionally bypasses N2 DNS and
+// dial policy while retaining the shared N1 request/response bounds.
+func SetHTTPClientForTesting(client *http.Client) func() {
 	if client == nil {
-		defaultClient = &http.Client{Timeout: 12 * time.Second}
-	} else {
-		defaultClient = client
+		client = defaultSourceHTTPClient()
 	}
+	frame := &sourceHTTPClientOverride{client: client, active: true}
+	sourceHTTPClientOverrides.Lock()
+	sourceHTTPClientOverrides.frames = append(sourceHTTPClientOverrides.frames, frame)
+	defaultClient.Store(client)
+	sourceHTTPClientOverrides.Unlock()
+	var restored atomic.Bool
 	return func() {
-		defaultClient = previous
+		if !restored.CompareAndSwap(false, true) {
+			return
+		}
+		sourceHTTPClientOverrides.Lock()
+		frame.active = false
+		frames := sourceHTTPClientOverrides.frames
+		for len(frames) > 0 && !frames[len(frames)-1].active {
+			frames = frames[:len(frames)-1]
+		}
+		sourceHTTPClientOverrides.frames = frames
+		current := defaultSourceHTTPClient()
+		for index := len(frames) - 1; index >= 0; index-- {
+			if frames[index].active {
+				current = frames[index].client
+				break
+			}
+		}
+		defaultClient.Store(current)
+		sourceHTTPClientOverrides.Unlock()
 	}
 }
 
@@ -166,6 +288,11 @@ func fetchTextRequestWithURLContext(
 	responseType string,
 	sourceProxy ...string,
 ) (string, string, error) {
+	normalizedURL, err := normalizeSourceRequestURL(url)
+	if err != nil {
+		return "", "", err
+	}
+	url = normalizedURL
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" {
 		method = http.MethodGet
@@ -173,14 +300,27 @@ func fetchTextRequestWithURLContext(
 	if retry < 0 {
 		retry = 0
 	}
-	client := defaultClient
-	if len(sourceProxy) > 0 && strings.TrimSpace(sourceProxy[0]) != "" {
-		var err error
-		client, err = sourceHTTPClient(defaultClient, sourceProxy[0])
-		if err != nil {
-			return "", url, err
-		}
+	limits := currentSourceFetchLimits()
+	if retry > limits.MaxRetries {
+		retry = limits.MaxRetries
 	}
+	baseClient := defaultClient.Load()
+	if baseClient == nil {
+		baseClient = defaultSourceHTTPClient()
+	}
+	client := baseClient
+	proxyClientOwned := false
+	if len(sourceProxy) > 0 && strings.TrimSpace(sourceProxy[0]) != "" {
+		client, err = sourceHTTPClient(baseClient, sourceProxy[0])
+		if err != nil {
+			return "", "", redactSourceFetchError(errSourceTransport, err)
+		}
+		proxyClientOwned = true
+	}
+	if proxyClientOwned {
+		defer client.CloseIdleConnections()
+	}
+	client = sourceFetchClient(client, limits)
 
 	for attempt := 0; attempt <= retry; attempt++ {
 		var requestBody io.Reader
@@ -189,7 +329,7 @@ func fetchTextRequestWithURLContext(
 		}
 		request, err := http.NewRequestWithContext(ctx, method, url, requestBody)
 		if err != nil {
-			return "", url, err
+			return "", "", redactSourceFetchError(ErrUnsafeSourceURL, err)
 		}
 		for name, value := range headers {
 			name = strings.TrimSpace(name)
@@ -204,15 +344,14 @@ func fetchTextRequestWithURLContext(
 
 		response, err := client.Do(request)
 		if err != nil {
-			return "", url, err
+			return "", "", classifySourceClientError(err)
 		}
 
 		responseURL := url
 		if response.Request != nil && response.Request.URL != nil {
 			responseURL = response.Request.URL.String()
 		}
-		responseBody, readErr := io.ReadAll(response.Body)
-		_ = response.Body.Close()
+		responseBody, readErr := readBoundedSourceResponse(response, limits.MaxResponseBytes)
 		if readErr != nil {
 			return "", responseURL, readErr
 		}
@@ -232,6 +371,145 @@ func fetchTextRequestWithURLContext(
 		return decoded, responseURL, nil
 	}
 	return "", url, nil
+}
+
+func normalizeSourceRequestURL(rawURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed == nil || parsed.Opaque != "" || parsed.User != nil ||
+		parsed.Host == "" || parsed.Hostname() == "" {
+		return "", redactSourceFetchError(ErrUnsafeSourceURL, err)
+	}
+	parsed.Scheme = strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", redactSourceFetchError(ErrUnsafeSourceURL, nil)
+	}
+	if port := parsed.Port(); port != "" {
+		value, parseErr := strconv.Atoi(port)
+		if parseErr != nil || value < 1 || value > 65535 {
+			return "", redactSourceFetchError(ErrUnsafeSourceURL, parseErr)
+		}
+	}
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String(), nil
+}
+
+func sourceFetchClient(base *http.Client, limits SourceFetchLimits) *http.Client {
+	if base == nil {
+		base = defaultSourceHTTPClient()
+	}
+	client := *base
+	if client.Timeout <= 0 || client.Timeout > limits.Timeout {
+		client.Timeout = limits.Timeout
+	}
+	previousRedirect := base.CheckRedirect
+	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if len(via) > limits.MaxRedirects {
+			return ErrSourceRedirectLimit
+		}
+		if request == nil || request.URL == nil {
+			return ErrUnsafeSourceURL
+		}
+		normalized, err := normalizeSourceRequestURL(request.URL.String())
+		if err != nil {
+			return ErrUnsafeSourceURL
+		}
+		parsed, err := url.Parse(normalized)
+		if err != nil {
+			return ErrUnsafeSourceURL
+		}
+		request.URL = parsed
+		if len(via) > 0 && !sameSourceOrigin(via[len(via)-1].URL, request.URL) {
+			request.Header = safeCrossOriginSourceHeaders(request.Header)
+		}
+		if previousRedirect != nil {
+			return previousRedirect(request, via)
+		}
+		return nil
+	}
+	return &client
+}
+
+func sameSourceOrigin(left, right *url.URL) bool {
+	return normalizedSourceOrigin(left) != "" && normalizedSourceOrigin(left) == normalizedSourceOrigin(right)
+}
+
+func normalizedSourceOrigin(parsed *url.URL) string {
+	if parsed == nil || parsed.User != nil {
+		return ""
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if host == "" {
+		return ""
+	}
+	port := parsed.Port()
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
+}
+
+func safeCrossOriginSourceHeaders(headers http.Header) http.Header {
+	safe := make(http.Header)
+	for name, values := range headers {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "accept", "accept-language", "cache-control", "pragma", "user-agent":
+			for _, value := range values {
+				safe.Add(name, value)
+			}
+		}
+	}
+	return safe
+}
+
+func readBoundedSourceResponse(response *http.Response, maxBytes int64) ([]byte, error) {
+	if response == nil || response.Body == nil {
+		return nil, redactSourceFetchError(errSourceResponseRead, nil)
+	}
+	defer response.Body.Close()
+	if maxBytes <= 0 || response.ContentLength > maxBytes {
+		return nil, redactSourceFetchError(ErrSourceResponseLimit, nil)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+	if err != nil {
+		return nil, classifySourceReadError(err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, redactSourceFetchError(ErrSourceResponseLimit, nil)
+	}
+	return data, nil
+}
+
+func classifySourceClientError(err error) error {
+	switch {
+	case errors.Is(err, ErrSourceRedirectLimit):
+		return redactSourceFetchError(ErrSourceRedirectLimit, err)
+	case errors.Is(err, ErrUnsafeSourceURL):
+		return redactSourceFetchError(ErrUnsafeSourceURL, err)
+	case errors.Is(err, ErrUnsafeSourceNetwork):
+		return redactSourceFetchError(ErrUnsafeSourceNetwork, err)
+	default:
+		return redactSourceFetchError(errSourceTransport, err)
+	}
+}
+
+func classifySourceReadError(err error) error {
+	return redactSourceFetchError(errSourceResponseRead, err)
+}
+
+func redactSourceFetchError(kind, cause error) error {
+	if kind == nil {
+		kind = errSourceTransport
+	}
+	return &redactedSourceFetchError{kind: kind, cause: cause}
 }
 
 func acquireSourceRate(ctx context.Context, sourceKey, rate string) (func(), error) {
@@ -310,51 +588,88 @@ func waitSourceRate(ctx context.Context, wait time.Duration) error {
 	}
 }
 
-func sourceHTTPClient(base *http.Client, value string) (*http.Client, error) {
+type sourceProxyConfig struct {
+	kind     string
+	host     string
+	port     string
+	address  string
+	username string
+	password string
+}
+
+func parseSourceProxyConfig(value string) (sourceProxyConfig, error) {
 	match := sourceProxyPattern.FindStringSubmatch(strings.TrimSpace(value))
 	if len(match) != 6 {
-		return nil, fmt.Errorf("invalid source proxy %q", value)
+		return sourceProxyConfig{}, errors.New("invalid source proxy")
 	}
 	port, err := strconv.Atoi(match[3])
 	if err != nil || port < 1 || port > 65535 {
-		return nil, fmt.Errorf("invalid source proxy port %q", match[3])
+		return sourceProxyConfig{}, errors.New("invalid source proxy port")
+	}
+	address := strings.TrimSpace(match[2]) + ":" + match[3]
+	host, parsedPort, err := net.SplitHostPort(address)
+	if err != nil {
+		return sourceProxyConfig{}, errors.New("invalid source proxy")
+	}
+	canonicalHost, _, _, err := canonicalSourceNetworkHost(host)
+	if err != nil {
+		return sourceProxyConfig{}, errors.New("invalid source proxy")
+	}
+	return sourceProxyConfig{
+		kind:     match[1],
+		host:     canonicalHost,
+		port:     parsedPort,
+		address:  net.JoinHostPort(canonicalHost, parsedPort),
+		username: match[4],
+		password: match[5],
+	}, nil
+}
+
+func sourceHTTPClient(base *http.Client, value string) (*http.Client, error) {
+	if base == nil {
+		base = defaultSourceHTTPClient()
+	}
+	proxyConfig, err := parseSourceProxyConfig(value)
+	if err != nil {
+		return nil, err
 	}
 	transport, err := cloneHTTPTransport(base.Transport)
 	if err != nil {
 		return nil, err
 	}
-	address := match[2] + ":" + match[3]
-	switch match[1] {
+	prepareSourceNetworkTransport(transport)
+	client := *base
+	switch proxyConfig.kind {
 	case "http":
-		proxyURL := &url.URL{Scheme: "http", Host: address}
-		if match[4] != "" || match[5] != "" {
-			proxyURL.User = url.UserPassword(match[4], match[5])
+		proxyURL := &url.URL{Scheme: "http", Host: proxyConfig.address}
+		if proxyConfig.username != "" || proxyConfig.password != "" {
+			proxyURL.User = url.UserPassword(proxyConfig.username, proxyConfig.password)
 		}
-		transport.Proxy = http.ProxyURL(proxyURL)
+		client.Transport = &sourceHTTPProxyRoundTripper{
+			template:     transport,
+			proxyURL:     proxyURL,
+			endpointHost: proxyConfig.host,
+			transports:   make(map[string]*http.Transport),
+		}
 	case "socks5":
 		var auth *proxy.Auth
-		if match[4] != "" || match[5] != "" {
-			auth = &proxy.Auth{User: match[4], Password: match[5]}
+		if proxyConfig.username != "" || proxyConfig.password != "" {
+			auth = &proxy.Auth{User: proxyConfig.username, Password: proxyConfig.password}
 		}
-		dialer, dialErr := proxy.SOCKS5("tcp", address, auth, proxy.Direct)
+		dialer, dialErr := proxy.SOCKS5("tcp", proxyConfig.address, auth, sourceProxyEndpointDialer{})
 		if dialErr != nil {
-			return nil, dialErr
+			return nil, errors.New("invalid source proxy")
 		}
-		transport.Proxy = nil
-		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-			if contextDialer, ok := dialer.(proxy.ContextDialer); ok {
-				return contextDialer.DialContext(ctx, network, address)
-			}
-			return dialer.Dial(network, address)
-		}
-	case "socks4":
-		transport.Proxy = nil
 		transport.DialContext = func(ctx context.Context, network, targetAddress string) (net.Conn, error) {
-			return dialSOCKS4Context(ctx, address, targetAddress, match[4])
+			return dialSourceSOCKS5Context(ctx, dialer, network, targetAddress)
 		}
+		client.Transport = &sourceValidatedRoundTripper{transport: transport, proxyEndpoint: proxyConfig.host}
+	case "socks4":
+		transport.DialContext = func(ctx context.Context, network, targetAddress string) (net.Conn, error) {
+			return dialSourceSOCKS4Context(ctx, proxyConfig.address, targetAddress, proxyConfig.username)
+		}
+		client.Transport = &sourceValidatedRoundTripper{transport: transport, proxyEndpoint: proxyConfig.host}
 	}
-	client := *base
-	client.Transport = transport
 	return &client, nil
 }
 
@@ -432,9 +747,15 @@ func cloneHTTPTransport(transport http.RoundTripper) (*http.Transport, error) {
 	if transport == nil {
 		return http.DefaultTransport.(*http.Transport).Clone(), nil
 	}
+	if sourceTransport, ok := transport.(*sourceValidatedRoundTripper); ok {
+		if sourceTransport.transport == nil {
+			return nil, errors.New("source transport is unavailable")
+		}
+		return sourceTransport.transport.Clone(), nil
+	}
 	base, ok := transport.(*http.Transport)
 	if !ok {
-		return nil, fmt.Errorf("source proxy requires an HTTP transport")
+		return nil, errors.New("source proxy requires an HTTP transport")
 	}
 	return base.Clone(), nil
 }

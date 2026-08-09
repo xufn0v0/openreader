@@ -1,5 +1,13 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-08-09 P1 搜索/探索临时 Reader 会话第二轮
+
+固定上游仍由 `Index.vue#toDetail` 把未入架搜索结果写入浏览器 `readingBook`，再由目录/正文动作按书源重建；只有显式 `saveBook` 才持久化。OpenReader 的用户绑定高熵服务端会话是 JWT/Vue 3 下隐藏书源凭证的技术栈等价适配，但原实现的 create body 无上限、内存 map 无单会话/用户/进程预算，且非法章节 index 会提前续期，均判定为 `must-fix`。
+
+合同 `7c35555` 先行提交；随后失败测试固定 64 KiB 唯一 JSON、30m idle/4h absolute TTL、8 MiB/session、8 sessions+32 MiB/user、128 sessions+128 MiB/process、确定性 LRU、自然到期 410、预算驱逐 404、Book/Chapter 变量优先级、取消回滚、typed failure cache 与错误脱敏。实现 `30dbe53` 把 store 迁入 `services/remotereader`，不改现有路由/响应，不创建 SQLite、cache、backup/WebDAV 或同步记录。
+
+Go full/focused race/vet、frontend 713/713/build、临时 Reader 1440×900/390×844/360×800、真实 Go CSS/JSONPath/XPath Search → BookInfo → temporary Reader → TOC/content、新旧挂载卷均通过。本机 OrbStack 发布 `30dbe53` 与 `latest`，OCI index 为 `sha256:9c07871ef7d3c8d99733fcecea205336576c081db651dada13eaeedafda76365`。状态：`aligned / Docker-published / awaiting-device-verification`。
+
 ## 2026-08-05 P1 移动书架发布后宽度回归
 
 设备验收确认 `c851c5f` 的普通移动书架明显变窄。生产构建在 390px 视口稳定复现书籍行仅
@@ -1086,7 +1094,7 @@ Fixed upstream authority: `web/src/views/Index.vue` methods `uploadBookSource`, 
 | Local import | File input parses JSON; valid entries open a selection preview. User confirms selected rows. Invalid input shows a source-file error. | Preserve file selection/preview/confirmation, JSON shapes, source tags, cancellation and reload broadcast. Do not directly import a file without the preview selection. |
 | Remote import | Prompt remembers the last remote URL, fetches remote JSON, then opens the same selection preview as local import. | Keep one remote URL dialog and the same preview/confirm transaction. Persisting the last URL per authenticated user is a compatible current-runtime adaptation. |
 | Failure detection | `Index.vue#showFailureBookSource()` calls `getInvalidBookSources()`, opens the same manager in failure view, and filters the failures that the backend recorded during normal use. `BookController#getInvalidBookSources` reads that user-scoped cache; invalid entries expire after 600 seconds. Opening the view does not run a new source request. | Entering the failure intent must only select the failure view. A user must explicitly press the bounded health-test command to start live checks. OpenReader has no persisted normal-use invalid-source cache yet, so the initial failure list is empty until P2 adds the equivalent user-scoped runtime-error cache; that missing cache is a separate backend/data gap, not permission to auto-test every source. |
-| Debug | Upstream opens a separate source-debug page. | The current in-overlay three-step debug dialog (search → TOC → content) is an allowed improvement if it keeps source rules and request results unmodified and opens without leaving Index. |
+| Debug | Upstream opens a separate source-debug page. | The old in-overlay three-step Dialog was an incorrect reconstruction and has been removed. The canonical named standalone workspace, save-before-debug and automatic streamed chain are implemented and published under the fixed-baseline second-audit contract. |
 | Mobile | Upstream source dialogs are fullscreen under collapsed/mobile UI; side actions do not create a second product page. | Source overlay is fullscreen/appropriate mobile popover and must consume clicks. Source manager opening does not implicitly close the Index sidebar unless the specific upstream action does. |
 | Events | Successful save/import/default/restore causes source list refresh. | Keep `sources_update` WebSocket event and `openreader:sources-update` browser event with debounced reload; no stale list after an overlay transaction. |
 
@@ -1139,6 +1147,22 @@ Status: implemented and validated on 2026-07-10.
 - **C3 — lifecycle and mobile behavior.** The manager is full-screen on compact screens, remains in the same root-workspace scene, receives `openreader:sources-update` reload events, and does not close or receive clicks through to the mobile sidebar. Local and remote import continue to use a selection preview before any mutation; health and three-step debug remain nested manager dialogs.
 - **Allowed differences.** The current Vue 3/Pinia dialog, structured editor, bounded *user-triggered* health test, guided in-overlay debug, Go/SQLite authorization, and user-scoped persisted remote URL are retained runtime/safety improvements. No book-source API, parser, database, or backup contract changed in P1-C.
 - **Known follow-up / audit correction (2026-07-12).** Earlier P1-C evidence incorrectly treated an automatic health request on the legacy `health` intent as compatible. The upstream entry loads its existing 600-second invalid-source cache and never starts a fresh test. OpenReader's health intent was corrected to enable only failure filtering; the smoke contract now verifies zero `batch-test` calls before an explicit “失效检测” click, then verifies that the manual test creates the structured summary. P2 must still provide an equivalent user-scoped normal-use error cache for full failure-list parity.
+
+### P1-C second-audit correction (2026-08-09)
+
+The 2026-07-10 record is historical implementation evidence, not the current compatibility verdict. Its
+“Allowed differences” incorrectly accepted mobile source cards, a structured Drawer editor, manager-nested
+import/remote/debug flows, and extra batch/health controls. A line-by-line review of fixed upstream
+`Index.vue:720-890,1699-2001,2238-2244,2480-2614,2878-2952` revokes those exceptions. The visible source
+manager must return to one desktop/mobile table, upstream columns/actions/footer, dynamic normal/failure
+title, fixed group order, cached-failure entry, and the generic reader-dev JSON editor. Local import, remote
+import, failure management, and the already-rebuilt standalone debugger remain separate Index actions.
+
+The authoritative replacement contract is
+[`source-manager-fixed-baseline-second-audit-p1-contract.md`](source-manager-fixed-baseline-second-audit-p1-contract.md).
+Only Vue 3/Pinia/Element Plus mechanics, Go/JWT/SQLite multi-user isolation and transactions, secure remote
+fetch/script boundaries, user-scoped failure cache, sync events, and hidden old-URL/API adapters remain
+allowed differences. Application implementation is gated on committed contract evidence and red tests.
 
 ### 2026-07-12 P2 invalid-source cache inventory
 
@@ -1594,6 +1618,26 @@ Planned delivery order: (A) common import-parser limits, EPUB/UMD/PDF guards and
 - **Evidence.** Engine fixtures cover ZIP count/per-entry/expanded/path rejection, UMD declared-count rejection and PDF extracted-text limits; importer coverage proves a rejected archive creates no book or library archive; API coverage proves cleanup reaches expired and orphaned files in otherwise idle user directories while preserving a fresh token. Full `go test ./...` passes. Frontend/Docker gates are still required before this backend slice can be released.
 
 The backup ZIP reader/restore path was kept as the next separate data-contract submodule; its existing formats remain unchanged by this parser/staged-preview implementation.
+
+### 2026-08-09 P2 TXT/Markdown parser-budget follow-up
+
+The earlier parser record correctly closed EPUB/CBZ archive structure, UMD/PDF work limits and proactive staged
+preview cleanup, but its “shared parser policy” claim was too broad. `parseUploadedBookWithLimits` still calls
+the no-limit `ParseTXTWithRule` branch for TXT/`.text`/Markdown, while prepared-snapshot validation borrows the
+UMD-specific chapter setting. Historical refresh and cache reconstruction also call `os.ReadFile` before the
+documented wider legacy ceiling can apply.
+
+This remaining gap is now governed by
+[`local-text-parser-budget-p2-contract.md`](local-text-parser-budget-p2-contract.md): add a generic parsed-chapter
+limit, enforce decoded UTF-8 text and chapter budgets in the TXT branch, and bound historical source reads before
+full allocation. It is a security/runtime adaptation only; the fixed-upstream 512000-byte probe, explicit-rule
+order, preface behavior, 10KiB no-TOC fallback and zero-chapter explicit-rule preview remain authoritative.
+The inventory pass itself changed no application code. The subsequent implementation now routes TXT/`.text`/Markdown
+through the same configured limits as the other local formats, applies the generic final-chapter ceiling to every
+parser and prepared snapshot, and bounds historical refresh/lazy reads before full allocation. Focused/race/full Go,
+frontend 706/706, production build, targeted vet, three-viewport real import, fresh/historical mounted volumes and
+portable backup pass. The locally built multi-architecture release is `e7f168e` / `latest`, OCI index
+`sha256:8d64bbb187f65c433388bddc5385ce68d42e8b40d9b397787e4c1d354c892dac`.
 
 ### 2026-07-13 P2 local-import UMD binary compatibility audit
 
@@ -3379,3 +3423,189 @@ frontend 649/649、Go 全量和 production build 通过。专项浏览器在
 工作台三视口和 Reader 桌面/手机/iPad 选中文字流程也通过。RE2 pattern 子集、JWT/SQLite、
 legacy 空 scope 及隐藏兼容 API 是唯一明确允许差异；Docker mounted-volume/backup 门在提交后
 执行。
+
+## 2026-08-09 RSS 可见工作区与分页第二轮固定基准复审
+
+此前 RSS 合同虽然纠正了 Drawer、三层弹窗所有权、账号隔离、同 URL 身份和事务删除，却错误地
+把 OpenReader 的富卡片、结构化表单、直接全量导入、文章筛选/收藏和缓存分页当成了允许增强。
+重新逐行核对固定 `RssSourceList.vue`、`RssArticleList.vue`、`RssArticle.vue`、根 `App.vue`、
+`Index.vue` 导入流程及 `RssSourceController/Rss.getArticles` 后，现撤销该结论。
+
+固定上游源场景是标题为 `RSS订阅(N)` 的 500px/fullscreen Dialog，只有新增、导入、编辑，
+内部始终为四列 25% 图标/名称网格；编辑模式只叠加删除和编辑图标。新增/编辑使用 750–1000px
+通用 JSON editor，导入先进入默认零选择的 checkbox Dialog。文章列表同样是 500px/fullscreen，
+只显示可选 tabs、标题、日期、图片和固定加载更多；正文弹层只显示 `content || description`。
+当前重复 panel header、760/900px 几何、group/enabled/refresh、structured form、全量确认、
+all/unread/favorite、作者/摘要、已读/收藏、正文 metadata/footer 都是 `must-fix`。
+
+后端还存在语义级偏差：当前一次 refresh 会沿下一页循环直至结束或 1000 页；固定上游每次
+`getRssArticles(page)` 只发起请求页。后续 REST 可继续使用 user-scoped ID 和 SQLite cache，
+但 source/sort/page 必须成为一次有界操作，page 1 不得预抓 page 2…1000，响应也不得再由全局
+缓存重新切片冒充请求页。
+
+完整证据、允许差异和 test-first 门禁见
+[`rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md`](rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md)。
+状态为 `audit-complete / implementation-pending`；本次 inventory 只修改合同和总矩阵，未修改
+RSS 应用或测试代码。下一步必须先替换固化错误富 UI/缓存分页的测试，再依次重建 source/editor/
+import、article/content 和 page API/parser 数据流。JWT/SQLite 用户隔离、HTML 清洗、SSRF/超时/
+大小/重定向限制、请求 generation、事务删除及隐藏 read/favorite 数据继续作为条件保留。
+
+### 固定基准重建结果
+
+审查合同 `1283f03` 和 API 合同 `dff7c86` 已先于应用代码单独提交。随后以失败合同替换旧富 UI/
+缓存分页测试，重建 `RSS订阅(N)` 500px/fullscreen 根层、四列图标/名称源网格、JSON editor、默认
+零选择的安全导入，以及独立 500px/fullscreen 的文章列表和正文 sibling dialogs。可见列表只保留
+tabs、标题、日期、图片和加载更多；正文获取成功后才打开并只渲染已清洗正文。
+
+Go endpoint 现在按 source/sort/page 执行一个请求页，标准 feed 的 page>1 零网络返回；批量导入和
+页面 article upsert 使用 current-user transaction，sort URL 必须来自 owned source。frontend
+706/706、Go 全量、production build 和 diff 通过；RSS 专项在 1440×900、1024×1366、390×844、
+360×800 通过，工作台旧链接和 RSS 跨账号迟到写入也在桌面/双手机通过。当前状态更新为
+`implemented / regression-validated / Docker-pending`。
+
+安全复核没有把旧共享 fetcher 的缺口包装成完成：本批新增 8 MiB/5000 条 import bound、100000
+page bound、owned sort allowlist、事务和内容清洗；共享 source fetcher 仍需单独补响应体上限、
+显式重定向上限和私网 SSRF 策略。这些是跨书源/RSS 的后续 P2，不由本批可见对齐签收。
+
+### P2-N 书源 / RSS 共享远程抓取器（2026-08-09 重新开放）
+
+固定基准源码盘点已完成，详见
+[`shared-source-fetcher-p2-contract.md`](shared-source-fetcher-p2-contract.md)。上游 OkHttp 的合法请求语义
+（GET/POST、headers/body/charset/type/retry/proxy、最终 URL）继续作为兼容合同，但不复制不安全 TLS、
+无界 body 和无私网防护。当前 `backend/engine/fetcher.go` 的 12 秒 client timeout 只是间接边界；
+`io.ReadAll`、Go 默认 redirect 次数、无上限 retry、未统一 URL 校验及跨 origin header 处理均为
+`must-fix`。
+
+实施拆为两个测试先行切片：`P2-N1` 增加显式 15 秒总 timeout、16 MiB 单响应上限、5 次 redirect、
+3 次 retry 上限、HTTP(S)/host/userinfo 校验和跨 origin credential 剥离；`P2-N2` 再增加默认严格的
+private/loopback/link-local/metadata/DNS-dial policy 与仅由部署管理员配置的 host/CIDR allowlist，保留
+显式配置后的 NAS/局域网书源能力。
+
+P2-N1 已按合同先写失败测试并在 `981bca7` 实施：共享 fetcher 现在有显式 timeout/body/redirect/retry
+上限、HTTP(S)/host/port/userinfo 校验、跨 origin credential 剥离、body 关闭和安全错误；远程书源
+预览还在发网前完成权限检查。全量 Go/frontend/build、focused race、CSS/JSONPath/XPath、RSS/Source/
+Index 浏览器流程、新旧挂载卷和 portable backup/restart 门均通过。本机 OrbStack 双架构镜像
+`981bca7`/`latest` 已发布，index 为
+`sha256:02160e0797b3371fdfadccb550b8766d412c3e09df632ba1e36d192b26eb500d`。
+
+P2-N2 仍未实施：private/loopback/link-local/metadata、DNS rebinding、proxy target/endpoint 与管理员
+host/IP/CIDR allowlist 继续开放。因此当前仍不宣称关闭全部共享 SSRF 债务。
+
+本地候选随后通过新卷 portable v1/v2 assets、cross-user、restart，以及历史卷 TXT/EPUB/UMD/
+CBZ、relative-cache、owner-isolation。OrbStack 在本机构建并推送 `92b7034` 与 `latest`，没有使用
+云端构建；两个标签共同指向双架构 OCI index
+`sha256:095540fe28c553ab6d2cfd9ce589ec0b31809f00600cd9f59ab814b7753098ba`。RSS 状态现更新为
+`aligned / Docker-published / awaiting-device-verification`，共享 fetcher 安全债务仍保持开放。
+
+## 2026-08-09 Reader 移动端阅读内书架宽度复审
+
+固定基准取证见
+[`reader-mobile-shelf-width-p0-contract.md`](reader-mobile-shelf-width-p0-contract.md)。上游最终
+`100vw` Popover 中，Element 的 12px padding 与 `BookShelf.vue` 的 `margin:-16px;padding:24px`
+组合后，标题、列表和书籍条目相对视口的最终左右 inset 各为 20px；390/360 视口的列表宽分别为
+350/320px。
+
+当前主面板根虽为 `100vw`，但内容层直接使用左右各 24px，列表只有 342/312px。现有 smoke 又从
+当前 computed padding 反推 expected width，因而无法发现该偏差。裁决为 `must-fix` 后已测试先行
+实施：Reader 水平 inset 恢复 20px，390/360 列表实测 350/320px；1024 强制手机模式仍按上游
+`min-width:900px` 显示四列。Reader 桌面/双手机/自适应与强制 iPad、Index 书架四视口、frontend
+706/706、全量 Go 和 production build 通过。Index 普通书架的 390/360px 整行宽度未改变。
+
+实现提交 `5151609` 已推送 `main`；本机 OrbStack 完成 amd64/arm64 构建并发布 `5151609` 与
+`latest`，OCI index 为
+`sha256:d3110429a422e092832afde3b7780d6a3c193c01316c5e251c7c6ba8cd85f23c`。fresh/historical
+volume、portable backup、restart、TXT/EPUB/UMD/CBZ、relative-cache 和 owner-isolation 均通过。
+状态更新为 `aligned / Docker-published / awaiting-device-verification`。
+
+## 2026-08-09 P2-N2 共享抓取器私网/DNS/代理合同
+
+固定上游 `HttpHelper.kt` 只从 source 配置读取 HTTP/SOCKS 代理，直接把 hostname 交给 OkHttp/代理，
+没有私网、metadata、混合 DNS 或 rebinding 防护；当前 OpenReader N1 同样仍可访问私网，并额外继承
+Go `http.DefaultTransport` 的进程代理。判定：合法 GET/POST/header/body/charset/retry/proxy 为
+`must-preserve`，隐式进程代理和无界私网访问为 `acceptable security change / must-fix`。
+
+N2 合同已固定：`OPENREADER_SOURCE_NETWORK_ALLOWLIST` 是唯一管理员入口，逗号分隔 exact hostname、
+bare IP 或 CIDR，空值默认只允许公网，非法非空值使服务在监听和打开数据库前失败。初始 URL、每跳
+redirect 和实际拨号都复核 DNS；混合答案默认整体拒绝，direct 只拨复核后的 IP。HTTP proxy target
+改为本地解析并以 IP 固定 CONNECT/absolute-form，同时保留 Host、TLS SNI 和证书校验；SOCKS4/5
+握手同样只接收本地验证 IP，proxy endpoint 自身也受 policy。进程 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY`
+不进入共享 source transport，上游兼容的显式 source `proxy` 与 FlClash/TUN 系统路由继续保留。
+
+该 inventory 先以 `ff53b16` 单独提交；失败合同 `4cb88ed` 随后证明旧实现缺少 allowlist、IPv4/IPv6、
+mixed DNS、rebinding、redirect→metadata、HTTP CONNECT/absolute-form、SOCKS target/endpoint 和安全 API
+边界。当前实现已使上述专项、Engine race、全量 Go、frontend 706/706 和 production build 通过；历史
+SQLite、source/RSS JSON、缓存、备份和 WebDAV 均未迁移或重写。真实 Docker 默认公网 IP、
+host-gateway/loopback 拒绝、exact-host 放行、移除 allowlist 后重启恢复严格模式，以及 fresh/historical
+volume、portable backup、restart 门全部通过。FlClash fake-IP 对 GitHub 的解析落入合同明确拒绝的
+`198.18.0.0/15`，因此公网门使用真实公网 IP 完成，并保留 README 中的 real-IP/Redir-Host 或显式
+CIDR 部署说明。
+
+`d198c2e` 已由本机 OrbStack 构建并发布为同名标签与 `latest`，没有使用云构建；OCI index 为
+`sha256:021817e602aa589c1583ec7ccb65828172c1a2afe1e038e23651dd51c455fcc1`，amd64/arm64 manifest 分别为
+`sha256:ef6bbd76f6b748b2597a57154fc54826c4afde3cc60615fbd63f867a7fa6217b` 与
+`sha256:d45132098b26dbf8a4ebbc9ca1f3e22b5fbb2ec48430e813a2c13f29204bee50`。状态更新为
+`aligned / Docker-published / awaiting-device-verification`。
+
+## 2026-08-09 书架手动刷新第二轮固定基准复审
+
+固定基准的首页 `Index.vue#refreshShelf` 与 Reader 内 `BookShelf.vue#refreshShelf` 都把用户可见刷新
+映射为 `getBookshelf?refresh=1`。`BookController#getBookShelfBooks` 对当前 namespace 中非本地、
+可更新的书以 16 并发抓取最新 TOC；单书/书源失败不阻断其它书，成功目录更新最后章节、总章数，
+只有正增长推进 `lastCheckTime`，最后返回完整书架。
+
+当前 `Home.vue` 和 `useReaderShelf.js` 都只强制读取 `/api/books`，从未调用已经存在的
+`POST /api/books/check-updates`。后者底层又是顺序、append-only：忽略 Book.Variable，同数改名/URL、
+重排、缩短均不生效，逐行 INSERT 与随后全行 `Save` 也会在中途失败时留下不一致状态。因此现状为
+`must-fix`。完整 API、目录差异、单书事务、陈旧抓取、缓存、UI 去重和红灯门禁见
+[`bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md`](bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md)；
+本次 inventory 只修改合同，状态为 `extracted / implementation-pending`。
+
+## 2026-08-09 书源调试第二轮固定基准复审
+
+固定基准 `Index.vue#debugBookSource` 打开独立的 `bookSourceDebug` 工作区；该工作区同时拥有完整规则
+表单、命令栏、JSON/控制台/源列表/帮助面板、50 步撤销重做及本地源列表。调试动作先把当前表单源
+保存到当前 namespace，再建立一条 SSE。`Debugger.startDebug` 根据绝对 URL、`::`、`++`、`--` 或普通
+搜索词选择入口，并自动串联第一条结果的详情、目录和首章正文。搜索/发现结果只贡献 `bookUrl`；
+详情产生的 Book variable、目录产生的 Book/Chapter variable 以及第二章 URL 才沿后半链传递。
+
+当前 `SourceManager.vue` 把调试降成三个独立标签：只能选择已持久化源，手工复制搜索结果 URL 和
+章节 URL，没有详情阶段、流式日志、默认“我的”、直达前缀、撤销/重做或任务取消；独立 REST body
+又丢失详情/目录阶段的 Book/Chapter variable 与 `nextChapterUrl`。`source_debug.go` 还把调试中的远程失败写入
+`source_failures`，可能让普通搜索在随后 10 分钟跳过用户正在修理的源。以上均为 `must-fix`，而非
+Go/Vue 技术栈差异。
+
+完整 UI、状态、API、权限、安全和测试合同见
+[`source-debug-fixed-baseline-second-audit-p2-contract.md`](source-debug-fixed-baseline-second-audit-p2-contract.md)。
+保留三个 `/api/sources/:id/test*` 为响应兼容探针，新增 Bearer-capable POST SSE 作为规范自动链；
+调试流和旧探针均改为零失败缓存副作用，只有独立批量健康检测可写诊断缓存。JWT、账号 scoped
+localStorage、`CanEditSources` 保存权限、有界 fetch/SSE、SSRF 防护和不执行 JavaScript/WebView 是明确
+允许的多用户/安全适配。
+
+实施现已完成：错误的三探针 Dialog 已删除，`SourceDebug.vue` 恢复独立三列/移动单列工作区、完整
+reader-dev JSON、九项命令、账号隔离的本地源列表与 50 步历史；规范 Bearer POST SSE 自动完成五类
+入口到详情/目录/首章的链路，并保持固定上游 variable 与下一章边界。旧探针响应兼容但不再污染
+`source_failures`。全量 Go、focused race、vet、frontend 724/724、build、diff 和四视口真实浏览器均
+通过；fresh/historical volume/backup 门和本机双架构 GHCR 回读也已通过，状态为
+`aligned / Docker-published / awaiting-device-verification`，镜像 `f8f263d`/`latest`。
+
+## 2026-08-09 P2 WebSocket 同步协议与账号隔离复审
+
+固定上游没有 WebSocket；每个业务动作经控制器持久化后由当前页面更新本地状态。因此 OpenReader
+的 JWT 多标签同步只能是服务端 durable mutation 的通知层，不能形成一条浏览器上传任意
+`{type,payload}`、绕开 REST 参数/权限/事务后再由 Hub 转发的第二写路径。
+
+当前仓库全历史没有 `useSync().send()` 调用者，但 `ReadPump` 仍会完整读取、解析并转发客户端消息；
+握手又无条件接受任意 Origin。另一个已经写入用户管理/书源专项合同却未落实的偏差是
+`users_update` 仍用 `BroadcastAll`，向无关普通用户暴露整批变更 ID。三项均裁决为 `must-fix`。
+
+完整线协议和测试闸门见
+[`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md)：保持 `/ws/sync?token=`、现有服务端事件
+type/payload、日志脱敏、同用户收敛与 REST 权威；改为同源/有效现存用户握手、严格 server→client、
+有界 policy close，并把用户事件限定为管理员完整集合及目标用户 self-only 投影。本轮只完成
+inventory，应用实现必须在失败测试之后进行。
+
+合同 `7953bc6` 与红灯测试 `598b00b` 已分别先行提交。实现随后恢复 same-Origin safe default、拒绝
+已删除账号、删除客户端 `send` 与 Hub 任意 relay/全账号广播，并保持目标删除通知；Go/full race、
+frontend 706/706、build 和真实三视口双客户端均通过。状态现为
+`implemented / regression-validated / Docker-pending`；备份事务的独立 vet 债务和新旧卷/Docker 门
+完成前不发布。

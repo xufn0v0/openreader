@@ -22,7 +22,7 @@ func TestSourceRequestErrorsAreStructuredAndRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restore := engine.SetHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	restore := engine.SetHTTPClientForTesting(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("upstream https://alice:supersecret@source-errors.example/data?token=private-token failed")
 	})})
 	defer restore()
@@ -61,6 +61,205 @@ func TestSourceRequestErrorsAreStructuredAndRedacted(t *testing.T) {
 		router.ServeHTTP(writer, req)
 		assertSourceErrorResponse(t, writer, http.StatusBadRequest, "failed to fetch chapters", "source_request_failed", "book_info")
 	})
+}
+
+func TestSharedFetcherAPIErrorsRemainRedacted(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	user := lifecycleUser(t, server, "testuser")
+	source := models.RSSSource{
+		UserID:       user.ID,
+		Title:        "安全 RSS",
+		URL:          "https://rss-errors.example/feed",
+		RuleContent:  ".content@html",
+		Enabled:      true,
+		SingleURL:    true,
+		RuleArticles: ".article",
+	}
+	if err := server.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	article := models.RSSArticle{
+		UserID:   user.ID,
+		SourceID: source.ID,
+		Title:    "安全文章",
+		Link:     "https://rss-errors.example/article?session=rss-query-secret",
+	}
+	if err := server.db.Create(&article).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var requests atomic.Int32
+	restore := engine.SetHTTPClientForTesting(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, errors.New("upstream https://alice:rss-password@rss-errors.example/article?session=rss-query-secret header rss-header-secret proxy rss-proxy-secret")
+	})})
+	defer restore()
+
+	t.Run("RSS article content", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/rss/articles/"+strconv.FormatUint(uint64(article.ID), 10)+"/content", nil)
+		req.Header.Set("Authorization", token)
+		writer := httptest.NewRecorder()
+		router.ServeHTTP(writer, req)
+		if writer.Code != http.StatusBadRequest {
+			t.Fatalf("RSS content status = %d, want 400: %s", writer.Code, writer.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(writer.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["error"] != "failed to fetch RSS article" {
+			t.Fatalf("RSS safe error = %#v", payload)
+		}
+		assertNoSharedFetchSecrets(t, writer.Body.String())
+	})
+
+	t.Run("remote source preview rejects userinfo before transport", func(t *testing.T) {
+		before := requests.Load()
+		req := httptest.NewRequest(http.MethodPost, "/api/sources/remote-preview", strings.NewReader(`{"url":"https://alice:remote-password@source-import.example/list.json?token=remote-query-secret"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+		writer := httptest.NewRecorder()
+		router.ServeHTTP(writer, req)
+		if writer.Code != http.StatusBadRequest || writer.Body.String() != "{\"error\":\"failed to fetch remote source URL\"}" {
+			t.Fatalf("remote source safe error status=%d body=%s", writer.Code, writer.Body.String())
+		}
+		if requests.Load() != before {
+			t.Fatal("unsafe remote source URL reached transport")
+		}
+		assertNoSharedFetchSecrets(t, writer.Body.String())
+	})
+}
+
+func TestSharedFetcherPrivateNetworkFailuresKeepExistingAPIContracts(t *testing.T) {
+	restorePolicy, err := engine.ConfigureSourceNetworkPolicy("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restorePolicy()
+
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	user := lifecycleUser(t, server, "testuser")
+	bookSource := sourceErrorContractSource(t)
+	bookSource.BaseURL = "http://127.0.0.1:65534"
+	if err := bookSource.SetRules(models.BookSourceRule{
+		SearchURL:       "http://127.0.0.1:65534/search?token=private-search",
+		BookListRule:    ".book",
+		BookNameRule:    ".name|text",
+		BookURLRule:     "a|attr:href",
+		ChapterListRule: ".chapter",
+		ChapterNameRule: ".name|text",
+		ChapterURLRule:  "a|attr:href",
+		ContentRule:     ".content|html",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.db.Create(&bookSource).Error; err != nil {
+		t.Fatal(err)
+	}
+	rssSource := models.RSSSource{
+		UserID:       user.ID,
+		Title:        "私网 RSS",
+		URL:          "http://[::1]:65534/feed",
+		RuleContent:  ".content@html",
+		Enabled:      true,
+		SingleURL:    true,
+		RuleArticles: ".article",
+	}
+	if err := server.db.Create(&rssSource).Error; err != nil {
+		t.Fatal(err)
+	}
+	article := models.RSSArticle{
+		UserID:   user.ID,
+		SourceID: rssSource.ID,
+		Title:    "私网文章",
+		Link:     "http://[::1]:65534/article?token=private-rss",
+	}
+	if err := server.db.Create(&article).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("search", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/search", strings.NewReader(`{"keyword":"测试","sourceIds":[`+strconv.FormatUint(uint64(bookSource.ID), 10)+`],"page":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+		writer := httptest.NewRecorder()
+		router.ServeHTTP(writer, req)
+		assertSourceErrorResponse(t, writer, http.StatusBadGateway, "failed to search source", "source_request_failed", "search")
+		assertNoPrivateNetworkDetails(t, writer.Body.String())
+	})
+
+	t.Run("RSS article", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/rss/articles/"+strconv.FormatUint(uint64(article.ID), 10)+"/content", nil)
+		req.Header.Set("Authorization", token)
+		writer := httptest.NewRecorder()
+		router.ServeHTTP(writer, req)
+		if writer.Code != http.StatusBadRequest || writer.Body.String() != "{\"error\":\"failed to fetch RSS article\"}" {
+			t.Fatalf("RSS private-network status=%d body=%s", writer.Code, writer.Body.String())
+		}
+		assertNoPrivateNetworkDetails(t, writer.Body.String())
+	})
+
+	t.Run("remote source preview", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/sources/remote-preview", strings.NewReader(`{"url":"http://169.254.169.254/latest/meta-data?token=private-import"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", token)
+		writer := httptest.NewRecorder()
+		router.ServeHTTP(writer, req)
+		if writer.Code != http.StatusBadRequest || writer.Body.String() != "{\"error\":\"failed to fetch remote source URL\"}" {
+			t.Fatalf("remote private-network status=%d body=%s", writer.Code, writer.Body.String())
+		}
+		assertNoPrivateNetworkDetails(t, writer.Body.String())
+	})
+}
+
+func assertNoPrivateNetworkDetails(t *testing.T, value string) {
+	t.Helper()
+	for _, forbidden := range []string{"127.0.0.1", "::1", "169.254.169.254", "private-search", "private-rss", "private-import"} {
+		if strings.Contains(value, forbidden) {
+			t.Fatalf("private-network API error leaked %q: %s", forbidden, value)
+		}
+	}
+}
+
+func TestRemoteSourcePreviewRequiresSourceEditPermissionBeforeFetch(t *testing.T) {
+	router, server := setupTestServer(t)
+	token := authHeader(t, router)
+	if err := server.db.Model(&models.User{}).Where("username = ?", "testuser").Update("can_edit_sources", false).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var requests atomic.Int32
+	restore := engine.SetHTTPClientForTesting(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, errors.New("permission check must run before transport")
+	})})
+	defer restore()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sources/remote-preview", strings.NewReader(`{"url":"https://source-import.example/list.json"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+	writer := httptest.NewRecorder()
+	router.ServeHTTP(writer, req)
+	if writer.Code != http.StatusForbidden || !strings.Contains(writer.Body.String(), `"code":"FORBIDDEN"`) {
+		t.Fatalf("remote source preview permission status=%d body=%s", writer.Code, writer.Body.String())
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("forbidden remote source preview made %d requests", requests.Load())
+	}
+}
+
+func assertNoSharedFetchSecrets(t *testing.T, value string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		"alice", "rss-password", "rss-query-secret", "rss-header-secret", "rss-proxy-secret",
+		"remote-password", "remote-query-secret", "session=", "token=",
+	} {
+		if strings.Contains(value, forbidden) {
+			t.Fatalf("shared fetch API error leaked %q: %s", forbidden, value)
+		}
+	}
 }
 
 func TestChapterContentRuleFailureHasStructuredCode(t *testing.T) {
@@ -109,7 +308,7 @@ func TestDynamicSourceHeaderFailsBeforeFetchWithStructuredErrors(t *testing.T) {
 	}
 
 	var requests atomic.Int32
-	restore := engine.SetHTTPClient(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	restore := engine.SetHTTPClientForTesting(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		requests.Add(1)
 		return nil, errors.New("dynamic header must be rejected before a remote request")
 	})})

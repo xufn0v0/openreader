@@ -10,6 +10,12 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 - The upstream WebDAV compatibility root is implemented and shares the same caller-scoped storage;
   see [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md)).
 - Sync WebSocket: `/ws/sync`.
+
+The sync route is specified by [`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md):
+`GET /ws/sync?token=<jwt>` is a same-origin, active-user-authenticated, server-to-client-only transport. Client
+application messages are not a second write API and must be closed without relay. Owner events remain user-scoped;
+`users_update` is limited to administrators plus each affected user with a self-only ID projection. The route,
+server event names and existing business payloads remain stable.
 - Expected error shape for handled failures: JSON object with `error`.
 - User-owned resources must be scoped to the authenticated user unless documented as admin/global.
 - Concurrent first writes to the same authenticated `settings/:key` use the existing `(user_id,key)` unique key as
@@ -39,7 +45,7 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Group | Representative paths | Contract notes |
 |---|---|---|
 | User/settings/admin | `/api/me`, `/api/settings/:key`, `/api/admin/users` | Settings are per user. Admin endpoints require admin role. |
-| Sources | `/api/sources`, `/api/sources/import`, `/api/sources/:id/test*` | Preserve reader3-compatible source fields and parser semantics. Test endpoints keep their existing authenticated `200` response shape (`results`/`chapters`/`content` plus `error`), but may write `source_failures` only for remote request errors. Local unsupported or invalid parser rules remain visible in `error` and never suppress the source. |
+| Sources | `/api/sources`, `/api/sources/import`, `/api/sources/:id/test*`, `/api/sources/:id/debug/stream` | Preserve reader3-compatible source fields and parser semantics. The three deployed test endpoints keep their authenticated `200` response fields, while the canonical debugger uses one cancellable stream for search/explore → BookInfo → TOC → first content and carries the BookInfo/TOC runtime into content. Debugging has no `source_failures` side effect; only the separate explicit health-check action may record diagnostic failures. |
 | Bookshelf | `/api/books`, `/api/books/:id`, `/api/books/batch`, `/api/books/export` | Book operations must not cross user boundaries. `GET /api/books` is the current user's authoritative mutable shelf snapshot: the frontend requests it network-first and may use its scoped persistent copy only after a network failure. |
 | Reader content | `/api/books/:id/chapters`, `/api/books/:id/chapters/:index/content` | Content fetch uses a valid cache first and returns stable chapter data. On a remote cache miss, one single `nextContentUrl` that resolves to the adjacent catalog chapter is a chapter boundary, not continuation content. A blank text `contentRule` remains the existing client-safe `502` response but must not cache page HTML or create a `source_failures` row; audio sources retain their approved blank-rule media-URL behavior. |
 | Reader legacy search | `/api/reader3/searchBookContent` | Compatibility endpoint; keep until old clients/routes no longer need it. |
@@ -50,9 +56,41 @@ Status: working contract. Keep this file updated when endpoint semantics change.
 | Uploads | `/api/uploads` | Uploaded assets are content-validated before final write, rooted under data uploads and user-scoped for new writes/deletes; legacy global upload URLs remain readable. BookInfo ownership is in [`bookinfo-shelf-mutations-p2-contract.md`](bookinfo-shelf-mutations-p2-contract.md); implemented Reader upload/save/delete ordering, signature/dimension admission and the separate pending P2-B backup boundary are in [`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md). |
 | Cache | `/api/cache/stats`, `/api/cache`, `/api/books/:id/cache` | Cache operations must not delete unrelated user data. |
 | Replace rules | `/api/replace-rules*` | See the P2 replace-rule contract below: stable name-upsert order and upstream-visible plain/regex/scope semantics. |
-| RSS | `/api/rss/sources`, `/api/rss/articles` | Remote fetch limits and parser safety apply. |
+| RSS | `/api/rss/sources`, `/api/rss/sources/import`, `/api/rss/sources/:id/refresh`, `/api/rss/articles` | Source writes are current-user scoped. The visible article flow fetches exactly one requested remote page; remote fetch limits and parser safety apply. See the P2 RSS page contract below. |
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
+
+UserManage 权限部分更新的第二轮固定基准见
+[`user-management-partial-update-second-audit-p2-contract.md`](user-management-partial-update-second-audit-p2-contract.md)。
+`PUT /api/admin/users/:id` 必须只更新请求中显式存在的权限/限额列；禁止把读取到的完整 User 快照
+`Save` 回数据库，从而覆盖并发登录时间或密码重置。前端每个 switch 同样只能拥有自己的单字段 payload。
+该合同已于 2026-08-09 实施并通过 focused/race/full Go、frontend 707/707、build 和四视口浏览器验证；
+本机发布的 `77a60d8` 还通过 fresh/historical volume 门，OCI index 为
+`sha256:a1a37b223e10a3c43febd23250dd7790394c200d69e7c9548255cf1fdba3b017`。
+
+## P2 RSS source import and requested-page contract
+
+Status: implemented, regression-validated and Docker-published on 2026-08-09.
+The complete visible, state and parser contract is
+[`rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md`](rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md).
+
+All routes below require `Authorization: Bearer <jwt>` and scope every source,
+article, cache write and sync event to the authenticated user.
+
+| Method / path | Request | Success / side effects | Errors |
+|---|---|---|---|
+| `POST /api/rss/sources/import` | JSON array containing only the records selected in the import dialog. Current `title/url` and upstream `sourceName/sourceUrl` aliases are accepted. Missing `singleUrl` uses the upstream import default `false`. | `200 {"created":N,"updated":N,"skipped":N}`. In one SQLite transaction, trim only identity fields, skip blank name/URL, replace same-user same-URL rows in place, create new rows in input order, and emit one source sync event only after commit. Another user's same URL is unrelated. | `400` malformed/non-array/over-limit payload; `500` rollback with no partial source changes. |
+| `POST /api/rss/sources/:id/refresh?page=N&sortName=...&sortUrl=...` | `page` is a positive bounded integer, default `1`. `sortUrl` must resolve through the owned source's allowed sort/base semantics; it is not an arbitrary fetch capability. | `200 {"items":[...],"page":N,"hasMore":bool,"imported":N,"total":N,"sortUrl":"..."}`. Fetch exactly the requested remote page/transition, preserve parser order in `items`, user-scope and upsert those rows, then emit one post-commit article sync event. It must not prefetch later pages. | `400` invalid page, unsupported rule or bounded remote/parser failure; `404` missing/cross-user source; client-safe `{ "error": "..." }`. |
+| `GET /api/rss/articles` | Existing optional `sourceId`, `sort`, `unread`, `favorite`, `page`, `limit`. | Existing user-scoped cached-list response remains for deployed/hidden clients. It is not the data source for the fixed-baseline visible RSS page list. | Existing stable `400/500` behavior; never exposes another user's rows. |
+| `GET /api/rss/articles/:id/content` | Existing owned article ID. | `200` with sanitized content/link fields after the source-owned content action. No read/favourite mutation is implied by opening content. | `404` missing/cross-user article/source; `400` bounded fetch/parser failure. |
+
+Standard RSS/Atom has one remote page: page 1 returns its items and
+`hasMore=false`; page greater than 1 returns an empty successful page without
+refetching the feed. Rule sources may return `hasMore=true` only when their
+parsed next-page state supports the next requested transition. Timeout, response
+size, redirect, scheme/host, SSRF, request-rate and parser-work limits apply to
+every page. Response/error data must not reveal credentials, request headers,
+private host paths or raw security diagnostics.
 
 ## P2 remote book-cover projection contract (implemented and published)
 
@@ -299,6 +337,20 @@ Status: extracted 2026-07-10. These routes retain their OpenReader paths while m
 | `POST /api/books/:id/refresh`, `POST /api/books/:id/refresh-local`, `POST /api/books/:id/change-source` | Existing route bodies | Replace chapter rows atomically. For EPUB `refresh-local`, the newly parsed catalogue uses one row per canonical href and empty fragment metadata; an old fragment progress/bookmark is rebound by canonical resource path before the generic index fallback. Only after commit, prune superseded derived caches while preserving `OriginalFile`, `chapters.json`, `bookSource.json`, local-store/WebDAV source files, and valid progress/bookmark recovery. Broadcast the merged shelf item after durable writes. | Owner only. Parse/fetch errors and an explicitly selected rule with no readable chapters return `400` and leave the current catalogue/cache metadata usable without deleting source files. Thus an old pure-`toc`/no-TOC EPUB remains readable after a rejected default refresh and can be explicitly refreshed with `{"tocRule":"spin"}`. Ordinary startup/read/backup never silently collapses historical fragment rows; only a successful explicit refresh applies the new catalogue. |
 
 The upstream uses namespace-specific JSON storage and SSE cache progress. OpenReader's REST/SQLite adaptation is allowed only where it preserves the visible action semantics, current-user isolation, durable event ordering, and bounded resource use described above.
+
+### P1 manual shelf refresh API contract
+
+Status: implemented and regression-validated 2026-08-09; Docker pending. Full state, transaction and test requirements are in
+[`bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md`](bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md).
+
+| Method / path | Request | Success / side effects | Auth and errors |
+|---|---|---|---|
+| `POST /api/books/check-updates` | Empty body or `{}`; deployed-client extra JSON fields remain ignored. | Checks only the caller's remote `canUpdate` shelf books with fetch concurrency ≤16. Returns backward-compatible `{newChapters,books}` plus `{checked,updated,failed,replacedBookIds}`. Every successful book is committed atomically; one book's remote/parse/transaction/stale-snapshot failure does not roll back another book. A single post-commit `bookshelf_update` contains changed shelf items. | JWT required. Candidate-list or final-projection failure is `500 {"error":"检查书籍更新失败"}`; per-book failures remain `200` and are represented only by a safe count. No error may expose rules, credentials, remote bodies or host paths. |
+
+The successful remote TOC is authoritative for rename, URL change, reorder and shrink as well as append growth.
+Exact-prefix growth preserves existing chapter IDs/cache; non-prefix replacement rebinds progress/bookmarks and
+prunes only superseded derived cache after commit. `lastCheckTime` advances only for positive growth relative to the
+persisted book summary. Initial/focus/WebSocket shelf reloads do not invoke this route.
 
 ## EPUB reader resource contract
 
@@ -612,29 +664,35 @@ Frontend ownership rules:
 - Opening a result cover only opens the shared BookInfo; opening result body may create a temporary
   Reader session. Neither preview action persists a shelf book.
 
-## P1-B remote temporary-reader contract (implemented slice)
+## P1-B remote temporary-reader contract (second audit Docker-published)
 
 Reader-dev permits a search/explore result to enter Reader before it has been
 added to the shelf. Its Vuex `readingBook` is an in-memory reading context, not
 a saved shelf row. OpenReader adds a server-owned expiring session so Vue 3 can
 preserve that behavior without treating `POST /api/books/remote` as a read
-operation. This slice is implemented and covered by an API contract test plus
-the desktop and two mobile browser flows on 2026-07-13.
+operation. The main slice is implemented and covered by an API contract test
+plus the desktop and two mobile browser flows on 2026-07-13. The fixed-baseline
+second audit on 2026-08-09 found and corrected missing request/session memory
+budgets and an invalid chapter-index lease extension. The authoritative
+lifecycle, variable, cancellation, redaction and retention contract is now
+[`remote-reader-session-fixed-baseline-second-audit-p1-contract.md`](remote-reader-session-fixed-baseline-second-audit-p1-contract.md);
+implemented, regression-validated and Docker-published as `30dbe53`.
 
 | Method / path | Request | Success / side effects | Auth and errors |
 |---|---|---|---|
-| `POST /api/reader/remote-sessions` | `{ sourceId, bookUrl, title, author?, coverUrl?, intro?, kind?, wordCount?, variable? }`. `sourceName` is display-only and ignored for authorization. | Validates the caller-visible source and normalized bounded variable map; resolves BookInfo + TOC once with the current source snapshot; returns `201 { id, expiresAt, book, chapters }`. `book.id` is always `0`; its opaque `variable` remains available only for a later explicit add-to-shelf. The server stores only a user-bound, opaque, expiring runtime session; it creates **no** Book, Chapter, Progress, Bookmark, cache file, backup record, or websocket bookshelf event. | JWT required. Missing `sourceId`/`bookUrl`/`title` or invalid variables: `400`; unavailable source: `404`; parser/request failure: safe `502 { error, code?, stage: "book_info" }`; no raw rule/header/cookie/URL-query detail is exposed. Source-request failures may enter the caller's existing short-lived source-failure cache. |
+| `POST /api/reader/remote-sessions` | `{ sourceId, bookUrl, title, author?, coverUrl?, intro?, kind?, wordCount?, variable? }`. `sourceName` is display-only and ignored for authorization. The decoded body must be limited to 64 KiB. | Validates the caller-visible source and normalized bounded variable map; resolves BookInfo + TOC once with the current source snapshot; returns `201 { id, expiresAt, book, chapters }`. `book.id` is always `0`; its opaque `variable` remains available only for a later explicit add-to-shelf. The server stores only a user-bound, opaque, expiring and budgeted runtime session; it creates **no** Book, Chapter, Progress, Bookmark, cache file, backup record, or websocket bookshelf event. | JWT required. Missing `sourceId`/`bookUrl`/`title` or invalid variables: `400`; body/session too large: `413`; unavailable source: `404`; parser/request failure: safe `502 { error, code?, stage: "book_info" }`; no raw rule/header/cookie/URL-query detail is exposed. Source-request failures may enter the caller's existing short-lived source-failure cache. |
 | `GET /api/reader/remote-sessions/:id` | Opaque session id. | Returns the original normalized `{ id, expiresAt, book, chapters }` without reparsing or persisting it. `Cache-Control: no-store`. | JWT required. Unknown or another user's id: `404`; expired id: `410 { error: "remote reader session expired" }`. |
-| `GET /api/reader/remote-sessions/:id/chapters/:index/content` | Opaque session id and non-negative chapter ordinal. | Uses only the server-stored source snapshot, book variables and chapter variables to fetch/parse that TOC row. Returns the normal Reader `{ chapter, content, format }` shape (and the existing safe remote-audio fields when applicable). It must never accept a client-supplied chapter URL or source rule. Refreshes the bounded idle expiry but never writes a shelf cache/chapter/progress row. | JWT/session binding required; malformed index `400`; unknown/foreign session `404`; expired `410`; missing chapter `404`; parser/request failure `502 { error, code?, stage: "content" }`. Cancellation stops further source work and returns no synthetic success. |
+| `GET /api/reader/remote-sessions/:id/chapters/:index/content` | Opaque session id and non-negative chapter ordinal. Index validation occurs before session lookup/lease renewal. | Uses only the server-stored source snapshot, book variables and chapter variables to fetch/parse that TOC row. Returns the normal Reader `{ chapter, content, format }` shape (and the existing safe remote-audio fields when applicable). It must never accept a client-supplied chapter URL or source rule. Refreshes the bounded idle expiry only for a valid request and never writes a shelf cache/chapter/progress row. | JWT/session binding required; malformed index `400`; unknown/foreign/evicted session `404`; expired `410`; missing chapter `404`; parser/request failure `502 { error, code?, stage: "content" }`. Cancellation stops further source work and returns no synthetic success. |
 
 ### Runtime and frontend boundary
 
-- Session IDs are high-entropy opaque values, held server-side only; they are never JWTs, never appear in a source URL, never enter backup/WebDAV/export data, and use `Cache-Control: no-store`. The implemented idle TTL is 30 minutes and the absolute lifetime is four hours. Expiration returns `410`, never a silent account/session logout.
-- The source snapshot and fetchable variable state stay server-side. The frontend receives only presentation metadata, an opaque session id, and the existing opaque variable needed for a later explicit add-to-shelf; it never turns that field into a request URL. Temporary sessions deliberately do **not** save browser-local or server progress, and must not call `/progress/:bookId`, bookmark, cache, category, source-change, refresh, or any other shelf-ID endpoint with a fabricated ID.
+- Session state is held server-side behind a high-entropy opaque ID carried only by the authenticated OpenReader route/API; it is never a JWT, never appears in a source URL, never enters backup/WebDAV/export data, and uses `Cache-Control: no-store`. The implemented idle TTL is 30 minutes and the absolute lifetime is four hours. Expiration returns `410`, never a silent account/session logout.
+- The complete source snapshot, request credentials and resolved fetch URLs stay server-side. Bounded opaque Book/Chapter variables may be returned to the same authenticated user because they are upstream entity state and the Book variable is needed for a later explicit add-to-shelf; the frontend never interprets them as request URLs. Temporary sessions deliberately do **not** save browser-local or server progress, and must not call `/progress/:bookId`, bookmark, cache, category, source-change, refresh, or any other shelf-ID endpoint with a fabricated ID.
+- Retention is bounded by the specialist contract: 8 MiB per session, eight sessions/32 MiB per user, and 128 sessions/128 MiB per process, with deterministic least-recently-used eviction after expired-session purge. Eviction is memory-only and appears as 404.
 - Search and Explore must call this same session creation endpoint and use the same reader route form, e.g. `/reader/remote/:sessionId`; neither preview nor result-body reading may call `POST /books/remote`. Persistence starts only from an explicit result-card or BookInfo “加入书架” action. The result card confirms categories first; BookInfo adds directly. Both may forward the returned opaque `variable` field.
 - Reader controls that require a durable shelf record (bookmark creation, group editing, cache/clear cache, durable progress, source change/refresh) must be either temporarily unavailable with an explicit “加入书架后可用” state or receive a separately documented temporary-session contract. They must never fail as a hidden `404` caused by a synthetic book ID.
 
-Implemented tests: `backend/api/remote_reader_contract_test.go` proves user isolation, content loading and zero Book/Chapter/Progress/Bookmark writes. `scripts/smoke/remote-reader-contract.mjs` proves Search cover → BookInfo, Search body → temporary Reader, and zero persistent writer requests at 1440×900, 390×844 and 360×800. Remaining API test coverage is listed in P1-B follow-up: request validation before fetch; expiry; safe parser error redaction; cancellation; source-failure cache; and variable propagation across multiple chapters.
+Regression evidence now includes `backend/api/remote_reader_contract_test.go`, `backend/api/remote_reader_second_audit_contract_test.go`, `backend/services/remotereader/store_contract_test.go`, focused race, full Go/vet, frontend 713/713/build, three-viewport `remote-reader-contract.mjs`, and real Go CSS/JSONPath/XPath `source-parser-workflow-contract.mjs`. Body/retention budgets, expiry/LRU, invalid-index lease behavior, safe parser error redaction, cancellation, source-failure cache and cross-chapter variable propagation are covered. Local dual-architecture build, GHCR digest readback and fresh/historical mounted-volume/backup gates passed for `30dbe53`.
 
 ## Compatibility rule
 
@@ -649,13 +707,13 @@ does not authorize access.
 
 | Method / path | Stable request and success response | User scope, side effects and errors |
 |---|---|---|
-| `GET /api/sources` | `200` ordered `BookSource[]`; existing JSON fields remain unchanged and `usedBookCount` counts only caller-owned books. | Lazily initializes the caller from the current default exactly once. An initialized empty namespace returns `[]`; persistence failure is `500 {"error":"failed to list sources"}`. |
+| `GET /api/sources` | `200` ordered `BookSource[]`; existing JSON fields remain unchanged. `usedBookCount` counts only caller-owned books and the additive response-only `usedBookNames:string[]` contains those books' titles in stable book-ID order. An unused source returns an empty array. | Lazily initializes the caller from the current default exactly once. The usage projection must be computed in bounded grouped queries, never per-source N+1 reads, and must not expose another user's title. It does not add a SQLite column or enter source export/backup/WebDAV data. An initialized empty namespace returns `[]`; persistence failure is `500 {"error":"failed to list sources"}`. |
 | `GET /api/sources/:id` | Existing `200 BookSource`. | Only a caller-active association is addressable. Missing, detached, or foreign ID is the same `404 {"error":"source not found"}`; no ownership detail is disclosed. |
 | `POST /api/sources` | Existing payload/default normalization and `201 BookSource`. | Requires JWT plus `CanEditSources`; creates only a caller association. Validation remains `400`, disabled editing `403`, persistence failure `500`. After commit, `sources_update` is sent only to the caller's clients. |
 | `PUT /api/sources/:id` | Existing full source payload and `200 BookSource`. The returned ID may change when an upgraded shared snapshot is copied. | Requires JWT plus `CanEditSources`; foreign/detached ID is `404`. A shared snapshot is copy-on-write and only caller books/failure rows are remapped. Semantic rule changes clear only caller variables. Persistence failure remains `500`. |
 | `DELETE /api/sources/:id` | Existing `204`; a caller-owned source used by caller books remains `409 {"error":"source is used by bookshelf books","usedBookCount":N}`. | Requires JWT plus `CanEditSources`. Foreign/detached ID is `404`. Deletion removes only caller association/failures; the shared snapshot is garbage-collected only when globally unreferenced. |
 | `GET /api/sources/export?sourceIds=...` | Existing JSON download and sourceIds validation. With no IDs, exports all caller-active sources; supplied IDs retain caller order/filter behavior. | Foreign/detached IDs are omitted and cannot be exported. A selection containing no caller source returns `200 []`; malformed input remains `400`. |
-| `POST /api/sources/:id/test`, `/test-chapter`, `/test-content`; `POST /api/sources/batch-test`; `GET /api/sources/invalid` | Existing debug payloads, optional structured parser error fields, and invalid-source response shape remain unchanged. | Single-item foreign/detached ID is `404`; batch selection silently excludes non-caller IDs. Failure-cache reads/writes are caller-scoped. |
+| `POST /api/sources/:id/test`, `/test-chapter`, `/test-content`; `POST /api/sources/:id/debug/stream`; `POST /api/sources/batch-test`; `GET /api/sources/invalid` | Existing test payloads and optional structured parser error fields remain; the additive canonical stream is defined in `source-debug-fixed-baseline-second-audit-p2-contract.md`. | Single-item foreign/detached ID is `404`; batch selection silently excludes non-caller IDs. Debug/test requests never write `source_failures`; only batch health-check reads/writes are caller-scoped. |
 | `DELETE /api/sources`; `POST /api/sources/batch`; import/remote-import | Existing request validation and response envelopes remain stable. | Mutation affects only caller-active associations. Batch foreign IDs are not counted as affected. Import identity is normalized `bookSourceUrl/baseUrl` within the caller namespace; no same-name or ID match may mutate another user. |
 | `GET /api/sources/default`; `POST /api/sources/default/restore` | Existing status/restore paths remain compatible. Restore reconciles only the caller against current default; initialized empty and restore-default remain distinct states. | Restore requires `CanEditSources`; used unmatched sources become detached instead of leaving dangling book references. |
 | `POST /api/sources/default/save` | Existing path remains as an admin compatibility shim and returns `{count}`; `count` may be zero for an explicitly configured empty default. | Requires administrator role in addition to `CanEditSources`; copies the caller's active list into the default namespace. It does not rewrite initialized users or broadcast a false private-source update to every account. |
@@ -672,6 +730,22 @@ status or error envelope is changed by the remaining Docker work: the dedicated 
 stable routes above and compares actual source IDs/lists plus ZIP members before and after restart.
 Until the old-global-source fixture, COW, administrator-root/regular-root and restore-isolation checks
 pass together, the implemented management/runtime API slices are not sufficient release evidence.
+
+The additive `usedBookNames` projection above is required by the fixed upstream source-manager
+`书架书籍` column and is governed by
+[`source-manager-fixed-baseline-second-audit-p1-contract.md`](source-manager-fixed-baseline-second-audit-p1-contract.md).
+It is deliberately limited to `GET /api/sources`: single-source persistence responses and source
+archives remain source configuration records, not bookshelf-data envelopes.
+
+## P2 local-text parser budget
+
+- Existing import paths, request fields and success schemas are unchanged. TXT/`.text`/Markdown direct preview,
+  LocalStore and WebDAV preview now consume the same configured decoded-text and final-chapter budgets as confirm.
+- A parser-budget failure remains `400` with the existing safe parser-limit message and caller-owned retry
+  `importToken`; raw transport overflow remains the existing `413`. Storage batch envelopes keep per-item errors.
+- `POST /api/books/:id/refresh-local` returns `400` for the bounded historical input ceiling before any mutation.
+  Lazy cache reconstruction treats the same bounded-read failure as an unavailable derived chapter and discloses no
+  host path. No route, auth rule, response field, SQLite schema, backup field or WebSocket event was added.
 
 ## P1 bookshelf latest-chapter timestamp contract (2026-07-22 extracted)
 
@@ -728,9 +802,63 @@ Status: implemented and API-tested on 2026-07-13. Reader-dev has no equivalent R
 |---|---|---|
 | `GET /api/books/:id/chapters/:index/content` | Remote failure remains `502 {"error":"failed to load chapter content"}`. | Implemented optional `code` (`source_rule_invalid`, `source_rule_unsupported`, `source_request_failed`, `content_unavailable`) and `stage: "content"`. |
 | `POST /api/search` (single paged source), `GET /api/explore/:sourceId`, `POST /api/books/remote`, source change/refresh | Existing status and top-level `error` remain stable. | Implemented stable `error` text plus optional `code`/`stage` (`search`, `explore`, `book_info`); raw Go/source-request detail is never serialized. |
-| `/api/sources/:id/test*` and batch test | Existing authenticated `200` shape includes its result payload plus `error`/`message`. | Implemented optional `code`/`stage` (`search`, `toc`, `content`) without changing `200` or result fields. Debug messages never include variable values, rule source, request URL query, response body, cookie, authorization header, JWT, WebDAV secret or filesystem path. |
+| `/api/sources/:id/test*`, the additive canonical debug stream, and batch test | Existing authenticated test `200` shapes include result payload plus `error`/`message`; the canonical stream uses ordered stage/log/end/error events. | Optional `code`/`stage` remain. Debug messages never include variable values, rule source, request URL query, response body, cookie, authorization header, JWT, WebDAV secret or filesystem path. Debug/test requests never write the invalid-source cache; batch health remains the explicit diagnostic writer. |
 
-`code` and `stage` are optional additive fields. Legacy frontend paths continue to use `error`; no parser error becomes an authentication failure, and only `engine.IsSourceRequestError` may enter `source_failures`. `backend/api/source_error_contract_test.go` proves remote request failures are redacted for paged search, explore, source debug and remote-book creation, while an invalid content rule keeps its existing `502` text and receives `source_rule_invalid` / `content`.
+### Shared source/RSS remote-request failure boundary (P2-N1)
+
+The routes and successful response bodies remain unchanged. Search, Explore, remote BookInfo/TOC/content,
+source test, RSS source page/content and remote source JSON import all pass through the shared request boundary
+defined in [`shared-source-fetcher-p2-contract.md`](shared-source-fetcher-p2-contract.md): HTTP(S)-only absolute
+URLs without userinfo, 15-second default total request timeout, 16-MiB response cap, five redirects and at most
+three retries. Same-origin redirects retain source headers; cross-origin redirects retain only safe negotiation
+headers and never Cookie, Authorization, Proxy-Authorization or custom source credentials.
+
+| Endpoint family | Existing status / shape retained | Bounded failure behavior |
+|---|---|---|
+| `POST /api/search`, `GET /api/explore/:sourceId`, remote BookInfo/TOC/content and Reader chapter content | Existing status, top-level `error`, optional `code`/`stage` and source-failure classification remain authoritative. | Unsafe URL, response limit, redirect limit and timeout are source-request failures, but public payloads contain only stable path/query/header/body/proxy-credential-free messages. Caller cancellation remains cancellation and is not cached as a failed source. |
+| `POST /api/sources/:id/test*`, `POST /api/sources/batch-test` | Existing HTTP 200 diagnostic envelope remains. | The safe `error`/`message` and optional `code`/`stage` identify request failure without echoing the raw URL or source credentials. |
+| `POST /api/sources/remote-preview`, `POST /api/sources/remote` | Existing JWT/edit permission, 200 success shape and 400 failure shape remain. | Malformed/unsafe/oversized/redirect-limited fetches return the existing generic `{"error":"failed to fetch remote source URL"}`; remote response bytes never reach JSON decoding after the cap. |
+| `POST /api/rss/sources/:id/refresh`, `GET /api/rss/articles/:id/content` | Existing authenticated source/article ownership, requested-page semantics, success payload and current 400 failure status remain. | Fetch diagnostics are redacted before concatenation; no URL query, userinfo, header/cookie, body or proxy credential enters the `error` field or persisted RSS article/source state. |
+
+P2-N1 does not change SQLite, backup, WebSocket or frontend request schemas. The separate P2-N2 contract is now
+implemented, regression-validated and Docker-published. It adds only the deployment variable
+`OPENREADER_SOURCE_NETWORK_ALLOWLIST` (comma-separated exact hostname, bare IP or CIDR; empty means public-only),
+fails startup on invalid non-empty entries, and keeps all business API paths/status/success/error schemas unchanged.
+Unsafe private/DNS/proxy targets become the existing `source_request_failed` family without exposing the target,
+DNS answer, allowlist or proxy credentials. Engine/config/API focused tests, the full Go suite, Engine race,
+frontend 706/706, production build, Docker public/LAN/loopback/restart and fresh/historical volume gates pass without
+changing a business response schema. P2-N2 was published locally to GHCR as `d198c2e` / `latest`; the verified OCI
+index is `sha256:021817e602aa589c1583ec7ccb65828172c1a2afe1e038e23651dd51c455fcc1`.
+P2-N1 was implemented in `981bca7` and published locally to GHCR as `981bca7` / `latest`; the verified OCI
+index is `sha256:02160e0797b3371fdfadccb550b8766d412c3e09df632ba1e36d192b26eb500d`.
+
+`code` and `stage` are optional additive fields. Legacy frontend paths continue to use `error`; no parser error becomes an authentication failure. Normal source operations may classify `engine.IsSourceRequestError` for their existing failure policy, but source debug/test requests are now explicitly read-only and never enter `source_failures`; the separate batch health action owns diagnostic failure writes. The completed second-audit implementation and release evidence are in [`source-debug-fixed-baseline-second-audit-p2-contract.md`](source-debug-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 source-debug second-audit API contract (2026-08-09 implemented)
+
+The fixed baseline saves the current editor source and starts one SSE debugger which automatically runs search or
+direct-entry dispatch, BookInfo, TOC and first-chapter content while carrying the BookInfo/TOC parser runtime and
+the adjacent chapter boundary. Its `Debugger.infoDebug` deliberately re-enters by `bookUrl`, so a search/explore
+result's own variable is not carried into BookInfo; the contract preserves that exact call graph. The current three
+unrelated REST probes are not an upstream-equivalent state machine.
+
+OpenReader retains `POST /api/sources/:id/test`, `/test-chapter` and `/test-content` as deployed-client shims with
+their existing bodies, authenticated `200` debug envelopes, optional `code/stage`, validation and owner-scoped
+`404`. It adds `POST /api/sources/:id/debug/stream` as the canonical Bearer-JWT streaming translation. The stream
+defaults a blank keyword to “我的”, dispatches absolute URL / `::` / `++` / `--` exactly as the fixed baseline,
+uses ordered bounded `log`/`stage` events and exactly one `end` or `error`, and stops on request cancellation.
+
+Neither the canonical stream nor any legacy `/test*` probe may mutate the invalid-source cache. Source persistence
+occurs before the stream through the existing create/update APIs and therefore keeps `CanEditSources`, user
+association, copy-on-write and post-commit sync behavior. Full request/response/status/side-effect/error fields and
+planned tests are fixed in
+[`source-debug-fixed-baseline-second-audit-p2-contract.md`](source-debug-fixed-baseline-second-audit-p2-contract.md).
+
+Implementation status: the canonical stream, cancellation, bounded/redacted events, exact dispatch/runtime
+boundaries and zero failure-cache side effects are implemented. Focused race, full Go/vet, frontend 724/724,
+production build, four-viewport real-browser validation and fresh/historical volume gates pass. The locally built
+amd64/arm64 image is published as `f8f263d`/`latest`, OCI index
+`sha256:9c83821de9e5f4df223b6e69a6d67eff512fa55d4a271f544718ccad8ae58ba1`.
 
 ## P2 parser persistent-variable contract (P2-Parser-1G implemented)
 

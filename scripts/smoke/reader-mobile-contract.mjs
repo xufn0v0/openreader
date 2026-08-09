@@ -240,6 +240,21 @@ function savedReaderBook() {
   }
 }
 
+function savedReaderShelf() {
+  const current = savedReaderBook()
+  return [
+    current,
+    ...Array.from({ length: 11 }, (_, index) => ({
+      ...current,
+      id: index + 2,
+      title: `移动阅读书架布局测试 ${index + 2}`,
+      url: `${current.url}/${index + 2}`,
+      bookUrl: `${current.bookUrl}/${index + 2}`,
+      durChapterTitle: `第 ${index + 2} 章 多书架滚动测试`,
+    })),
+  ]
+}
+
 async function installApiMocks(page, readerSettings = {}) {
   const bookmarks = [{
     id: 101,
@@ -291,7 +306,7 @@ async function installApiMocks(page, readerSettings = {}) {
     if (path === '/books/1') {
       return route.fulfill(json(savedReaderBook()))
     }
-    if (path === '/books') return route.fulfill(json([savedReaderBook()]))
+    if (path === '/books') return route.fulfill(json(savedReaderShelf()))
     if (path === '/books/1/chapters') {
       return route.fulfill(json([
         { id: 11, index: 0, title: '第一章' },
@@ -439,7 +454,12 @@ async function assertWorkspaceOpen(page, viewport, label, { primary = false, con
     const primaryBodyRect = primaryBody?.getBoundingClientRect()
     const primaryBodyStyle = primaryBody ? window.getComputedStyle(primaryBody) : null
     const shelfListRect = workspace.querySelector('.reader-shelf-list')?.getBoundingClientRect()
-    const shelfCardRect = workspace.querySelector('.reader-shelf-card')?.getBoundingClientRect()
+    const shelfCards = Array.from(workspace.querySelectorAll('.reader-shelf-card'))
+    const shelfCardRect = shelfCards[0]?.getBoundingClientRect()
+    const secondShelfCardRect = shelfCards[1]?.getBoundingClientRect()
+    const shelfTitleRect = shelfCards[0]?.querySelector('.reader-shelf-title-line')?.getBoundingClientRect()
+    const shelfChapterRect = shelfCards[0]?.querySelector('.reader-shelf-chapter')?.getBoundingClientRect()
+    const shelfList = workspace.querySelector('.reader-shelf-list')
     const visibleDrawers = Array.from(document.querySelectorAll('.el-drawer')).filter((element) => {
       const drawerRect = element.getBoundingClientRect()
       const style = window.getComputedStyle(element)
@@ -461,10 +481,21 @@ async function assertWorkspaceOpen(page, viewport, label, { primary = false, con
       paddingBottom: window.getComputedStyle(workspace).paddingBottom,
       hasPrimaryBody: Boolean(workspace.querySelector('.reader-mobile-primary-popover-body')),
       primaryBodyWidth: Math.round(primaryBodyRect?.width || 0),
+      primaryBodyLeft: Math.round(primaryBodyRect?.left || 0),
+      primaryBodyRightInset: Math.round(window.innerWidth - (primaryBodyRect?.right || 0)),
       primaryBodyPaddingLeft: Number.parseFloat(primaryBodyStyle?.paddingLeft || '0'),
       primaryBodyPaddingRight: Number.parseFloat(primaryBodyStyle?.paddingRight || '0'),
       shelfListWidth: Math.round(shelfListRect?.width || 0),
+      shelfListLeft: Math.round(shelfListRect?.left || 0),
+      shelfListRightInset: Math.round(window.innerWidth - (shelfListRect?.right || 0)),
       shelfCardWidth: Math.round(shelfCardRect?.width || 0),
+      shelfCardHeight: Math.round(shelfCardRect?.height || 0),
+      shelfTitleHeight: Math.round(shelfTitleRect?.height || 0),
+      shelfChapterHeight: Math.round(shelfChapterRect?.height || 0),
+      shelfCardGap: Math.round((secondShelfCardRect?.top || 0) - (shelfCardRect?.bottom || 0)),
+      shelfCardCount: shelfCards.length,
+      shelfListClientHeight: shelfList?.clientHeight || 0,
+      shelfListScrollHeight: shelfList?.scrollHeight || 0,
       toolbarZIndex: Number(window.getComputedStyle(document.querySelector('.reader-mobile-top.visible')).zIndex || 0),
     }
   }, label)
@@ -482,12 +513,25 @@ async function assertWorkspaceOpen(page, viewport, label, { primary = false, con
     assert(workspaceState.zIndex > 8, `${viewport.width}: ${label} primary popover must paint above reader content`)
     assert(workspaceState.toolbarZIndex > workspaceState.zIndex, `${viewport.width}: ${label} mobile toolbar must stay interactive above the primary popover`)
     if (label === '书架') {
-      const expectedShelfWidth = Math.round(
-        viewport.width - workspaceState.primaryBodyPaddingLeft - workspaceState.primaryBodyPaddingRight,
-      )
       assert(workspaceState.primaryBodyWidth === viewport.width, `${viewport.width}: reader shelf primary body width ${workspaceState.primaryBodyWidth}`)
+      assert(workspaceState.primaryBodyLeft === 0 && workspaceState.primaryBodyRightInset === 0, `${viewport.width}: reader shelf primary body bounds ${workspaceState.primaryBodyLeft}/${workspaceState.primaryBodyRightInset}`)
+      assert(workspaceState.primaryBodyPaddingLeft === 20, `${viewport.width}: reader shelf body left inset ${workspaceState.primaryBodyPaddingLeft}`)
+      assert(workspaceState.primaryBodyPaddingRight === 20, `${viewport.width}: reader shelf body right inset ${workspaceState.primaryBodyPaddingRight}`)
+      assert(workspaceState.shelfListLeft === 20 && workspaceState.shelfListRightInset === 20, `${viewport.width}: reader shelf list insets ${workspaceState.shelfListLeft}/${workspaceState.shelfListRightInset}`)
+      const expectedShelfWidth = viewport.width - 40
       assert(workspaceState.shelfListWidth === expectedShelfWidth, `${viewport.width}: reader shelf list width ${workspaceState.shelfListWidth}/${expectedShelfWidth}`)
-      assert(workspaceState.shelfCardWidth === workspaceState.shelfListWidth, `${viewport.width}: reader shelf card width ${workspaceState.shelfCardWidth}/${workspaceState.shelfListWidth}`)
+      if (viewport.width < 900) {
+        assert(workspaceState.shelfCardWidth === workspaceState.shelfListWidth, `${viewport.width}: reader shelf card width ${workspaceState.shelfCardWidth}/${workspaceState.shelfListWidth}`)
+        assert(workspaceState.shelfCardCount >= 12, `${viewport.width}: reader shelf contract must exercise a populated scroll list`)
+        assert(workspaceState.shelfCardHeight >= 60, `${viewport.width}: reader shelf card height collapsed to ${workspaceState.shelfCardHeight}`)
+        assert(workspaceState.shelfTitleHeight >= 20, `${viewport.width}: reader shelf title height ${workspaceState.shelfTitleHeight}`)
+        assert(workspaceState.shelfChapterHeight >= 16, `${viewport.width}: reader shelf chapter height ${workspaceState.shelfChapterHeight}`)
+        assert(workspaceState.shelfCardGap === 16, `${viewport.width}: reader shelf row gap ${workspaceState.shelfCardGap}`)
+        assert(workspaceState.shelfListScrollHeight > workspaceState.shelfListClientHeight, `${viewport.width}: populated reader shelf must scroll instead of shrinking rows`)
+      } else {
+        const expectedCardWidth = Math.round((workspaceState.shelfListWidth - (3 * 24)) / 4)
+        assert(workspaceState.shelfCardWidth === expectedCardWidth, `${viewport.width}: reader shelf four-column card width ${workspaceState.shelfCardWidth}/${expectedCardWidth}`)
+      }
     }
   }
   if (contentSized) {

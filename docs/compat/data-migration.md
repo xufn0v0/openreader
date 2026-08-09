@@ -1,6 +1,6 @@
 # OpenReader Data Migration and Storage Contract
 
-Status: initial scaffold.
+Status: working compatibility ledger; implemented migrations and remaining action-level audits are recorded below.
 
 ## P2 reading-progress CAS and WebDAV mirror (audit pending implementation)
 
@@ -197,6 +197,16 @@ Status: implemented in-progress; no database migration is required.
 Status: parser and staged-preview cleanup implementation complete. Backup ZIP restore is documented and implemented in the following section; no SQLite or mounted-root migration is authorized.
 
 - New parser-limit environment values must be additive with documented defaults. An unset deployment keeps the default bounded policy; existing `OPENREADER_MAX_IMPORT_BYTES` remains the byte limit before staging.
+- The follow-up TXT/Markdown budget is additive and migration-free. `OPENREADER_MAX_PARSED_CHAPTERS`
+  limits final parser output for new/explicit parse work; when unset it follows an explicitly configured legacy
+  `OPENREADER_MAX_UMD_CHAPTERS` value, otherwise defaults to 100000. Existing rows, archives and caches are not
+  scanned on startup. Historical lazy recovery uses the wider bounded compatibility policy and must reject an
+  over-ceiling source before reading the complete file into memory.
+- Implementation keeps this no-migration contract: no model, `AutoMigrate`, backup schema, stage filename or mounted
+  root changed. The new generic chapter field exists only in process configuration/parser limits, while historical
+  refresh and lazy reconstruction retain the existing source path and use a bounded reader before allocation.
+- Release `e7f168e` passed both fresh portable-v1/v2/cross-user/restart and historical
+  TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation mounted-volume gates.
 - Configured import limits apply while previewing, importing or explicitly reparsing new bytes. Existing `books`, `chapters`, `chapters.json`, archived originals, cached chapter content and reader progress are never scanned, rewritten or deleted by startup cleanup; lazy recovery of a pre-existing local archive uses a documented wider but still bounded compatibility ceiling instead of retroactively applying the new-upload policy.
 - The preview cleanup worker operates only below `cache/import-previews/<user-id>/`. It may remove an expired token's `.book` and `.json` pair or a stale orphan created by an interrupted stage write. It must not remove a fresh valid pair, any LocalStore/WebDAV source, any `library/` archive, SQLite row or backup file.
 - Parser rejection happens before `ArchiveImportedBook`, category mutation, chapter-row creation, sync broadcast or staged-token consumption. A rejected input leaves the mounted source and existing shelf untouched.
@@ -740,6 +750,21 @@ Release evidence completed with `f44447f`: both ordinary and historical volume s
 including restart, portable v1/v2 assets, cross-user isolation, TXT/EPUB/UMD/CBZ and relative-cache
 fixtures. No migration or mounted data rewrite was observed.
 
+## P2 UserManage partial-update compatibility (2026-08-09)
+
+- No table, column, index, file, mounted directory, backup member or WebDAV path changes.
+- Permission writes now use an explicit SQL column map. Existing user rows and every omitted account field remain
+  untouched; in particular, a concurrent `password_hash` or `last_active_at` update cannot be replaced by a stale
+  permission-screen snapshot.
+- Existing `can_access_webdav=NULL` rows remain NULL in SQLite. API responses expose the effective inherited value
+  on a response copy only; this is not a backfill or migration.
+- Existing `false` permission values and zero unlimited book/source limits remain readable and writable. Negative
+  limits and empty patches are rejected without updating `updated_at` or emitting synchronization events.
+
+Focused trigger-based concurrency tests, race tests and full API regressions pass. `77a60d8` then passed fresh
+mounted volume portable v1/v2 assets, cross-user and restart, plus historical TXT/EPUB/UMD/CBZ, relative-cache,
+owner-isolation and portable restore. No mounted data or archive rewrite was observed.
+
 ## P0 ReaderSettings scheme/snapshot compatibility (2026-08-02 extracted)
 
 - No SQLite table, column, index, mounted directory, API path, backup member or WebDAV file changes. Reader settings
@@ -762,3 +787,50 @@ fixtures. No migration or mounted data rewrite was observed.
 Required evidence before release: old/current reader JSON fixtures, cross-user reset and delayed settings load,
 normal↔Kindle reload, custom scheme/asset preservation, portable v1/v2 assets, historical mounted-volume restart and
 owner-isolation smoke. See `reader-settings-fixed-baseline-second-audit-p0-contract.md`.
+
+## P2 WebSocket synchronization protocol compatibility (2026-08-09 extracted)
+
+- `/ws/sync` remains an ephemeral transport. It adds no SQLite row, browser-persisted event queue, mounted file,
+  backup member, WebDAV object or migration.
+- Existing server event names and payloads remain readable by old clients. The protocol becomes explicitly
+  server-to-client only; removing the unused frontend `send()` and rejecting inbound application messages cannot
+  delete or translate persisted state.
+- Tightening `users_update` recipients changes no user, role or source row. Administrators receive the complete
+  changed-ID set; an affected ordinary user receives only its own ID so profile refresh/deletion logout still works;
+  unrelated users receive nothing.
+- A reconnect never replays an event log. Existing REST/SQLite authority, foreground reconciliation, operation
+  generation and cache fallback remain unchanged, including historical browser caches.
+- Because there is no data-format change, no new old-volume fixture is required. A release still runs the unchanged
+  fresh/historical volume and portable-backup gates to prove that the transport hardening did not accidentally touch
+  `data/`, `cache/` or `library/`.
+
+See [`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md).
+
+## P1 manual shelf refresh compatibility (2026-08-09)
+
+- No table, column, index, mounted directory, backup member, WebDAV object or browser key format changes.
+  Existing `Book`, `Chapter`, `ReadingProgress` and `Bookmark` rows remain the durable authority.
+- An exact-prefix remote catalogue update appends only new chapter rows and preserves every existing chapter ID,
+  cache path, progress reference and bookmark reference. An equal catalogue performs no chapter rewrite.
+- A successful non-prefix replacement reuses the existing catalogue replacement transaction. Recoverable progress
+  and bookmark offsets/indexes remain; obsolete chapter IDs are rebound by canonical resource or index, and only
+  unreferenced derived chapter caches are removed after commit. Original imports and mounted library files are not
+  cleanup targets.
+- A remote, parser, stale-snapshot or transaction failure leaves that book's old catalogue, summary, variable,
+  progress, bookmarks and cache readable. Another book may still commit independently in the same refresh round.
+- Existing old volumes need no migration or backfill. `43635a1` passed the unchanged fresh/historical Docker volume
+  and portable-backup gates before publication; see
+  `bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md`.
+
+## P2 backup restore transaction-worker compatibility (2026-08-09 extracted)
+
+- The logical restore already promises one SQLite transaction for selected settings, groups, shelf, progress,
+  bookmarks, RSS, rules and permitted sources. Its transaction worker must therefore contain only the transaction
+  DB and services explicitly rebuilt on that DB.
+- Copying the full `Server` also copies its mutex and unrelated long-lived runtime/service pointers. It is forbidden
+  even if today's helpers happen not to dereference those fields; a later helper could silently escape the rollback
+  boundary through an original-DB service.
+- Replacing the shallow copy with a minimal transaction-bound worker changes no table, row, archive, mounted file,
+  API field or WebSocket event. Existing old/current backup fixtures remain authoritative.
+- `go vet ./...` is an explicit red/green gate in addition to the existing rollback and fresh/historical volume
+  tests. See `backup-restore-fixed-baseline-p2-contract.md`.

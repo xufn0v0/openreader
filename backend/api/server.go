@@ -19,6 +19,8 @@ import (
 	"openreader/backend/services/coverimage"
 	"openreader/backend/services/epubreader"
 	"openreader/backend/services/readingprogress"
+	"openreader/backend/services/remotereader"
+	rssservice "openreader/backend/services/rss"
 	"openreader/backend/services/scheduler"
 	"openreader/backend/services/sourcefailure"
 	readersync "openreader/backend/sync"
@@ -38,8 +40,9 @@ type Server struct {
 	coverImages    *coverimage.Service
 	epubReader     *epubreader.Service
 	progressSvc    *readingprogress.Service
+	rss            *rssservice.Service
 	sourceFailures *sourcefailure.Service
-	remoteReaders  *remoteReaderSessionStore
+	remoteReaders  *remotereader.Store
 	registerMu     sync.Mutex
 }
 
@@ -58,8 +61,9 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 		coverImages:    coverimage.New(cfg, database),
 		epubReader:     epubreader.New(cfg, database),
 		progressSvc:    readingprogress.New(database, cfg.DataDir),
+		rss:            rssservice.New(database),
 		sourceFailures: sourcefailure.New(database),
-		remoteReaders:  newRemoteReaderSessionStore(),
+		remoteReaders:  remotereader.NewStore(remotereader.DefaultLimits(), nil),
 	}
 	server.cleanupPortableAssetRestoreJournals()
 
@@ -113,6 +117,7 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 	protected.POST("/sources/:id/test", server.testSourceSearch)
 	protected.POST("/sources/:id/test-chapter", server.testSourceChapter)
 	protected.POST("/sources/:id/test-content", server.testSourceContent)
+	protected.POST("/sources/:id/debug/stream", server.debugSourceStream)
 	protected.GET("/categories", server.listCategories)
 	protected.POST("/categories", server.createCategory)
 	protected.PUT("/categories/reorder", server.reorderCategories)
@@ -180,6 +185,7 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 	protected.DELETE("/replace-rules/:id", server.deleteReplaceRule)
 	protected.GET("/rss/sources", server.listRSSSources)
 	protected.POST("/rss/sources", server.createRSSSource)
+	protected.POST("/rss/sources/import", server.importRSSSources)
 	protected.PUT("/rss/sources/:id", server.updateRSSSource)
 	protected.DELETE("/rss/sources/:id", server.deleteRSSSource)
 	protected.POST("/rss/sources/:id/refresh", server.refreshRSSSource)
