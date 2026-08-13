@@ -1,5 +1,85 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-08-12 P2 用户配置写入请求边界第二轮
+
+固定上游 `saveUserConfig/getUserConfig` 认证后保存当前终端四项 localStorage 配置 object；OpenReader 已
+签收的技术栈映射把它拆为当前用户 `reader/shelf/search` 三个 SQLite setting，并增加 CAS 与显式
+force。该状态机不重开，但当前 PUT 仍直接 `ShouldBindJSON`，没有 actual-read/single-JSON 边界。
+
+隔离运行时实测 declared 与 chunked 的 8 MiB + 1 请求都返回 200、写入并回显约 8 MiB；第二 JSON 和
+尾随垃圾也返回 200 并持久化首对象。无 token 401 与非法 key 400 仍优先。差异裁决为 P2 Go/security
+`must-fix`：合法 key 后使用 8 MiB actual-read 单 JSON，overflow 为现有平面 413，malformed/multi 为
+现有平面 400，并保证零查询/写入/event。三键、任意合法 JSON value、reader 顶层设备字段清理、
+CAS/force、并发 upsert、GET/backup/restore 和历史大行均保持。完整合同见
+[`user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md`](user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同先以 `7233add` 独立提交；旧实现红测随后复现超限/尾随请求的写入与广播副作用。`c2bc736` 只在
+setting handler 内复用窄共享 decoder，完成 8 MiB actual-read 单 JSON 和既有平面错误映射，同时保持
+任意 JSON value、CAS/force/upsert、三键、历史大行和 backup/restore。focused/full/race/vet、frontend
+740/740、build 与真实 HTTP 均通过；本地 arm64 候选构建成功。fresh/historical 卷与正式多架构发布因
+OrbStack socket 自动审批通道断开而未执行，当前状态为
+**implementation-complete / regression-validated / Docker-pending**。
+
+## 2026-08-12 P2 管理员用户写入请求边界与共享密码长度第二轮
+
+固定上游 `UserController#addUser/resetPassword` 与当前 Vue 都按 UTF-16 `String.length` 执行密码至少
+8 位；当前 Go 却按 UTF-8 bytes，6 个 UTF-16 单元的中文密码可创建。管理员 create/reset 还未继承
+公开认证切片的 bcrypt 72-byte 适配，实测均返回错误 `500`；五个管理员 JSON 写入口无 actual-read
+上限并接受首 JSON 后的尾随值，两个批量动作也没有 cardinality 上限。
+
+这些差异裁决为 P2 Go/security `must-fix`。目标为管理员鉴权优先、16 KiB actual-read 单 JSON、批量
+2,000 项、所有新密码至少 8 UTF-16 单元且至多 72 UTF-8 bytes，并把确定性失败移到 bcrypt/事务前。
+旧账号登录、成功响应、UserManage 可见结构、用户删除/书源事务和数据格式不重开。完整合同见
+[`admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md`](admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同先以 `61512f7` 独立提交；随后旧实现红测复现全部差异及失败副作用。`6c1c6db` 以窄共享 decoder
+统一 public/admin 的 actual-read 单 JSON 边界但保留各自错误形状，加入 2,000 原始 ID 上限、UTF-16/
+UTF-8 双单位密码校验、负限额拒绝和 bcrypt 前确定性检查。focused/full/race/vet、frontend 740/740、
+build、真实 HTTP 与 fresh/historical 卷门均通过；本机双架构发布的 `6c1c6db`/`latest` OCI index 为
+`sha256:55326ed147aea4370c0161d75568fe85a5095abb6dad6b487856dfeea09832a2`。当前状态为
+**aligned / Docker-published / awaiting-device-verification**。
+
+## 2026-08-11 P2 公开认证请求边界第二轮
+
+固定上游 `/reader3/login` 的账号字段、登录/注册转换和错误语义已由六动作合同裁决；本轮不重开该
+产品状态机。当前 OpenReader 拆分的公开 `/api/auth/login`、`/register` 却在 JWT 前直接执行无上限
+`ShouldBindJSON`，Gin 只消费首个 JSON 值；超过 bcrypt 72-byte 硬限制的新密码又落成错误的 `500`。
+
+这些差异裁决为 P2 Go/security `must-fix`。目标是 16 KiB 声明/流式 body 上限、单 JSON、超限
+`413`、格式错误 `400`、过长新密码 `400`，同时保留通用登录 `401`、旧账号登录、成功响应和零数据
+迁移。完整合同见
+[`auth-request-boundary-fixed-baseline-second-audit-p2-contract.md`](auth-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同已先以 `052de86` 独立提交；随后测试先行实现认证专用 16 KiB 有界单 JSON 解码和 bcrypt 72-byte
+注册/登录适配。旧实现红测复现超限写入、尾随 JSON、注册 `500` 与前 72 bytes 相同的 73-byte 密码
+错误登录；新实现的 focused/full/race/vet、frontend 740/740、build 与真实 declared/chunked HTTP smoke
+均通过。实现提交 `f5c15d7` 又顺序通过 fresh/historical 卷与 portable backup 门，并由本机发布为
+`f5c15d7`/`latest`，OCI index 为
+`sha256:db667de319ae2721cbd35990896612a738b4570a94920875ea14e2aed613503f`。当前状态为
+**aligned / Docker-published / awaiting-device-verification**。
+
+## 2026-08-11 P0 Reader 内联章节缓存第二轮
+
+固定上游 `Reader.vue#cacheChapterContent/cancelCaching`、`App.vue#getBookContent` 和
+`helper.js#LimitResquest/cacheFirstRequest` 证明，2026-07-10 只核对内联几何后作出的“缓存引擎和
+取消行为未变”结论并不完整。上游对当前章后的完整 50/100/all 区间执行并发 2 的 cache-first，
+浏览器已命中章节仍计入完整进度；取消同步清空 pending 并立即恢复按钮；自然结束只提示
+`缓存完成`。
+
+审计时实现会提前剔除已缓存章节、全命中时误报“不需要缓存”、对已入架本地书静默返回、取消后把
+面板锁在“正在取消缓存...”直到在途请求结束，还增加完成计数/取消 toast 和无关目录重载。这些均为
+`must-fix`。审计时的独立边框/阴影、描边动作和“取消”文字按钮也应恢复为继承底栏的扁平区、文本动作
+和关闭图标，同时保留 button/ARIA。临时 Reader 保留既有 `Cache-Control:no-store` 和零 cache
+writer 安全适配，不为表面对齐写入 IndexedDB。账号或书籍切换后的旧任务还必须禁止迟到提示和
+跨作用域刷新。
+
+完整合同、数据边界和测试先行门见
+[`reader-inline-chapter-cache-fixed-baseline-second-audit-p0-contract.md`](reader-inline-chapter-cache-fixed-baseline-second-audit-p0-contract.md)。
+合同先以 `03e337a` 独立推送；随后失败测试锁定完整区间、扁平关闭图标、本地书、取消即时恢复和
+上下文隔离。实现恢复 cache-first 全区间和精确反馈，冻结每任务用户 scope，并保留临时 Reader
+`no-store`。frontend 740/740、build、Go 全量、新增四视口专项浏览器和完整 Reader/iPad 合同通过。
+实现提交 `4da98fa` 又通过顺序 fresh/historical 卷门并由本机发布为同名标签与 `latest`；两标签的
+amd64/arm64 OCI index 均为
+`sha256:771df515341f46f35a07b7f62de913490cdefe4489f3016d7d82f4436aa8f75d`。当前状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
 ## 2026-08-09 P1 搜索/探索临时 Reader 会话第二轮
 
 固定上游仍由 `Index.vue#toDetail` 把未入架搜索结果写入浏览器 `readingBook`，再由目录/正文动作按书源重建；只有显式 `saveBook` 才持久化。OpenReader 的用户绑定高熵服务端会话是 JWT/Vue 3 下隐藏书源凭证的技术栈等价适配，但原实现的 create body 无上限、内存 map 无单会话/用户/进程预算，且非法章节 index 会提前续期，均判定为 `must-fix`。
@@ -3609,3 +3689,31 @@ inventory，应用实现必须在失败测试之后进行。
 frontend 706/706、build 和真实三视口双客户端均通过。状态现为
 `implemented / regression-validated / Docker-pending`；备份事务的独立 vet 债务和新旧卷/Docker 门
 完成前不发布。
+
+## 2026-08-12 BookGroup / Category 写请求边界第二轮复审
+
+Reader 换源专项已由当前仓库的 `a2ecc17` 实现、全量/四视口/卷门与 Docker 证据证明关闭，本轮没有
+因旧交接状态重开。继续逐动作盘点 Go REST 后，BookGroup 状态机的六个 JSON mutation 成为下一条
+明确 must-fix：五个 Gin bind 入口没有 actual-read 上限且忽略第二 JSON，`updateBookCategory` 虽严格
+unmarshal 却先无界 `io.ReadAll`。隔离生产服务还证明 20 KiB Category name 会 `201` 落库，而空白名称
+在 400 前会惰性创建四个内置 preference。
+
+同一双用户探针还发现并持久化复现了 owner 绕过：`categoryIds:[]` 让验证分支检查空集合，后续却
+fallback 到另一个用户的 `categoryId`，同时污染 `books.category_id` 和 `book_categories`。因此实现
+必须先计算最终有效 ID，再统一 owner 校验；这不是 body-limit 附带优化，而是本入口的 P2 隔离缺口。
+
+固定上游的 save/order/set 动作均在认证后先解析并校验必要 payload，再进入当前用户存储；它没有可
+照抄的资源上限。OpenReader 因此保留已签收的 REST 路径、many-to-many、完整混合排序、兼容
+category-only 排序、事务、用户隔离和 event，只新增明确的安全适配：六入口 16 KiB actual-read
+single-JSON，未来显式名称/颜色 80/24 UTF-8 bytes，body/字段拒绝零写入零广播，invalid built-in key
+和 owned path target 继续 body 前裁决，书籍分类最终采用集合必须完整 owner 验证。历史 oversized
+SQLite 行与所有 backup/restore 格式不迁移。
+
+完整 API、数据、安全和测试先行门见
+[`book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md`](book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同 `3873781` 与红灯合同 `dc4589d` 分别先行提交。实现 `6f54be3` 随后统一六入口 16 KiB actual-read
+single-JSON、字段预算和 body 前优先级，并修复最终有效 category 集合的 caller-owner 校验；没有 schema、
+backup、前端或其它 endpoint 变化。focused/full/race Go、全量 vet、frontend 740/740、production build、
+历史 oversized backup/restore 和隔离真实 HTTP smoke 均通过。状态为
+**implementation-complete / regression-validated / mounted-volume-and-Docker-pending**；fresh/historical
+mounted-volume 与正式本机 Docker 发布仍等待显式 Docker socket 授权。

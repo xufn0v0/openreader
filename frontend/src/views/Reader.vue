@@ -52,6 +52,9 @@
         :book="book"
         :sources="sourceCandidates"
         :loading="loadingSources"
+        :opening="openingSources"
+        :refreshing="refreshingSources"
+        :loading-more="loadingMoreSources"
         :changing-source="changingSource"
         :current-source-name="currentSourceName"
         :group="sourceGroup"
@@ -327,6 +330,9 @@
           :book="book"
           :sources="sourceCandidates"
           :loading="loadingSources"
+          :opening="openingSources"
+          :refreshing="refreshingSources"
+          :loading-more="loadingMoreSources"
           :changing-source="changingSource"
           :current-source-name="currentSourceName"
           :group="sourceGroup"
@@ -456,6 +462,7 @@ import { useReaderViewportProgress } from '../composables/useReaderViewportProgr
 import { useReaderWheel } from '../composables/useReaderWheel'
 import { bookCategoryIds, createBookCategoryNameResolver } from '../utils/bookCategory'
 import { clearBookBrowserChapterCache, loadBrowserChapterContent } from '../utils/bookChapterCache'
+import { currentUserScope } from '../utils/authScope'
 import { cacheFirstRequest, networkFirstRequest } from '../utils/browserCache'
 import { isEPUBLocalBook as checkEPUBLocalBook, isTextLocalBook as checkTextLocalBook } from '../utils/localBookToc'
 import { readerFontOptions, readerFontStack, syncReaderFontFaces } from '../utils/readerFonts'
@@ -633,6 +640,9 @@ const sourceGroupOptions = ref([])
 const {
   candidates: sourceCandidates,
   loading: loadingSources,
+  opening: openingSources,
+  refreshing: refreshingSources,
+  loadingMore: loadingMoreSources,
   group: sourceGroup,
   hasMore: sourceHasMore,
   groups: sourceGroups,
@@ -640,6 +650,7 @@ const {
   refresh: refreshSourceCandidates,
   loadMore: loadMoreSourceCandidates,
   changeGroup: changeSourceGroup,
+  applyChangedSource,
   reset: resetSourceCandidates,
 } = useBookSourceCandidates({
   bookId,
@@ -744,9 +755,14 @@ const {
   bookId,
   chapters,
   currentIndex,
-  isRemoteBook,
   isTemporaryReader: isTemporaryRemoteReader,
-  afterCache: (...args) => loadChapters(...args),
+  getContextKey: () => [
+    bookId.value,
+    remoteSessionId.value,
+    book.value?.url || book.value?.bookUrl || book.value?.libraryPath || '',
+    book.value?.sourceId || '',
+  ].join('|'),
+  getCacheScope: () => currentUserScope(),
   onClearMemory: () => clearChapterContentMemory(),
   notify: message => showReaderToast(message, 1600),
   onNoTargets: () => ElMessage.error('不需要缓存'),
@@ -845,14 +861,17 @@ const {
   locateCurrentTocChapter: locateTocCurrentChapter,
   getCurrentOffset: () => currentOffset(),
   getCurrentChapterPercent: () => currentChapterPercent(),
+  captureScrollAnchor: () => captureReaderScrollAnchor(),
   fetchChapters: async targetBookId => {
     const { data } = await api.get(`/books/${targetBookId}/chapters`)
     return data
   },
-  refreshSourceCandidates,
+  resetContentSearch: () => overlay.resetSearchBookContent(),
+  applyChangedSource,
   closeSourceDrawer: () => {
     showSourceDrawer.value = false
   },
+  restoreScrollAnchor: anchor => restoreReaderScrollAnchor(anchor),
   notify: (...args) => showReaderToast(...args),
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
@@ -1709,7 +1728,6 @@ const {
 } = useReaderPanels({
   book,
   bookId,
-  isRemoteBook,
   bookProgress,
   bookProgressLabel,
   mobileChromeVisible,

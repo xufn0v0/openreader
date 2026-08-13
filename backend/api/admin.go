@@ -126,13 +126,33 @@ type resetUserSourcesRequest struct {
 	IDs []uint `json:"ids"`
 }
 
+const (
+	maxAdminUserRequestBodyBytes = 16 << 10
+	maxAdminUserBatchIDs         = 2000
+)
+
+func decodeAdminUserRequest(c *gin.Context, target any) bool {
+	if err := decodeBoundedSingleJSON(c, target, maxAdminUserRequestBodyBytes); err != nil {
+		if errors.Is(err, errJSONRequestTooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, errResp("REQUEST_TOO_LARGE", "request body too large"))
+			return false
+		}
+		badRequest(c, "invalid payload")
+		return false
+	}
+	return true
+}
+
 func (s *Server) resetUserSources(c *gin.Context) {
 	if !s.requireAdmin(c) {
 		return
 	}
 	var req resetUserSourcesRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "invalid payload")
+	if !decodeAdminUserRequest(c, &req) {
+		return
+	}
+	if len(req.IDs) > maxAdminUserBatchIDs {
+		badRequest(c, "too many users selected")
 		return
 	}
 	ids := uniqueAdminUserIDs(req.IDs)
@@ -204,8 +224,7 @@ func (s *Server) createUser(c *gin.Context) {
 	}
 
 	var req createAdminUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "invalid payload")
+	if !decodeAdminUserRequest(c, &req) {
 		return
 	}
 
@@ -215,15 +234,23 @@ func (s *Server) createUser(c *gin.Context) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		internalError(c, "failed to hash password")
-		return
-	}
-
 	role := strings.TrimSpace(req.Role)
 	if role != "" && role != "user" {
 		badRequest(c, "administrator role assignment is not allowed")
+		return
+	}
+	if req.BookLimit < 0 {
+		badRequest(c, "book limit cannot be negative")
+		return
+	}
+	if req.SourceLimit < 0 {
+		badRequest(c, "source limit cannot be negative")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		internalError(c, "failed to hash password")
 		return
 	}
 
@@ -303,8 +330,7 @@ func (s *Server) updateUser(c *gin.Context) {
 	}
 
 	var req updateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "invalid payload")
+	if !decodeAdminUserRequest(c, &req) {
 		return
 	}
 
@@ -366,18 +392,11 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 	}
 
 	var req resetUserPasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "invalid payload")
+	if !decodeAdminUserRequest(c, &req) {
 		return
 	}
 	if validationError := validateResetPassword(req.Password); validationError != "" {
 		badRequest(c, validationError)
-		return
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		internalError(c, "failed to hash password")
 		return
 	}
 
@@ -388,6 +407,11 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 	}
 	if user.Role == "admin" {
 		c.JSON(http.StatusForbidden, errResp("FORBIDDEN", "protected administrator password cannot be reset"))
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		internalError(c, "failed to hash password")
 		return
 	}
 	if err := s.db.Model(&user).Update("password_hash", string(hash)).Error; err != nil {
@@ -499,6 +523,7 @@ func (s *Server) deleteUserData(ids []uint, protectedUserID uint) ([]models.User
 			{model: &models.BookCategory{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.Bookmark{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.ReadingProgress{}, where: "user_id IN ?", args: []any{deletedIDs}},
+			{model: &models.BookSourceCandidate{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.Book{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.Category{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.BookGroupPreference{}, where: "user_id IN ?", args: []any{deletedIDs}},
@@ -554,8 +579,11 @@ func (s *Server) deleteUsers(c *gin.Context) {
 	}
 
 	var req deleteUsersRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		badRequest(c, "invalid payload")
+	if !decodeAdminUserRequest(c, &req) {
+		return
+	}
+	if len(req.IDs) > maxAdminUserBatchIDs {
+		badRequest(c, "too many users selected")
 		return
 	}
 

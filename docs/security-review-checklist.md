@@ -10,6 +10,87 @@ Use this checklist for security-sensitive changes and release reviews.
 - [ ] User-owned rows are scoped by authenticated user ID.
 - [ ] Batch operations cannot affect another user’s data.
 
+### P2 Bookmark write boundary (2026-08-12 implementation)
+
+- [x] Single create/update bodies accept exactly one actual-read-bounded 64 KiB JSON object; batch create uses
+  16 MiB/2,000 raw rows and batch delete uses 16 KiB/2,000 raw IDs after owner target resolution.
+- [x] Malformed, multi-JSON, overflow, cardinality and invalid note patches fail before per-row queries, mutation,
+  timestamp changes or sync events, without reflecting excerpt/note/JWT/database content.
+- [x] Note edits require an explicit string and use only an owner-scoped note column update. A concurrently deleted
+  target cannot be reinserted by GORM `Save` fallback, and newer immutable location/context values cannot be lost.
+- [x] The frontend edit action sends only `{note}`; create/import keeps the published DTO and all-row transaction,
+  chapter ownership, user/book isolation, backup and historical-row behavior.
+
+Target contract:
+[`docs/compat/bookmark-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/bookmark-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+Status is `implemented / regression-validated / Docker-published / awaiting-device-verification`. Contract/red-test/
+implementation ordering, focused race, full Go/vet, frontend 740/740, production build, Reader browser payload,
+host/local/pullback HTTP plus SQLite-trigger probes, and sequential fresh/historical volume gates passed. The locally
+built `a9a55db`/`latest` amd64/arm64 OCI index is
+`sha256:944a85881170bc900c1fda0acb885bedc1dc4b17ed4e635305988163e1b635e5`.
+
+### P2 BookSource write/import boundary (2026-08-12 implementation)
+
+- [x] Source create/update accept exactly one actual-read-bounded 16 MiB JSON object; batch and remote URL
+  controls must use a 16 KiB boundary after JWT and `CanEditSources` checks.
+- [x] Local and remote source JSON stops at 5,000 raw entries before normalization, database work or response;
+  remote bytes continue through the existing SSRF-safe 16 MiB fetch boundary.
+- [x] Positive `sourceLimit` atomically caps future caller-active associations across concurrent create/import,
+  while zero remains unlimited and historical/default/restore data is never truncated or deleted.
+- [x] Every rejected/no-op request preserves source associations, COW snapshots, failure cache, parser variables,
+  timestamps and sync events; errors must not expose rules, credentials, URLs with queries or SQLite details.
+
+Target contract and current runtime counterexamples are recorded in
+[`docs/compat/book-source-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/book-source-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+Status is `implemented / regression-validated / Docker-published / awaiting-device-verification`. Focused race,
+full Go/vet, real HTTP declared/chunked/cardinality/quota probes, fresh/historical/ownership/portable container gates
+and GHCR pullback passed for `d9ddc0f`; OCI index is
+`sha256:548bf0984e7fa5039411bd75f9ae8ac8496052010255bfe746bf36fa9336dc8f`.
+
+### P2 user-setting write boundary (2026-08-12 implementation)
+
+- [x] Auth and legal setting-key checks run before reading a setting value; legal `reader/shelf/search` PUT bodies
+  accept exactly one actual-read-bounded 8 MiB JSON value for declared and chunked transport.
+- [x] Overflow, malformed, second JSON and garbage fail before setting query/upsert/event, do not change the prior
+  row or timestamp, and never place setting/JWT/private asset data in errors or logs.
+- [x] Existing large rows remain readable/exportable/restorable without migration; normal CAS/force/concurrent upsert
+  and current-user isolation stay unchanged.
+
+Evidence: `backend/api/user_setting_write_boundary_contract_test.go`, focused/full/race/vet, frontend 740/740,
+production build and isolated real declared/chunked/exact-limit HTTP. `c2bc736` also produced a local arm64 candidate;
+fresh/historical volume and remote publication remain pending after the OrbStack socket approval reviewer disconnected.
+[`docs/compat/user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+### P2 admin user write boundary (2026-08-12 implementation)
+
+- [x] Five administrator JSON user mutations authenticate the administrator before reading credentials, then enforce
+  one 16 KiB actual-read-bounded JSON value for declared and chunked bodies.
+- [x] Batch user deletion/source reset accept at most 2,000 raw IDs and retain existing dedupe, protected-user,
+  transaction, workspace-root and post-commit event boundaries.
+- [x] Every newly written password is at least 8 UTF-16 code units and at most 72 UTF-8 bytes; rejected input is
+  handled before bcrypt/SQLite and never enters errors, logs, events or backups. Existing hashes remain loginable.
+
+Evidence: `backend/api/admin_user_write_boundary_contract_test.go`, focused/full/race/vet, frontend 740/740,
+production build, real declared/chunked HTTP smoke and sequential fresh/historical volume gates. `6c1c6db` was built
+locally for amd64/arm64 and published as version/latest OCI index
+`sha256:55326ed147aea4370c0161d75568fe85a5095abb6dad6b487856dfeea09832a2`. See
+[`docs/compat/admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+### P2 public auth request boundary (2026-08-12 implementation)
+
+- [x] `POST /api/auth/login` and `/register` enforce the same 16 KiB actual-read limit for declared and chunked
+  bodies before DB lookup, bcrypt or durable writes; overflow is a path-free `413` and never logs credentials.
+- [x] Exactly one JSON value is accepted. Trailing whitespace is compatible; a second value or garbage is `400`
+  with no user/login-time mutation.
+- [x] New bcrypt passwords over 72 bytes fail as an explicit `400`, never a library-derived `500`; invalid login
+  remains a generic `401`, and historical usernames are not revalidated as new accounts.
+
+Evidence: `backend/api/auth_request_boundary_contract_test.go`,
+`scripts/smoke/auth-request-boundary-contract.mjs`, focused/full/race/vet, frontend 740/740 and production build. See
+[`docs/compat/auth-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/auth-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+`f5c15d7` also passed sequential fresh/historical mounted-volume gates and was published locally as the matching
+version/latest OCI index `sha256:db667de319ae2721cbd35990896612a738b4570a94920875ea14e2aed613503f`.
+
 ## P1 Index authenticated-session isolation (2026-07-27 candidate; browser gate pending)
 
 - [x] Session invalidation suspends or resets Index state before token removal. Visible search/explore rows,
@@ -150,6 +231,35 @@ Evidence: `backend/api/rss_requested_page_contract_test.go`,
 `backend/services/rss/service_test.go`, the existing RSS parser/content tests,
 frontend RSS contracts, and `scripts/smoke/rss-workspace-contract.mjs` at four
 viewports. Full contract: [`docs/compat/rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md`](compat/rss-visible-workspace-fixed-baseline-second-audit-p2-contract.md).
+
+### P2 RSS write/cache concurrency boundary (2026-08-12 implemented and published)
+
+- [x] Source create/update consumes exactly one non-null JSON object with an
+  8 MiB actual-read cap; import consumes one non-empty array under its existing
+  8 MiB/5,000-item flat-400 contract; article state patch consumes one non-null
+  object under 16 KiB and requires at least one explicit non-null boolean.
+- [x] Same-user source create/import/update/delete shares a narrow per-user
+  transactional mutation boundary so concurrent same-URL requests cannot create
+  duplicate active identities or resurrect an ID deleted after precheck. Other users
+  remain independent.
+- [x] Source/article existing-row writes use caller-scoped explicit columns,
+  check zero affected and return fresh rows; no GORM `Save`/upsert fallback may
+  overwrite concurrent owner columns or recreate a deleted target.
+- [x] Article state owns only supplied `is_read`/`favorite`; refresh owns only
+  remote/parser columns; content fetch completion owns only `content`. Source/article
+  liveness is rechecked after remote work so delayed results cannot create
+  orphan cache rows or revive deleted data.
+- [x] Failures and tests do not expose source rules, headers/cookies, URL query,
+  article content, JWT, SQLite diagnostics or filesystem paths. No schema/index,
+  backup member, startup cleanup or historical-row truncation is allowed.
+
+Contract and test-first evidence:
+[`docs/compat/rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/rss-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+Evidence: implementation `5236389`; API/service red-to-green contracts; critical race
+`-count=3`, full Go/vet, frontend 740/740, production build, four-viewport RSS UI,
+host HTTP + SQLite-trigger and pullback-container public-API probes. Fresh/historical
+volume gates passed. Locally published `0986d8e`/`latest` resolve to OCI index
+`sha256:9884d0e9b41c1a1a109f3034159ae2968fe9d889da063deaca2514e1ac371e25`.
 
 ## P2 remote book-cover proxy review (2026-07-27 implemented and published)
 
@@ -298,6 +408,21 @@ contract (three viewports).
 
 ## P2 Reader appearance asset runtime review
 
+第二轮 HTTP wire/multipart 生命周期复审见
+[`compat/user-asset-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/user-asset-write-boundary-fixed-baseline-second-audit-p2-contract.md)。
+当前状态为 **aligned / regression-validated / Docker-published / awaiting-device-verification**：33 MiB
+actual-read 包络、单一 file/type、显式 multipart 临时文件清理和 16 KiB 单 JSON 删除已关闭原先 Gin
+先完整解析再做 8/32 MiB 文件检查的资源缺口。以下内容/路径/事务结论继续有效。
+
+- [x] Declared and chunked multipart bodies share the 33 MiB actual-read envelope; JWT rejection happens before
+  body parsing, while authenticated overflow returns the stable path-free 413.
+- [x] Exactly one file and at most one bounded type are accepted. Ambiguous parts and oversized metadata fail
+  before final write, and every successfully parsed form releases its `multipart-*` temporary storage on all exits.
+- [x] Asset deletion accepts one 16 KiB JSON object plus whitespace. Overflow, a second document or trailing
+  garbage cannot reach reference checks or delete the file.
+- [x] Host, local candidate and GHCR-pulled HTTP probes verify upload/read/rejected-delete/final-delete bytes and
+  temp-file cleanup; fresh and traced historical mounted-volume/portable gates pass before local publication.
+
 - [x] Cover/background/font/misc uploads still enforce the existing 8 MiB/32 MiB
   admission caps before content inspection and continue to derive the destination owner
   from the authenticated JWT only.
@@ -361,6 +486,20 @@ Evidence for the checked items: `backend/api/workspace_storage_access_contract_t
 - [x] Removing visible directory/rename/download/recursive controls does not remove guarded legacy API compatibility routes or weaken the existing raw WebDAV `MKCOL`/`MOVE` path checks.
 - [x] Workbench suffix gating is presentation-only: disallowed current UI formats do not bypass P1-E1 scoped preview tokens, and retained direct parser support does not expand filesystem access.
 - [x] Browser regression proves LocalStore/WebDAV requests retain bearer auth and no hidden mobile control can invoke a removed operation.
+
+第二轮 LocalStore 文件系统与 HTTP wire 复审见
+[`compat/local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+当前状态为 **inventory-complete / implementation-pending**：下列缺口必须由旧实现红测证明后关闭，
+不能用既有 lexical prefix、每文件 copy limit 或 WebDAV 测试代替 LocalStore 证据。
+
+- [ ] Multi-file upload has one aggregate actual-read envelope, bounded part cardinality/metadata and explicit
+  handler-owned multipart temporary-file cleanup; authentication and `canAccessStore` still run first.
+- [ ] Directory/rename/import JSON actions accept one bounded document; import request and recursive expansion
+  cardinality fail before stage, database, cache or sync side effects.
+- [ ] Every LocalStore action rejects root/ancestor/target symlinks and special files. Open/download/import recheck
+  an opened regular file, and no read/write/delete can escape the current user's resolved root.
+- [ ] Host HTTP, focused race, fresh/historical mounted-volume and portable restore probes cover these boundaries
+  without moving or deleting pre-existing symlinks or mounted user data.
 
 Evidence: `backend/api/workspace_file_manager_p1e3_contract_test.go` covers private rooted listing fields, multi-file ordinary-file storage and a rejected later part preserving its old destination. `frontend/tests/workspaceFileManagerParity.test.mjs` keeps source-specific presentation gates separated from direct parser support. `scripts/smoke/workspace-storage-import-state-machine.mjs` validates authenticated WebDAV requests and removed actions across desktop and both required mobile sizes.
 
@@ -700,3 +839,49 @@ Evidence: `backend/api/book_source_ownership_api_contract_test.go`,
 `backend/services/sourcecompat/export.go`, `frontend/tests/bookSourceEditor.test.mjs`,
 `frontend/tests/sourceScriptTransparencyContract.test.mjs`, full Go/frontend gates, focused/full race, `go vet`,
 and `scripts/smoke/source-workspace-contract.mjs` at four viewports.
+
+## P2 TXT TOC rule compatibility security review (2026-08-11)
+
+- [x] The fixed-upstream 18-rule list changes no upload, stage-token, filesystem, SQLite, backup or WebDAV boundary.
+- [x] Automatic detection still scans only enabled rules over the existing 512 KiB probe; disabled rules require an
+      explicit user selection.
+- [x] Ordinary rules continue through Go RE2 and the existing 16 KiB rule limit. No backtracking regex engine,
+      JavaScript evaluator or remote fetch was introduced.
+- [x] The two fixed-upstream cross-line lookaround rules use exact-rule dispatch and inspect at most eight adjacent
+      Unicode whitespace runes. Modified/custom lookaround strings fail compilation instead of silently receiving
+      broader semantics.
+- [x] Input bytes, decoded text and final chapter count remain bounded by the shared local-book parser policy;
+      parser failures consume no import stage and expose no source bytes or host path.
+
+Evidence: `backend/engine/parser_test.go`, `backend/api/api_test.go`,
+`frontend/tests/overlayBookImport.test.mjs`, full/focused/race Go, `go vet`, frontend 730/730, production build,
+and `scripts/smoke/local-book-import-contract.mjs` at 1440×900, 390×844 and 360×800.
+
+## P2 BookGroup / Category write-boundary review (2026-08-12 implementation)
+
+- [x] Six authenticated BookGroup JSON mutations enforce the same 16 KiB actual-read limit for declared and
+      chunked bodies; exactly 16 KiB reaches normal validation and 16 KiB + 1 returns safe flat 413.
+- [x] Each mutation accepts exactly one JSON object plus whitespace. A second JSON value or trailing garbage maps
+      to the endpoint's existing 400 and produces no row, timestamp or event change.
+- [x] JWT remains first. Unknown built-in keys and missing/foreign owned Category/Book targets retain their existing
+      pre-body 400/404 behavior and do not expose whether request data would otherwise be valid.
+- [x] Invalid Category create is fully validated before `NextSortOrder`, so it cannot create built-in preference
+      rows as a side effect. Mixed reorder and book-membership replacement stay atomic and caller-scoped.
+- [x] `PUT /api/books/:id/category` validates the final effective ID set. A foreign `categoryId` combined with an
+      empty/zero-only `categoryIds` cannot create a cross-user `books` or `book_categories` reference.
+- [x] New names/colors enforce 80/24 UTF-8-byte budgets, while untouched historical oversized rows remain usable,
+      backup/restorable and are never scanned or rewritten.
+- [x] Errors, logs and sync events do not include JWTs, request bodies, submitted names/colors, SQLite text or host
+      paths. No global middleware or unrelated endpoint limit is introduced.
+- [ ] Before Docker publication, run the fresh/historical mounted-volume and backup compatibility gates against the
+      implementation candidate.
+
+Required implementation evidence: red/green API contracts for all six routes, two-user isolation and event
+assertions, historical-row backup/restore coverage, focused/full/race/vet, frontend/build and isolated real HTTP.
+The separate release checkbox additionally requires fresh/historical mounted-volume gates. See
+[`compat/book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+Implementation evidence is complete on `6f54be3`: the red/green six-route contracts, caller/other-user persistence
+and event assertions, historical oversized backup/restore, focused/full/race/vet, frontend 740/740, production build
+and `scripts/smoke/book-group-write-boundary-contract.mjs` all pass. The release-specific fresh/historical
+mounted-volume gate and local Docker publication still await explicit Docker socket approval.

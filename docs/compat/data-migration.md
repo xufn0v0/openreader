@@ -2,6 +2,23 @@
 
 Status: working compatibility ledger; implemented migrations and remaining action-level audits are recorded below.
 
+## User-facing migration contract (2026-08-11)
+
+The English and Chinese READMEs now expose three distinct, supported migration paths. These are documentation
+of existing behavior and do not authorize a new schema or filesystem migration:
+
+| Source | Supported path | Explicit boundary |
+|---|---|---|
+| reader-dev/Legado | Upload the original logical `backup*.zip` to the authenticated user's WebDAV root and restore it through the single WebDAV file manager. | Never reuse the upstream SQLite database, IDs, accounts, passwords, JWT state or host paths. Upstream logical backups do not contain local-book originals. |
+| OpenReader account/host | Use portable v2 for an account-level move. | Portable packages are caller-scoped, fail closed when a required archive/asset is unavailable, and exclude local audio directories. |
+| Complete OpenReader instance | Stop the service and copy `data/`, `cache/` and `library/` together with deployment configuration. | A partial root copy is not described as a complete migration. Preserve `OPENREADER_JWT_SECRET` only when existing sessions should remain valid. |
+
+An in-place OpenReader upgrade retains the same three mounts and relies only on already-reviewed additive startup
+migrations. The documented rollback is a complete pre-upgrade volume snapshot plus the prior image; it never merges
+an old database into directories already written by a newer container. The README also distinguishes ordinary
+logical `backup_*.zip`, OpenReader `portable_backup_*.zip`, and a cold three-root system snapshot so users do not
+mistake logical reader-dev compatibility for full filesystem portability.
+
 ## P2 reading-progress CAS and WebDAV mirror (audit pending implementation)
 
 The 2026-07-18 fixed-baseline audit in
@@ -143,6 +160,36 @@ Status: implemented and tested. This is a derived, caller-scoped runtime cache a
 - Required evidence: upgrade an existing SQLite volume; verify no existing row changes; verify cross-user/expiry/edit/delete isolation; run full Go tests and Docker mounted-volume backup smoke.
 
 Implementation evidence: `db.AutoMigrate` only adds `source_failures`; it never alters existing source/user/book rows. Records are created and expired under the JWT user/source unique key and are neither exported nor restored. `backend/api/source_failure_contract_test.go` verifies isolation, expiry and source-edit invalidation; release Docker volume smoke remains required before publishing this slice.
+
+## P0 Reader source-candidate derived cache
+
+Status: implemented, migration-tested and Docker-published as `a2ecc17` on 2026-08-11.
+
+- Startup may add only a `book_source_candidates` table and its indexes. Existing users, books, sources,
+  chapters, progress, bookmarks, `data/`, `cache/`, and `library/` content must not be rewritten.
+- Each row is scoped by `user_id` and `book_id`, with a unique current-user/book/`book_url` identity. It stores
+  the bounded source/book projection needed by Reader source switching plus stable order and timestamps.
+- Remote-book creation seeds the current row in the same SQLite transaction. Old books are not bulk rewritten;
+  their first `available` read seeds the current snapshot idempotently.
+- Book deletion removes that book's rows in the same transaction. User deletion removes all rows for that user.
+  Source copy-on-write may remap only the affected user's candidate source ids; source deletion never deletes
+  another user's snapshots.
+- A successful source change upserts the selected/current snapshot in the same transaction as book and chapter
+  replacement. `books.source_id + books.url` remains authoritative; no persisted `current` flag is introduced.
+- Candidate rows are derived cache and are deliberately excluded from reader-dev logical backup, OpenReader
+  portable backup, WebDAV backup and restore payloads. Restored books seed on first `available` access.
+- Field lengths and rows per book are bounded. Stable oldest non-current rows are pruned at the cap; the current
+  source snapshot is never pruned.
+
+Required evidence: fresh and historical `AutoMigrate`, idempotent historical seeding, two-user isolation,
+book/user deletion cleanup, backup member stability, restore-then-seed, full Go tests and mounted-volume smoke.
+
+Implementation evidence: startup `AutoMigrate` adds only `book_source_candidates`; the historical migration
+test verifies existing book identity is unchanged and no candidate rows are eagerly created. API/service contracts
+verify first-available seeding, remote-book and source-change transactional seeding, user/book deletion, source COW,
+200-row pruning with current retention, two-user isolation, and backup exclusion. Full Go and focused race tests pass.
+The local `a2ecc17` image passed fresh portable-v1/v2-assets/cross-user/restart and the successful sequential
+historical TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation mounted-volume gate before publication.
 
 ## P2-Parser-1G persistent source-rule variables
 
@@ -630,6 +677,24 @@ UNIQUE error. SQLite connection count, WAL/busy-timeout configuration and existi
   and current plus historical Docker volume/backup smoke. The first three automated code gates pass; browser and
   Docker gates remain pending.
 
+## P0 Reader inline chapter browser-cache compatibility (2026-08-11)
+
+- No SQLite table/column/index, API shape, mounted root, backup/WebDAV member, cache/library file or Docker volume
+  changes. Existing `data/`, `cache/` and `library/` content remains byte-compatible.
+- Existing `localCache@<user-scope>@...@chapterContent-<index>` keys remain unchanged and readable. The Reader now
+  schedules the complete requested range; cache-first hits still advance progress without issuing another API
+  request, so no cache migration, rewrite or owner claim is needed.
+- Each task freezes the existing authenticated user scope before workers start. A book or account change cancels
+  pending work and suppresses late UI updates; at most two already authorized in-flight requests can finish in the
+  frozen old scope. No result can be re-keyed into the new user scope.
+- Shelved TXT/EPUB/UMD/CBZ books use the same existing chapter-content endpoint and scoped browser keys. Temporary
+  Reader sessions retain `Cache-Control: no-store` and do not gain a persistent cache writer.
+- Queue progress, cancellation tokens and cached-index projections are runtime-only. Existing browser cache and
+  mounted server chapter cache remain usable after upgrade and rollback.
+- The locally built `4da98fa` candidate passed fresh portable-v1/v2-assets/cross-user/restart and historical
+  TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation mounted-volume and portable-restore gates before the same commit
+  was published for amd64/arm64. No migration was required.
+
 ## P2 whole-book chapter text cache compatibility (2026-07-18)
 
 - No SQLite table/column/index, mounted root, backup member, WebDAV file, browser cache key or chapter-cache
@@ -806,6 +871,51 @@ owner-isolation smoke. See `reader-settings-fixed-baseline-second-audit-p0-contr
 
 See [`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md).
 
+## P2 public auth request-boundary compatibility (2026-08-12)
+
+- No SQLite table, column, index, user row, JWT claim, browser key, mounted directory, backup member or WebDAV
+  object changes. Existing `data/`, `cache/` and `library/` layouts remain byte-for-byte compatible.
+- The 16 KiB limit applies only to the wire body of public login/registration requests. It does not rewrite stored
+  usernames, password hashes or login timestamps and does not add a migration/backfill.
+- The bcrypt 72-byte registration boundary constrains only newly submitted public passwords. Existing password
+  hashes remain readable; login keeps existing username trimming and does not apply new-account username rules.
+- Rejected oversized, multi-value or overlong-password requests are validated before durable work. Contract tests
+  directly prove no user row or `last_active_at` mutation; runtime smoke proves no rejected registration appears in
+  the public server's authoritative user list.
+
+Focused/full/race/vet, frontend 740/740, production build and isolated production-shape HTTP smoke pass. `f5c15d7`
+then passed the unchanged fresh portable-v1/v2-assets/cross-user/restart and historical
+TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation gates before local dual-architecture publication. No migration or
+mounted data rewrite was observed. See `auth-request-boundary-fixed-baseline-second-audit-p2-contract.md`.
+
+## P2 administrator user-write boundary compatibility (2026-08-12)
+
+- No SQLite table, column, index, JWT claim, mounted path, backup member, WebDAV object or browser key changed.
+  Existing password hashes and legacy usernames remain loginable; only future public/admin password writes use the
+  corrected 8 UTF-16-code-unit minimum and existing bcrypt 72 UTF-8-byte maximum.
+- The 16 KiB single-JSON boundary applies only to five administrator user mutations, after authentication. The 2,000
+  raw-ID limit applies only to source reset and batch deletion before dedupe/query/transaction. Rejected requests do
+  not create users, update limits/hashes, alter source namespaces, plan workspace cleanup or broadcast events.
+- `6c1c6db` passed focused/full/race/vet, frontend 740/740, production build, real HTTP declared/chunked and exact-limit
+  checks, then sequential fresh portable-v1/v2-assets/cross-user/restart and historical
+  TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation gates. No mounted data or archive rewrite was observed before local
+  dual-architecture publication. See `admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md`.
+
+## P2 user-setting write-boundary compatibility (2026-08-12 implementation)
+
+- The 8 MiB single-JSON limit applies only to future authenticated `PUT /api/settings/:key` wire bodies
+  after legal-key validation. It adds no table, column, index, row, browser key, backup member or mounted file.
+- Existing `user_settings` values, including rows larger than the new PUT limit, remain readable and exportable.
+  Startup and restore do not scan, truncate, delete or rewrite them. Logical/portable/WebDAV restore keeps its own
+  archive and transaction limits rather than reusing the interactive HTTP PUT limit.
+- Rejected oversized/multi-value writes leave the prior value and `updated_at` unchanged and emit no sync event.
+  Normal CAS/force, `(user_id,key)` upsert, reader local-field cleanup and three-key backup mapping remain authoritative.
+- `c2bc736` passed focused/full/race/vet, frontend 740/740, production build and isolated real HTTP. A directly seeded
+  setting larger than 8 MiB also passed GET, logical backup and restore without truncation. The local arm64 candidate
+  built with the correct revision; fresh/historical volume and remote multi-architecture publication remain pending
+  because the OrbStack socket approval request was rejected after its automatic reviewer disconnected. See
+  `user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md`.
+
 ## P1 manual shelf refresh compatibility (2026-08-09)
 
 - No table, column, index, mounted directory, backup member, WebDAV object or browser key format changes.
@@ -834,3 +944,25 @@ See [`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md).
   API field or WebSocket event. Existing old/current backup fixtures remain authoritative.
 - `go vet ./...` is an explicit red/green gate in addition to the existing rollback and fresh/historical volume
   tests. See `backup-restore-fixed-baseline-p2-contract.md`.
+
+## P2 BookGroup / Category write-boundary compatibility (2026-08-12 implementation)
+
+- The implemented 16 KiB single-JSON boundary applies only to six authenticated HTTP mutations in the existing
+  BookGroup state machine. It adds no table, column, index, row, backup member, browser key or mounted file.
+- The existing `categories`, `book_group_preferences`, `book_categories` and `books` rows remain authoritative.
+  No startup scan, truncation, backfill, ID rewrite or relationship conversion is permitted.
+- Future explicitly submitted names and colors will enforce the already documented model budgets of 80/24 UTF-8
+  bytes. Historical oversized values remain readable, exportable and restorable, and an update that does not touch
+  the oversized field must remain possible.
+- Logical, portable, WebDAV, reader-dev and categories-only restore retain their own archive/transaction contracts;
+  they do not reuse the interactive HTTP body or field limit.
+- Rejected create/update/reorder/set requests must leave rows and timestamps unchanged and emit no sync event.
+  In particular, an invalid Category create may not lazily seed four built-in preference rows before returning 400.
+- A book-category mutation must validate the final effective ID set before writing either `books.category_id` or
+  `book_categories`; an empty secondary array cannot let a foreign fallback ID create a cross-user relationship.
+  Existing contaminated rows are not silently scanned or rewritten by this HTTP-boundary slice.
+- No frontend geometry or BookGroup backup format changes. See
+  `book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md`; status is
+  `implementation-complete / regression-validated / mounted-volume-and-Docker-pending`. `6f54be3` changes no
+  schema or persistent format; API backup/restore coverage proves historical oversized rows remain lossless. The
+  release-specific fresh/historical mounted-volume gate still awaits explicit Docker socket approval.

@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -16,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -303,34 +301,70 @@ func shelfOrderAt(book models.Book, progress *models.ReadingProgress) time.Time 
 func (s *Server) createBook(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 
-	var book models.Book
-	data, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
+	request, ok := decodeBookCreateRequest(c)
+	if !ok {
 		return
 	}
-	if err := json.Unmarshal(data, &book); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
+	title, ok := normalizeBookWriteField(c, request.Title, maxBookTitleBytes, "book title is too long")
+	if !ok {
 		return
 	}
-	var request struct {
-		CategoryIDs []uint `json:"categoryIds"`
-	}
-	_ = json.Unmarshal(data, &request)
-	book.UserID = userID
-	book.Title = strings.TrimSpace(book.Title)
-	if book.Title == "" {
+	if title == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "book title is required"})
 		return
 	}
-	if len(request.CategoryIDs) > 0 {
-		if !s.validateCategoryIDs(c, userID, request.CategoryIDs) {
-			return
-		}
-	} else if !s.validateCategory(c, userID, book.CategoryID) {
+	author, ok := normalizeBookWriteField(c, request.Author, maxBookAuthorBytes, "book author is too long")
+	if !ok {
 		return
 	}
-	categoryIDs := categoryIDsFromRequest(book.CategoryID, request.CategoryIDs)
+	coverURL, ok := normalizeBookWriteField(c, request.CoverURL, maxBookCoverURLBytes, "book cover url is too long")
+	if !ok {
+		return
+	}
+	customCoverURL, ok := normalizeBookWriteField(c, request.CustomCoverURL, maxBookCustomCoverURLBytes, "book custom cover url is too long")
+	if !ok {
+		return
+	}
+	intro := ""
+	if request.Intro != nil {
+		intro = strings.TrimSpace(*request.Intro)
+	}
+	kind, ok := normalizeBookWriteField(c, request.Kind, maxBookKindBytes, "book kind is too long")
+	if !ok {
+		return
+	}
+	wordCount, ok := normalizeBookWriteField(c, request.WordCount, maxBookWordCountBytes, "book word count is too long")
+	if !ok {
+		return
+	}
+	bookURL, ok := normalizeBookWriteField(c, request.URL, maxBookURLBytes, "book url is too long")
+	if !ok {
+		return
+	}
+	if err := s.validateBookCustomCoverURL(userID, "", customCoverURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid custom cover url"})
+		return
+	}
+	categoryIDs := categoryIDsFromRequest(request.CategoryID, request.CategoryIDs)
+	if !s.validateCategoryIDs(c, userID, categoryIDs) {
+		return
+	}
+
+	book := models.Book{
+		UserID:         userID,
+		Title:          title,
+		Author:         author,
+		CoverURL:       coverURL,
+		CustomCoverURL: customCoverURL,
+		Intro:          intro,
+		Kind:           kind,
+		WordCount:      wordCount,
+		URL:            bookURL,
+		CanUpdate:      true,
+	}
+	if request.CanUpdate != nil {
+		book.CanUpdate = *request.CanUpdate
+	}
 	if len(categoryIDs) > 0 {
 		book.CategoryID = &categoryIDs[0]
 	}
@@ -338,6 +372,15 @@ func (s *Server) createBook(c *gin.Context) {
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&book).Error; err != nil {
 			return err
+		}
+		// GORM applies the model's true default to a false bool during Create.
+		// Preserve an explicitly submitted false without changing the model schema.
+		if request.CanUpdate != nil && !*request.CanUpdate {
+			if err := tx.Model(&models.Book{}).Where("id = ? AND user_id = ?", book.ID, userID).
+				UpdateColumn("can_update", false).Error; err != nil {
+				return err
+			}
+			book.CanUpdate = false
 		}
 		return s.setBookCategories(tx, userID, book.ID, categoryIDs)
 	}); err != nil {
@@ -383,32 +426,27 @@ func (s *Server) updateBook(c *gin.Context) {
 		return
 	}
 
-	data, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
-		return
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
-		return
-	}
-	var request bookUpdateRequest
-	if err := json.Unmarshal(data, &request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid book payload"})
+	raw, request, ok := decodeBookUpdateRequest(c)
+	if !ok {
 		return
 	}
 	_, categoryIDSet := raw["categoryId"]
 	_, categoryIDsSet := raw["categoryIds"]
-	if categoryIDSet && !s.validateCategory(c, userID, request.CategoryID) {
-		return
-	}
-	if categoryIDsSet && !s.validateCategoryIDs(c, userID, request.CategoryIDs) {
+	var nextCategoryIDs []uint
+	if categoryIDsSet {
+		nextCategoryIDs = uniquePositiveUintIDs(request.CategoryIDs)
+		if !s.validateCategoryIDs(c, userID, nextCategoryIDs) {
+			return
+		}
+	} else if categoryIDSet && !s.validateCategory(c, userID, request.CategoryID) {
 		return
 	}
 
 	if request.Title != nil {
-		title := strings.TrimSpace(*request.Title)
+		title, ok := normalizeBookWriteField(c, request.Title, maxBookTitleBytes, "book title is too long")
+		if !ok {
+			return
+		}
 		if title == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "book title is required"})
 			return
@@ -416,13 +454,24 @@ func (s *Server) updateBook(c *gin.Context) {
 		book.Title = title
 	}
 	if request.Author != nil {
-		book.Author = strings.TrimSpace(*request.Author)
+		author, ok := normalizeBookWriteField(c, request.Author, maxBookAuthorBytes, "book author is too long")
+		if !ok {
+			return
+		}
+		book.Author = author
 	}
 	if request.CoverURL != nil {
-		book.CoverURL = strings.TrimSpace(*request.CoverURL)
+		coverURL, ok := normalizeBookWriteField(c, request.CoverURL, maxBookCoverURLBytes, "book cover url is too long")
+		if !ok {
+			return
+		}
+		book.CoverURL = coverURL
 	}
 	if request.CustomCoverURL != nil {
-		customCoverURL := strings.TrimSpace(*request.CustomCoverURL)
+		customCoverURL, ok := normalizeBookWriteField(c, request.CustomCoverURL, maxBookCustomCoverURLBytes, "book custom cover url is too long")
+		if !ok {
+			return
+		}
 		if err := s.validateBookCustomCoverURL(userID, book.CustomCoverURL, customCoverURL); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid custom cover url"})
 			return
@@ -436,9 +485,8 @@ func (s *Server) updateBook(c *gin.Context) {
 		book.CategoryID = request.CategoryID
 	}
 	if categoryIDsSet {
-		ids := uniquePositiveUintIDs(request.CategoryIDs)
-		if len(ids) > 0 {
-			book.CategoryID = &ids[0]
+		if len(nextCategoryIDs) > 0 {
+			book.CategoryID = &nextCategoryIDs[0]
 		} else {
 			book.CategoryID = nil
 		}
@@ -452,7 +500,7 @@ func (s *Server) updateBook(c *gin.Context) {
 			return err
 		}
 		if categoryIDsSet {
-			return s.setBookCategories(tx, userID, book.ID, request.CategoryIDs)
+			return s.setBookCategories(tx, userID, book.ID, nextCategoryIDs)
 		}
 		if categoryIDSet {
 			if request.CategoryID == nil {
@@ -1551,6 +1599,9 @@ func cacheBookResponse(result chaptercache.Progress, book any) gin.H {
 }
 
 func deleteBookRecords(tx *gorm.DB, userID, bookID uint, book *models.Book) error {
+	if err := tx.Where("user_id = ? AND book_id = ?", userID, bookID).Delete(&models.BookSourceCandidate{}).Error; err != nil {
+		return err
+	}
 	if err := tx.Where("user_id = ? AND book_id = ?", userID, bookID).Delete(&models.BookCategory{}).Error; err != nil {
 		return err
 	}
@@ -1582,34 +1633,15 @@ func (s *Server) updateBookCategory(c *gin.Context) {
 		return
 	}
 
-	var request bookCategoryRequest
-	data, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category payload"})
+	request, ok := decodeBookGroupWriteRequest[bookCategoryRequest](c, "invalid category payload")
+	if !ok {
 		return
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category payload"})
-		return
-	}
-	if err := json.Unmarshal(data, &request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category payload"})
-		return
-	}
-	_, categoryIDsSet := raw["categoryIds"]
-	if categoryIDsSet {
-		if !s.validateCategoryIDs(c, userID, request.CategoryIDs) {
-			return
-		}
-	} else if !s.validateCategory(c, userID, request.CategoryID) {
+	nextIDs := categoryIDsFromRequest(request.CategoryID, request.CategoryIDs)
+	if !s.validateCategoryIDs(c, userID, nextIDs) {
 		return
 	}
 
-	nextIDs := categoryIDsFromRequest(request.CategoryID, request.CategoryIDs)
-	if !categoryIDsSet && request.CategoryID != nil {
-		nextIDs = []uint{*request.CategoryID}
-	}
 	if len(nextIDs) > 0 {
 		book.CategoryID = &nextIDs[0]
 	} else {
@@ -1765,6 +1797,9 @@ func (s *Server) createRemoteBook(c *gin.Context) {
 		if err := s.setBookCategories(tx, userID, book.ID, categoryIDs); err != nil {
 			return err
 		}
+		if err := s.sourceCandidates.SeedCurrent(tx, book, &source); err != nil {
+			return err
+		}
 		for _, ch := range chapters {
 			chapter := models.Chapter{
 				BookID:   book.ID,
@@ -1822,209 +1857,6 @@ type contentSearchScan struct {
 	UnavailableChapters int
 	Truncated           bool
 	Canceled            bool
-}
-
-func (s *Server) listBookSourceCandidates(c *gin.Context) {
-	userID, _ := middleware.UserID(c)
-	bookID, ok := parseUintParam(c, "id")
-	if !ok {
-		return
-	}
-	book, ok := s.ensureBook(c, userID, bookID)
-	if !ok {
-		return
-	}
-
-	group := strings.TrimSpace(c.Query("group"))
-	keyword := strings.TrimSpace(c.Query("q"))
-	if keyword == "" {
-		keyword = book.Title
-	}
-	limit := parseBoundedInt(c.Query("limit"), 10, 1, 80)
-	offset := parseBoundedInt(c.Query("offset"), 0, 0, 10000)
-	paged := c.Query("paged") == "1" || c.Query("paged") == "true"
-
-	sources, err := s.bookSources.ListActiveByIDs(userID, nil, true)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load sources"})
-		return
-	}
-	if group != "" {
-		filtered := make([]models.BookSource, 0, len(sources))
-		for _, source := range sources {
-			if source.Group == group {
-				filtered = append(filtered, source)
-			}
-		}
-		sources = filtered
-	}
-	totalSources := int64(len(sources))
-	if paged {
-		if offset >= len(sources) {
-			sources = []models.BookSource{}
-		} else {
-			end := offset + limit
-			if end > len(sources) {
-				end = len(sources)
-			}
-			sources = sources[offset:end]
-		}
-	} else if len(sources) > limit {
-		sources = sources[:limit]
-	}
-	sources = s.filterActiveSourceFailures(userID, sources)
-
-	type sourceCandidate struct {
-		SourceID           uint    `json:"sourceId"`
-		SourceName         string  `json:"sourceName"`
-		Group              string  `json:"group"`
-		Title              string  `json:"title"`
-		Author             string  `json:"author"`
-		CoverURL           string  `json:"coverUrl"`
-		CoverResourceURL   *string `json:"coverResourceUrl,omitempty"`
-		Intro              string  `json:"intro"`
-		Kind               string  `json:"kind"`
-		WordCount          string  `json:"wordCount"`
-		LatestChapterTitle string  `json:"latestChapterTitle"`
-		BookURL            string  `json:"bookUrl"`
-		Time               int64   `json:"time,omitempty"`
-		Current            bool    `json:"current"`
-		Type               int     `json:"type"`
-	}
-	type sourceCandidateBatch struct {
-		Index      int
-		Candidates []sourceCandidate
-		Failure    error
-		Empty      bool
-	}
-
-	results := make([]sourceCandidate, 0)
-	if offset == 0 && book.SourceID > 0 {
-		currentSource, err := s.bookSources.FindActive(userID, book.SourceID)
-		if err == nil && currentSource.Enabled && (group == "" || currentSource.Group == group) {
-			results = append(results, sourceCandidate{
-				SourceID:           currentSource.ID,
-				SourceName:         currentSource.Name,
-				Group:              currentSource.Group,
-				Title:              book.Title,
-				Author:             book.Author,
-				CoverURL:           book.CoverURL,
-				Intro:              book.Intro,
-				Kind:               book.Kind,
-				WordCount:          book.WordCount,
-				LatestChapterTitle: book.LastChapter,
-				BookURL:            book.URL,
-				Current:            true,
-				Type:               currentSource.SourceType,
-			})
-		}
-	}
-	channel := make(chan sourceCandidateBatch, len(sources))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-	parentCtx := c.Request.Context()
-	for index, source := range sources {
-		source := source
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			ctx, cancel := context.WithTimeout(parentCtx, 12*time.Second)
-			started := time.Now()
-			searchResults, err := engine.SearchBooksContext(ctx, source, keyword)
-			cancel()
-			elapsed := time.Since(started).Milliseconds()
-			if err != nil {
-				channel <- sourceCandidateBatch{Index: index, Failure: err}
-				return
-			}
-			candidates := make([]sourceCandidate, 0)
-			for _, item := range searchResults {
-				if item.BookURL == "" {
-					continue
-				}
-				candidates = append(candidates, sourceCandidate{
-					SourceID:           source.ID,
-					SourceName:         source.Name,
-					Group:              source.Group,
-					Title:              item.Title,
-					Author:             item.Author,
-					CoverURL:           item.CoverURL,
-					Intro:              item.Intro,
-					Kind:               item.Kind,
-					WordCount:          item.WordCount,
-					LatestChapterTitle: item.LatestChapter,
-					BookURL:            item.BookURL,
-					Time:               elapsed,
-					Current:            source.ID == book.SourceID && item.BookURL == book.URL,
-					Type:               source.SourceType,
-				})
-				if len(candidates) >= 3 {
-					break
-				}
-			}
-			channel <- sourceCandidateBatch{
-				Index:      index,
-				Candidates: candidates,
-				Empty:      len(candidates) == 0,
-			}
-		}(index)
-	}
-	go func() {
-		wg.Wait()
-		close(channel)
-	}()
-	failedSources := 0
-	emptySources := 0
-	matchedSources := 0
-	batches := make([]sourceCandidateBatch, len(sources))
-	for batch := range channel {
-		batches[batch.Index] = batch
-	}
-	for _, batch := range batches {
-		if batch.Failure != nil {
-			failedSources++
-			if batch.Index >= 0 && batch.Index < len(sources) {
-				s.recordSourceFailure(userID, sources[batch.Index], batch.Failure)
-			}
-			continue
-		}
-		if batch.Empty {
-			emptySources++
-			continue
-		}
-		matchedSources++
-		results = append(results, batch.Candidates...)
-		if len(results) >= 120 {
-			break
-		}
-	}
-	for index := range results {
-		results[index].CoverResourceURL = s.projectCoverResource(
-			userID,
-			results[index].SourceID,
-			results[index].CoverURL,
-		)
-	}
-
-	if paged {
-		c.JSON(http.StatusOK, gin.H{
-			"list":       results,
-			"offset":     offset,
-			"nextOffset": offset + len(sources),
-			"hasMore":    int64(offset+len(sources)) < totalSources,
-			"total":      totalSources,
-			"searched":   len(sources),
-			"matched":    matchedSources,
-			"failed":     failedSources,
-			"empty":      emptySources,
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, results)
 }
 
 func parseBoundedInt(value string, fallback int, minValue int, maxValue int) int {
@@ -2130,7 +1962,10 @@ func (s *Server) changeBookSource(c *gin.Context) {
 		book.LastChapter = newChapters[len(newChapters)-1].Title
 		book.ChapterCount = len(newChapters)
 		book.LastCheckTime = time.Now().UnixMilli()
-		return tx.Save(&book).Error
+		if err := tx.Save(&book).Error; err != nil {
+			return err
+		}
+		return s.sourceCandidates.SeedCurrent(tx, book, &newSource)
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to change source"})

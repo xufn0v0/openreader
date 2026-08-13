@@ -30,6 +30,18 @@ server event names and existing business payloads remain stable.
 - `PUT /api/settings/:key` may receive additive `force:true` only for the confirmed “备份用户配置” action.
   It bypasses stale-base comparison for that authenticated user's legal `reader/shelf/search` row only; ordinary
   background writes keep CAS. Explicit restore never creates a missing row as a side effect of reading it.
+- The setting write wire boundary is implemented in
+  [`user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md`](user-setting-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+  It preserves auth/key priority and the deployed flat errors, then accepts one actual-read-bounded
+  8 MiB JSON envelope for `reader/shelf/search`; existing value/CAS/force/upsert/response/event and historical-row
+  semantics remain unchanged. `c2bc736` passed focused/full/race/vet, frontend 740/740, production build and real
+  declared/chunked HTTP; it shipped in the locally built multi-architecture `231aa9e` image after fresh/historical
+  volume gates. Status is `implementation-complete / regression-validated / Docker-published`.
+- The five JSON-writing `/api/admin/users*` mutations are closed under the fixed-baseline contract in
+  [`admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md`](admin-user-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+  They authenticate first, accept one actual-read-bounded 16 KiB JSON value, cap batch actions at 2,000 raw IDs,
+  and validate new passwords from 8 UTF-16 code units through 72 UTF-8 bytes. `6c1c6db` passed focused/full/race/vet,
+  real declared/chunked HTTP, fresh/historical volumes and local dual-architecture publication.
 
 ## Public endpoints
 
@@ -37,8 +49,14 @@ server event names and existing business payloads remain stable.
 |---|---|---|---|
 | `GET` | `/api/health` | Health and build metadata. | OpenReader runtime addition; keep stable for Docker/probes. |
 | `GET`, `HEAD` | `/api/cover/:capability` | Serve a server-projected remote book cover through a same-origin, short-lived resource capability. | Implemented and published in `ceb4baa` on 2026-07-27. The path never accepts a raw URL or login JWT. Successful responses are bounded, type-verified and privately cacheable; malformed/tampered capabilities are `403`, unavailable/unsafe remote images are `404`. See [`book-cover-proxy-p2-contract.md`](book-cover-proxy-p2-contract.md). |
-| `POST` | `/api/auth/register` | Create user; first user becomes admin. | OpenReader multi-user addition. |
-| `POST` | `/api/auth/login` | Return JWT and user object. | OpenReader auth addition; invalid credentials return `401`. |
+| `POST` | `/api/auth/register` | Create user; first user becomes admin. | OpenReader multi-user addition. One JSON body is limited to 16 KiB; overflow is `413`. New passwords are at least 8 UTF-16 code units and at most 72 UTF-8 bytes for bcrypt; oversize is `400`. |
+| `POST` | `/api/auth/login` | Return JWT and user object. | OpenReader auth addition; one JSON body is limited to 16 KiB and overflow is `413`. Invalid credentials remain generic `401`, and legacy usernames are not revalidated as new registrations. |
+
+The complete auth wire/error/no-side-effect contract is
+[`auth-request-boundary-fixed-baseline-second-audit-p2-contract.md`](auth-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+It is `aligned / Docker-published / awaiting-device-verification`: focused contract/race tests, the full Go/frontend
+gates, real declared/chunked HTTP smoke and fresh/historical mounted-volume gates passed before local publication as
+`f5c15d7` and `latest`.
 
 ## Protected endpoint groups
 
@@ -51,12 +69,12 @@ server event names and existing business payloads remain stable.
 | Reader legacy search | `/api/reader3/searchBookContent` | Compatibility endpoint; keep until old clients/routes no longer need it. |
 | Progress | `/api/progress/:bookID`, `/api/progress` | Progress writes must be conflict-safe and user scoped. |
 | Bookmarks | `/api/books/:id/bookmarks`, `/api/bookmarks/:id` | Bookmark CRUD and batch operations remain user/book scoped. |
-| Local store | `/api/local-store*` | All paths must stay rooted under configured local store/library paths. |
+| Local store | `/api/local-store*` | All paths must stay rooted under the authenticated user's configured local-store root. The pending second-audit filesystem/wire contract preserves current multi-file and import shapes while adding an aggregate multipart envelope, bounded single-JSON metadata/import bodies, cardinality limits, handler-owned multipart cleanup, and symlink-safe final-path/regular-file checks; see [`local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md). |
 | Import | `/api/imports/books/preview`, `/api/imports/books`, `/api/imports/txt` | Preview may return `importToken`; import must be able to reuse staged content. |
-| Uploads | `/api/uploads` | Uploaded assets are content-validated before final write, rooted under data uploads and user-scoped for new writes/deletes; legacy global upload URLs remain readable. BookInfo ownership is in [`bookinfo-shelf-mutations-p2-contract.md`](bookinfo-shelf-mutations-p2-contract.md); implemented Reader upload/save/delete ordering, signature/dimension admission and the separate pending P2-B backup boundary are in [`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md). |
+| Uploads | `/api/uploads` | Uploaded assets are content-validated before final write, rooted under data uploads and user-scoped for new writes/deletes; legacy global upload URLs remain readable. BookInfo ownership is in [`bookinfo-shelf-mutations-p2-contract.md`](bookinfo-shelf-mutations-p2-contract.md), while the Reader transaction/signature/portable rules are in [`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md) and [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md). The implemented second-audit wire contract adds a 33 MiB actual-read multipart envelope, singular file/type semantics, explicit multipart temporary-file cleanup, and a 16 KiB single-JSON delete body without changing successful response shapes; see [`user-asset-write-boundary-fixed-baseline-second-audit-p2-contract.md`](user-asset-write-boundary-fixed-baseline-second-audit-p2-contract.md). |
 | Cache | `/api/cache/stats`, `/api/cache`, `/api/books/:id/cache` | Cache operations must not delete unrelated user data. |
 | Replace rules | `/api/replace-rules*` | See the P2 replace-rule contract below: stable name-upsert order and upstream-visible plain/regex/scope semantics. |
-| RSS | `/api/rss/sources`, `/api/rss/sources/import`, `/api/rss/sources/:id/refresh`, `/api/rss/articles` | Source writes are current-user scoped. The visible article flow fetches exactly one requested remote page; remote fetch limits and parser safety apply. See the P2 RSS page contract below. |
+| RSS | `/api/rss/sources`, `/api/rss/sources/import`, `/api/rss/sources/:id/refresh`, `/api/rss/articles` | Source writes are current-user scoped. The visible article flow fetches exactly one requested remote page; remote fetch limits and parser safety apply. The pending second-audit write boundary additionally owns single-JSON limits, same-URL serialization and source/article column ownership; see the two P2 RSS contracts below. |
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
 | Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
 
@@ -91,6 +109,28 @@ parsed next-page state supports the next requested transition. Timeout, response
 size, redirect, scheme/host, SSRF, request-rate and parser-work limits apply to
 every page. Response/error data must not reveal credentials, request headers,
 private host paths or raw security diagnostics.
+
+### P2 RSS write and cached-article concurrency boundary
+
+Status: **aligned / regression-validated / Docker-published** on 2026-08-12. Full contract:
+[`rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](rss-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+| Method / path | Request boundary | Durable-write contract |
+|---|---|---|
+| `POST /api/rss/sources` | One non-null JSON object, 8 MiB actual-read; overflow `413`. Preserve aliases, validation/defaults, `201` create and `200` same-user same-URL replace. | Serialize source mutations per user; transactionally recheck URL identity/order and use explicit columns. Same-user concurrent create/import cannot create duplicate active URLs. |
+| `POST /api/rss/sources/import` | One non-empty JSON array, 8 MiB actual-read and 5,000 raw records; malformed/overflow/cardinality retain flat `400 invalid RSS source import`. | One per-user serialized transaction; preserve skip/order/counts and same-URL in-place replacement; one post-commit event only when changed. |
+| `PUT /api/rss/sources/:id` | Owner/missing lookup precedes one non-null 8 MiB JSON object; overflow `413`; URL collision remains `409`. | Revalidate caller-owned row and collision inside the per-user source transaction; explicit configuration-column update, fresh response, zero affected `404`, no `Save` resurrection. |
+| `PUT /api/rss/articles/:id` | Owner/missing lookup precedes one non-null 16 KiB JSON object; at least one explicit non-null boolean `isRead`/`favorite`; overflow `413`. | Update only supplied state columns under `user_id + id`; preserve refresh/content columns, return fresh row, zero affected `404`, one durable event. |
+| `POST /api/rss/sources/:id/refresh` | Existing requested-page/sort/fetch boundary is unchanged. | Commit parser metadata and never overwrite read/favourite. Feed content may update existing rows only when the source has no detail `ruleContent`; otherwise refresh may fill an empty content value but cannot replace cached detail. Recheck source ownership/liveness in the write transaction; a source deleted during fetch yields `404` and no orphan rows/event. |
+| `GET /api/rss/articles/:id/content` | Existing owned content fetch, sanitizer and bounded remote request remain. | Cache only authoritative detail `content`, recheck article/source liveness after fetch and return a fresh row. Concurrent state/metadata fields survive; deleted rows/sources are never recreated. |
+
+This slice adds no schema/index/migration and does not route `rssSources.json` backup restore through HTTP limits.
+Historical oversized source rows remain readable/exportable/restorable/deletable; RSS articles remain rebuildable cache.
+Implementation commit `5236389` and runtime-probe commits through `0986d8e` passed focused/full/race/vet,
+frontend 740/740, production build, four-viewport RSS workspace, real declared/chunked HTTP plus SQLite triggers,
+pullback-container public API, and fresh/historical volume gates. The locally built amd64/arm64 `0986d8e` and
+`latest` tags resolve to OCI index
+`sha256:9884d0e9b41c1a1a109f3034159ae2968fe9d889da063deaca2514e1ac371e25`.
 
 ## P2 remote book-cover projection contract (implemented and published)
 
@@ -326,15 +366,34 @@ Status: extracted 2026-07-10. These routes retain their OpenReader paths while m
 
 | Method / path | Request | Success / side effects | Auth and errors |
 |---|---|---|---|
+| `POST /api/books` | One non-null JSON object, at most 1 MiB actual wire bytes. The compatibility DTO accepts only metadata, category and `canUpdate`; server-owned identity/source/format/storage/parser/progress/chapter/count/time fields are ignored. | Creates the caller-owned compatibility book and final validated category set atomically, then emits one `bookshelf_update`. Dedicated remote confirmation and local import routes remain authoritative for source, parser and archive state. | JWT first. Malformed/multi JSON is `400`, overflow is `413`; title/UTF-8 field bounds, final category ownership and current-user custom-cover capability are validated before mutation. |
+| `PUT /api/books/:id` | One non-null JSON object, at most 1 MiB actual wire bytes. Only the explicit metadata/category/`canUpdate` patch fields are writable; unrelated historical oversized columns are not revalidated. | Saves only submitted allowed fields and category relations in one transaction, returns the complete shelf projection, then emits one `bookshelf_update`. `{}` remains a no-op success. | Owner target is resolved before body read, so foreign/missing ids remain `404`. Malformed/multi JSON is `400`, overflow is `413`; rejected requests do not update rows, timestamps or events. |
 | `PUT /api/books/:id/category` | `{ "categoryId": number }` or `{ "categoryIds": number[] }` | Replaces the shelf book's categories atomically, updates legacy primary `categoryId`, and emits one `bookshelf_update` after commit. The BookGroup set UI must not call this with an empty selection; direct API empty-array compatibility remains explicitly documented only if an ungrouped-book workflow needs it. | Owner only. `400` for malformed/foreign category, `404` for foreign/missing book, `500` only before an unsuccessful transaction can alter rows. |
-| `POST /api/books/batch` | `{ "action": "delete"\|"category"\|"category-add"\|"category-remove"\|"cache"\|"clear-cache", "bookIds": number[], ... }` | Category and delete actions are transactional. Delete removes category links, chapters, bookmarks, progress, scoped browser-cache references and post-commit derived files; category actions emit one scoped `bookshelf_update`. Cache actions keep bounded request limits and emit affected shelf items only after durable cache state. | Owner only. Invalid/foreign category ids fail without mutation. Foreign book ids never expose or mutate another user's record; the response must distinguish an empty owned selection from a successful cross-user mutation. |
-| `DELETE /api/books/:id` | None | Removes the caller's book rows in one transaction, broadcasts `bookshelf_delete` after commit, then prunes only that book's unreferenced remote cache files and private imported archive directory. | Owner only; `404` for another user's id. Failure before commit leaves all rows/files unchanged. Post-commit derived-cache cleanup is idempotent and must not delete another user's/shared path. |
+| `POST /api/books/batch` | `{ "action": "delete"\|"category"\|"category-add"\|"category-remove"\|"cache"\|"clear-cache", "bookIds": number[], ... }` | Category and delete actions are transactional. Delete removes category links, chapters, bookmarks, progress and scoped browser-cache references; a private local archive is pruned post-commit only after the last normalized same-user reference disappears. Category actions emit one scoped `bookshelf_update`. Cache actions keep bounded request limits and emit affected shelf items only after durable cache state. | Owner only. Invalid/foreign category ids fail without mutation. Foreign book ids never expose or mutate another user's record; reference-query/path uncertainty fails closed and preserves local files. |
+| `DELETE /api/books/:id` | None | Removes the caller's book rows in one transaction, broadcasts `bookshelf_delete` after commit, then prunes only unreferenced remote cache files. A private imported archive is removed only after no remaining same-user local book resolves to the same directory, including a safe legacy alias inside the owner root. | Owner only; `404` for another user's id. Failure before commit leaves all rows/files unchanged. A deletion candidate may not traverse a symlink; outside-root aliases never expand cleanup, and reference-query/path uncertainty preserves the archive. |
 | `POST /api/books/:id/cache` | `{ "chapterIndex"?: number, "all"?: boolean, "count"?: number, "refresh"?: boolean }` | `all=true,count<=0` means the whole remaining catalogue (chapter 0 when the index is omitted); an explicit positive count remains a max-300 compatibility window. `refresh=false` skips valid existing cache and `refresh=true` refetches it. Returns canonical `cachedCount/successCount/failedCount` plus legacy `cached/requested/failed` aliases and the refreshed book. | Owner only; malformed payload `400`, missing/foreign book `404`. Local books retain the no-server-cache result. See `book-management-cache-p2-contract.md`. |
 | `POST /api/books/:id/cache/stream` | Same body as `/cache`; authenticated `fetch` request with a readable response body. | Each `message` and terminal `end` carries canonical `{ bookId, chapterIndex, processed, total, cachedCount, successCount, failedCount }` plus legacy aliases. Terminal success includes `book`. Aborting stops further fetches and skips a completed shelf broadcast while retaining already-written entries. The client must not put a JWT in a query string. | Owner only. Validation failures are JSON `400`/`404` before the stream opens. Missing/empty files are not valid existing cache. Client-safe terminal errors cannot expose source credentials, host paths, or internal stacks. |
 | `GET /api/cache/stats` | None | Returns only the authenticated user's remote cache counts/size. The response never includes an absolute host cache path. | JWT required; it must not reveal another user's chapter count, filename, or root. |
 | `DELETE /api/cache` | None | Clears only the authenticated user's remote chapter-cache references in a transaction, then removes only cache files left unreferenced by all chapter rows; emits a current-user shelf refresh after commit. | JWT required; no other user's database cache state or still-referenced file may be removed. |
 | `POST /api/books/export` | `{ "bookIds": number[], "format": "txt"\|"epub"\|"json" }` | A single local book returns its archived original file. Remote books retain TXT/EPUB export. JSON and multi-book ZIP are explicit OpenReader extensions and remain user-scoped/bounded. | JWT required. Empty/foreign-only selections are client errors; safe `Content-Disposition` names must not expose host paths. |
 | `POST /api/books/:id/refresh`, `POST /api/books/:id/refresh-local`, `POST /api/books/:id/change-source` | Existing route bodies | Replace chapter rows atomically. For EPUB `refresh-local`, the newly parsed catalogue uses one row per canonical href and empty fragment metadata; an old fragment progress/bookmark is rebound by canonical resource path before the generic index fallback. Only after commit, prune superseded derived caches while preserving `OriginalFile`, `chapters.json`, `bookSource.json`, local-store/WebDAV source files, and valid progress/bookmark recovery. Broadcast the merged shelf item after durable writes. | Owner only. Parse/fetch errors and an explicitly selected rule with no readable chapters return `400` and leave the current catalogue/cache metadata usable without deleting source files. Thus an old pure-`toc`/no-TOC EPUB remains readable after a rejected default refresh and can be explicitly refreshed with `{"tocRule":"spin"}`. Ordinary startup/read/backup never silently collapses historical fragment rows; only a successful explicit refresh applies the new catalogue. |
+
+### P0 Reader source-candidate API contract (2026-08-11 implemented)
+
+Status: implemented, regression-validated and Docker-published as `a2ecc17`. The stable OpenReader route remains
+`GET /api/books/:id/source-candidates`; the additive `mode` query separates the fixed-upstream
+available/refresh/search state transitions.
+
+| Mode | Request and response | Authorization, side effects and errors |
+| --- | --- | --- |
+| omitted or `available` | No remote request. Returns the current user's saved candidate array in stable order. A historical book with no rows is transactionally seeded from its current shelf snapshot. Each row projects `current` from the authoritative book source id and URL. | JWT and current-user book ownership required; foreign/missing book is `404`. No candidate, source or source-failure data from another user may be observed. |
+| `refresh` | Revalidates only source ids already represented in the saved candidate set. Remote results are retained only when both title and author exactly match the shelf book. The response is the replacement saved array; the current shelf snapshot is retained when its source fails. | Partial source failure records only the caller-scoped failure cache and does not roll back successful candidates or remove the current candidate. No active but uncached source is contacted. |
+| `search` | Accepts `group`, `offset`, `limit`, and compatibility `paged=1`. `offset` is the next active-source index in that group. Returns `{list,offset,nextOffset,hasMore,total,searched,matched,failed,empty}`; `list` contains only this scan batch. | Uses caller-active enabled sources, existing failed-source filtering, bounded concurrency, per-source timeout and request cancellation. Only exact title+author matches are merged by `bookUrl` into the derived cache. |
+
+Unknown `mode` is `400` with the existing `{error}` envelope. The server derives title and author from the
+owned book and never accepts client identity fields for candidate discovery. `POST /api/books/:id/change-source`
+keeps its existing body and success object, but commits the selected candidate snapshot with the source/catalogue
+transaction; the frontend updates the current projection locally and must not issue a follow-up candidate search.
 
 The upstream uses namespace-specific JSON storage and SSE cache progress. OpenReader's REST/SQLite adaptation is allowed only where it preserves the visible action semantics, current-user isolation, durable event ordering, and bounded resource use described above.
 
@@ -616,6 +675,29 @@ an allowed OpenReader runtime adaptation.
 | `PUT /api/bookmarks/:id` | `{ "note": string }` | Edits the note only; the original book, chapter, offset, title, and paragraph context remain unchanged. | JWT/current-user required; absent row `404`, oversize note `400`. |
 | Backup / restore `bookmarks.json` | Existing JSON shape, including `bookTitle` and `bookUrl`. | Exports ID/creation order; restores modern timestamped rows idempotently without merging independent same-location bookmarks, and remaps a matching destination chapter by index. | Per-user restore scope applies. Legacy rows without timestamps remain readable through the narrow fallback identity. |
 
+### Bookmark write request and concurrent-delete boundary (2026-08-12 implemented)
+
+The four JSON mutations are specified and regression-validated in
+[`bookmark-write-boundary-fixed-baseline-second-audit-p2-contract.md`](bookmark-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+Status is `implemented / regression-validated / Docker-published / awaiting-device-verification`; the existing
+Bookmark UI, independent-ID data model, reader navigation and backup contract remain closed.
+
+- Single create and note update accept exactly one non-null object within 64 KiB actual wire bytes. Batch create
+  accepts one non-null array within 16 MiB and at most 2,000 raw rows; batch delete accepts one non-null object within
+  16 KiB and at most 2,000 raw IDs. Declared and chunked overflow are flat `413`, while malformed/multiple JSON keeps
+  each route's existing flat `400`.
+- Book/Bookmark owner target resolution remains before body read. Rejected requests do not query per-row chapters,
+  mutate timestamps/rows, or broadcast. Existing field sizes, numeric normalization, chapter ownership, all-row
+  prevalidation and one-transaction batch creation remain unchanged.
+- `PUT /api/bookmarks/:id` requires an explicit non-null string `note`; explicit empty string clears it. It must use
+  an owner-scoped note-only SQL update, return a fresh row, and never use GORM full-row `Save`/upsert. A target deleted
+  after precheck stays deleted and produces no successful event. The frontend edit action sends only `{note}`.
+
+These are narrow Go/multi-user safety adaptations. They add no route, schema, archive field, global middleware or
+visible Bookmark behavior. Contract, red tests and implementation were committed in that order; `a9a55db`/`latest`
+is the validated amd64/arm64 release at OCI index
+`sha256:944a85881170bc900c1fda0acb885bedc1dc4b17ed4e635305988163e1b635e5`.
+
 ## Reader book-content search contract
 
 Fixed-baseline correction audited on 2026-07-27: both routes search the original chapter text
@@ -709,27 +791,39 @@ does not authorize access.
 |---|---|---|
 | `GET /api/sources` | `200` ordered `BookSource[]`; existing JSON fields remain unchanged. `usedBookCount` counts only caller-owned books and the additive response-only `usedBookNames:string[]` contains those books' titles in stable book-ID order. An unused source returns an empty array. | Lazily initializes the caller from the current default exactly once. The usage projection must be computed in bounded grouped queries, never per-source N+1 reads, and must not expose another user's title. It does not add a SQLite column or enter source export/backup/WebDAV data. An initialized empty namespace returns `[]`; persistence failure is `500 {"error":"failed to list sources"}`. |
 | `GET /api/sources/:id` | Existing `200 BookSource`. | Only a caller-active association is addressable. Missing, detached, or foreign ID is the same `404 {"error":"source not found"}`; no ownership detail is disclosed. |
-| `POST /api/sources` | Existing payload/default normalization and `201 BookSource`. | Requires JWT plus `CanEditSources`; creates only a caller association. Validation remains `400`, disabled editing `403`, persistence failure `500`. After commit, `sources_update` is sent only to the caller's clients. |
-| `PUT /api/sources/:id` | Existing full source payload and `200 BookSource`. The returned ID may change when an upgraded shared snapshot is copied. | Requires JWT plus `CanEditSources`; foreign/detached ID is `404`. A shared snapshot is copy-on-write and only caller books/failure rows are remapped. Semantic rule changes clear only caller variables. Persistence failure remains `500`. |
+| `POST /api/sources` | Existing payload/default normalization and `201 BookSource`; one non-null JSON object is capped at 16 MiB actual-read bytes. | Requires JWT plus `CanEditSources`; creates only a caller association. Validation remains `400`, body overflow is flat `413`, positive `sourceLimit` exhaustion is flat `409`, disabled editing `403`, persistence failure `500`. After commit, `sources_update` is sent only to the caller's clients. |
+| `PUT /api/sources/:id` | Existing full source payload and `200 BookSource`; one non-null JSON object is capped at 16 MiB actual-read bytes. The returned ID may change when an upgraded shared snapshot is copied. | Requires JWT plus `CanEditSources`; foreign/detached ID is resolved before body read and remains `404`. A shared snapshot is copy-on-write without consuming active quota, and only caller books/failure rows are remapped. Semantic rule changes clear only caller variables. Body overflow is flat `413`; persistence failure remains `500`. |
 | `DELETE /api/sources/:id` | Existing `204`; a caller-owned source used by caller books remains `409 {"error":"source is used by bookshelf books","usedBookCount":N}`. | Requires JWT plus `CanEditSources`. Foreign/detached ID is `404`. Deletion removes only caller association/failures; the shared snapshot is garbage-collected only when globally unreferenced. |
 | `GET /api/sources/export?sourceIds=...` | Existing JSON download and sourceIds validation. With no IDs, exports all caller-active sources; supplied IDs retain caller order/filter behavior. | Foreign/detached IDs are omitted and cannot be exported. A selection containing no caller source returns `200 []`; malformed input remains `400`. |
 | `POST /api/sources/:id/test`, `/test-chapter`, `/test-content`; `POST /api/sources/:id/debug/stream`; `POST /api/sources/batch-test`; `GET /api/sources/invalid` | Existing test payloads and optional structured parser error fields remain; the additive canonical stream is defined in `source-debug-fixed-baseline-second-audit-p2-contract.md`. | Single-item foreign/detached ID is `404`; batch selection silently excludes non-caller IDs. Debug/test requests never write `source_failures`; only batch health-check reads/writes are caller-scoped. |
-| `DELETE /api/sources`; `POST /api/sources/batch`; import/remote-import | Existing request validation and response envelopes remain stable. | Mutation affects only caller-active associations. Batch foreign IDs are not counted as affected. Import identity is normalized `bookSourceUrl/baseUrl` within the caller namespace; no same-name or ID match may mutate another user. |
+| `DELETE /api/sources`; `POST /api/sources/batch`; import/remote-import | Existing request validation and response envelopes remain stable. Batch/remote URL controls accept one JSON object capped at 16 KiB; local/remote source arrays cap at 5,000 raw entries. | Mutation affects only caller-active associations. Batch foreign IDs are not counted as affected. Import identity is normalized `bookSourceUrl/baseUrl` within the caller namespace; no same-name or ID match may mutate another user. Projected quota overflow is flat `409`; 5,001 entries are flat `400`; no-op import/batch does not clear failures or broadcast. |
 | `GET /api/sources/default`; `POST /api/sources/default/restore` | Existing status/restore paths remain compatible. Restore reconciles only the caller against current default; initialized empty and restore-default remain distinct states. | Restore requires `CanEditSources`; used unmatched sources become detached instead of leaving dangling book references. |
 | `POST /api/sources/default/save` | Existing path remains as an admin compatibility shim and returns `{count}`; `count` may be zero for an explicitly configured empty default. | Requires administrator role in addition to `CanEditSources`; copies the caller's active list into the default namespace. It does not rewrite initialized users or broadcast a false private-source update to every account. |
 | `GET /api/admin/users` | Existing user summary array; additive `sourceCount` remains. | `sourceCount` is each target's active association count, excluding detached rows. An uninitialized target projects the current default count without creating its namespace. Admin JWT required. |
 | `POST /api/admin/users/:id/sources/default` | No body; `200 {"count":N}` where `N` may be zero. | Admin JWT required. Missing target is `404 {"error":"user not found"}`; existing but uninitialized target is `409 {"error":"user sources are not initialized"}`. Copies that target's active snapshot to default and never falls back to caller sources. |
 | `POST /api/admin/users/sources/reset` | `{ids:[positive user ids]}`; success is `200 {reset,imported,updated,skipped}`. | Admin JWT required. IDs are deduplicated; empty effective selection is `400`. Every target must exist and the default namespace must be configured; missing target/default is `404` and the whole batch remains unchanged. All target reconciles commit in one transaction, then each target alone receives `sources_update`; `users_update` refreshes admin summaries. |
 
+### P2 BookSource write/import boundary (2026-08-12 implemented)
+
+The completed source hardening slice is specified by
+[`book-source-write-boundary-fixed-baseline-second-audit-p2-contract.md`](book-source-write-boundary-fixed-baseline-second-audit-p2-contract.md)
+and is `implemented / regression-validated / Docker-published / awaiting-device-verification`. It preserves the routes
+and response schemas above while adding: one actual-read-bounded JSON object (16 MiB for full create/update source documents; 16 KiB for
+batch and remote URL controls), a 5,000-entry local/remote import ceiling, and atomic enforcement of the existing
+per-user `sourceLimit` for future active associations. `sourceLimit=0` remains unlimited; historical/default/restore
+data stays readable and is never truncated or deleted. Same-user create/import races are serialized around one
+authoritative SQLite transaction; existing identity updates and COW remain available at or above quota.
+
 Search, explore, remote-book, change-source, Reader content/cache and scheduler consumers now resolve the same
 association service. New/read-by-selection operations require caller-active enabled sources, while an existing
 caller-owned book may continue resolving its caller-detached snapshot; a foreign source id is treated as missing
 before any remote request. Administrator source-count/default/reset/delete and owner-scoped
 logical/portable/WebDAV backup/restore consumers are implemented. No API method, body, success schema,
-status or error envelope is changed by the remaining Docker work: the dedicated smoke invokes the
-stable routes above and compares actual source IDs/lists plus ZIP members before and after restart.
-Until the old-global-source fixture, COW, administrator-root/regular-root and restore-isolation checks
-pass together, the implemented management/runtime API slices are not sufficient release evidence.
+status or error envelope outside this documented additive 409/413/entry-limit behavior changed. The dedicated
+source ownership smoke compares actual source IDs/lists plus ZIP members before and after restart. Fixed tests,
+focused race, full Go/vet, frontend `740/740`, production build, real HTTP and fresh/historical/ownership/portable
+container gates all passed for `d9ddc0f`. The locally built amd64/arm64 image is published as `d9ddc0f`/`latest` with
+OCI index `sha256:548bf0984e7fa5039411bd75f9ae8ac8496052010255bfe746bf36fa9336dc8f`.
 
 The additive `usedBookNames` projection above is required by the fixed upstream source-manager
 `书架书籍` column and is governed by
@@ -780,6 +874,29 @@ Existing category create/update/delete/reorder paths retain their current reques
 post-commit sync side effects additionally invalidate or broadcast the unified projection. New Categories append
 after the maximum order across both data sources; the old custom-only reorder endpoint remains compatible for old
 clients but is not used by the rebuilt mixed manager.
+
+### BookGroup / Category write request boundary (2026-08-12 implementation)
+
+The six JSON mutations in the BookGroup state machine are governed by
+[`book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md`](book-group-write-boundary-fixed-baseline-second-audit-p2-contract.md).
+After JWT and any path/owner precheck, each accepts at most a 16 KiB actual-read wire body and exactly one JSON
+object. Overflow is flat `413 {"error":"request body too large"}`; trailing non-whitespace is each endpoint's
+existing malformed `400`. Unknown built-in keys are rejected before body read. A failed Category create must not
+seed built-ins, and all rejected requests produce no durable mutation or sync event.
+
+`PUT /api/books/:id/category` must compute its final effective category IDs before owner validation. A foreign
+`categoryId` cannot bypass validation by accompanying an empty/zero-only `categoryIds`; the existing non-empty-array
+priority, empty effective-array fallback, clear behavior, legacy primary field and many-to-many transaction remain.
+
+Future explicitly submitted Category/built-in names are bounded to 80 UTF-8 bytes and Category colors to 24 UTF-8
+bytes. Historical oversized rows remain readable/restorable and may receive updates that do not touch those fields.
+No schema, route, success payload, complete mixed-reorder transaction, category-only compatibility behavior, book
+membership semantics, backup format, or visible BookGroup workflow changes in this slice. `6f54be3` passed the
+red/green six-route API contract, focused/full/race Go, full vet, frontend 740/740, production build and isolated
+real declared/chunked/exact-limit HTTP smoke. It shipped in the locally built multi-architecture `231aa9e` image
+after fresh/historical volume gates; OCI index digest is
+`sha256:e4affbeaf133220409c82dc1316d7cc2e2e7267fe8623d817205b1fa0340a5c6`. Status is
+`implementation-complete / regression-validated / Docker-published`.
 
 ## P2 embedded chapter-image cache contract (implementation in progress)
 
