@@ -292,6 +292,45 @@ backup gates. Locally published `ceb4baa`/`latest` resolve to OCI index
 - [ ] Final resolved path is verified to remain under the allowed root.
 - [ ] Local store, uploads, cache, backups, and WebDAV all use rooted paths.
 
+### P2 remote chapter-text cache filesystem lifecycle (2026-08-17 inventory)
+
+- [ ] Remote chapter cache read/stat/remove accepts only relative or current-root absolute identities that resolve to
+      regular files below `cache/`; root/ancestor/entry symlinks, directories and special files fail closed.
+- [ ] Remote chapter cache reads use one same-file-verified handle and the configured source-response byte budget;
+      mounted outside bytes, host paths and OS errors never enter chapter responses or cache API errors.
+- [ ] Remote cache writes use a verified parent, private stage and atomic rename; unsafe targets, cancellation and
+      failures do not truncate an existing file, write outside the root, publish a DB path or leave temporary files.
+- [ ] Stats count only actual safe non-empty chapter files and remain current-user scoped. Clear/prune removes only
+      verified regular files after commit and only when an all-user reference query proves them unreferenced.
+- [ ] File publication plus DB reference and reference-query plus prune share one process serialization boundary, so
+      concurrent cache writes and cleanup cannot leave a newly referenced path missing.
+
+Current source inventory shows lexical-prefix validation followed by `os.ReadFile/Stat/Remove`, direct
+`MkdirAll/WriteFile`, stale DB-path counting, and delete-on-reference-query-error behavior. Status is
+`inventory-complete / tests-and-implementation-pending`; checklist items remain open until old-implementation red
+tests, the complete implementation, runtime/mounted-volume probes and release gates pass. Full contract:
+[`compat/remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+
+### P2 public upload-resource filesystem boundary (2026-08-17 inventory)
+
+- [x] Public `GET|HEAD /uploads/*resourcePath` opens only a regular file beneath `data/uploads`; root, ancestor and
+      entry symlinks plus directory/FIFO/device/socket targets fail closed without blocking or object mutation.
+- [x] Metadata and response bytes derive from one `Lstat -> open -> SameFile` handle; no Gin static check/reopen
+      race or fallback `c.File(path)`/`http.FileServer(http.Dir)` remains.
+- [x] Existing unauthenticated legacy/current/portable-restored URLs preserve GET/HEAD, inline Content-Type,
+      Content-Length, Last-Modified, conditional and Range behavior; no directory listing or redirect is introduced.
+- [x] Missing/unsafe 404 responses and logs expose no upload root, symlink target, OS error, SQLite path, JWT,
+      credential or file bytes. Read requests do not create, repair, delete or rewrite mounted objects.
+
+Published `2986357` runtime inventory reproduced both an entry symlink and an ancestor symlink returning 200 with
+bytes outside `data/uploads`. Contract `d0c948c`, old-implementation red tests `7181634` and implementation `277e512`
+preserve that evidence while replacing Gin static reads with an explicit rooted same-file-open handler. Focused/race,
+full Go/vet, frontend 741/741, build, three-viewport Reader assets, local-candidate/GHCR-pulled HTTP probes and
+fresh/historical/portable mounted-volume gates pass. Locally published `277e512`/`latest` resolve to OCI index
+`sha256:ca50fd59dce4f4bb13a1450ee7ee39b2a3d7b392de3902a7f3c21272e8ac9c70`; status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`. Full contract:
+[`compat/upload-public-read-filesystem-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/upload-public-read-filesystem-boundary-fixed-baseline-second-audit-p2-contract.md).
+
 ## P2 raw WebDAV protocol review (2026-07-19 implemented; Docker gate pending)
 
 - [x] `/webdav/*` and `/reader3/webdav/*` authenticate before reading path, Destination, Depth or body;
@@ -312,8 +351,29 @@ middleware, and WebDAVBrowser at 1440×900, 390×844 and 360×800. Historical-vo
 container curl remain mandatory before Docker release. Required evidence is fixed in
 [`docs/compat/webdav-protocol-p2-contract.md`](compat/webdav-protocol-p2-contract.md): auth/permission,
 two-prefix, PROPFIND, mutation/status, symlink, LOCK, browser regression, curl and mounted-volume tests.
-- [ ] Backup downloads only expose expected backup files.
-- [ ] API errors do not leak host filesystem paths.
+- [x] Backup list/download only expose caller-root, same-file-verified regular `backup_*.zip` and
+      `portable_backup_*.zip`; symlink, directory, special and prefix-only non-ZIP entries fail closed.
+- [x] API errors do not leak host filesystem paths.
+
+### P2 backup list/download filesystem boundary (2026-08-17 implemented/published)
+
+- [x] JWT and effective WebDAV permission resolve the caller root before stat/open; regular users cannot list or
+      download an administrator or another user's same-name backup.
+- [x] Root/ancestor/entry symlinks, directories, FIFO/device/socket and non-ZIP names are hidden from list and
+      unavailable from direct download without deleting or rewriting the mounted object.
+- [x] Metadata, portable format inspection and response bytes derive from one scoped `Lstat -> open -> SameFile`
+      handle; no check-then-`c.File(path)` race remains.
+- [x] Missing roots keep `200 []`; invalid/missing/unsafe download responses and logs expose no root, symlink target,
+      OS/ZIP detail, JWT or WebDAV credential.
+
+Runtime inventory on published `cd3a17c` reproduced a regular-user `backup_escape.zip` symlink returning 200 with
+caller-root-external bytes, a prefix-only non-ZIP returning 200, and a directory returning 301. Contract `b9deec2`
+and old-implementation red tests `d7810ca` precede scoped same-file-open implementation `2986357`; focused/race,
+full Go/vet, frontend 741/741, build, real HTTP and fresh/historical/portable mounted-volume gates pass. Locally built
+`2986357`/`latest` resolve to OCI index
+`sha256:bdb8195077000a898569e0f3f6664a5760c2b56058d67b2d6ae1d4aaf42fea5e`. Status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`. Full contract:
+[`compat/backup-list-download-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/backup-list-download-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md).
 
 ## P2 reading-progress CAS and WebDAV mirror review (2026-07-18)
 
@@ -405,18 +465,21 @@ revision `9f5a52b3ea4da8ca557653052c5190d8023dfa61`. Status is
 Full contract:
 [`compat/replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md).
 
-### Backup generation request lifecycle second audit (2026-08-16 inventory)
+### Backup generation request lifecycle second audit (2026-08-17 implemented/published)
 
-- [ ] `POST /api/backup/trigger` maps every internal DB/ZIP/OS failure to fixed `500 {"error":"backup failed"}`;
+- [x] `POST /api/backup/trigger` maps every internal DB/ZIP/OS failure to fixed `500 {"error":"backup failed"}`;
       no mounted path, SQL, ZIP detail, source/archive path or credential appears in response or ordinary logs.
-- [ ] Logical and portable HTTP generation propagate request context through lock wait, DB reads and bounded
+- [x] Logical and portable HTTP generation propagate request context through lock wait, DB reads and bounded
       archive/asset copies; a canceled waiter never starts after the active generator releases the lock.
-- [ ] Cancellation before final rename closes/removes the private temp and creates no list-visible package; successful
+- [x] Cancellation before final rename closes/removes the private temp and creates no list-visible package; successful
       rename is the durable boundary and is not compensation-deleted after a later disconnect.
-- [ ] Existing auth/WebDAV permission priority, caller roots, logical/portable formats, typed 409/413, output budgets,
+- [x] Existing auth/WebDAV permission priority, caller roots, logical/portable formats, typed 409/413, output budgets,
       same-name collision protection and scheduled backup behavior remain unchanged.
 
-Status is `inventory-complete / implementation-pending`; no application or test change is included. Full contract:
+Contract `05def84`, red tests `f9d2aff` and implementation `cd3a17c` passed focused/full/race/vet, frontend 741/741,
+build, real HTTP safe-500/success/128 MiB cancel and fresh/historical/portable gates. The local amd64/arm64 release
+resolves to OCI index `sha256:08e9a5ba94646e5955e9c0d4586a4be95d004d6a015b518331c02748a9e53f70`.
+Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`. Full contract:
 [`compat/backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md).
 
 ## Uploads and archive formats
@@ -1011,3 +1074,23 @@ Implementation evidence is complete on `6f54be3`: the red/green six-route contra
 and event assertions, historical oversized backup/restore, focused/full/race/vet, frontend 740/740, production build
 and `scripts/smoke/book-group-write-boundary-contract.mjs` all pass. The release-specific fresh/historical
 mounted-volume gate and local Docker publication still await explicit Docker socket approval.
+
+## P2 public capability opened-file identity review (2026-08-17 implemented)
+
+- [x] EPUB XHTML and sibling assets are read from a rooted regular handle whose identity is the object checked after
+      capability, owner, generation and resource-path validation; no handler pathname reopen remains.
+- [x] CBZ GET/HEAD/Range and local-audio GET/HEAD/Range pass the same verified handle and metadata to
+      `http.ServeContent`; source/generation replacement cannot redirect an existing capability to another object.
+- [x] Cached cover reads compare `Lstat/open/fstat` identity and never read or touch a replacement mounted object.
+- [x] Root/ancestor/entry symlinks, directory/FIFO/device and deterministic validation-to-open replacement probes
+      fail closed with path/token/credential-free errors while leaving every mounted object unchanged.
+- [x] Capability purpose/user/book/fingerprint/expiry, EPUB CSP, MIME allowlists, byte/range behavior, private cache
+      headers, old URLs and multi-user isolation remain unchanged.
+- [ ] Focused/race/full/vet, real EPUB/CBZ/audio/cover browser flows and fresh/historical/portable mounted-volume
+      gates pass before local Docker publication.
+
+Required evidence and scope exclusions are defined in
+[`compat/public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Implementation commit `a90f7b3` and its code-level gates are complete. EPUB passed all three required Chromium
+viewports; CBZ desktop and host HEAD/Range/mounted-symlink probes passed. The final checkbox remains open until the
+blocked CBZ/audio/cover browser reruns and fresh/historical/portable/restart volume gates can receive local approvals.

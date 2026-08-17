@@ -46,6 +46,7 @@ type Server struct {
 	sourceCandidates *sourcecandidates.Service
 	remoteReaders    *remotereader.Store
 	registerMu       sync.Mutex
+	remoteCacheMu    sync.Mutex
 }
 
 func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hub *readersync.Hub, sched *scheduler.Scheduler, backupSvc *backup.Service) *Server {
@@ -214,7 +215,8 @@ func RegisterRoutes(router *gin.Engine, cfg config.Config, database *gorm.DB, hu
 
 	uploadsDir := filepath.Join(cfg.DataDir, "uploads")
 	if err := os.MkdirAll(uploadsDir, 0o755); err == nil {
-		router.Static("/uploads", uploadsDir)
+		router.GET("/uploads/*resourcePath", server.uploadPublicResource)
+		router.HEAD("/uploads/*resourcePath", server.uploadPublicResource)
 	}
 	return server
 }

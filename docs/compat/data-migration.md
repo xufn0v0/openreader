@@ -1004,3 +1004,89 @@ mounted data rewrite was observed. See `auth-request-boundary-fixed-baseline-sec
 - The local candidate passed fresh portable-v1/v2-assets, cross-user and restart plus historical TXT/EPUB/UMD/CBZ,
   relative-cache, owner-isolation and restore gates. The locally built amd64/arm64 `9f5a52b`/`latest` release resolves
   to OCI index `sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`.
+
+## P2 backup-generation request lifecycle compatibility (2026-08-17 implemented/published)
+
+- `cd3a17c` changes only future ordinary/portable generation request cancellation, internal-error projection and
+  path-free logging. It adds no table, column, index, migration, startup scan, caller root, archive member, manifest
+  version, filename prefix, browser key or persisted setting.
+- Existing logical/portable ZIPs, SQLite rows and mounted `data/`, `cache/` and `library/` files are neither scanned
+  nor rewritten. A canceled request removes only its current private pre-rename temp; an already renamed durable ZIP
+  is retained. Scheduled and existing in-process callers keep background-context compatibility entry points.
+- The local candidate passed fresh portable-v1/v2-assets, cross-user and restart plus historical TXT/EPUB/UMD/CBZ,
+  relative-cache, owner-isolation and restore gates. Real HTTP also proved fixed safe 500, ordinary list/download and
+  cleanup after disconnecting a 128 MiB portable copy with a visible private temp.
+- The locally built amd64/arm64 `cd3a17c`/`latest` release resolves to OCI index
+  `sha256:08e9a5ba94646e5955e9c0d4586a4be95d004d6a015b518331c02748a9e53f70`; both remote platform configs carry
+  full revision `cd3a17c63f9768130a33b4a199a3228cb94d8261`.
+
+## P2 backup list/download filesystem-boundary compatibility (2026-08-17 implemented/published)
+
+- `2986357` changes only future backup list filtering, safe file opening, portable format inspection and download
+  response handling. It adds no table, column, index, migration, startup scan, caller root, archive member, manifest
+  version, filename prefix, generation path, browser key or persisted setting.
+- Existing regular `backup_*.zip` and `portable_backup_*.zip` remain readable without rewriting. Symlinks,
+  directories, special files and prefix-only non-ZIP objects remain untouched in their mounted location but are no
+  longer projected or downloadable through the backup API. Raw WebDAV management retains its independent contract.
+- The local candidate passed fresh portable-v1/v2-assets, cross-user and restart plus historical TXT/EPUB/UMD/CBZ,
+  relative-cache, owner-isolation and restore gates. Real HTTP also proved valid logical/portable bytes, portable-invalid
+  projection, same-name caller isolation and symlink/non-ZIP/directory/FIFO/ancestor fail-closed behavior.
+- The locally built amd64/arm64 `2986357`/`latest` release resolves to OCI index
+  `sha256:bdb8195077000a898569e0f3f6664a5760c2b56058d67b2d6ae1d4aaf42fea5e`; remote amd64 manifest is
+  `sha256:e782f3219c910e2c70580fc74b5d0bc9fd7014fa370e638e16b07eccb5e99628`, arm64 manifest is
+  `sha256:85e0a43109b2d98e77e3150b4a1600c08fb638dbd7298eb3800631128245fa8f`, and both configs carry full revision
+  `298635792caaa9a8dfb6de09fd2879f837c84f22`.
+
+## P2 public upload-resource filesystem-boundary compatibility (2026-08-17 implemented/published)
+
+- `277e512` changes only future public GET/HEAD opening below the existing `data/uploads` root. It adds no table,
+  column, index, migration, startup scan, directory, URL, asset namespace, backup member, browser key or setting field.
+- Existing legacy `/uploads/<kind>/<name>` and current `/uploads/users/<id>/<kind>/<name>` regular files remain
+  byte-for-byte readable without moving, renaming or rewriting. Existing root/ancestor/entry symlinks, directories and
+  special files remain untouched on disk but are no longer projected through the public resource capability.
+- The local candidate and GHCR-pulled image passed regular GET/HEAD/Range/304, unsafe empty-404, unchanged-object and
+  path-free-log probes. Fresh portable-v1/v2-assets/cross-user/restart and historical TXT/EPUB/UMD/CBZ,
+  relative-cache, owner-isolation and restore gates passed against unchanged `data/cache/library` mounts.
+- The locally built amd64/arm64 `277e512`/`latest` release resolves to OCI index
+  `sha256:ca50fd59dce4f4bb13a1450ee7ee39b2a3d7b392de3902a7f3c21272e8ac9c70`; remote amd64 manifest is
+  `sha256:f936ed8b9dbf3bf61a5d0f621bd7c06f4861f0c1a963df2fe85cc3890cc3ed81`, arm64 manifest is
+  `sha256:111f01ed3ddf7c404bdc6dc3a40c97180ce4821dc0bff852d8b4abf3e1213c91`, and both configs carry full revision
+  `277e512fa1a0135cff4089298d4644ee72ddf518`.
+
+## P2 remote chapter-text cache filesystem-lifecycle compatibility (2026-08-17 extracted)
+
+- The pending second audit changes no SQLite table/column/index, mounted root, cache hash name, backup member,
+  WebDAV object, browser key or environment variable. Existing `chapters.cache_path` remains authoritative input.
+- Relative paths and historical absolute paths below the current `cache/` root remain lazy-readable. Retired-host or
+  unsafe paths are not rewritten at startup; they remain until a successful recache publishes the existing relative
+  hash identity or the owning user explicitly clears/deletes that remote book.
+- Explicit clear may reset the caller's unsafe/missing remote DB references after commit, but must leave every unsafe,
+  special or outside-root mounted object untouched. Local imported-book rows and `library/` content are excluded.
+- Reference-aware pruning remains post-commit and compensating. It may remove a verified regular derived file only
+  after an all-user query proves no remote chapter still references its canonical cache identity; query failure and
+  concurrent publication fail closed.
+- Required release evidence is focused/race/full/vet, real Reader/BookManage/sidebar cache flows, mounted symlink and
+  shared-reference runtime probes, plus unchanged fresh/historical/portable `data/cache/library` gates before local
+  amd64/arm64 publication. Full contract:
+  [`remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+- `75cc238` implements this boundary without a migration or startup scan. Host/candidate mounted probes, Docker
+  named-volume restart and fresh/historical/portable gates passed. The locally built amd64/arm64 `3cef8df`/`latest`
+  release resolves to OCI index `sha256:8cfe72e56af0cbb191d6b31fa243153a3ce14010614c5153881b262229facf86`;
+  both pulled platform configs report full revision `3cef8dfdccd45970596b3d8916a2cb6fab1480dc`.
+
+## P2 public capability filesystem-read lifecycle compatibility (2026-08-17 extracted)
+
+- The pending EPUB/CBZ/local-audio/cached-cover opened-file change adds no table, column, index, migration, startup
+  scan, directory, capability field, URL, environment variable, backup member or browser key.
+- Existing regular files under `library/` and `cache/cover-images`, original archives, complete EPUB/CBZ generation
+  markers and historical relative paths remain byte-for-byte authoritative. No startup rewrite or eager rebuild is
+  allowed.
+- Unsafe symlinks, directories and special files remain untouched on mounted storage but cannot be projected by a
+  public capability. A failed identity check must not delete an archive, generation, audio source or cover object.
+- Required release evidence includes fresh/historical/portable mounted volumes and restart, proving TXT/EPUB/UMD/
+  CBZ/audio, relative cache, owner isolation and backup/restore remain compatible. Full contract:
+  [`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+- `a90f7b3` implements opened-file identity without schema, migration, startup scan or layout changes. Focused/full/race/
+  vet and host mounted-symlink probes pass, and the local candidate image reports the full expected revision. The
+  fresh/historical/portable/restart volume gate remains pending because the workspace could not grant Docker socket
+  approval after its automatic approval quota was exhausted; no release image is claimed for this slice yet.

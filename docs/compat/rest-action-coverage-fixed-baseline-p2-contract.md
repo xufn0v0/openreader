@@ -455,4 +455,104 @@ rename。现有 temp+rename、caller scope、logical/portable 格式和 typed 40
 HTTP context lifecycle、安全错误投影与 path-free 日志，final rename 前取消清理 temp，rename 后 durable
 包不补偿删除。完整合同和红测门见
 [`backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
-当前状态 **inventory-complete / implementation-pending**；本 inventory 没有修改应用或测试。
+合同和旧实现红测已依次完成；当前实现把两个 handler 的 request context 贯穿可取消生成 gate、GORM
+snapshot、logical entry、archive/asset validation/copy、ZIP close、sync 和 rename 前提交边界。普通 trigger
+固定安全 500，portable typed 409/413 保持；预取消零查询、锁 waiter、logical/portable 中途取消、temp 清理、
+rename 后 durable ZIP 与 path-free 日志均有测试。focused/backup/race、Go 全量/vet、frontend 741/741 与 build
+通过；真实 HTTP safe-500/success/list/download/128 MiB portable cancel 与 fresh/historical/portable 卷门亦
+通过。本机发布 `cd3a17c`/`latest`，OCI index 为
+`sha256:08e9a5ba94646e5955e9c0d4586a4be95d004d6a015b518331c02748a9e53f70`，远端 amd64/arm64 config
+均确认完整 revision。当前状态 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 25. 备份 list/download 文件系统读取边界（2026-08-17 implemented/published）
+
+generation lifecycle 发布后按 path-traversal 与 route/work amplification 继续枚举，下一项确定 must-fix
+收敛到 `GET /api/backup/list` 和 `/backup/download/:name`。既有合同只允许 caller root 内
+`backup_*.zip`/`portable_backup_*.zip`；当前 `backupFileNameAllowed` 却只检查前缀，list 信任 `ReadDir`
+entry，download 再由 `c.File(path)` 跟随路径。
+
+已发布 `cd3a17c` 的真实 HTTP 反例证明：regular user 的 allowed-name symlink 可返回 caller root 外内容，
+前缀匹配非 ZIP 返回 200，目录 direct download 返回 301，list 还暴露 symlink/非 ZIP。完整 scoped-root、
+opened-handle、same-file、format、错误和测试先行门见
+[`backup-list-download-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-list-download-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同 `b9deec2` 与旧实现红测 `d7810ca` 已按顺序完成。当前实现以 `webdavfs.NewScoped` 约束 caller root，
+list 对严格 ZIP basename 逐项执行普通文件/same-file open，并从同一句柄取得 metadata 与 portable format；
+download 直接发送该句柄，不再由 `c.File(path)` 重开。missing/unsafe/non-regular 使用固定安全 404，
+其它打开失败使用固定安全 500。focused/race、Go 全量/vet、frontend 741/741 与 build 已通过。
+
+真实 HTTP symlink/non-ZIP/directory/FIFO/valid/ancestor、跨用户同名与 path-free 错误探针，以及
+fresh portable-v1/v2-assets/cross-user/restart 和 historical TXT/EPUB/UMD/CBZ/relative-cache/
+owner-isolation 卷门均通过。本机 amd64/arm64 发布 `2986357`/`latest`，OCI index 为
+`sha256:bdb8195077000a898569e0f3f6664a5760c2b56058d67b2d6ae1d4aaf42fea5e`；远端两平台 config 均确认
+完整 revision。当前状态 **aligned / regression-validated / Docker-published / awaiting-device-verification**；
+generation/restore/格式未重开。
+
+## 26. 上传资产公开读取文件系统边界（2026-08-17 inventory）
+
+继续枚举 `server.go` 的非 `/api` 文件读取面后，下一项确定 must-fix 收敛到
+`GET|HEAD /uploads/*resourcePath`。固定上游公开 `/assets/<namespace>/...` 供封面、背景和字体直接加载；
+OpenReader 的 `/uploads` capability、JWT user-ID 随机路径和 legacy 全局 URL 是已签收适配，不能改成
+Bearer-only、短期签名或新 URL。
+
+当前 `router.Static` 使用 Gin `onlyFilesFS(http.Dir)`：它只禁用目录 `Readdir`，仍跟随 root/ancestor/
+entry symlink，并先 open/close 检查、再由 `http.FileServer` 按 path 重开。已发布 `2986357` 的真实容器
+反例确认 entry symlink 与 ancestor symlink 均返回 200 和 uploads root 外 bytes。完整 GET/HEAD/Range、
+rooted same-file-open、special-file、legacy/portable/data 与测试门见
+[`upload-public-read-filesystem-boundary-fixed-baseline-second-audit-p2-contract.md`](upload-public-read-filesystem-boundary-fixed-baseline-second-audit-p2-contract.md)。
+
+合同 `d0c948c` 与旧实现红测 `7181634` 已按顺序完成。当前实现以显式 GET/HEAD handler 替代
+`router.Static/http.Dir`，复用 `webdavfs.New/Open` 的逐组件 symlink、普通文件与 same-file 验证，并从
+同一 `*os.File` 执行 `http.ServeContent`。root/ancestor/entry symlink、反斜杠、目录、FIFO、安全 404 与
+legacy/current GET/HEAD/304/Range 均有测试；focused/race、Go 全量/vet、frontend 741/741 与 build 通过。
+
+真实 Go + Chromium 三视口、本地候选与 GHCR 回拉 HTTP 探针、fresh portable-v1/v2-assets/
+cross-user/restart 与 historical TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation 卷门均通过。
+本机 amd64/arm64 发布 `277e512`/`latest`，OCI index 为
+`sha256:ca50fd59dce4f4bb13a1450ee7ee39b2a3d7b392de3902a7f3c21272e8ac9c70`，远端两平台 config 均确认
+完整 revision `277e512fa1a0135cff4089298d4644ee72ddf518`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；upload write/delete、
+BookInfo/Reader/portable v2 合同不重开。
+
+## 27. 远程章节文本缓存文件系统生命周期（2026-08-17 inventory）
+
+公开 upload read 发布后继续按 mounted path 与数据引用枚举，下一项 must-fix 不只是
+`GET /api/cache/stats`/`DELETE /api/cache`，而是远程章节文本缓存的读、写、统计、剪枝和
+DB path 发布共享生命周期。固定上游只统计/删除当前 namespace 书架中远程书的实际
+`.txt` 缓存；OpenReader 当前用户级 JSON stats/clear 和共享物理 path 是已发布多用户适配。
+
+当前 `remoteCacheFilePath` 只做 lexical prefix，后续 `os.ReadFile/Stat/Remove` 会跟随 mounted
+root/ancestor/entry symlink；`WriteChapterCache` 的 `MkdirAll/WriteFile` 也可被 ancestor/entry symlink
+扩展到 `cache/` 外。stats 会把 missing/unsafe 非空 DB path 计为 cached chapter；prune 在全局
+引用查询失败时反而继续删候选，且文件写入→DB 发布与 DB 清行→剪枝无共享串行边界。
+
+详细 rooted opened-file、原子写、实际文件统计、all-user reference fail-closed、write/prune 并发、
+历史 relative/current-absolute path 和无迁移边界见
+[`remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+`f8e5c04` 先在旧实现上锁定读/写/统计/删除和引用查询失败反例；`75cc238` 已实现 rooted
+同句柄有界读取、原子可取消写入、实际文件统计、全用户引用 fail-closed 和 write/prune 共享串行边界。
+专项/focused race、Go full/vet、frontend 741/741、build、Reader/BookManage/侧边栏真实浏览器、宿主与
+候选 mounted probe、named-volume restart 及 fresh/historical/portable 卷门均通过。本机发布
+`3cef8df`/`latest`，OCI index 为
+`sha256:8cfe72e56af0cbb191d6b31fa243153a3ce14010614c5153881b262229facf86`；两平台回拉 config 均确认
+完整 revision `3cef8dfdccd45970596b3d8916a2cb6fab1480dc`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 28. 公开 capability 文件读取生命周期（2026-08-17 implemented）
+
+远程章节文本缓存发布后继续枚举公开读取路由。旧实现中 `/api/epub-resource`、
+`/api/cbz-resource` 和 `/api/audio-resource` 在 service 完成 capability/owner/path/fingerprint 检查后
+只返回 path，随后由 service 或 handler 再次 `os.Open/http.ServeFile`；cached `/api/cover` 也存在
+`Lstat -> Open -> Chtimes` 而没有 same-file 证明。`df49535` 已在旧实现上锁定 mounted replacement
+反例，`a90f7b3` 已把四路收敛为 rooted same-file opened handle，并让 handler 只消费该句柄。
+
+固定上游的 `/assets/*`、`/epub/*` 与本地 EPUB/CBZ 章节投影只要求浏览器能读取对应资源；OpenReader
+私有 generation、用途隔离 capability、CSP/MIME/Range 和多用户 owner 是必须保留的安全适配。本切片
+不改变 URL、token、派生目录、原 archive、响应 schema 或备份格式，只把授权、路径验证和响应收敛到
+rooted same-file opened handle。完整合同见
+[`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+
+章节图片 capability 在响应前按 token fingerprint 重验最终内存字节，公开 uploads 已由独立合同关闭，
+二者不并入本轮。focused/race/full/vet、frontend 741/741、build、EPUB 三视口、CBZ desktop 与宿主
+HEAD/Range/mounted-symlink probe 已通过，本地 `a90f7b3` 候选镜像 revision 已确认。CBZ 完整三视口、
+audio/cover browser、fresh/historical/portable/restart 与正式 Docker 发布因当前本机授权额度耗尽待补；
+状态：**implementation-complete / release-validation-pending**。

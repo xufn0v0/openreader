@@ -32,16 +32,16 @@
 | Reader：登录失效与账号切换 | `plugins/axios.js` 的 `NEED_LOGIN`、根 `App.vue#login`、`Reader.vue#loginAuth` | `api/client.js`、`App.vue`、`AuthDialog.vue`、`stores/user.js`、Reader lifecycle/progress、`stores/overlay.js` | **P0 已完成并发布 `59e11a9`**：401 按真实拦截顺序先挂起旧 Reader 再清凭证，未认证根场景不渲染私有 DOM；overlay reset、同账号 generation 重挂载、异账号返回书架、安全 returnTo、旧进度写入抑制均已验证。 | [`reader-reauthentication-isolation-p0-contract.md`](reader-reauthentication-isolation-p0-contract.md)；1440×900、1024×1366、390×844、360×800、frontend 643/643、Go/build 和新旧卷门通过。 |
 | Reader：EPUB、漫画/CBZ、音频、连续跨章、TTS | `Reader.vue`、`Content.vue`、本地格式解析类 | `ReaderChapterContent.vue`、`ReaderEpubContent.vue`、`ReaderAudioContent.vue`、`ReaderTTSBar.vue`、`useReaderChapterReady.js`、格式 parser / cache | **EPUB、CBZ、连续跨章、音频和 TTS 固定基准切片均已完成实现、三视口验证和 Docker 发布**：音频恢复上游结构、边界行为与真实 autoplay；TTS 恢复显式 voice、贴底栏、可取消跨章和关闭段落定位。 | [`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md) 及前三份格式合同；本批 frontend 444/444、Go/build、Reader 全矩阵通过，镜像 `5260efd`/`latest` 已发布。当前 volume 脚本受 Codex socket 授权额度阻断，兼容证据继承无后端/持久化差异的 `370d0f7` 已通过门禁。 |
 | Pinia 状态、缓存、同步、数据事务 | `plugins/vuex.js`、`plugins/cache.js`、后端 controller/model | `stores/*.js`、`utils/*cache*`、`backend/models`、`services`、`sync` | 书架、认证 scope 与阅读进度 P2 已完成并发布；**WebSocket 协议第二轮已测试先行实施并发布 `2ea6e8c`**：任意客户端 event relay、无条件 Origin、deleted-user 连接和全局 `users_update` 已关闭；服务端 event type/payload、同用户收敛、重连 REST 权威和数据格式保持。 | [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)、[`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md)；WebSocket 状态 `implemented / regression-validated / Docker-published`，Go/full race、frontend 706/706、build、三视口双客户端及新旧卷通过。 |
-| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、`ReturnData.kt` | `backend/api/*.go`、`middleware/*.go`、前端 `api/*.js` | **按动作逐项复审；已关闭模块不从旧日志重开**。books.go 六个 JSON control 与 ReplaceRule 五路均已关闭；`backend/api` direct Gin JSON binder 差集为空。改按 route/work amplification 枚举后，备份生成的 raw internal 500 与 ordinary/portable 无 context 长 I/O 成为下一项确定 must-fix。 | ReplaceRule 已随 `9f5a52b` 发布。备份生成合同见 [`backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md)，状态 `inventory-complete / implementation-pending`；格式、restore、caller root 和唯一工作台不重开。 |
+| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。books.go 六个 JSON control、ReplaceRule、备份 generation/list/download、公开 upload read 和远程章节文本缓存生命周期均已发布。EPUB/CBZ/audio/cached-cover capability 的 pathname reopen/same-file 缺口已按 `2587299` 合同、`df49535` 红测、`a90f7b3` 实现顺序关闭；handler 只消费 service 验证的 opened handle。 | [`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md) 状态 `implementation-complete / release-validation-pending`；full/race/vet、frontend/build、EPUB 三视口和宿主 mounted/Range 已通过，剩余浏览器/卷门与正式发布受本机授权额度阻断。 |
 | 书源解析、RSS、远程抓取 | `AnalyzeRule*`、`Rss*`、`BookSourceController.kt` | `backend/engine/source_*.go`、`rss_parser.go`、fetcher、`services/rss` | **CSS/JSONPath/XPath 书源主链、RSS 可见请求页语义、P2-N1/P2-N2 抓取边界和 RSS 持久提交边界均已发布**。refresh 只写 parser/remote 列并按 detail rule 保留权威正文；content cache 只写 content；state 只写 read/favourite；三者不再用全行 `Save` 覆盖。 | 抓取预算/SSRF 合同不重开；[`rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](rss-write-boundary-fixed-baseline-second-audit-p2-contract.md) 已用 trigger/API 证明列所有权、删除不复活、无孤儿 article 和远程工作后的 source/article 存活复验。 |
-| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | `9f5a52b` 通过 frontend 741/741、Go full/race/vet、build、真实 HTTP 和 ReplaceRule 四视口；fresh/historical/portable 覆盖 TXT/EPUB/UMD/CBZ、relative-cache、owner isolation、restart 与 portable v1/v2。 | 本机 amd64/arm64 发布 `9f5a52b`/`latest`，OCI index `sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`。Docker CLI arm64 强制回拉受 `osxkeychain -50` 阻断，GHCR Registry config 已确认远端 arm64/full revision；用户生产环境运行提交未知。 |
+| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | `3cef8df` 通过 frontend 741/741、Go full/focused race/vet、build、Reader 四视口、BookManage 五视口、侧边栏三视口、宿主/候选 mounted probe 与 named-volume restart；fresh/historical/portable 覆盖 TXT/EPUB/UMD/CBZ、relative-cache、owner isolation、restart 与 portable v1/v2 assets。 | 本机 amd64/arm64 发布 `3cef8df`/`latest`，OCI index `sha256:8cfe72e56af0cbb191d6b31fa243153a3ce14010614c5153881b262229facf86`；远端两平台 config 已确认完整 revision。用户生产环境运行提交未知。 |
 
-## 当前整体进度快照（2026-08-16，`9f5a52b` ReplaceRule 请求边界已发布）
+## 当前整体进度快照（2026-08-17，`3cef8df` 远程章节缓存生命周期已发布）
 
 按全量计划的模块/合同口径而不是代码行数估算，整体约 **99%**。该数字表示固定基准合同和测试先行
 实现覆盖度；用户配置、BookGroup/Category、Book、BookSource、Bookmark 与 RSS 写入/导入边界均完成
-实现、全量、运行时、新旧卷和正式 Docker 发布；ReplaceRule 请求边界亦已关闭。剩余约 1% 已重新
-定位到备份生成 action lifecycle 及后续逐路由/真实设备证据，不能从 direct binder 差集为空推导完成。
+实现、全量、运行时、新旧卷和正式 Docker 发布；ReplaceRule 与备份生成请求边界亦已关闭。剩余约 1%
+为后续逐路由 action 审计、长尾固定基准复审与真实设备证据，不能从 direct binder 差集为空推导完成。
 
 - **P0 Reader 主链已覆盖**：工具层/面板状态机、正文排版、移动点击与连续滚动、设置、书签、正文
   搜索、登录恢复、普通文本、EPUB、CBZ/漫画、音频、连续跨章、TTS、夜间对比度均有专项合同和
@@ -65,11 +65,14 @@
   reading progress 16 KiB/single UTF-8 JSON/显式 identity/CAS 控制字段与 client ID 自愈，books.go 六个
   JSON control 的 16 KiB/32 KiB/1 MiB single UTF-8 object、Book/TOC/category admission、batch cache /
   export / remote add / change-source 取消，ReplaceRule 五路 512 KiB/16 MiB/128 KiB/4 MiB actual-read 单
-  UTF-8 document 与 transaction 取消、server-only WebSocket/recipient scope 和备份事务 worker。
+  UTF-8 document 与 transaction 取消、server-only WebSocket/recipient scope、备份事务 worker，以及
+  ordinary/portable 备份生成 safe-500、可取消 gate/DB/copy 和 durable rename 边界。
 - **尚未完成的主线**：其余尚未逐动作签约的 Go REST/错误/事务语义；仍待第二轮固定基准复审的长尾组件；
   以及后续真实设备反馈暴露出的上游可见偏差。reading progress、books.go 六个 JSON control 和
-  ReplaceRule 五路均已完成合同、红测、实现、runtime、卷门和发布；备份生成安全 500/request context
-  已完成 inventory、尚待红测/实现，其它 action 长尾继续逐项取证。
+  ReplaceRule 五路、备份生成、backup list/download 与公开 upload resource rooted opened-file 边界均已
+  完成合同、红测、实现、runtime、浏览器、卷门和发布；远程章节文本缓存共享文件系统
+  生命周期已完成合同 `c6f9de8`、旧实现红测 `f8e5c04`、实现 `75cc238`、浏览器/runtime/卷门和
+  `3cef8df` Docker 发布；其它 action 长尾继续逐项取证。
   `c74be70` 已发布但尚待
   服务器部署；移动书架在
   390×844 线上真实账号复测中保持上游 390/350px 几何和内容高度行轨，但设备“明显窄”的反馈仍待
@@ -93,6 +96,33 @@ frontend 741/741、build、真实 Go HTTP、四视口 ReplaceRule 和 fresh/hist
 `sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`；Docker CLI 强制 arm64 回拉
 受 `osxkeychain -50` 阻断，但 GHCR Registry config 已确认远端 arm64 与完整 revision。状态为
 **aligned / regression-validated / Docker-published / awaiting-device-verification**，整体比例更新为 99%。
+
+2026-08-17 的备份生成请求生命周期按 `05def84` 合同、`f9d2aff` 旧实现红测和 `cd3a17c` 实现顺序
+关闭：普通 trigger 使用固定安全 500，ordinary/portable request context 贯穿可取消生成 gate、GORM
+snapshot、logical entry、archive/asset copy、ZIP close、sync 与 rename 提交边界；取消不留半包，rename
+后 durable ZIP 保持。Go full/race/vet、frontend 741/741、build、真实 HTTP safe-500/success/list/download/
+128 MiB portable cancel 和 fresh/historical/portable 卷门通过。本机发布 `cd3a17c`/`latest`，OCI index 为
+`sha256:08e9a5ba94646e5955e9c0d4586a4be95d004d6a015b518331c02748a9e53f70`；远端 amd64/arm64 config
+均确认完整 revision `cd3a17c63f9768130a33b4a199a3228cb94d8261`。状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**，整体比例仍为 99%。
+
+2026-08-17 的备份 list/download 文件系统读取边界按 `b9deec2` 合同、`d7810ca` 旧实现红测和
+`2986357` 实现顺序关闭：严格 ZIP basename、caller-root scoped same-file open、同句柄 metadata/
+portable format/download 与固定安全 400/404/500 已落地。Go full/race/vet、frontend 741/741、build、
+真实 HTTP symlink/non-ZIP/directory/FIFO/valid/ancestor/cross-user/path-free 探针及 fresh/historical/portable
+卷门通过。本机发布 `2986357`/`latest`，OCI index 为
+`sha256:bdb8195077000a898569e0f3f6664a5760c2b56058d67b2d6ae1d4aaf42fea5e`；远端 amd64/arm64 config
+均确认完整 revision `298635792caaa9a8dfb6de09fd2879f837c84f22`。状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**，整体比例仍为 99%。
+
+2026-08-17 的公开 upload resource 文件系统读取边界按 `d0c948c` 合同、`7181634` 旧实现
+红测和 `277e512` 实现顺序关闭：显式 GET/HEAD、caller-rooted 逐组件 symlink 拒绝、普通
+文件限定、same-file opened handle 与标准 ServeContent 语义已落地。Go full/race/vet、frontend
+741/741、build、Reader 资产三视口、本地候选与 GHCR 回拉 HTTP 探针、fresh/historical/portable
+卷门均通过。本机发布 `277e512`/`latest`，OCI index 为
+`sha256:ca50fd59dce4f4bb13a1450ee7ee39b2a3d7b392de3902a7f3c21272e8ac9c70`；远端 amd64/arm64 config
+均确认完整 revision `277e512fa1a0135cff4089298d4644ee72ddf518`。状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**，整体比例仍为 99%。
 
 2026-08-16 的 BookSource local import multipart 按 `d7bc00a` inventory、`ddbac4c` 旧实现红测、
 `8c66dc9` 实现和 `3f3c9c8` runtime contract 顺序关闭：原始 chooser 在 `text()` 前拒绝已知 16 MiB

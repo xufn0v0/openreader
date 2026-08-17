@@ -1,6 +1,6 @@
 # 备份生成请求边界第二轮固定基准合同
 
-状态：**inventory-complete / implementation-pending**
+状态：**aligned / regression-validated / Docker-published / awaiting-device-verification**
 
 固定上游：
 `changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。
@@ -109,3 +109,26 @@ caller-root 解析必须先于任何数据库快照、目录创建、文件打�
 direct Gin JSON binder 差集关闭后，按 route/work amplification 重新枚举得到的下一项确定 must-fix 是
 备份生成 action lifecycle：一个已证明的安全 500 冲突，以及普通/portable 两条无 context 长 I/O 路径。
 本 inventory 只新增/更新合同文档，没有修改应用或测试。
+
+## 9. 实施与回归证据
+
+- `backend/api/backup.go` 将两个 trigger 的 request context 传入生成服务；普通内部错误固定投影为
+  `500 {"error":"backup failed"}`，portable 原有 409/413 和安全 500 保持，客户端取消直接结束 handler。
+- `backend/services/backup` 保留无 context 兼容入口，并新增 context-aware ordinary/portable 入口；全局
+  生成锁改为可取消 gate，GORM snapshot、logical entry、archive/asset validation/copy、ZIP close、sync
+  与 rename 提交前均观察同一 context。取消路径只删除本次私有 temp，rename 后取消不补偿删除 durable ZIP。
+- 成功日志只记录 basename；scheduled 失败不再输出可能含 mounted path/SQL/ZIP 细节的底层错误。
+- 旧实现红测位于 `backend/api/backup_generation_request_boundary_contract_test.go` 与
+  `backend/services/backup/request_context_contract_test.go`。实施后覆盖预取消零查询、锁 waiter 取消、
+  logical snapshot 中途取消、8 MiB portable archive copy 中途取消、temp/final 零残留、rename 后 durable
+  包可读及 host-path-free 日志。
+- 合同 `05def84`、旧实现红测 `f9d2aff` 与实现 `cd3a17c` 已按顺序完成。focused、备份专项、focused
+  race、Go 全量、`go vet ./...`、frontend 741/741 与 Vite build 通过；真实 HTTP 探针覆盖 path-bearing
+  内部失败的固定 500、普通 success/list/download，以及 128 MiB portable copy 在 temp 出现后的 TCP
+  断开清理。fresh portable-v1/v2-assets/cross-user/restart 与 historical TXT/EPUB/UMD/CBZ/relative-cache/
+  owner-isolation mounted-volume 门通过。
+- 本机 amd64/arm64 发布 `ghcr.io/changshengyu/openreader:cd3a17c` 与 `latest`；二者均指向 OCI index
+  `sha256:08e9a5ba94646e5955e9c0d4586a4be95d004d6a015b518331c02748a9e53f70`。amd64 manifest 为
+  `sha256:9440e2d3d04b4e9565efe5e89507bacd03e9f9335d77a74e033cb0fcc58878ab`，arm64 manifest 为
+  `sha256:9006acfadff69446f872bea96e40cce0e6289cb5ecd14c21b3337c8455d44d0b`；远端两平台 config 均确认
+  完整 revision `cd3a17c63f9768130a33b4a199a3228cb94d8261`。
