@@ -69,14 +69,14 @@ gates, real declared/chunked HTTP smoke and fresh/historical mounted-volume gate
 | Reader legacy search | `/api/reader3/searchBookContent` | Compatibility endpoint; keep until old clients/routes no longer need it. |
 | Progress | `/api/progress/:bookID`, `/api/progress` | Progress writes must be conflict-safe and user scoped. |
 | Bookmarks | `/api/books/:id/bookmarks`, `/api/bookmarks/:id` | Bookmark CRUD and batch operations remain user/book scoped. |
-| Local store | `/api/local-store*` | All paths must stay rooted under the authenticated user's configured local-store root. The pending second-audit filesystem/wire contract preserves current multi-file and import shapes while adding an aggregate multipart envelope, bounded single-JSON metadata/import bodies, cardinality limits, handler-owned multipart cleanup, and symlink-safe final-path/regular-file checks; see [`local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md). |
+| Local store | `/api/local-store*` | All paths stay rooted under the authenticated user's configured local-store root. The implemented second-audit contract preserves current multi-file/import shapes while enforcing a `maxLocalImportBytes + 1 MiB` multipart envelope, 1..64 files, bounded single-JSON metadata/import bodies, 200-item request/expansion limits, handler-owned multipart cleanup, and symlink/special-file-safe final-path/opened-regular-file checks; see [`local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md). |
 | Import | `/api/imports/books/preview`, `/api/imports/books`, `/api/imports/txt` | Preview may return `importToken`; import must be able to reuse staged content. |
 | Uploads | `/api/uploads` | Uploaded assets are content-validated before final write, rooted under data uploads and user-scoped for new writes/deletes; legacy global upload URLs remain readable. BookInfo ownership is in [`bookinfo-shelf-mutations-p2-contract.md`](bookinfo-shelf-mutations-p2-contract.md), while the Reader transaction/signature/portable rules are in [`reader-appearance-assets-p2-contract.md`](reader-appearance-assets-p2-contract.md) and [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md). The implemented second-audit wire contract adds a 33 MiB actual-read multipart envelope, singular file/type semantics, explicit multipart temporary-file cleanup, and a 16 KiB single-JSON delete body without changing successful response shapes; see [`user-asset-write-boundary-fixed-baseline-second-audit-p2-contract.md`](user-asset-write-boundary-fixed-baseline-second-audit-p2-contract.md). |
 | Cache | `/api/cache/stats`, `/api/cache`, `/api/books/:id/cache` | Cache operations must not delete unrelated user data. |
-| Replace rules | `/api/replace-rules*` | See the P2 replace-rule contract below: stable name-upsert order and upstream-visible plain/regex/scope semantics. |
+| Replace rules | `/api/replace-rules*` | See the P2 replace-rule contract below: stable name-upsert order and upstream-visible plain/regex/scope semantics. The pending request-boundary second audit additionally requires actual-read single UTF-8 JSON, stable 413 mapping and request-context GORM cancellation without reopening the visible module; see [`replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md). |
 | RSS | `/api/rss/sources`, `/api/rss/sources/import`, `/api/rss/sources/:id/refresh`, `/api/rss/articles` | Source writes are current-user scoped. The visible article flow fetches exactly one requested remote page; remote fetch limits and parser safety apply. The pending second-audit write boundary additionally owns single-JSON limits, same-URL serialization and source/article column ownership; see the two P2 RSS contracts below. |
 | Explore | `/api/explore/sources`, `/api/explore/:sourceId` | Browse source catalogs with bounded pagination/fetch behavior. |
-| Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore must preserve existing data and report clear compatibility failures. |
+| Backup/WebDAV import | `/api/backup/*`, `/api/webdav/import-*` | Backup/restore preserves existing data and reports clear compatibility failures. The implemented mounted-read second audit adds bounded single JSON, 200-item raw/expanded admission, caller-rooted opened regular files and an immutable restore snapshot without changing successful import/restore shapes; see [`webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md). |
 
 UserManage 权限部分更新的第二轮固定基准见
 [`user-management-partial-update-second-audit-p2-contract.md`](user-management-partial-update-second-audit-p2-contract.md)。
@@ -186,6 +186,51 @@ preserves the existing `200` plus
 commits. Existing `bookProgress/` or `legado/bookProgress/` directories regain upstream-compatible
 per-book JSON mirrors without weakening OpenReader's private WebDAV roots.
 
+### P2 reading-progress request boundary (2026-08-16 implemented)
+
+The completed CAS/chapter/mirror contract above remains authoritative. The implemented second-audit wire contract is
+[`reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md`](reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+- Authenticated `PUT /api/progress` accepts at most one non-null UTF-8 JSON object within 16 KiB. Declared/chunked
+  overflow is `413 {"error":"request body too large"}`; malformed, multi-value or wrong-shape input remains
+  `400 {"error":"invalid progress payload"}`. JWT rejection precedes every body check.
+- `bookId` and `chapterIndex` must be explicitly present; chapter index and offset remain non-negative. Service-side
+  chapter canonicalization, percent clamping, user isolation and 404/400 distinctions are unchanged.
+- Empty conflict timestamps remain compatible; non-empty `baseUpdatedAt`/`clientUpdatedAt` are at most 64 bytes and
+  valid RFC3339Nano. `mode` is at most 20 bytes and reflected event-only `clientId` at most 128 bytes.
+- Rejection occurs before CAS, WebDAV mirror and Hub broadcast. Conflict remains compatible `200` plus
+  `X-OpenReader-Progress-Conflict: 1`; successful response and persisted schema do not change.
+
+Status is **aligned / regression-validated / Docker-published / awaiting-device-verification**. Contract `f924604`,
+red tests `a10facb`, implementation `8d3790d` and runtime evidence `1563bc3` were pushed in order. No route, schema,
+backup or mirror-format migration was introduced. The later `65199f6` release includes this implementation and passed
+fresh/historical/portable volume gates plus forced arm64 revision verification; `65199f6`/`latest` resolve to OCI index
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`.
+
+### P2 Book control request boundary (2026-08-16 extracted)
+
+The six remaining direct JSON binders in `backend/api/books.go` are governed by
+[`book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md`](book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md):
+
+- `POST /api/books/batch`, `/books/export` and `/reader3/searchBookContent` accept at most one UTF-8 object within
+  16 KiB; `/books/:id/refresh-local` uses 32 KiB so a valid 16 KiB TOC rule plus JSON wrapping remains representable.
+  Empty body remains valid only for refresh-local; legacy search preserves its HTTP 200 failure envelope.
+- `POST /api/books/remote` and `/books/:id/change-source` use a 1 MiB boundary for the published candidate/intro
+  projection. Existing Book field bytes, source-variable limits and at most 200 raw Category IDs are enforced before
+  remote work or persistence.
+- Batch/export retain 200 unique positive owner book IDs and their existing response/transaction/export formats.
+  Batch cache, export generation, remote add and source change propagate request cancellation without rolling back
+  already durable cache work or reporting cancellation as a source failure.
+- Local refresh checks owner/type first, then decodes an optional object and 16 KiB TOC rule before reading or staging
+  the existing archive. Parser budgets, archive identity and all successful reparse formats remain unchanged.
+
+Status is **aligned / regression-validated / Docker-published / awaiting-device-verification**. Contract `097c862`
+plus TOC-envelope correction `669aa5b`, red tests `5cc4b18`, and implementation `65199f6` were pushed in order.
+Focused/full/race/vet, frontend 741/741, production build, real-Go three-viewport BookManage/remote-work contracts,
+fresh/historical/portable volume gates and a forced GHCR arm64 revision pull passed. `65199f6` and `latest` resolve to
+OCI index `sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`. No route,
+schema, mounted path, archive, backup or visible frontend flow changed.
+
 ## P1-B workspace search API contract
 
 Status: implemented for the P1-B search-default/error slice on 2026-07-13 from fixed reader-dev `Index.vue`, `config.js`, and `BookController.kt`. OpenReader keeps its authenticated REST path and source-ID representation, but restores the upstream search defaults and error semantics.
@@ -232,9 +277,20 @@ atomic generation/restore and source-edit capability contract are defined by
 |---|---|---|---|
 | `POST /api/backup/trigger` | Authenticated, no body; effective `canAccessWebdav` required. | Existing `{message,path,name}` remains. The file stays in the administrator legacy root or regular-user private root, but every logical artifact—including `bookSource.json`—contains only the authenticated user. An uninitialized source namespace omits that member; initialized empty writes `[]`. | Existing safe `500` remains; no archive is visible before atomic completion and no other-user data or host path is exposed. |
 | `POST /api/backup/restore-legado` | Authenticated multipart field `file`; filename must end in `.zip` (case-insensitive). | Existing counts remain; restore accepts `myBookShelf.json`/`bookshelf.json`, nested `bookProgress/`, upstream `bookmark.json`/`replaceRule.json` and old OpenReader plural aliases without double-processing. Allowed source restore replaces/reconciles only the authenticated user's active namespace; additive `sourcesSkipped` reports denied current-user source mutation. | Existing structural `400/413` rules remain. Supported content is fully planned before one SQLite transaction; decode/DB error returns client-safe `400/500`, rolls back all logical writes and emits no sync event. |
-| `POST /api/backup/restore-webdav` | Authenticated JSON `{path}`; the caller-scoped WebDAV path must reference a `.zip` file. | Same planner/transaction/count/owner/permission semantics as uploaded restore; the sole WebDAV manager owns the confirmation. Bookshelf source name/URL resolves only in the caller's active associations. | `400` if file/path is missing, directory, non-ZIP, or archive validation fails; `413` for an oversized file. The response never exposes server paths, another user's source existence, or ZIP parser details. |
+| `POST /api/backup/restore-webdav` | Authenticated 16 KiB single JSON `{path}`; the normalized caller-scoped WebDAV path must reference a regular `.zip` file. | Same planner/transaction/count/owner/permission semantics as uploaded restore; the sole WebDAV manager owns the confirmation. The scoped file service opens the source and copies that handle to a private bounded snapshot before restore, so mounted source replacement cannot change the selected bytes. Bookshelf source name/URL resolves only in the caller's active associations. | `400` if file/path is missing, directory, special, symlink, non-ZIP, or archive validation fails; `413` for an oversized body/file. The response never exposes server paths, another user's source existence, or ZIP parser details. |
 
 Configuration defaults: `OPENREADER_MAX_BACKUP_RESTORE_BYTES=134217728`, `OPENREADER_MAX_BACKUP_ARCHIVE_ENTRIES=5000`, `OPENREADER_MAX_BACKUP_ARCHIVE_ENTRY_BYTES=16777216`, and `OPENREADER_MAX_BACKUP_ARCHIVE_EXPANDED_BYTES=134217728`. These are an allowed OpenReader security improvement; they do not change the exported data schema or user-visible restore sequence.
+
+### P2 backup-generation request lifecycle (2026-08-16 extracted)
+
+The logical and portable formats above remain closed. The next route-level action gap is limited to generation
+diagnostics and cancellation; see
+[`backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+Both trigger routes keep no-body requests, auth/permission priority, caller roots, atomic temp+rename and current
+success/typed error fields. The ordinary trigger must stop serializing raw service errors and use safe fixed 500;
+both HTTP-triggered generators must propagate request context through lock wait, DB reads, archive/asset copies and
+the pre-rename boundary. Existing no-context service methods remain scheduled/internal compatibility wrappers.
+Status: **inventory-complete / implementation-pending**.
 
 P2-S4 keeps `sources` as imported/updated/reactivated count and may add
 `sourceDetached`/`sourceRemoved` when replace-style reconciliation only removes or detaches old active
@@ -307,10 +363,10 @@ Status: TXT matching and raw-byte token reuse were implemented on 2026-07-11. Th
 
 | Method / path | Request | Success and side effects | Errors / retry contract |
 |---|---|---|---|
-| `POST /api/imports/books/preview` | Multipart `file`, optional `title`, `author`, `tocRule`, or an existing `importToken` instead of `file`. JWT required. | A new upload creates a caller-scoped immutable stage before parsing. Successful response is `200` with `{title,author,chapterCount,chapters,importToken}`. The server atomically records the bounded parsed result for that token and exact rule without changing the public response. An empty `tocRule` uses the automatic first-512,000-byte probe and may return pseudo chapters for text without a TOC. An explicit TXT `tocRule` with no match is likewise a normal `200` empty catalogue, retaining the token for a rule refresh or empty-catalog confirmation. EPUB preview records catalogue metadata/resource boundaries only; it does not materialize every XHTML body merely to return titles. For newly parsed EPUB TOC rules, repeated `href#fragment` entries collapse to one canonical href item; the first href fixes order, the final TOC title write fixes title, and no fragment field is exposed or persisted for that new item. | Unsupported/invalid input remains `400` `{error,importToken}`. A failed reparse must not replace the last successful parsed snapshot. No durable book rows/library archives are created during preview. |
-| `POST /api/imports/books` | Same multipart/token fields plus existing category fields. JWT required. | `201` creates the book only from the staged bytes or submitted upload. When token/rule/hash match a successful preview, confirmation consumes that parsed catalogue instead of executing the catalogue parser again. Old full-content and catalogue-only snapshots—including an upgrade-time snapshot containing historical fragment rows—and stages without a snapshot remain accepted/rebuilt lazily. New preview snapshots persist one chapter per canonical EPUB href with empty fragment metadata. EPUB may prepare its caller-owned bounded derived resource tree below the new archive before commit so the first Reader request does not rehash/re-extract it. A consumed staged token and all derived snapshot files are deleted only after a successful import. A local TXT book with an explicit unmatched rule is allowed to persist with zero chapter rows, matching upstream local-book confirmation semantics. | `400` for unsupported/parser/archive-policy extraction errors; the client-safe extraction message cannot expose a host path. Host storage/database failures remain generic `500`. Failed confirmation leaves an existing stage and its last successful snapshot reusable until normal expiry. No book row, broadcast, consumed token or orphan new library directory may survive a failed confirmation. |
-| `POST /api/local-store/import-preview`, `POST /api/webdav/import-preview` | JSON `{paths}` or `{items:[{path,title,author,tocRule}]}`. JWT/store permission required. | `200 {items}`. Each readable item is copied once to a caller-scoped immutable stage; success item contains `{path,book,importToken}`. | A parser failure remains an item-level `{path,error,importToken}` in the `200` envelope. The token remains valid for a later `{items:[{path,importToken,tocRule}]}` preview/import; mounted-file mutation/removal cannot affect that retry. |
-| `POST /api/local-store/import`, `POST /api/webdav/import` | Existing paths/items/category body. | Successful staged item uses the original preview bytes and deletes its token after durable import. | Item-level parser failures retain the staged token and do not create book/cache rows. A container response does not expose paths outside the caller's scoped store. |
+| `POST /api/imports/books/preview` | JWT-first multipart with exactly one `file` or one existing `importToken`; optional unique `title`, `author`, `tocRule`. The implemented wire envelope is `maxLocalImportBytes + 1 MiB`; file/field metadata and shape are strict, and a successfully parsed form is handler-cleaned. | A new upload creates a caller-scoped immutable stage before parsing. Successful response remains one `200 {title,author,chapterCount,chapters,importToken}` object; frontend direct multi-select issues ordered single-file requests and aggregates them into the shared confirmation workflow. The server atomically records the bounded parsed result for that token and exact rule. Empty automatic or explicit unmatched TXT catalogues remain confirmable. | Declared/chunked wire overflow is `413`; malformed/ambiguous multipart is `400` before stage. Parser failure may return the new/existing token for retry and cannot replace the last successful snapshot. No durable Book/library archive is created during preview. See the implemented and regression-validated direct-import second-audit contract. |
+| `POST /api/imports/books`, `POST /api/imports/txt` | Same one-file-or-token multipart contract plus bounded `categoryId/categoryIds`; the alias has identical status, response and side effects. JWT required. | `201 Book` creates only from the staged bytes or submitted upload. Matching token/rule/hash consumes the prepared catalogue rather than rerunning preview parsing. Existing two-/three-file stages and historical parser formats remain accepted. Token/snapshot removal and one bookshelf broadcast occur only after durable archive/DB/category success. | `400` for shape/category/unsupported/parser/archive-policy errors, `413` for wire/file overflow, safe generic `500` for internal persistence. Failed confirmation leaves a token/snapshot reusable and cannot leave a Book row, category relation, event or orphan new archive. |
+| `POST /api/local-store/import-preview`, `POST /api/webdav/import-preview` | JSON `{paths}` or `{items:[{path,title,author,tocRule}]}`. JWT and source-specific store permission required. Both sources enforce 1 MiB single JSON and 200 raw/expanded items. | `200 {items}`. Each readable regular item is copied once to a caller-scoped immutable stage; success item contains `{path,book,importToken}`. | A parser failure remains an item-level `{path,error,importToken}` in the `200` envelope. The token remains valid for a later `{items:[{path,importToken,tocRule}]}` preview/import; mounted-file mutation/removal cannot affect that retry. WebDAV source-backed reads use its caller-rooted file service rather than a resolved host path. |
+| `POST /api/local-store/import`, `POST /api/webdav/import` | Existing paths/items/category body. `paths` and `items` are mutually exclusive; raw and expanded target counts are bounded before side effects. | Successful staged item uses the original preview bytes and deletes its token after durable import. | Item-level parser failures retain the staged token and do not create book/cache rows. A container response does not expose paths outside the caller's scoped store; multi-item per-book results remain visible rather than becoming one opaque transaction. |
 
 ## P1-E3 workspace file-manager API compatibility
 
@@ -319,7 +375,7 @@ Status: implemented and regression-tested on 2026-07-13. The fixed reader-dev co
 | Method / path | Workbench request / response contract | Compatibility and security rule |
 |---|---|---|
 | `GET /api/local-store?path=<relative>` | The rebuilt LocalStore sends only the current relative directory and expects `{path,items}`. Every item includes `name`, `path`, `size`, `lastModified`, `isDir`, and an internal parser-capability `importable` flag. | The normal UI never sends `recursive`; hidden dot-name entries are omitted. A legacy client may still send `recursive=1` until separately retired. All paths remain caller-rooted. |
-| `POST /api/local-store/upload` | Authenticated multipart body has `path` plus one or more `file` parts. A successful multi-file write returns `201 {paths:[...]}` in submitted order; one-file callers also receive the stable `path` first item field during the compatibility window. | Upload is file management, not parser admission: any basename-safe regular file may be stored. Each file remains bounded and atomically staged beside its target; invalid/oversized data returns a client-safe `400`/`413` and must not truncate an existing destination. |
+| `POST /api/local-store/upload` | Authenticated multipart body has at most one `path` plus 1..64 same-name `file` parts within `maxLocalImportBytes + 1 MiB`. A successful multi-file write returns `201 {paths:[...]}` in submitted order; one-file callers also receive the stable `path` first item field during the compatibility window. | Upload is file management, not parser admission: any basename-safe regular file may be stored. Each file remains independently bounded and atomically staged beside its target; invalid/oversized data returns a client-safe `400`/`413`, parser temporary files are handler-cleaned, and symlink/special targets fail closed without truncating an existing destination. |
 | `POST /api/local-store/directory`, `PUT /api/local-store/rename`, `GET /api/local-store/download` | Existing authenticated request/response shapes stay unchanged. | They are legacy/API compatibility routes only; P1-E3 LocalStore UI must not create these calls. |
 | `PUT /webdav/<path>` | The rebuilt WebDAV picker performs one authenticated, bounded PUT per selected file and refreshes the current directory after all successful writes. | Multiple visible selections are an UI-level sequence over the existing raw WebDAV contract. Every PUT retains normal bearer auth, caller-rooting and atomic staging. |
 | `MKCOL /webdav/<path>`, `MOVE /webdav/<path>` | Existing raw WebDAV compatibility methods remain unchanged. | P1-E3 WebDAV UI must not surface new-directory or rename controls. |
@@ -342,14 +398,21 @@ when every input row was skipped and no durable write occurred. Regex execution 
 the complete input to that rule and stops the Reader pipeline. Focused API/engine tests plus the
 full Go suite pass; Docker volume publication evidence is recorded in the focused contract.
 
+The second-audit request boundary is also implemented and published; see
+[`replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+Contract `ff6d7e3`, old-implementation red tests `c70f04e` and implementation `9f5a52b` close actual-read/single
+UTF-8 document, stable 413 and request-context transaction gaps without changing these successful API or data
+semantics. `9f5a52b`/`latest` resolve to OCI index
+`sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`.
+
 | Method / path | Request and validation | Success / side effects | Auth and errors |
 |---|---|---|---|
 | `GET /api/replace-rules` | None. | Returns only the caller's rules in stable insertion order (`id ASC`), never `sort_order` or update-time order. Compatibility output retains `enabled` plus legacy-readable `isEnabled`. | JWT required; `500` only for a read failure. |
-| `POST /api/replace-rules` | `{name, pattern, replacement, scope, isRegex, enabled|isEnabled}`. Exact empty name, pattern and scope are rejected; accepted strings are not trimmed. A missing `isRegex` means plain text; regex must compile under the bounded RE2 subset. Request body ≤ 512 KiB; hidden group ≤ 800 bytes. | Current-user exact-name upsert. Appending returns `201`; replacing the earliest existing same-name row in place returns `200`, without moving pipeline order. Emits `replace_rules_update` after commit. | JWT required; `400` for missing/oversized fields, invalid or unsupported regex; no cross-user lookup. |
-| `PUT /api/replace-rules/:id` | Same validated fields. | Updates only the owned ID and does not change its stable position. Emits one post-commit update event. | JWT required; `400` invalid body/regex, `404` missing/foreign ID, `409` when renaming to another existing current-user name. |
-| `POST /api/replace-rules/batch` | JSON array ≤ 16 MiB/2,000 rows. Exact empty name/pattern rows retain the upstream-compatible `skipped` result; whitespace is data, not blank normalization. Every accepted rule must have an explicit scope and valid plain/regex mode before any accepted row is written. | Transactional current-user exact-name upsert in input order, returning `{rules,created,updated,skipped}`. A malformed regex rejects the batch without a partial accepted-row write. | JWT required; `400` malformed/oversized array, regex or scope, `500` before a failed transaction can mutate state. |
-| `POST /api/replace-rules/test` | `{pattern,replacement,isRegex,text}` using the same compiler/mode as real Reader content; request body ≤ 4 MiB, decoded text ≤ 1 MiB and output ≤ 8 MiB. | Returns `{input,output,changed}` only; no persistence or sync event. | JWT required; `400` invalid regex, missing pattern/text, field limit or execution overflow. |
-| `DELETE /api/replace-rules/:id`, `POST /api/replace-rules/batch-delete` | Existing ID paths/payload; batch body ≤ 128 KiB/2,000 IDs. | Delete only owned rows, retain ordered `deletedIds`, and emit after durable deletion. | JWT required; single missing/foreign ID is `404`; invalid/oversized batch is `400`. |
+| `POST /api/replace-rules` | `{name, pattern, replacement, scope, isRegex, enabled|isEnabled}`. Exact empty name, pattern and scope are rejected; accepted strings are not trimmed. A missing `isRegex` means plain text; regex must compile under the bounded RE2 subset. Request body ≤ 512 KiB; hidden group ≤ 800 bytes. | Current-user exact-name upsert. Appending returns `201`; replacing the earliest existing same-name row in place returns `200`, without moving pipeline order. Emits `replace_rules_update` after commit. | JWT required; `413` for true wire overflow; `400` for malformed JSON, missing/oversized fields, invalid or unsupported regex; no cross-user lookup. |
+| `PUT /api/replace-rules/:id` | Same validated fields. | Updates only the owned ID and does not change its stable position. Emits one post-commit update event. | JWT required; target-first `400` invalid ID/`404` missing or foreign ID; accepted targets use `413` for body overflow, `400` for malformed body/regex and `409` for a rename conflict. |
+| `POST /api/replace-rules/batch` | One UTF-8 JSON array ≤ 16 MiB/2,000 raw rows. Exact empty name/pattern rows retain the upstream-compatible `skipped` result; whitespace is data, not blank normalization. Every accepted rule must have an explicit scope and valid plain/regex mode before any accepted row is written. | Request-context transactional current-user exact-name upsert in input order, returning `{rules,created,updated,skipped}`. A malformed regex or pre-commit cancellation rejects/rolls back the batch without a partial accepted-row write. | JWT required; `413` actual body overflow; `400` malformed/wrong-shape JSON, cardinality, regex or scope; `500` only for a non-context transaction failure before state can mutate. |
+| `POST /api/replace-rules/test` | One UTF-8 object `{pattern,replacement,isRegex,text}` using the same compiler/mode as real Reader content; request body ≤ 4 MiB, decoded text ≤ 1 MiB and output ≤ 8 MiB. | Returns `{input,output,changed}` only; no persistence or sync event. | JWT required; `413` actual body overflow; `400` invalid JSON/regex, missing pattern/text, field limit or execution overflow. |
+| `DELETE /api/replace-rules/:id`, `POST /api/replace-rules/batch-delete` | Existing ID path or one UTF-8 `{ids}` object; batch body ≤ 128 KiB/2,000 raw IDs. | Delete only owned rows, retain ordered `deletedIds`, and emit after durable deletion. Batch deletion uses the request-context transaction. | JWT required; single missing/foreign ID is `404`; batch body overflow is `413`, malformed/cardinality errors are `400`. |
 
 Reader content applies enabled matching rules only to text chapters, in the same listed order: plain
 text changes the first occurrence; regex changes every case-insensitive occurrence. Scope comparison
@@ -825,6 +888,29 @@ focused race, full Go/vet, frontend `740/740`, production build, real HTTP and f
 container gates all passed for `d9ddc0f`. The locally built amd64/arm64 image is published as `d9ddc0f`/`latest` with
 OCI index `sha256:548bf0984e7fa5039411bd75f9ae8ac8496052010255bfe746bf36fa9336dc8f`.
 
+### P2 BookSource local multipart boundary (2026-08-16 implemented)
+
+The deployed `POST /api/sources/import` remains the single JWT and `CanEditSources`-protected mutation adapter for
+the selected local-source JSON. Its implemented wire/resource contract is
+[`booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md`](booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md).
+
+- The raw browser chooser keeps the fixed-upstream single-file preview flow, but a known `File.size` above 16 MiB
+  must be rejected before `text()` or JSON parsing. Exact 16 MiB still enters the existing parse/preview state.
+- The API accepts exactly one `file` multipart part and no scalar fields. Duplicate/foreign file or any scalar part
+  is flat `400 {"error":"invalid source import request"}` before JSON decode or durable side effects.
+- The full multipart request is actual-read bounded at 17 MiB and the unique file at 16 MiB. Declared/chunked
+  envelope overflow is flat `413 {"error":"request body too large"}`; file overflow keeps
+  `413 {"error":"source file is too large"}`. JWT/permission errors retain priority over all body inspection.
+- Array/wrapper/single-object decoding, 5,000 items, reader-dev fields, caller identity, COW, quota, one transaction,
+  no-op behavior and success response remain governed by the completed BookSource write boundary. A parsed form is
+  explicitly cleaned on every handler exit.
+
+Status is **aligned / regression-validated / Docker-published / awaiting-device-verification**. Contract `d7bc00a`,
+old-implementation red tests `ddbac4c`, implementation `8c66dc9` and runtime contract `3f3c9c8` landed in order.
+Go full/race/vet, frontend `738/738`, build, three-viewport real Go/Chromium, fresh/historical/portable and source
+ownership gates passed. The locally built amd64/arm64 image is published as `3f3c9c8`/`latest`, OCI index
+`sha256:62ee55ffab7859aef4334f8fb8dd31520953521da494edd5f37cc56741731070`.
+
 The additive `usedBookNames` projection above is required by the fixed upstream source-manager
 `书架书籍` column and is governed by
 [`source-manager-fixed-baseline-second-audit-p1-contract.md`](source-manager-fixed-baseline-second-audit-p1-contract.md).
@@ -976,6 +1062,33 @@ boundaries and zero failure-cache side effects are implemented. Focused race, fu
 production build, four-viewport real-browser validation and fresh/historical volume gates pass. The locally built
 amd64/arm64 image is published as `f8f263d`/`latest`, OCI index
 `sha256:9c83821de9e5f4df223b6e69a6d67eff512fa55d4a271f544718ccad8ae58ba1`.
+
+### Remote-work JSON request boundary (2026-08-16 implemented)
+
+The deployed search, three legacy source probes, explicit batch health action and two book-cache routes keep their
+existing paths, successful bodies, owner scopes, parser/fetcher policies, failure-cache ownership and cancellation
+semantics. Their implemented second-audit wire/work contract is
+[`remote-work-request-boundary-fixed-baseline-second-audit-p2-contract.md`](remote-work-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+- `POST /api/search` accepts one UTF-8 JSON object up to 64 KiB. The trimmed keyword is at most 1024 bytes and raw
+  `sourceIds` at most 5,000. Non-positive concurrency remains 24; positive concurrency is capped at 60. A
+  multi-source request examines at most eight concurrency windows while preserving the stable original ordinal,
+  `lastIndex`, suppression behavior and `hasMore`.
+- `POST /api/sources/:id/test*`, `/sources/batch-test`, `/books/:id/cache` and `/cache/stream` accept one UTF-8
+  object up to 16 KiB. Probe keywords are at most 1024 bytes and probe URLs 8192 bytes. Batch health handles at most
+  300 sources through at most 15 workers; it does not create one waiting goroutine per source.
+- Exact limits enter the existing business state machine; declared or streamed overflow is flat
+  `413 {"error":"request body too large"}`. A second JSON, trailing garbage, null or wrong top-level type keeps
+  each route's existing malformed `400`. JWT and path/source/book ownership prechecks retain their current priority.
+- Book cache `all=true,count<=0` still means the whole remaining catalogue. The wire boundary is not permission to
+  replace the published whole-book product contract with a 300-chapter cap.
+
+Status is **aligned / regression-validated / Docker-published / awaiting-device-verification**. Inventory `5aadf9b`,
+old-implementation red tests `94d0a4e`, implementation `346a49d` and real-browser contract `6157466` landed in
+order. Focused/full/race/vet, frontend 737/737, production build, three-viewport real Go/Chromium, existing
+source-debug browser coverage and fresh/historical/portable volume gates pass. The locally built amd64/arm64 image
+is published as `6157466`/`latest`, OCI index
+`sha256:1e890a60a1b75879dd99074b1da13b17f91bbd4173e945b92cb8cec0fe8001b6`.
 
 ## P2 parser persistent-variable contract (P2-Parser-1G implemented)
 

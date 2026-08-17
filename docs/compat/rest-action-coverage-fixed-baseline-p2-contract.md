@@ -59,7 +59,8 @@
 必须满足：
 
 1. API 直接数组必须逐项保留 `id/enable/name/rule/serialNumber`，顺序与上游 JSON 完全一致。
-2. `useOverlayBookImport.loadTocRules()` 只剔除没有规则文本的损坏行，不得过滤 `enable=false`。
+2. 共享 `useStorageImportWorkflow.loadTocRules()` 只剔除没有规则文本的损坏行，不得过滤
+   `enable=false`；direct、LocalStore、WebDAV 使用同一规则投影。
 3. 自动检测仍只遍历 `enable=true`，并继续受 512 KiB probe、输入/解码文本/章节数预算约束。
 4. 手动选择 18 条中的任一条都必须可执行；不能只把 RE2 无法编译的 Java 正则显示出来。
 5. `-16` 前向双标题和 `-17` 后向双标题包含跨行 lookaround。Go 实现必须保留相邻标题语义，
@@ -67,8 +68,8 @@
 6. 自定义用户规则继续支持当前已实现的上游 lookbehind 前缀和负向排除兼容，超长规则与解析预算
    继续拒绝。
 
-错误测试 `overlayBookImport.test.mjs` 中“filters enabled TXT TOC rules once”必须改写；
-`TestDefaultTXTTocRulesIncludeUpstreamEnabledRules` 必须升级为精确 18 条合同，并为八条手动规则增加
+前端规则投影由 `localBookImportRetryContract.test.mjs` 与共享 workflow 合同锁定；
+`TestDefaultTXTTocRulesIncludeUpstreamEnabledRules` 已升级为精确 18 条合同，并为八条手动规则增加
 至少一组成功/不应匹配 fixture，特别覆盖 `-16/-17` 的相邻行语义。
 
 ## 5. 书签批删合同
@@ -240,7 +241,7 @@ runtime、fresh 与成功重跑的 historical 卷门通过。本机发布 `be83a
 `sha256:e1f31f3dd728bc27fbc89bbc8c21f81e8c5511c5e99196891feb21cd47138b73`。当前状态为
 **aligned / Docker-published / awaiting-device-verification**。
 
-## 16. LocalStore 文件系统与请求边界（2026-08-12 inventory）
+## 16. LocalStore 文件系统与请求边界（2026-08-12 implementation）
 
 重新盘点 `server.go` 后，下一项 must-fix 落在 `/api/local-store*`：多文件上传虽已有每文件上限、
 私有根和原子替换，但 `PostForm`/`MultipartForm` 会在业务检查前完整读取无界聚合 body；legacy
@@ -251,4 +252,207 @@ directory/rename/import JSON 仍无 actual-read/single-document/cardinality 边�
 固定上游多选上传、当前 OpenReader 稳定路由/响应/逐文件提交、允许的安全差异、multipart/JSON
 精确边界、symlink-safe regular-file 读取和测试门禁见
 [`local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
-当前状态为 **inventory-complete / implementation-pending**；本 inventory 未修改应用或测试。
+合同 `69145fc`、旧实现红测 `8c78775`、实现 `bba99e1` 和真实 HTTP 探针 `930be4d` 已依次推送。
+现在 multipart 总包络、1..64 part/metadata、临时文件所有权、16 KiB/1 MiB single-JSON、200 项请求/
+目录展开、逐组件 symlink/special-file 拒绝和 opened regular-file 复验均已落地；固定上游多文件顺序、
+逐文件提交、旧路由/响应、private root 和 immutable token 保持。
+
+Go focused/full/race/vet、frontend 740/740、build、宿主和本机 arm64 candidate 真实 HTTP 均通过。
+后续 `65a9870` 重新通过 LocalStore candidate 探针、fresh/historical/portable 卷、跨用户与重启，并由
+本机发布为同名标签与 `latest`。远端 amd64/arm64 OCI index 为
+`sha256:255c81b43dbb7f49c707d6c609b920aa183b730401ad1c1ca32157eb0a945c71`；GHCR 回拉 health revision
+一致。当前状态为 **aligned / Docker-published / awaiting-device-verification**。
+
+## 17. WebDAV 导入/恢复文件系统与请求边界（2026-08-16 implemented）
+
+再次扫描 `server.go` 与所有仍直接使用 `ShouldBindJSON`/multipart form 的 handler 后，下一项 must-fix
+选择三个 mounted WebDAV 读取动作，而不是重开已签收的原生 DAV 协议：
+
+- `POST /api/webdav/import-preview`
+- `POST /api/webdav/import`
+- `POST /api/backup/restore-webdav`
+
+固定上游 `WebDAV.vue`、`WebdavController.kt` 与 `BookController.importFromLocalPathPreview` 证明：用户
+从唯一 WebDAV 文件管理器显式选择有序文件，预览后逐本确认；恢复只在确认一项 ZIP 后执行，mounted
+源保留。当前 OpenReader 的稳定 JSON 路由、private root、immutable token、logical/portable ZIP 和
+逐项结果是允许适配，不能被改回上游弱路径拼接或 token-in-URL。
+
+旧实现三个 handler 无 actual-read/single-document JSON；import path/category/目录展开无 cardinality。
+`webdavPath` 仅对顶层请求 path 执行 `Service.Resolve`，随后目录内项进入 `WalkDir`/`os.Open`，因此
+嵌套 symlink/special file 和 restore 的 path 重新打开没有 caller-rooted opened regular-file 证据。
+动作矩阵还发现 direct/source multipart、remote search/debug/cache JSON、progress 和其它 batch JSON
+仍待后续排序；本项因同时触及 mounted data、目录展开、parser 与恢复事务而优先。
+
+精确 1 MiB/16 KiB single JSON、200 项 raw/expanded admission、path 正规化、token-source independence、
+`Service.Open` identity、restore caller-private snapshot、稳定响应/逐项提交、零迁移与红测/卷门见
+[`webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+一次性 Go overlay probe 实际证明超限+第二 JSON 仍 stage/restore、目录内根外 symlink 字节进入 stage，
+且一个目录可返回 201 个 preview item。合同 `cf46e22`、正式旧实现红测 `1bb904a`、实现与真实 runtime
+探针 `616a076` 随后依次推送：三个动作现在按认证优先执行 actual-read UTF-8 single JSON，完整规划
+最多 200 个唯一 target；source-backed 文件逐项用 caller-rooted `Service.Open`，token-only 不访问 mounted
+root；restore 使用 opened regular ZIP 的 caller-private bounded snapshot。
+
+Go focused/full/race/vet、frontend 740/740、build、宿主/candidate declared/chunked + symlink/FIFO +
+token/snapshot 探针，以及 1440x900/390x844/360x800 导入、token 重试和恢复会话隔离均通过。
+`65a9870` 又通过 fresh/historical 三卷和 logical/portable v1/v2、跨用户、重启，由本机发布为同名标签
+与 `latest`；amd64/arm64 OCI index 为
+`sha256:255c81b43dbb7f49c707d6c609b920aa183b730401ad1c1ca32157eb0a945c71`。状态为 **aligned /
+Docker-published / awaiting-device-verification**。direct/source multipart、remote-work JSON、progress 及其它
+batch JSON 仍保留在下一轮动作差集，不因本项完成而误报关闭。
+
+## 18. 直接本地图书多选与 multipart 边界（2026-08-16 implemented）
+
+按第 17 节保留的差集核对固定上游 `Index.vue#onBookFileChange/importMultiBooks`、
+`BookController.importBookPreview` 和旧 `OverlayBookImport/useOverlayBookImport/imports.go` 后，direct
+local import 曾被确定为 must-fix：固定上游隐藏 chooser 支持多选，单本进入确认，多本选择批量或逐一，
+并与 LocalStore/WebDAV 复用同一状态机。
+
+`05343ec` 保留单 object preview/import API、caller-scoped token 和 prepared snapshot，以顺序单文件
+adapter 聚合 1..64 项并接入 shared workflow；旧 direct composable 已删除。三个 direct multipart 路由
+在任何 `PostForm/FormFile` 或 stage 前执行 `maxLocalImportBytes + 1 MiB` declared/actual-read 包络，只
+接受一个 file 或 token、有限已知 scalar/category，并由 handler 清理成功解析的 multipart 临时文件。
+认证、parser、stage、archive、分类和 durable-only 广播的既有成功/失败语义保持。
+
+精确上游证据、可见状态、允许适配、wire/field/error/副作用和测试先行门见
+[`direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md`](direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md)。
+状态为 **aligned / regression-validated / Docker-published / awaiting-device-verification**。`cd8f073` 先使旧实现
+在 direct 多选/共享状态机、declared/chunked、ambiguous part、metadata/category 和临时文件所有权上
+正式变红，`05343ec` 实现，`3b9ae54` 补齐真实 HTTP 与三视口 browser 证据；frontend 737/737、Go
+full/race/vet、build、fresh/historical/portable 卷门和 GHCR 回拉 revision 均通过。本机发布
+`429444a`/`latest`，OCI index 为 `sha256:41f430a5fbf944b9a1dcf25aec6c9f6e92a11a3ff75e395d1a73120da5a6f4d5`；
+下一步从当前 server 重新生成动作差集。
+
+## 19. 当前 `server.go` 动作差集与远程工作优先级（2026-08-16 inventory）
+
+以 `649f2eb` 的 `backend/api/server.go` 重新枚举 route，并逐个反查仍直接使用
+`ShouldBindJSON`、`FormFile` 或只做 `MaxBytesReader + ShouldBindJSON` 的 handler。已发布 direct、
+LocalStore、WebDAV、upload、auth/admin、BookGroup、Bookmark、RSS、BookSource 写边界不因旧调用痕迹
+重开；本轮开放差集如下：
+
+| 候选 | 当前放大面 | 既有合同覆盖 | 排序 |
+|---|---|---|---|
+| remote-work JSON：`/search`、三个 `/sources/:id/test*`、`/sources/batch-test`、两个 book cache | 小 JSON 可触发多源/多章远程工作；旧 search 无 60/八轮上限，旧 batch health 按全部源预建 goroutine，七路曾缺统一 actual-read/single-object。 | 已补 64/16 KiB 单 object、字段/cardinality、60 并发/八窗口、15-worker/300-source、Context 取消，并保留搜索 cursor、诊断 envelope、failure cache 和整本缓存。 | **aligned / regression-validated / Docker-published / awaiting-device-verification**。见 [`remote-work-request-boundary-fixed-baseline-second-audit-p2-contract.md`](remote-work-request-boundary-fixed-baseline-second-audit-p2-contract.md)。 |
+| BookSource local multipart `/sources/import` | 原始浏览器 File 现于 `text()` 前执行 16 MiB admission；API 具有 17 MiB actual-read 包络、严格单 file/零 scalar、稳定双层 413 与 handler-owned cleanup。 | selected payload bytes/cardinality/quota/COW 保持；raw chooser、multipart shape/error/temporary ownership 已有红测、运行时与发布证据。 | **aligned / regression-validated / Docker-published / awaiting-device-verification**。见 [`booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md`](booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md)。 |
+| reading progress `/progress` | 旧无界首 JSON、缺省 chapter index 与无短界 CAS 控制字段已由 16 KiB 单 UTF-8 object、显式 identity 和 RFC3339Nano/字段长度 admission 关闭。 | 进度身份、CAS、镜像、冲突和多客户端收敛保持；`f924604` 合同、`a10facb` 红测、`8d3790d` 实现、`1563bc3` runtime 已完成并随 `65199f6` 通过卷门/正式发布。 | **aligned / regression-validated / Docker-published / awaiting-device-verification**。 |
+| ReplaceRule control JSON | books control 已关闭；重新扫描所得五路 create/update/batch/batch-delete/test 已统一移除 direct Gin binder，使用 actual-read 单 UTF-8 文档、稳定 413 和 request-context GORM transaction。 | 已发布的 UI/Reader/SQLite/backup 合同保持关闭；512 KiB/16 MiB/128 KiB/4 MiB、2,000 raw row/ID、PUT target-first、精确字符串和 durable-only event 均保持。 | **aligned / regression-validated / Docker-published / awaiting-device-verification**；见 [`replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md)。 |
+
+固定上游 `BookController.searchBookMulti` 与 SSE 版本使用可见最高 60 并发和
+`concurrentLoopCount=8`；inventory 时 OpenReader 只有前端枚举，没有服务端 60/八轮边界。旧健康检查
+虽把执行并发夹到 15，却按源数创建等待 goroutine。由此 remote-work 的网络/内存放大风险高于
+progress，成为本轮实现切片。BookManage 整本缓存是明确上游产品合同，本轮只补 wire/cancel，没有借
+安全收紧改回固定章数。
+
+该 inventory 阶段本身只新增/更新文档；后续已按 `5aadf9b` inventory、`94d0a4e` 旧实现红测、
+`346a49d` 实现和 `6157466` 真实浏览器合同顺序关闭。Go full/race/vet、frontend 737/737、build、
+三视口真实 Go/Chromium、source-debug smoke 和 fresh/historical/portable 卷门通过；本机发布
+`6157466`/`latest`，OCI index 为
+`sha256:1e890a60a1b75879dd99074b1da13b17f91bbd4173e945b92cb8cec0fe8001b6`。历史卷首次普通运行出现一次
+fixture 后瞬时 404，同镜像 trace 重跑全链通过。BookSource multipart 后续亦按独立合同关闭；下一轮
+reading progress 后续已由独立合同关闭；下一轮仍须从其它 batch/control JSON 重新取证，不能因这些项目
+关闭而合并签收。
+
+## 20. BookSource 本地导入 multipart 与前端预读（2026-08-16 implemented）
+
+固定上游 chooser 只取第一项，正常路径由浏览器 `FileReader` 解析非空数组，失败 fallback 才把该文件
+交给 `readSourceFile`，最终以用户勾选数组调用 `saveBookSources`。OpenReader 的规范前端同样只取第一项，
+并在确认后生成唯一 `file=bookSources.json` 调用合并的 `/api/sources/import`，因此严格单 file/零 scalar
+不会删减可见流程。
+
+`54f2c83` 的后端已有 17 MiB `MaxBytesReader` 与 16 MiB file read，但 `c.FormFile` 会忽略额外同/异名
+file 与 scalar，body overflow 又会降级成 `400 file is required`，handler 也未局部拥有 multipart temp。
+更重要的是，前端原始 chooser 在任何 size 检查前调用 `file.text()`，所以既有 16 MiB 声明只覆盖预览
+后重新生成的 selected-source Blob，不覆盖用户选入浏览器的原文件。
+
+精确上游映射、17/16 MiB 双层 413、单 file shape、错误优先级、显式 `RemoveAll`、前端预读和必须先写
+的失败测试见
+[`booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md`](booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md)。
+后续按 `d7bc00a` inventory、`ddbac4c` 旧实现红测、`8c66dc9` 实现和 `3f3c9c8` 真实运行时合同顺序
+关闭。前端已在读取前拒绝已知超限 File；后端已落实认证优先、17 MiB actual-read、唯一 file/零 scalar、
+16 MiB file、稳定双层 413 和 form `RemoveAll()`。Go full/race/vet、frontend 738/738、build、三视口真实
+Go/Chromium、fresh/historical/portable 与 source ownership 门通过。本机发布 `3f3c9c8`/`latest`，OCI
+index 为 `sha256:62ee55ffab7859aef4334f8fb8dd31520953521da494edd5f37cc56741731070`；状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+reading progress 后续已由独立合同关闭；其它 batch/control JSON 继续排队，不因 BookSource multipart
+关闭而合并签收。
+
+## 21. 阅读进度 JSON 与 CAS 控制字段（2026-08-16 implemented）
+
+固定上游 `saveBookProgress` 只提交书籍 URL 和显式目录 index；POST 缺省 index 为 `-1`，服务端先确认
+当前用户书架书籍，再从目录取得规范章节。OpenReader 保留已发布的数字 identity、精确位置、SQLite
+CAS、200 conflict、WebSocket 和 existing-directory WebDAV 镜像，不重开该业务合同。
+
+`cfb06e9` 的 `PUT /api/progress` 仍直接 `ShouldBindJSON`：Gin 1.10 只 decode 第一个 JSON value，没有
+actual-read 上限或 UTF-8/single-document 检查；value `chapterIndex` 缺省为 0，省略字段可误写第一章。
+`baseUpdatedAt/clientUpdatedAt` 无长度/语法检查，非法非空时间可落入 non-stale fallback；持久 `mode`
+与广播 `clientId` 也没有应用层短界。
+
+本轮裁决为 auth-first 16 KiB 单 UTF-8 object、显式 book/index、64-byte RFC3339Nano timestamps、20-byte
+mode 和 128-byte clientId；所有拒绝必须先于 service/SQLite/WebDAV/Hub。精确合同和必须先写的测试见
+[`reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md`](reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+后续按 `f924604` 合同、`a10facb` 旧实现红测、`8d3790d` 实现和 `1563bc3` 真实运行时合同顺序关闭。
+Go full/race/vet、frontend 741/741、production build，以及 1440x900、390x844、360x800 的真实
+Go/Chromium 请求边界、client ID 自愈、双客户端 CAS/WebSocket、冷恢复和 WebDAV mirror 均通过。
+`1563bc3` 本机 Docker 候选当时因 socket 使用额度未完成卷门；后续 `65199f6` 重新通过
+fresh/historical/portable 门并由本机发布。`65199f6`/`latest` OCI index 为
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`，强制回拉 arm64 revision
+通过。当前状态为 **aligned / regression-validated / Docker-published / awaiting-device-verification**；
+其它尚未签约 action 继续排队。
+
+## 22. Book 控制动作 JSON、cardinality 与取消（2026-08-16 implemented/published）
+
+重新枚举 `books.go` 中仍直接 `ShouldBindJSON` 的入口后，下一项 must-fix 收敛为 batch、export、
+refresh-local、remote add、change-source 和 legacy content-search POST。固定上游证明这些分别对应已签收
+的 BookManage、BookInfo、本地重解析、入架、Reader 换源和正文搜索状态机；本轮不改可见流程或成功
+语义，只关闭请求可放大的 wire/work 边界。
+
+当前六路都接受首个 object 后的第二 JSON 且无 actual-read/UTF-8 admission；batch category IDs 无 raw
+cardinality，batch cache 和 remote add/change 使用 `context.Background()`，local refresh 又在读取整个
+原书档后才绑定可选规则。完整 16 KiB/32 KiB/1 MiB、200 项、Book 字段、16 KiB TOC rule、legacy 200 envelope、
+target-first priority、取消及零迁移合同见
+[`book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md`](book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+
+后续已按 `097c862` 合同、`669aa5b` 32 KiB TOC 包络勘误、`5cc4b18` 旧实现红测和 `65199f6` 实现
+顺序关闭。六路已执行 single UTF-8 object/actual-read admission，category/Book/TOC 短界和 request
+context 取消，同时保留完整导出、本地原文件、换源 transaction、legacy 200 envelope 和零迁移。
+Go focused/full/race/vet、frontend 741/741、build、三视口真实 Go/Chromium、fresh/historical/portable
+卷门与 GHCR arm64 强制回拉 revision 均通过。本机发布 `65199f6`/`latest`，OCI index 为
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`；状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。下一轮必须从剩余
+server action 重新取证，不因本项签收而合并关闭 replace-rule 等 first-document 长尾。
+
+## 23. ReplaceRule JSON 与事务取消（2026-08-16 implemented/published）
+
+重新枚举 `backend/api` 后，剩余直接 `ShouldBindJSON` 只有 `replace_rules.go` 的 create、update、batch、
+batch-delete 和隐藏 test。固定上游证明 object/array shape、精确字符串、name-upsert、输入顺序和 skip
+语义；当前业务层已有字段、2,000 row/ID、RE2、match/output、事务、owner 和 durable-only broadcast，
+因此本轮不重开已由 `a7abcdd` 发布的管理器、Reader、SQLite 或 backup 合同。
+
+inventory 时五路的 `MaxBytesReader + ShouldBindJSON` 只消费首个 JSON，actual overflow 被各路普通 400
+吸收，非法 UTF-8 又可被替换后进入精确规则字段；GORM/batch transaction 也没有 request context。完整
+边界、旧实现红测和实施证据见
+[`replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同 `ff6d7e3`、红测 `c70f04e`、实现 `9f5a52b` 已依次关闭五路 actual-read/single UTF-8 document、稳定
+413、PUT target-first 和 pre-commit transaction 取消；拒绝零写入/零广播，持久提交仍发一次既有事件。
+focused/full/race/vet、frontend 741/741、build、真实 Go HTTP、ReplaceRule 四视口及 fresh/historical/portable
+卷门通过。本机发布 `9f5a52b`/`latest`，OCI index 为
+`sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`；远端 arm64 config 通过 Registry
+API 确认完整 revision，Docker CLI 强制回拉仅受本机 `osxkeychain -50` 阻断。状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+`backend/api` 当前 direct `ShouldBindJSON`/`ShouldBind` 差集为空，但这只关闭该类 binder；下一项仍须按
+路由、工作放大、事务和错误优先级重新枚举，不能据此宣称全部 REST action 已签收。
+
+## 24. 备份生成错误与请求取消（2026-08-16 inventory）
+
+改按 route/work amplification 枚举后，`POST /api/backup/trigger` 和 `/backup/portable/trigger` 成为下一项
+确定 must-fix。固定上游 `backupToWebdav` 失败只返回“备份失败”；OpenReader 已发布的普通备份 API
+合同同样要求安全固定 500，但当前 handler 仍把 `Service.run` 的 `err.Error()` 拼入响应。底层 OS/GORM/
+ZIP 错误可含 mounted path、SQL 或内部归档信息。
+
+两个生成服务也都没有 context：取消请求仍会等待全局锁并继续数据库查询、ZIP/asset/archive I/O 直到
+rename。现有 temp+rename、caller scope、logical/portable 格式和 typed 409/413 均保持；下一切片只增加
+HTTP context lifecycle、安全错误投影与 path-free 日志，final rename 前取消清理 temp，rename 后 durable
+包不补偿删除。完整合同和红测门见
+[`backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / implementation-pending**；本 inventory 没有修改应用或测试。

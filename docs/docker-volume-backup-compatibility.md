@@ -63,3 +63,104 @@ archive. See
 [`portable-local-archive-backup-p1e4-contract.md`](compat/portable-local-archive-backup-p1e4-contract.md).
 
 This is not a substitute for full restore validation. It is the minimum release gate for Docker volume and backup regressions.
+
+## 2026-08-16 LocalStore/WebDAV boundary release
+
+Release `65a9870` ran the fresh and `HISTORICAL_VOLUME=1` variants sequentially against the locally built candidate.
+Both passed, including TXT/EPUB/UMD/CBZ/relative-cache, owner isolation, logical restore, portable v1/v2 appearance
+assets, cross-user restore and restart. The candidate also passed the LocalStore and WebDAV declared/chunked HTTP,
+symlink/FIFO, token-only and private restore-snapshot probes against mounted host directories.
+
+The image was built locally for `linux/amd64` and `linux/arm64`, then published as
+`ghcr.io/changshengyu/openreader:65a9870` and `latest`. Both tags resolve to OCI index
+`sha256:255c81b43dbb7f49c707d6c609b920aa183b730401ad1c1ca32157eb0a945c71`; a GHCR-pulled arm64 container
+reported commit `65a987049d6a9bff7feeb2618f7257620cd896a9` from `/api/health`.
+
+## 2026-08-16 Direct local import boundary release
+
+Release `429444a` reran the fresh and `HISTORICAL_VOLUME=1` variants sequentially against the locally built
+candidate. Both passed, including TXT/EPUB/UMD/CBZ/relative-cache, owner isolation, logical restore, portable v1/v2
+assets, cross-user restore and restart. The same candidate passed direct declared/chunked multipart admission,
+authentication priority, strict field shape, disk-backed temporary-file cleanup, token-only aliases and 1440x900,
+390x844, 360x800 single/batch/sequential browser flows.
+
+The image was built locally for `linux/amd64` and `linux/arm64`, then published as
+`ghcr.io/changshengyu/openreader:429444a` and `latest`. Both tags resolve to OCI index
+`sha256:41f430a5fbf944b9a1dcf25aec6c9f6e92a11a3ff75e395d1a73120da5a6f4d5`; a GHCR-pulled arm64 container
+reported commit `429444a83ddbe774070c8832ec9d33390037852f` from `/api/health`.
+
+## 2026-08-16 Remote-work request boundary release
+
+Release `6157466` passed the fresh portable-v1/v2-assets, cross-user and restart gates against the locally built
+arm64 candidate. The first ordinary `HISTORICAL_VOLUME=1` run encountered one transient HTTP 404 after fixture
+creation; an immediate traced rerun against the same image passed TXT/EPUB/UMD/CBZ, relative-cache migration,
+owner isolation and historical backup/restore. The failure was not reproducible and is retained here rather than
+being hidden by the successful rerun.
+
+The candidate also passed full Go/race/vet, frontend 737/737, production build, the three-viewport real-Go
+remote-work browser contract and the existing four-viewport source-debug contract. It was built locally for
+`linux/amd64` and `linux/arm64`, then published as `ghcr.io/changshengyu/openreader:6157466` and `latest`. Both tags
+resolve to OCI index `sha256:1e890a60a1b75879dd99074b1da13b17f91bbd4173e945b92cb8cec0fe8001b6`; platform
+manifests are `sha256:02d2055bec076f2590e2a952c9dffad84c55c959965ea1f3dd212da5ef9ff424` for amd64 and
+`sha256:84f17fca80e57e00bdd833c00d300b3cbd31dbaf706dd3ae20d475812037ff53` for arm64. Both image labels report
+revision `6157466687c15d2ce48007443992523dd6a26834`.
+
+## 2026-08-16 BookSource local import multipart release
+
+Release `3f3c9c8` passed the fresh portable-v1/v2-assets, cross-user and restart gates against the locally built
+arm64 candidate. The first ordinary `HISTORICAL_VOLUME=1` run encountered one transient HTTP 404 after fixture
+creation; an immediate traced rerun against the same image passed TXT/EPUB/UMD/CBZ, relative-cache migration,
+owner isolation and historical backup/restore. The failure was not reproducible and is retained here rather than
+being hidden by the successful rerun. The separate source-ownership gate also passed legacy migration, COW,
+administrator/private roots, logical/portable restore and restart.
+
+The candidate passed full Go/race/vet, frontend 738/738, production build and the 1440x900, 390x844, 360x800
+real-Go BookSource import browser contract. Direct API coverage included authentication priority, declared/chunked
+envelope overflow, exact 16 MiB file and +1 boundaries, strict part shape, disk-backed temporary-file cleanup and
+zero mutation on rejection.
+
+The image was built locally for `linux/amd64` and `linux/arm64`, then published as
+`ghcr.io/changshengyu/openreader:3f3c9c8` and `latest`. Both tags resolve to OCI index
+`sha256:62ee55ffab7859aef4334f8fb8dd31520953521da494edd5f37cc56741731070`; platform manifests are
+`sha256:a47a179afdc0356a84ac808148c0a930a40ac80856a5ecf5be3f267b3037036c` for amd64 and
+`sha256:8298c35b5d3d43000a68a52fbd612a48c5e079a1ba9fbaf80e4677b67081e339` for arm64. Both image labels report
+revision `3f3c9c8461e60a12dd0ba08ce4a4f95860dbf319`; a forced GHCR pull returned that revision from `/api/health`.
+
+## 2026-08-16 Book control request boundary release
+
+Release `65199f6` passed the fresh portable-v1/v2-assets, cross-user and restart gate plus the ordinary
+`HISTORICAL_VOLUME=1` TXT/EPUB/UMD/CBZ, relative-cache, owner-isolation and historical/portable restore gate against
+the locally built arm64 candidate. The local candidate label reported full revision
+`65199f666723010beb39a982f941e18af3927697`.
+
+The same implementation passed focused/full/race/vet, frontend 741/741, production build, and real-Go BookManage and
+remote-work browser contracts at 1440x900, 390x844 and 360x800. The image was built locally for `linux/amd64` and
+`linux/arm64`, then published as `ghcr.io/changshengyu/openreader:65199f6` and `latest`. Both tags resolve to OCI index
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`; platform manifests are
+`sha256:df8b9653ea313ebebef0a86c6d1c5359607eb16ea5f2cfb25e72d0ea32c60a0c` for amd64 and
+`sha256:351b7ffbadd4b0ac00689f458cefa0bd179aaf600092a9b0cb71b8655bd4f58a` for arm64. A forced GHCR arm64 pull
+reported the same full revision and index digest.
+
+## 2026-08-16 ReplaceRule request boundary release
+
+Release `9f5a52b` passed the fresh portable-v1/v2-assets, cross-user and restart gate plus the ordinary
+`HISTORICAL_VOLUME=1` TXT/EPUB/UMD/CBZ, relative-cache, owner-isolation and historical/portable restore gate against
+the locally built arm64 candidate. Candidate health and image labels reported full revision
+`9f5a52b3ea4da8ca557653052c5190d8023dfa61`.
+
+The same implementation passed focused/full/race/vet, frontend 741/741, production build, real-Go HTTP request
+boundary smoke and the 1440x900, 1024x1366, 390x844 and 360x800 ReplaceRule manager/editor/import/toggle/batch
+browser contract. No schema, migration, mounted path, archive, backup format or frontend payload changed.
+
+The image was built locally for `linux/amd64` and `linux/arm64`, then published as
+`ghcr.io/changshengyu/openreader:9f5a52b` and `latest`. Both tags resolve to OCI index
+`sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`; platform manifests are
+`sha256:333515ea7c5601bbb1567f39f989d63ad377659347bb27986766b143669e142b` for amd64 and
+`sha256:1c67d6f6e274fe0638fe77458778d566ed7c90da3dd9ee8ee11739805307933d` for arm64.
+
+A forced Docker CLI arm64 pull was blocked locally by macOS `osxkeychain` error `-50`, including with an otherwise
+empty Docker config. Read-only GHCR Registry API inspection resolved the remote arm64 manifest config
+`sha256:ca3cc698073f6741075f41300ef0062590d73d59ea87cd842e2fa25115910fd6` and confirmed
+`architecture=arm64` plus full revision `9f5a52b3ea4da8ca557653052c5190d8023dfa61`. This verifies the published
+remote artifact but is not evidence that any user production instance has upgraded; production runtime remains
+unknown.

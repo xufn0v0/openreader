@@ -390,7 +390,7 @@ The current risk is not framework selection. The risk is implementing from an ab
 | Bookmarks | Upstream `Bookmark.vue`, `BookmarkForm.vue`, `Reader.vue`, `BookmarkController.kt`. | Current ID-backed bookmark APIs and root overlays exist. | Form/manager ownership, paragraph context, stale-offset fallback, creation order and request validation have been rebuilt and verified for the extracted P2 slice. | `aligned` for extracted P2 | Bookmark context/jump/API contracts; three-viewport dialog smoke. |
 | Bookmark manager add-current-paragraph | Upstream bookmark creation is reached from Reader selected-text operations; `Bookmark.vue` itself has no create button. | Reader freezes one exact 32%-anchor paragraph from normal text or a same-origin EPUB iframe; the manager exposes “添加当前段落”. Audio/image/error/empty content has no fake fallback, and selected-text creation remains available. | User explicitly requested this path to avoid keeping the selection-operation popup enabled. | `intentional-redesign / completed 2026-07-18` | [`reader-bookmark-current-page-redesign.md`](reader-bookmark-current-page-redesign.md); 423 frontend tests plus main Reader and real EPUB browser contracts at 1440×900/390×844/360×800. |
 | RSS | Upstream `RssSourceList.vue`, `RssArticleList.vue`, `RssArticle.vue`. | Current root source dialog, independent article-list/content dialogs, `RSSManager.vue`, overlays and Go RSS parser. | The three-dialog transition and compact fullscreen behavior are rebuilt. The 2026-07-27 lifecycle batch removed blank-name fallback and same-URL duplicate creation, added source/sort/filter/page request ownership, and made source/article deletion transactional. Persistent per-user cache/filtering and sanitization remain allowed adaptations. | `aligned` for extracted P2 RSS | [`rss-source-lifecycle-p2-contract.md`](rss-source-lifecycle-p2-contract.md), RSS fixture/parser tests and delayed source-switch browser smoke. |
-| WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P1-E3 restored root labels, current-directory lifecycle, LocalStore result gate and distinct importable formats; private roots, immutable preview tokens and bounded writes remain allowed security/runtime adaptations. | `aligned for extracted workspace flow` | [`workspace-storage-import-p1e3-contract.md`](workspace-storage-import-p1e3-contract.md), path tests, three-viewport storage smoke and Docker volume gate. |
+| WebDAV/local store | Upstream `WebDAV.vue`, `LocalStore.vue` and server storage behavior. | Current Go endpoints, private mounted-root adaptation and workspace dialogs exist. | P1-E3 restored root labels, current-directory lifecycle, LocalStore result gate and distinct importable formats. LocalStore and WebDAV request/filesystem implementations are published after one shared Docker volume gate. WebDAV preview/import/restore enforce bounded single JSON, 200-item complete planning, caller-rooted regular opened reads and a private restore snapshot; private roots and immutable tokens remain allowed adaptations. | `aligned / Docker-published / awaiting-device-verification` | [`workspace-storage-import-p1e3-contract.md`](workspace-storage-import-p1e3-contract.md), [`local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md), [`webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md); implementation `616a076`, release `65a9870`, OCI index `sha256:255c81b43dbb7f49c707d6c609b920aa183b730401ad1c1ca32157eb0a945c71`. |
 | External WebDAV protocol | Upstream `WebdavController.kt` exposes `/reader3/webdav*`, Basic authentication, discovery headers and OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE/MOVE/COPY/LOCK/UNLOCK. | Both `/webdav/*` and `/reader3/webdav/*` accept Bearer/Basic and implement DAV discovery, listing and file methods through symlink-safe `webdavfs`; the deployed `/webdav` directory GET adapter remains. | Caller-private roots, bounded atomic writes and non-persistent LOCK are explicit security/runtime adaptations. | `aligned / Docker-published` | [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md); keep Basic curl, CORS, symlink and mounted-volume contracts. |
 | Backup/restore | Upstream logical backup and WebDAV restore use reader-dev singular artifacts, progress files and one file manager, all under the current user namespace. | OpenReader emits/accepts upstream and old aliases, plans bounded content before one transaction, keeps one WebDAV manager and adds separately named portable v1/v2 extensions. Logical/portable export and restore resolve only the authenticated user’s active source namespace; detached/cross-owner source metadata does not leak. | Fixed-baseline ZIP/UI/transaction behavior and P2-S4 source ownership are both closed. Private WebDAV roots, bounded archive validation, portable assets and detached-source safety are explicit Go/multi-user adaptations. | `aligned / Docker-published` | [`backup-restore-fixed-baseline-p2-contract.md`](backup-restore-fixed-baseline-p2-contract.md), [`book-source-ownership-p2-contract.md`](book-source-ownership-p2-contract.md), [`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md); `f44447f` revalidated the specialized ownership and general new/old-volume gates. |
 | Auth/user management | Upstream `AddUser.vue`/`UserManage.vue` impose account rules, a shared desktop/mobile table, exact last-login data, separate WebDAV/LocalStore rights, protected default namespace, private/default source actions and complete namespace deletion. | JWT/admin protection, account rules, independent permissions, transactional deletion and user/default source ownership remain. `f44447f` restored the one-table desktop/mobile structure, fixed mobile columns, exact core column/footer order, explicit cancel and persisted `lastLoginAt`; `lastActiveAt` remains only an equal compatibility alias. | Core product flow is aligned. Protected administrator semantics, source-edit permission and REST/JWT representation are documented multi-user/runtime adaptations. | `aligned / Docker-published` | [`user-management-p2-contract.md`](user-management-p2-contract.md), [`book-source-ownership-p2-contract.md`](book-source-ownership-p2-contract.md); Go/frontend/build, 1440/1024/390/360 browser and new/old-volume gates passed for `f44447f`. |
@@ -3717,3 +3717,88 @@ backup、前端或其它 endpoint 变化。focused/full/race Go、全量 vet、f
 历史 oversized backup/restore 和隔离真实 HTTP smoke 均通过。状态为
 **implementation-complete / regression-validated / mounted-volume-and-Docker-pending**；fresh/historical
 mounted-volume 与正式本机 Docker 发布仍等待显式 Docker socket 授权。
+
+## 2026-08-16 直接本地图书导入第二轮固定基准复审
+
+固定上游 `Index.vue` 的隐藏 input 含 `multiple`：一次选择的文件按顺序进入
+`importBookPreview`；单本直接打开可编辑书名、作者、分组和规则的确认，多本先选“批量导入/逐一确认”，
+再统一分组或逐本显示 `（i/n）`。LocalStore/WebDAV 的预览结果也调用同一个 `importMultiBooks`，因此
+多入口共享确认状态机是产品合同，不是当前组件形状的选择。
+
+`05343ec` 已把 `OverlayBookImport` 收敛为 1..64 项文件选择宿主，删除独立
+`useOverlayBookImport` 确认流；direct adapter 按顺序逐文件 preview、使用稳定 row identity 聚合，再复用
+`OverlayStorageImport/useStorageImportWorkflow` 的 phase/队列/分组/错误/账号隔离。现有
+`/api/imports/books/preview` 单 object 与 `/api/imports/books`/`imports/txt` 单 Book 响应保持不变；成功
+preview 后只用 caller-scoped token reparse/import，不重新提交浏览器 File。
+
+同一提交新增 direct 专用 multipart boundary：认证优先、`maxLocalImportBytes + 1 MiB` declared/actual-read
+总包络、唯一 file/token、有限 scalar/category、handler-owned `RemoveAll`，并使 shape 拒绝保持零
+stage/DB/archive/event。完整合同与回归证据见
+[`direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md`](direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md)。
+状态为 `aligned / regression-validated / Docker-published / awaiting-device-verification`；合同、红测、实现和
+runtime/browser 证据依次为 `279f688`、`cd8f073`、`05343ec`、`3b9ae54`。frontend 737/737、Go
+full/race/vet、build、真实 HTTP、三视口 direct/storage flow 和 fresh/historical/portable 卷门均通过；
+本机 `429444a`/`latest` OCI index 为 `sha256:41f430a5fbf944b9a1dcf25aec6c9f6e92a11a3ff75e395d1a73120da5a6f4d5`。
+其余 batch JSON 仍保留在下一轮动作差集，不因本项完成而误报关闭。
+
+## 2026-08-16 Book 控制动作请求边界第二轮复审
+
+Reader 换源和 reading progress 已由当前专项合同、实现及 runtime 证据关闭；本轮没有从旧 pending 文案
+重开。重新扫描 `backend/api/books.go` 后，剩余六个直接 `ShouldBindJSON` 入口成为下一项 must-fix：
+`books/batch`、`books/export`、`refresh-local`、`books/remote`、`change-source` 和 reader3 content-search
+POST 均无 actual-read/single-document/UTF-8 admission。category IDs 可放大关系写入，batch cache 与远程
+入架/换源又使用 request-independent context，local refresh 则在验证 body 前先读完整原书档。
+
+固定上游分别证明批删/分组/缓存/导出、本地重解析、远程入架、Reader 换源和正文搜索的可见状态；
+这些成功语义及 OpenReader 已签收的 JWT/ID/transaction/Blob/派生缓存适配继续权威。新增限制只包括
+route-specific 16 KiB/32 KiB/1 MiB 单 UTF-8 object、200 raw categories、既有 Book/variable/TOC 字段预算，以及
+直接请求触发远程工作的 context 取消。legacy POST 继续返回 HTTP 200 envelope，完整导出不截断，
+历史 SQLite、archive、cache、backup 和 WebDAV 均不迁移。
+
+完整 API、数据、安全和测试先行门见
+[`book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md`](book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+后续按 `5cc4b18` 旧实现红测、`65199f6` 实现完成独立阶段；六路现已落实 actual-read/single UTF-8
+object、字段/cardinality 和 request-context 取消，并保持成功业务/数据合同。Go focused/full/race/vet、
+frontend 741/741、build、三视口真实 Go/Chromium、fresh/historical/portable 卷门及 GHCR arm64 revision
+回拉均通过。本机发布 `65199f6`/`latest`，OCI index 为
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`；状态为
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-08-16 ReplaceRule 请求边界第二轮固定基准复审
+
+重新扫描 `backend/api` 后，剩余直接 `ShouldBindJSON` 全部集中在 `replace_rules.go` 的 create、update、
+batch、batch-delete 和隐藏 test。固定上游 `ReplaceRuleController.kt`/`ReplaceRule.kt` 证明认证后的
+object/array shape、精确字符串、name-upsert、输入顺序和精确空 name/pattern skip；已发布 `a7abcdd`
+合同继续权威管理器/编辑器、Reader pipeline、SQLite/backup 和允许差异，本轮不因 wire 长尾重开。
+
+inventory 时五路虽有 `MaxBytesReader` 和既有 512 KiB/16 MiB/128 KiB/4 MiB、2,000 row/ID、字段、RE2、
+match/output 预算，但 `ShouldBindJSON` 只消费首文档，actual overflow 被普通 400 吸收，非法 UTF-8 可被
+替换后进入精确规则字段；GORM 与 batch transaction 也未绑定 request context。实施范围因此只补认证后
+single non-null UTF-8 JSON、稳定 413、PUT target-first、pre-work admission 和 transaction 取消，所有拒绝
+零写入/零广播，不改 schema、文件、旧 URL、前端 payload 或成功业务语义。
+
+完整合同、失败测试和发布证据见
+[`replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+`ff6d7e3` 合同、`c70f04e` 旧实现红测和 `9f5a52b` 实现已依次完成。Go focused/full/race/vet、frontend
+741/741、build、真实 HTTP、四视口 ReplaceRule 及 fresh/historical/portable 卷门通过；本机发布
+`9f5a52b`/`latest`，OCI index 为
+`sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`。Docker CLI 强制 arm64 回拉受
+本机 `osxkeychain -50` 阻断，GHCR Registry config 已确认远端 arm64 与完整 revision。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-08-16 备份生成请求生命周期第二轮固定基准复审
+
+ReplaceRule 发布后不再按 direct Gin binder 推断剩余动作，而是重新按 route、工作放大、事务和错误优先级
+枚举。下一项确定 must-fix 收敛到 `POST /api/backup/trigger` 与 `/backup/portable/trigger`。固定上游
+`WebdavController.backupToWebdav` 在认证/WebDAV 权限后执行确认过的备份，失败只返回固定“备份失败”；
+OpenReader 已发布合同同样要求 ordinary trigger 使用 path-free 安全 500。
+
+当前 ordinary handler 却把 `Service.run` 的 `err.Error()` 直接拼回响应；底层 Mkdir/CreateTemp/Sync/
+Rename、GORM 和 ZIP 错误都可能带 mounted host path、SQL 或内部归档细节。两个 HTTP generator 及 service
+又都没有 context，取消请求仍会等待全局锁并继续 logical/portable DB、ZIP、asset 和原 archive I/O 直到
+rename。现有 caller root、原子 temp+rename、logical/portable 格式、typed 409/413、预算、恢复和唯一工作台
+入口不重开。
+
+完整错误、取消、durable rename、数据和测试先行门见
+[`backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / implementation-pending**；本 inventory 只修改合同文档，没有修改应用或测试。

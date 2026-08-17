@@ -19,15 +19,16 @@ an old database into directories already written by a newer container. The READM
 logical `backup_*.zip`, OpenReader `portable_backup_*.zip`, and a cold three-root system snapshot so users do not
 mistake logical reader-dev compatibility for full filesystem portability.
 
-## P2 reading-progress CAS and WebDAV mirror (audit pending implementation)
+## P2 reading-progress CAS, WebDAV mirror and request boundary
 
-The 2026-07-18 fixed-baseline audit in
-[`reading-progress-p2-contract.md`](reading-progress-p2-contract.md) does not authorize a schema
-migration. `reading_progresses` retains its existing `(user_id,book_id)` unique index and precise
-chapter/offset/percent fields. Atomicity is implemented with conditional writes against the
-existing row ID and `updated_at`, not a replacement table or destructive migration.
+The implemented 2026-07-18 fixed-baseline contract in
+[`reading-progress-p2-contract.md`](reading-progress-p2-contract.md) and the pending second-audit request contract in
+[`reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md`](reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md)
+do not authorize a schema migration. `reading_progresses` retains its existing `(user_id,book_id)` unique index and
+precise chapter/offset/percent fields. Atomicity uses conditional writes against the existing row ID and `updated_at`,
+not a replacement table or destructive migration.
 
-The planned upstream-compatible live progress mirror is additive filesystem output only. It may
+The implemented upstream-compatible live progress mirror is additive filesystem output only. It may
 write a safe `bookProgress/<book>_<author>.json` or `legado/bookProgress/...` file when that
 directory already exists in the caller's WebDAV root. It must not move/delete historical files,
 create the feature directory implicitly, cross the administrator/regular-user root boundary, or
@@ -234,6 +235,9 @@ Status: implemented in-progress; no database migration is required.
 - LocalStore/WebDAV uploads are atomically staged in their destination directory and accept at most `OPENREADER_MAX_IMPORT_BYTES` (default 128 MiB), so a rejected replacement does not truncate an existing file. A preview copies at most that same amount into `cache/import-previews/<user-id>/<random-token>.book` plus metadata; direct upload and every confirmation reread use the same bound. The cache location is user-private, token entropy is 192 bits, metadata expires after 24 hours, and success/expired-token access removes both files. It is safe to clear this derived cache; it is never part of the source file or library archive.
 - The 2026-07-18 parsed-result lifecycle correction adds an optional versioned `<random-token>.parsed.json` beside the existing `.book`/`.json` pair. It contains only bounded parser output, the exact normalized extension/rule and a SHA-256 binding to the staged raw bytes. It is derived caller-scoped cache, not a database or backup format. Existing two-file stages remain valid and create the third file lazily after their next successful preview. A failed reparse cannot replace the last successful snapshot; expiry, explicit cache clearing and successful token consumption remove all three files. No existing `data/`, `library/`, SQLite row, archived source or chapter cache is rewritten.
 - P1-E3 changes only the workbench's visible file-manager operations and makes LocalStore upload accept multiple already-supported multipart file parts. It does not move a LocalStore/WebDAV root, rename any existing source file, alter a book/library archive, or add a SQLite table/column. Each accepted part is independently staged and atomically renamed in its existing caller-scoped directory; a failure leaves other successfully written selected files and every pre-existing destination intact, matching the upstream multi-upload's per-file side effects.
+- The 2026-08-12 LocalStore boundary implementation adds only future-request admission and rooted filesystem checks: no SQLite schema/row, mounted root, source file, library archive, import token, backup member, or browser key is rewritten. Existing symlinks and special files are left in place but hidden/rejected by the API; immutable staged-token confirmation remains independent of later source removal. Fresh/historical/portable mounted-volume verification is still required before publishing its Docker image.
+- The implemented 2026-08-16 WebDAV import/restore boundary authorizes no migration. It adds only future-request admission plus caller-private derived snapshots below existing cache roots. Existing `data/webdav/` files, backups, symlinks and special files remain untouched; source-backed reads reject or skip unsafe entries, token-only import remains source-independent, and a restore snapshot is deleted after the request rather than written back to the mounted ZIP. Contract/red-test/implementation evidence is `cf46e22`/`1bb904a`/`616a076`; `65a9870` passed fresh/historical `data/cache/library`, logical/portable v1/v2, cross-user and restart gates before local amd64/arm64 publication.
+- The implemented direct browser multi-select/multipart second audit authorizes no migration. It changes only future direct-request admission and frontend orchestration: the existing single-object API, two-/three-file stages, 24-hour token cleanup, SQLite rows, library archives, hidden legacy parser formats, backup members and mounted roots remain unchanged. Selected files are previewed one at a time and confirmed only by their caller-scoped token; cancelled tokens remain derived cache and expire normally. Contract/red-test/implementation/runtime evidence is `279f688`/`cd8f073`/`05343ec`/`3b9ae54`; `429444a` passed fresh/historical `data/cache/library`, logical/portable v1/v2, cross-user and restart gates before local amd64/arm64 publication.
 - Extra parser formats already stored in `library/`, LocalStore, WebDAV, SQLite book rows and old direct API clients remain readable. P1-E3 only stops advertising `.text/.md/.pdf` and WebDAV `.cbz` as new workbench import actions, so no data migration, cleanup, archive rewrite or background deletion is permitted.
 - A LocalStore/WebDAV preview retry that supplies an existing `importToken` reads that staged file directly, including when the mounted source was renamed, deleted, or changed after the first preview. A no-match custom TXT rule leaves the token in place, so a later retry/import uses the same bytes. An old client that does not send an `importToken` retains the path-based import fallback.
 - Reader-dev-compatible TXT detection and fallback chunking apply only when a TXT is newly imported or explicitly refreshed/reparsed. Existing imported books, their SQLite rows, `chapters.json`, original archives, and chapter cache files are not rewritten during application startup or a Docker upgrade. This is intentionally a no-migration behavior change for future parsing operations; a user can choose an explicit local refresh/reparse for an old book.
@@ -966,3 +970,37 @@ mounted data rewrite was observed. See `auth-request-boundary-fixed-baseline-sec
   `implementation-complete / regression-validated / mounted-volume-and-Docker-pending`. `6f54be3` changes no
   schema or persistent format; API backup/restore coverage proves historical oversized rows remain lossless. The
   release-specific fresh/historical mounted-volume gate still awaits explicit Docker socket approval.
+
+## P2 Book control request-boundary compatibility (2026-08-16 extracted)
+
+- The proposed 16 KiB/32 KiB/1 MiB single-JSON boundaries affect only six future authenticated HTTP requests. They add no
+  table, column, index, startup scan, data rewrite, browser key, mounted path or backup member.
+- Existing Book, Chapter, Category, Progress, Bookmark and source-candidate rows remain authoritative. Historical
+  oversized text/URL rows are not scanned or truncated; the new Book byte limits apply only to fields explicitly
+  submitted by future remote-add/source-change requests.
+- `refresh-local` continues to reuse the existing `library` archive and atomically stage/promote derived TOC data.
+  Moving request admission before archive reads must leave every rejected request with identical Book/Chapter rows,
+  source bytes, TOC metadata, cache paths and progress.
+- Batch cache cancellation may retain chapters already durably cached before cancellation, exactly like the published
+  stream cache contract, but must not start later books or delete prior cache. Export cancellation writes no database
+  or mounted data. Remote add/change cancellation creates no row/candidate and records no source failure.
+- Logical/portable/WebDAV backups and restores keep their own archive/cardinality contracts; they do not reuse these
+  interactive request limits. Fresh/historical/portable volume gates remain required before release. See
+  `book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md`.
+- Implemented in `65199f6` with zero model/migration/path/backup-format diff. The local candidate passed fresh plus
+  historical/portable mounted-volume gates for TXT/EPUB/UMD/CBZ, relative cache, owner isolation, restart and portable
+  v1/v2 before the locally built amd64/arm64 image was published. `65199f6`/`latest` resolve to OCI index
+  `sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`.
+
+## P2 ReplaceRule request-boundary compatibility (2026-08-16 implemented/published)
+
+- `9f5a52b` changes only authenticated request decoding/admission and request-context propagation. It adds no table,
+  column, index, migration, startup scan, path, mounted file, archive member, browser key or backup format.
+- Existing `replace_rules` rows remain byte-for-byte authoritative, including stable IDs/order, exact whitespace,
+  duplicate names, legacy empty scope and historical mode values. No existing row is normalized, truncated or
+  rewritten by startup, list, backup or restore.
+- Logical/portable/reader-dev/Legado/WebDAV backup and restore retain their independent size/cardinality/transaction
+  contracts. Rejected new HTTP requests mutate neither SQLite nor mounted `data/`, `cache/` or `library/` state.
+- The local candidate passed fresh portable-v1/v2-assets, cross-user and restart plus historical TXT/EPUB/UMD/CBZ,
+  relative-cache, owner-isolation and restore gates. The locally built amd64/arm64 `9f5a52b`/`latest` release resolves
+  to OCI index `sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`.

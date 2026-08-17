@@ -344,6 +344,81 @@ Targeted evidence: `backend/api/progress_p2_contract_test.go`,
 `scripts/smoke/reader-progress-multiclient-contract.mjs`. Release evidence will be appended after
 the remaining gates pass.
 
+### Reading-progress request boundary second audit (2026-08-16 implemented)
+
+- [x] JWT rejection precedes declared/actual body admission; unauthorized oversized, malformed or multi-value input
+      is not read and cannot reveal progress shape or book existence.
+- [x] `PUT /api/progress` accepts one non-null UTF-8 JSON object within 16 KiB. Declared/chunked overflow is stable
+      413; malformed, invalid UTF-8, wrong-shape and trailing JSON are stable 400 before service work.
+- [x] `bookId` and `chapterIndex` are explicit; non-empty conflict timestamps are bounded valid RFC3339Nano.
+      Persisted `mode` and event-reflected `clientId` have 20/128-byte limits without truncation or secret echo.
+- [x] Every wire/field rejection leaves SQLite, shelf order, WebDAV mirror and Hub queue unchanged. Existing CAS,
+      conflict 200, chapter canonicalization, mirror failure and user isolation tests remain green.
+- [x] A stale/oversized session client ID is regenerated in the browser so a bad local value cannot permanently
+      prevent progress synchronization; pending local position and account-generation isolation remain intact.
+
+Evidence: `backend/api/reading_progress_request_boundary_contract_test.go`,
+`frontend/tests/readerProgressRequestBoundary.test.mjs`, `scripts/smoke/reader-progress-multiclient-contract.mjs`,
+focused/full/race/vet, frontend 741/741, production build and three real Chromium viewports. The local `1563bc3`
+candidate build passed; the later `65199f6` release passed fresh/historical/portable mounted-volume gates and forced
+arm64 revision verification, then published `65199f6`/`latest` at OCI index
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`. Full contract:
+[`compat/reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/reading-progress-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+### Book control request boundary second audit (2026-08-16 implemented/published)
+
+- [x] Six authenticated `books.go` JSON control routes enforce actual-read 16 KiB/32 KiB/1 MiB limits, one non-null UTF-8
+      object, auth/target-first priority and their stable modern or reader3 error envelope.
+- [x] Batch/export accept at most 200 raw unique positive owner book IDs; batch Category IDs stop at 200 before
+      dedupe/query/transaction, and existing 50-book cache/100-book clear-cache limits remain.
+- [x] Local refresh decodes the optional body and 16 KiB TOC rule before reading/staging its caller-owned archive;
+      rejected input cannot mutate Book/Chapter, TOC/cache files, progress or events.
+- [x] Remote add/source change validate bounded caller fields/categories/variables before fetch and use request context.
+      Cancellation writes no failure row, book/chapter/candidate/cache state or completion event.
+- [x] Batch cache/export cancellation stops later books/chapters without rolling back already durable cache work or
+      truncating successful complete exports; legacy content search keeps raw whitespace, bounded controls and 200.
+
+Evidence: contract/correction `097c862`/`669aa5b`, red tests `5cc4b18`, implementation `65199f6`, focused/full/race/vet,
+frontend 741/741, production build, real-Go three-viewport browser contracts, fresh/historical/portable gates and forced
+GHCR arm64 revision verification. Published OCI index:
+`sha256:57eda43d437d98a4f2d748164d58c5816f3ff3dc199397bd9dc8f6d48334a8cb`. Full contract:
+[`compat/book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/book-control-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+### ReplaceRule request boundary second audit (2026-08-16 implemented/published)
+
+- [x] Five authenticated ReplaceRule JSON routes enforce their existing 512 KiB/16 MiB/128 KiB/4 MiB limits by
+      actual read, accept exactly one non-null UTF-8 object/array and map true overflow to stable 413.
+- [x] Trailing JSON/garbage, invalid UTF-8, null/wrong shape and over-cardinality fail before rule execution,
+      SQLite mutation or Hub broadcast; PUT preserves auth/path/owner target-first priority.
+- [x] Batch upsert/delete bind GORM and their transactions to request context; pre-commit cancellation rolls back
+      every row and emits no event, while a durable commit retains the existing one convergence event.
+- [x] Existing exact strings/defaults/name-upsert/order/skipped/deletedIds, RE2/match/output budgets, schema, backup and
+      visible manager/Reader behavior remain unchanged.
+
+Evidence: contract `ff6d7e3`, old-implementation red tests `c70f04e`, implementation `9f5a52b`, focused/full/race/vet,
+frontend 741/741, production build, real HTTP, four-view browser and fresh/historical/portable volume gates. The locally
+built amd64/arm64 `9f5a52b`/`latest` release resolves to OCI index
+`sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`. Docker CLI forced arm64 pull was
+blocked by local `osxkeychain -50`; read-only GHCR Registry config inspection confirmed `architecture=arm64` and full
+revision `9f5a52b3ea4da8ca557653052c5190d8023dfa61`. Status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`.
+Full contract:
+[`compat/replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+### Backup generation request lifecycle second audit (2026-08-16 inventory)
+
+- [ ] `POST /api/backup/trigger` maps every internal DB/ZIP/OS failure to fixed `500 {"error":"backup failed"}`;
+      no mounted path, SQL, ZIP detail, source/archive path or credential appears in response or ordinary logs.
+- [ ] Logical and portable HTTP generation propagate request context through lock wait, DB reads and bounded
+      archive/asset copies; a canceled waiter never starts after the active generator releases the lock.
+- [ ] Cancellation before final rename closes/removes the private temp and creates no list-visible package; successful
+      rename is the durable boundary and is not compensation-deleted after a later disconnect.
+- [ ] Existing auth/WebDAV permission priority, caller roots, logical/portable formats, typed 409/413, output budgets,
+      same-name collision protection and scheduled backup behavior remain unchanged.
+
+Status is `inventory-complete / implementation-pending`; no application or test change is included. Full contract:
+[`compat/backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/backup-generation-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
 ## Uploads and archive formats
 
 - [ ] File size limits are enforced before expensive parsing.
@@ -489,19 +564,63 @@ Evidence for the checked items: `backend/api/workspace_storage_access_contract_t
 
 第二轮 LocalStore 文件系统与 HTTP wire 复审见
 [`compat/local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/local-store-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
-当前状态为 **inventory-complete / implementation-pending**：下列缺口必须由旧实现红测证明后关闭，
-不能用既有 lexical prefix、每文件 copy limit 或 WebDAV 测试代替 LocalStore 证据。
+当前状态为 **aligned / Docker-published / awaiting-device-verification**：合同、旧实现红测、实现和真实
+HTTP 探针已按 `69145fc`、`8c78775`、`bba99e1`、`930be4d` 顺序落地，并随 `65a9870` 完成卷门与发布。
 
-- [ ] Multi-file upload has one aggregate actual-read envelope, bounded part cardinality/metadata and explicit
+- [x] Multi-file upload has one aggregate actual-read envelope, bounded part cardinality/metadata and explicit
   handler-owned multipart temporary-file cleanup; authentication and `canAccessStore` still run first.
-- [ ] Directory/rename/import JSON actions accept one bounded document; import request and recursive expansion
+- [x] Directory/rename/import JSON actions accept one bounded document; import request and recursive expansion
   cardinality fail before stage, database, cache or sync side effects.
-- [ ] Every LocalStore action rejects root/ancestor/target symlinks and special files. Open/download/import recheck
+- [x] Every LocalStore action rejects root/ancestor/target symlinks and special files. Open/download/import recheck
   an opened regular file, and no read/write/delete can escape the current user's resolved root.
-- [ ] Host HTTP, focused race, fresh/historical mounted-volume and portable restore probes cover these boundaries
+- [x] Host/candidate HTTP, focused race, fresh/historical mounted-volume and portable restore probes cover these boundaries
   without moving or deleting pre-existing symlinks or mounted user data.
 
-Evidence: `backend/api/workspace_file_manager_p1e3_contract_test.go` covers private rooted listing fields, multi-file ordinary-file storage and a rejected later part preserving its old destination. `frontend/tests/workspaceFileManagerParity.test.mjs` keeps source-specific presentation gates separated from direct parser support. `scripts/smoke/workspace-storage-import-state-machine.mjs` validates authenticated WebDAV requests and removed actions across desktop and both required mobile sizes.
+Evidence: `backend/api/local_store_filesystem_request_boundary_contract_test.go` and
+`scripts/smoke/local-store-filesystem-request-boundary-contract.mjs` cover the wire/filesystem boundary; focused/full/
+race/vet, frontend 740/740, build, host/candidate runtime and fresh/historical/portable mounted-volume gates pass.
+`65a9870`/`latest` is published at OCI index
+`sha256:255c81b43dbb7f49c707d6c609b920aa183b730401ad1c1ca32157eb0a945c71`.
+
+## P1/P2 direct local-book multipart and workflow review (2026-08-16 implemented)
+
+- [x] Direct preview/import/compat-alias apply the same saturating
+      `maxLocalImportBytes + 1 MiB` actual-read envelope to declared and chunked multipart after JWT, before any
+      `PostForm`, `FormFile`, stage, parser, database or archive work.
+- [x] The stable single-object API accepts exactly one `file` or one caller-scoped `importToken`; duplicate,
+      mixed, extra file/value parts, unknown fields and over-cardinality categories fail before side effects.
+- [x] Filename/title/author/rule/category metadata are valid UTF-8 and byte/cardinality bounded. File bytes keep
+      the independent configured import limit; token-only reparse/import cannot access a browser or mounted source.
+- [x] Every successfully parsed multipart form is handler-cleaned on success and every failure branch. Cleanup cannot
+      delete the immutable stage, a successful library archive or another user's derived cache.
+- [x] Direct browser multi-select validates at most 64 visible TXT/EPUB/UMD/CBZ files before network, previews one at
+      a time, keeps duplicate filenames as separate stable rows, and reuses the shared LocalStore/WebDAV confirmation
+      state machine rather than a second business flow.
+- [x] Cancellation/session invalidation aborts current requests and suppresses stale UI/shelf writes. A parser failure
+      may retain only its scoped retry token; shape/wire rejection creates no token, Book, category relation, archive
+      or sync event.
+
+Formal red tests, implementation, focused/full/race/vet, frontend 737/737, build, real HTTP temporary-file probes and
+three-viewport browser flow pass as `cd8f073`/`05343ec`/`3b9ae54`. Fresh/historical/portable mounted-volume gates,
+candidate HTTP/browser probes and GHCR pullback revision also pass; `429444a`/`latest` is published at OCI index
+`sha256:41f430a5fbf944b9a1dcf25aec6c9f6e92a11a3ff75e395d1a73120da5a6f4d5`. See [`compat/direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md`](compat/direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md).
+
+第二轮 WebDAV mounted import/restore 复审见
+[`compat/webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/webdav-import-restore-filesystem-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+当前状态为 **aligned / Docker-published / awaiting-device-verification**；合同 `cf46e22`、旧实现红测
+`1bb904a` 与实现/runtime `616a076` 已推送，并随 `65a9870` 完成卷门与发布；原生 DAV 协议和 archive
+transaction 不重开。
+
+- [x] WebDAV preview/import and WebDAV-path restore accept one actual-read-bounded JSON document after JWT and
+  effective WebDAV permission; raw and expanded target cardinality fails before stage, DB, cache or event work.
+- [x] Every source-backed import item is opened through the caller-rooted file service. A selected directory cannot
+  introduce a nested symlink/FIFO/device/socket into parser input, and no response or log discloses a host path.
+- [x] WebDAV-path restore copies one opened regular ZIP into caller-private bounded cache before archive work; mounted
+  source rename/delete/replace cannot change the restore bytes and the source is never modified.
+- [x] Focused/full/race/vet, declared/chunked host HTTP and three-viewport WebDAV workflow prove the request and
+  mounted-read boundary before Docker publication.
+- [x] Fresh/historical logical/portable mounted-volume gates prove non-destructive upgrade and restore before Docker
+  publication.
 
 ## P1-E4 TXT empty-catalogue follow-up
 
@@ -827,7 +946,11 @@ gates, focused race and a real two-client synchronization smoke at 1440×900, 39
 - [x] Dangerous object keys (`__proto__`, `prototype`, `constructor`) are rejected from the preservation envelope;
       canonical source fields cannot be overridden by preserved extras.
 - [x] Local source JSON imports are capped at 16 MiB and fail with 413 before JSON decoding; the multipart request
-      is also bounded with explicit overhead.
+      is actual-read bounded at 17 MiB after JWT/source-edit authorization. Declared/chunked envelope overflow and
+      16 MiB file overflow use distinct stable 413 errors.
+- [x] The raw browser chooser rejects a known `File.size > 16 MiB` before `text()`/JSON parsing. The API accepts
+      exactly one multipart file named `file`, rejects duplicate/foreign/scalar parts before decode or mutation,
+      and explicitly removes every successfully parsed form on success and all failure paths.
 - [x] Remote source preview continues through the shared SSRF-safe fetcher with scheme/host, redirect, timeout,
       response-size, DNS/rebinding, private-network and credential constraints.
 - [x] Failure-cache categories expose only fixed safe labels and do not reveal JWTs, cookies, source headers,
@@ -836,9 +959,12 @@ gates, focused race and a real two-client synchronization smoke at 1440×900, 39
       existing source ownership, usage guard, mutation transaction and durable-only broadcast remain active.
 
 Evidence: `backend/api/book_source_ownership_api_contract_test.go`,
+`backend/api/book_source_local_import_multipart_boundary_contract_test.go`,
 `backend/services/sourcecompat/export.go`, `frontend/tests/bookSourceEditor.test.mjs`,
 `frontend/tests/sourceScriptTransparencyContract.test.mjs`, full Go/frontend gates, focused/full race, `go vet`,
-and `scripts/smoke/source-workspace-contract.mjs` at four viewports.
+`scripts/smoke/source-workspace-contract.mjs` at four viewports and
+`scripts/smoke/booksource-local-import-multipart-contract.mjs` at three viewports. See
+[`compat/booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md`](compat/booksource-local-import-multipart-fixed-baseline-second-audit-p2-contract.md).
 
 ## P2 TXT TOC rule compatibility security review (2026-08-11)
 
