@@ -8,6 +8,11 @@ reader-dev 的本地书格式行为与 OpenReader 已发布的 SQLite/挂载目�
 TXT、EPUB、UMD、CBZ 的解析和阅读结果；后者是 OpenReader 为 Docker、多用户和安全适配
 必须持续读取的历史数据。当前组件和既有测试都不是本合同的正确性依据。
 
+> 2026-08-24 第二轮 mounted-path 复审发现：`OpenReader@20ba211` 尚未兑现本合同中 owner-root
+> symlink fail-closed 的声明；真实探针可在 `LibraryDir` 外读写并由删除清理移除目录。该缺口由
+> [`local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)
+> 接管，并已随 `125fd93` 实现、回归及发布。本合同的合法旧卷兼容要求继续有效。
+
 ## 1. 历史卷的事实表示
 
 一个已挂载的 OpenReader 卷由下列根组成，不能在升级、启动或刷新时整体替换：
@@ -161,3 +166,15 @@ chapter 行；不能只在升级后通过注册空用户代替 B。完成条件�
 - 不把逻辑备份 ZIP 扩展成无约束的 library 打包，也不以删除旧 archive 换取 schema 简化。
 - 不在本合同审查阶段修改应用代码；所有路径收紧和 cache 迁移变更必须先由上述失败测试
   驱动。
+
+## 6. 2026-08-24 rooted lifecycle 复验
+
+后续本地书归档生命周期复审发现，`20ba211` 会把 symlink 后的 owner root 当作信任根，因而可在
+`LibraryDir` 外读取、刷新和删除。本合同中“符号链接不得逃逸”和“清理只作用于私有归档”的目标没有
+被删除，而是由
+[`local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)
+重新以真实反例、红测和 opened-file/rooted identity 实现取证。`125fd93` 已关闭该缺口，同时保留本合同
+的 current-relative、historical absolute basename/suffix、同 owner 安全 alias、TXT/EPUB/UMD/CBZ、
+relative-cache、owner isolation、archive hash、portable restore 和 restart 行为。本机 amd64/arm64
+`125fd93`/`latest` 已发布，OCI index 为
+`sha256:777ca720981b8a3529009211ce179b430bb354cb01e2957681f191036699f6a5`。

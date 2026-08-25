@@ -3896,7 +3896,85 @@ identity。目标只把响应改为消费 rooted same-file opened handle，保�
 [`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
 `2587299` 完成 inventory，`df49535` 在旧实现上锁定四路 replacement 红测，`a90f7b3` 已让
 EPUB/CBZ/audio 以同一 rooted verified handle 响应，并让 cached cover 只读取/touch 同一普通文件。
-focused/race/full/vet、frontend 741/741、build、EPUB 三视口、CBZ desktop 和宿主
-HEAD/Range/mounted-symlink probe 已通过，本地候选镜像 revision 已确认。CBZ 完整三视口、audio/cover
-browser、fresh/historical/portable/restart 与正式 Docker 发布因本机授权额度耗尽待补；当前状态：
-**implementation-complete / release-validation-pending**。
+focused/race/full/vet、frontend 741/741、build、EPUB/CBZ/audio/真实 cover 三视口、宿主和 `5313c49`
+候选容器 HEAD/Range/mounted-symlink probe，以及 fresh/historical/portable/restart 卷门均已通过；
+CBZ smoke 的自动主题夹具缺口由 `a0c0206`/`5313c49` 修正而未改变产品行为。本机已发布
+`5e63eb1`/`latest`，OCI index 为
+`sha256:8b7bc4cd8542f79eccc54d393cf2d79041f5fe9a90b05776c473cd3f1e4c2cee`；远端两平台 config 和回拉
+arm64 健康接口均确认完整 revision `5e63eb1854a95dc3fd79ebafec89f4723f37f8da`。当前状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-08-24 本地书归档文件系统生命周期第二轮固定基准复审
+
+公开 capability 发布后继续按 mounted path、持久路径字段和文件副作用枚举，下一项确定 must-fix
+收敛到本地书 archive 的 source/cache 读取、`refresh-local` stage/promote、生成式导出回退和删除清理。
+固定上游只从当前 namespace 的本地书文件恢复目录/正文并清理该书存储；OpenReader 的私有
+`library/data/<safe-user>/<book>`、原子 generation、旧绝对字段重定位和 portable v2 保持权威。
+
+`OpenReader@20ba211` 的 `localBookArchiveRoot` 只证明书目录位于 resolved owner root，没有证明该 owner
+root 仍位于可信 `LibraryDir`；refresh 更直接复用 lexical private path。隔离真实 HTTP 探针把
+`library/data/exportaudit` 换成指向库外的 symlink 后，refresh 和章节读取均返回 200 并在库外读写；随后
+batch delete 还删除了库外书目录。完整反例、rooted opened-file、refresh generation、identity-safe cleanup、
+旧卷/portable 回归和测试先行门见
+[`local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+
+合同 `cae9bf2`、alias 勘误 `852df65`、旧实现红测 `92a5fa4` 与实现 `125fd93` 已按顺序关闭该缺口。
+共享 caller/book rooted archive helper 约束 source/cache/export、refresh stage/promote/prune 和删除 detach；
+修复后真实 HTTP 探针不再读取/导出/写入/删除库外 sentinel。focused/full/race/vet、frontend 741/741、
+build、Reader/BookManage 三视口与 fresh/historical/portable/restart 卷门均通过。本机发布
+`125fd93`/`latest`，
+OCI index 为 `sha256:777ca720981b8a3529009211ce179b430bb354cb01e2957681f191036699f6a5`；当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。不删除历史路径回退，
+不要求重新上传，也不迁移 mounted 数据。
+
+## 2026-08-24 备份上传恢复 multipart 请求边界第二轮固定基准复审
+
+本地书归档发布后重新扫描当前 route/wire 差集，下一项确定 must-fix 是
+`POST /api/backup/restore-legado` 的 multipart identity 与临时文件 ownership。固定上游只允许用户选择
+一个 `.zip` WebDAV 行并确认恢复；OpenReader 保留 JWT multipart route 作为部署适配，但没有多包合并
+语义。已签收 ZIP budgets、logical/portable 内容、权限、transaction 和 WebDAV snapshot 不重开。
+
+`OpenReader@7045827` 使用 `c.FormFile("file")`，完整解析后忽略额外 scalar、第二个同名 file 和其它
+file field，也不在 handler 内调用 `MultipartForm.RemoveAll()`。一次性 overlay 探针提交合法 ZIP、scalar
+和 34 MiB 额外 file 后仍返回 200、写入 Book，并在直接 handler 返回后留下 temp。目标为 auth-first、
+compressed+1 MiB 总包络、唯一 `file`、零 scalar/额外 file、255-byte UTF-8 ZIP filename 和所有返回路径
+handler-owned cleanup。完整合同与红测/卷门见
+[`backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同 `7a2a44a`、旧实现红测 `20ac551` 与实现 `a0fb1bd` 已依次推送。实现严格拒绝任何 scalar、重复/
+异名 file 和非法 filename，在所有 parsed-form 路径由 handler 清理 temp；auth/permission、逻辑与
+portable restore、事务和稳定错误保持。Go full/race/vet、frontend 741/741、build、真实 HTTP、WebDAV
+恢复 1440/390/360 三视口及 fresh/historical/portable/restart 卷门通过。本机发布 `a0fb1bd`/`latest`，
+OCI index 为 `sha256:b25f5b05df983532bf656ec8647e553188db3ba7fb291b826cb45b65deae6f3c`；当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-08-25 HTTP 服务生命周期第二轮固定基准复审
+
+当前 action/body/file 差集收敛后，进程级入口仍有一个独立 must-fix。固定上游 startup 将最大 HTTP
+header 固定为 524288 bytes，shutdown 通过标准终止信号关闭进程；OpenReader 作为容器 PID 1 却直接
+调用 `router.Run`，没有显式 header deadline、signal handler 或 `http.Server.Shutdown`。因此当前正常
+`docker stop` 会跳过 cleanup/scheduler/backup defer，且请求头上限无意放宽为 Go 默认 1 MiB。
+
+目标是显式 512 KiB/10 秒 header 边界与 8 秒有界 drain，并关闭 hijacked WebSocket、最终取消 SSE；
+不得设置全局 read/write timeout，不改变 route/body/transaction/API/UI/数据格式。详细矩阵和测试先行门见
+[`http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md`](http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `5b06084`、旧实现红测 `6bee4e0` 与实现 `f394c1a` 已按顺序关闭差异。Go full/race/vet、frontend
+741/741、build、真实 10 秒 header/431/listen-error/SIGTERM/WebSocket、candidate stop 和新旧/portable
+卷门均通过；本机发布 `f394c1a`/`latest`，OCI index 为
+`sha256:4af0cf100434ed852fdf6727d351425cca6935c8f7f6a00eaec220de9865eafa`。状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-08-25 访问日志 Query 脱敏第二轮固定基准复审
+
+当前 process/middleware 差集的下一项 must-fix 是 access log query。固定上游的 Vert.x logger 和
+`RestVerticle` 会记录 URI，OpenReader 出于多用户/JWT 安全已不记录 body/header 并遮蔽 WebSocket JWT、
+公开 capability；但其它 raw query 仍完整输出。真实 `f394c1a` health 请求已把阅读短语、编码 userinfo
+和 token 原样写入日志，handler 不认识参数也不能阻止泄漏与日志放大。
+
+目标为全 route 固定 `?<redacted>` query marker，保留 path/method/status/latency/client IP 和 handler 的
+完整 query，不改变 API/UI/数据。详见
+[`access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md`](access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md)。
+合同 `9161ce5`、旧实现红测 `cce9efd` 与实现 `f88ecec` 已按顺序关闭。Go full/race/vet、frontend 741/741、
+build、真实二进制 200/401/404/256 KiB query 和新旧/portable/restart 卷门通过；本机发布
+`f88ecec`/`latest`，OCI index 为
+`sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`。状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。

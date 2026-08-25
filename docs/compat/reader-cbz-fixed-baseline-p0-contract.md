@@ -129,3 +129,24 @@ auto-reading 或 TTS read bar 打开 + mode=flip -> 临时 page
   `sha256:97c5fe40e7c6d66a2bca6d98939000862b9c7ca835fb5c039c3c36be05017f23`；包含
   `linux/amd64@sha256:bd5c1765d9fd4f16c8a3f086a6a8a37da5d0558554941aff4e958fb28c74e75d`
   和 `linux/arm64@sha256:d7e4d522528d1583e59831dcbd07a1b1d030eae8a0cb07183794ddb1e8eace1a`。
+
+## 9. 2026-08-24 浏览器夹具复审
+
+公开 capability opened-file 切片复验时，390x844 CBZ smoke 连续两次把请求的 `scroll` 观察为
+`page`。服务端持久设置仍是 `mode:"scroll"`；根因是 smoke 只写了局部 reader setting，没有显式
+关闭默认 `autoTheme:true`。固定上游/当前已签收的设置合同要求自动主题在设置加载后立即套用当前
+白天/黑夜默认方案，而方案字段包含 `mode`，因此默认方案把局部夹具合法覆盖为 `page`。
+
+裁决：这是测试夹具缺失全局前置条件，不是 CBZ mode 产品回归。真实 CBZ 三视口夹具必须显式写
+`autoTheme:false`，使本测试拥有的 `page/scroll/flip` 模式不再被系统昼夜状态异步改写；Reader 的
+自动主题、方案字段所有权和 CBZ 保留用户最终有效 mode 的产品合同均不改变。修正后必须重跑
+1440x900 page、390x844/360x800 scroll 和 390x844 flip，并继续检查 capability 请求无 4xx/5xx。
+
+`5313c49` 已在 smoke payload 中显式写入 `autoTheme:false`。修正后的真实 Go + Chromium 流程通过
+1440x900 page、390x844/360x800 scroll 和 390x844 flip；capability 图片全部成功加载且无 console/
+page error。该提交只改变测试夹具，不改变前端产物、持久设置迁移或 Reader mode 状态机。
+
+该复验随 `5e63eb1`/`latest` 由本机完成 amd64/arm64 发布；OCI index 为
+`sha256:8b7bc4cd8542f79eccc54d393cf2d79041f5fe9a90b05776c473cd3f1e4c2cee`，远端 arm64 运行时健康接口
+确认完整 revision `5e63eb1854a95dc3fd79ebafec89f4723f37f8da`。CBZ 产品实现仍是先前已签收状态，本次发布只补齐
+opened-file 安全实现和 smoke 前置条件证据。

@@ -1086,7 +1086,77 @@ mounted data rewrite was observed. See `auth-request-boundary-fixed-baseline-sec
 - Required release evidence includes fresh/historical/portable mounted volumes and restart, proving TXT/EPUB/UMD/
   CBZ/audio, relative cache, owner isolation and backup/restore remain compatible. Full contract:
   [`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-- `a90f7b3` implements opened-file identity without schema, migration, startup scan or layout changes. Focused/full/race/
-  vet and host mounted-symlink probes pass, and the local candidate image reports the full expected revision. The
-  fresh/historical/portable/restart volume gate remains pending because the workspace could not grant Docker socket
-  approval after its automatic approval quota was exhausted; no release image is claimed for this slice yet.
+- `a90f7b3` implements opened-file identity without schema, migration, startup scan or layout changes. Focused/full/
+  race/vet, host and `5313c49` candidate mounted-symlink probes pass. Fresh volumes preserve portable v1/v2 assets,
+  cross-user isolation and restart; historical volumes preserve TXT/EPUB/UMD/CBZ, relative cache, owner isolation,
+  portable restore and archive hashes. The local candidate reports full revision
+  `5313c49f6a18b3cce769ea03e4f8cdf8fddafebe`.
+- The final locally built amd64/arm64 `5e63eb1`/`latest` release resolves to OCI index
+  `sha256:8b7bc4cd8542f79eccc54d393cf2d79041f5fe9a90b05776c473cd3f1e4c2cee`; remote amd64 manifest is
+  `sha256:f5ac952ead7e410c3debe7c2892f84cc5d6e0212a3982c3cd18209e084186c3d`, arm64 manifest is
+  `sha256:a7a243fe0bc4083ebdb6f4f1df5206315a6d3cbac05544525544e44244663d76`, and both configs carry full revision
+  `5e63eb1854a95dc3fd79ebafec89f4723f37f8da`. A forced remote arm64 pull reported the same index and healthy
+  runtime revision. No mounted path, database row or backup member changed in the release.
+
+## P2 local-book archive filesystem lifecycle compatibility (2026-08-24 implemented/published)
+
+- The `125fd93` change adds no table, column, index, migration, startup rewrite, archive layout, backup member, URL,
+  browser key or environment variable. It only constrains future local-book reads, explicit refresh and post-delete
+  cleanup to the existing trusted `library/` mount.
+- Existing regular current-relative and historical-absolute `LibraryPath`/`OriginalFile` representations remain
+  readable through the established basename/suffix rebase. The retired host path itself never becomes readable,
+  and no valid original archive is rewritten by refresh.
+- Root, `data`, owner, outside-book, content/metadata ancestor and entry symlinks or special files remain untouched on
+  mounted storage but cannot be read, written, promoted, pruned or recursively deleted through the API. A historical
+  book-directory alias resolving inside the same verified owner root remains compatible; a durable Book delete is not
+  rolled back when best-effort unsafe cleanup is refused.
+- Refresh continues to stage a new generation and commit chapter/progress/bookmark metadata atomically. Unsafe archive
+  identity must fail before DB/file/event work; valid old rows, archive hashes and active cache remain unchanged.
+- Focused/full/race/vet, frontend 741/741, production build, post-fix real HTTP, Reader and BookManage three-view
+  smoke passed.
+  The local `125fd93` candidate then passed fresh portable-v1/v2-assets/cross-user/restart and historical
+  TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation/archive-hash/portable-restore gates. The locally built amd64/arm64
+  release resolves to OCI index `sha256:777ca720981b8a3529009211ce179b430bb354cb01e2957681f191036699f6a5`.
+  Full contract:
+  [`local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 backup-upload multipart request compatibility (2026-08-25 implemented/published)
+
+- The `a0fb1bd` change adds no schema, migration, startup scan, mounted path, backup member, manifest, archive budget,
+  environment variable, route, response field, browser key or visible restore workflow.
+- Existing logical reader-dev/Legado/OpenReader ZIPs and portable v1/v2 packages remain byte-for-byte inputs to the
+  same preflight and transaction. Current/historical `data/cache/library` volumes are not scanned or rewritten.
+- Only future ambiguous HTTP uploads with scalar, duplicate or differently named extra file parts are rejected before
+  stage/restore. A valid singular `file=*.zip` retains current counts, permission, collision and rollback semantics.
+- Handler-owned `multipart.Form.RemoveAll()` shortens request temp lifetime only; caller-private restore stage and its
+  existing cleanup remain separate. Fresh portable-v1/v2-assets/cross-user/restart and historical TXT/EPUB/UMD/CBZ/
+  relative-cache/owner-isolation/archive-hash/portable-restore gates passed against unchanged mounts. The locally built
+  amd64/arm64 `a0fb1bd`/`latest` release resolves to OCI index
+  `sha256:b25f5b05df983532bf656ec8647e553188db3ba7fb291b826cb45b65deae6f3c`. Full contract:
+  [`backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 HTTP server lifecycle compatibility (2026-08-25 implemented/published)
+
+- `f394c1a` adds no schema, migration, startup scan, persistent path, environment variable, route, response field,
+  browser key, backup member or manifest. Existing `data/cache/library` bytes are not scanned, moved or rewritten.
+- Graceful stop only changes process admission/lifetime: 512 KiB/10 second headers, an 8 second drain and explicit
+  cleanup notification. SQLite WAL/transaction, atomic stage/file publication and existing route body budgets remain
+  authoritative; global read/write timeouts stay disabled for large and streaming work.
+- Fresh portable-v1/v2-assets/cross-user/restart and historical TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation gates
+  passed against the local candidate. Candidate `docker stop -t 10` completed in 0.50 seconds with exit 0 and no OOM.
+- The locally built amd64/arm64 release is `f394c1a`/`latest`, OCI index
+  `sha256:4af0cf100434ed852fdf6727d351425cca6935c8f7f6a00eaec220de9865eafa`. Full contract:
+  [`http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md`](http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 access-log query redaction compatibility (2026-08-25 implemented/published)
+
+- No schema, migration, startup scan, persistent path, environment variable, route, payload, backup member, manifest,
+  browser key or UI is introduced. Existing `data/cache/library` bytes are not scanned or rewritten.
+- Only future access-log lines replace raw query with fixed `?<redacted>`; request parsing, SQLite/files/events and
+  backup/restore remain byte-for-byte outside this slice. Existing log files are not scanned or rewritten.
+- Fresh portable-v1/v2-assets/cross-user/restart and historical TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation gates
+  passed against the local candidate. The locally built amd64/arm64 release is `f88ecec`/`latest`, OCI index
+  `sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`.
+- Full contract:
+  [`access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md`](access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md).
+  Status is **aligned / regression-validated / Docker-published / awaiting-device-verification**.

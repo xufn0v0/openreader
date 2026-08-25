@@ -373,8 +373,49 @@ Go/Chromium、fresh/historical/portable 与 source ownership 门通过。本机�
 index 为 `sha256:62ee55ffab7859aef4334f8fb8dd31520953521da494edd5f37cc56741731070`；状态为
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
+## 29. 本地书归档文件系统生命周期（2026-08-24 implemented/published）
+
+继续按持久 path 与 destructive side effect 枚举后，下一项 must-fix 覆盖
+`GET /api/books/:id/chapters/:index/content`、`POST /api/books/:id/refresh-local`、
+`POST /api/books/export` 的本地书分支及 Book 删除后的 archive cleanup。当前 resolver 把
+resolved owner root 当作新信任根，refresh stage 还直接使用 lexical private path；因此
+`library/data/<user>` symlink 可把 source/cache 读、generation/metadata 写和最后引用删除带到
+`LibraryDir` 外。
+
+2026-08-24 的 `/tmp` 真实 Go/HTTP 探针已证明 refresh/read 返回库外正文并写入库外，batch delete 在
+提交 Book 删除后真实删除库外书目录。original export 自身因额外 library check 回退，但生成式导出仍会
+消费同一不安全 cache/source 链。固定上游本地书可见行为、旧绝对字段 rebase、原 archive、进度/书签、
+导出格式和 path-free envelope 均保留；目标只补 `LibraryDir -> owner -> book -> entry` 逐组件边界、
+same-file opened handle、rooted refresh stage/promote/prune 和 identity-safe delete detach。
+
+完整合同与红测/卷门见
+[`local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `cae9bf2`、alias 勘误 `852df65`、红测 `92a5fa4`、实现 `125fd93` 已顺序推送；修复后真实 HTTP
+探针、focused/full/race/vet、frontend 741/741、build、Reader/BookManage 三视口和 fresh/historical/portable/
+restart 卷门通过。本机发布 `125fd93`/`latest`，OCI index
+`sha256:777ca720981b8a3529009211ce179b430bb354cb01e2957681f191036699f6a5`。状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
 reading progress 后续已由独立合同关闭；其它 batch/control JSON 继续排队，不因 BookSource multipart
 关闭而合并签收。
+
+## 30. 备份上传恢复 multipart 请求边界（2026-08-25 implemented/published）
+
+重新生成当前 route/wire 差集后，下一项 must-fix 收敛到 `POST /api/backup/restore-legado`。已发布的
+compressed/expanded ZIP budgets、logical/portable restore、caller/source permission、transaction/
+rollback、WebDAV opened snapshot 均保持关闭；本轮只补 multipart singularity 和 handler-owned temp
+cleanup。
+
+当前 `c.FormFile("file")` 忽略额外 scalar、同名/异名 file，且 handler 不调用
+`MultipartForm.RemoveAll()`。`7045827` 一次性 overlay 探针提交合法 ZIP、scalar 与 34 MiB 额外 file 后
+仍恢复 Book，并在直接 handler 返回后留下 temp。固定上游单 ZIP 确认动作、OpenReader 稳定 route/error/
+counts 和精确 red-test 门见
+[`backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同 `7a2a44a`、红测 `20ac551` 和实现 `a0fb1bd` 已按测试先行顺序关闭。focused/full/race/vet、
+frontend 741/741、build、真实 HTTP declared/chunked/shape/temp 探针、WebDAV restore 三视口及
+fresh/historical/portable/restart 卷门通过。本机发布 `a0fb1bd`/`latest`，OCI index 为
+`sha256:b25f5b05df983532bf656ec8647e553188db3ba7fb291b826cb45b65deae6f3c`。状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
 ## 21. 阅读进度 JSON 与 CAS 控制字段（2026-08-16 implemented）
 
@@ -552,7 +593,45 @@ rooted same-file opened handle。完整合同见
 [`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
 
 章节图片 capability 在响应前按 token fingerprint 重验最终内存字节，公开 uploads 已由独立合同关闭，
-二者不并入本轮。focused/race/full/vet、frontend 741/741、build、EPUB 三视口、CBZ desktop 与宿主
-HEAD/Range/mounted-symlink probe 已通过，本地 `a90f7b3` 候选镜像 revision 已确认。CBZ 完整三视口、
-audio/cover browser、fresh/historical/portable/restart 与正式 Docker 发布因当前本机授权额度耗尽待补；
-状态：**implementation-complete / release-validation-pending**。
+二者不并入本轮。focused/race/full/vet、frontend 741/741、build、EPUB/CBZ/audio/真实 cover 三视口、
+宿主和 `5313c49` 候选容器 HEAD/Range/mounted-symlink probe，以及 fresh/historical/portable/restart
+卷门均已通过。最终证据提交由本机发布为 `5e63eb1`/`latest`；OCI index 为
+`sha256:8b7bc4cd8542f79eccc54d393cf2d79041f5fe9a90b05776c473cd3f1e4c2cee`，amd64/arm64 manifest 分别为
+`sha256:f5ac952ead7e410c3debe7c2892f84cc5d6e0212a3982c3cd18209e084186c3d` 和
+`sha256:a7a243fe0bc4083ebdb6f4f1df5206315a6d3cbac05544525544e44244663d76`；远端两平台 config 与回拉
+arm64 runtime 均确认完整 revision `5e63eb1854a95dc3fd79ebafec89f4723f37f8da`。状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 31. HTTP 服务生命周期（2026-08-25 implemented/published）
+
+备份 multipart 发布后重新枚举 route 以外的进程级 HTTP 边界，下一项 must-fix 收敛为 Go PID 1 的
+请求头与停止生命周期。固定上游 startup 显式使用 512 KiB header 上限，shutdown 脚本发送标准终止
+信号；当前 `router.Run` 沿用 Go 1 MiB 默认 header 且不接管 `SIGINT`/`SIGTERM`，因此容器停止会直接
+跳过 cleanup、scheduler 和 backup defer，也不等待普通在途请求。
+
+目标只引入显式 `http.Server`、10 秒 header deadline、512 KiB header、有界 8 秒 drain、WebSocket hub
+关闭和幂等 cleanup；全局 read/write timeout 必须保持为零，以免截断章节缓存 SSE、书源调试 SSE、
+WebSocket、大文件上传或备份。完整固定上游证据、目标合同、红测与容器门见
+[`http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md`](http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `5b06084`、旧实现红测 `6bee4e0` 与实现 `f394c1a` 已依次推送。focused/race/full/vet、frontend
+741/741、build、真实二进制 header/listen/SIGTERM/WebSocket、candidate `docker stop` 及
+fresh/historical/portable/restart 卷门通过。本机发布 `f394c1a`/`latest`，OCI index 为
+`sha256:4af0cf100434ed852fdf6727d351425cca6935c8f7f6a00eaec220de9865eafa`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 32. 访问日志 Query 脱敏（2026-08-25 implemented/published）
+
+HTTP 生命周期发布后继续枚举 process/middleware 边界，下一项 must-fix 收敛为共享 access log 的 query
+投影。固定上游保留 method/path 运维日志但会记录完整 URI；OpenReader 已明确遮蔽 WebSocket JWT 和
+capability token，却仍让普通 query 原样进入 Gin log。真实 `f394c1a` 证明任意 200 health 请求可把阅读
+短语、编码 userinfo 和 token 写入日志，且日志长度随 query 放大。
+
+目标统一保留 method/status/latency/client IP/path，将任何 query 整体替换为固定 `?<redacted>`，不解析、
+不 decode、不改变 handler `c.Query` 或任何 API 行为；现有 capability path 脱敏保持。完整固定上游证据、
+真实反例和红测门见
+[`access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md`](access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md)。
+合同 `9161ce5`、旧实现红测 `cce9efd` 与实现 `f88ecec` 已依次推送。focused/race/full/vet、frontend
+741/741、build、真实二进制 200/401/404/256 KiB query 及 fresh/historical/portable/restart 卷门通过。本机
+发布 `f88ecec`/`latest`，OCI index 为
+`sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。

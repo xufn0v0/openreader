@@ -462,8 +462,55 @@ built amd64/arm64 `9f5a52b`/`latest` release resolves to OCI index
 blocked by local `osxkeychain -50`; read-only GHCR Registry config inspection confirmed `architecture=arm64` and full
 revision `9f5a52b3ea4da8ca557653052c5190d8023dfa61`. Status is
 `aligned / regression-validated / Docker-published / awaiting-device-verification`.
-Full contract:
-[`compat/replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 backup-upload multipart request-boundary review (2026-08-25 implemented/published)
+
+- [x] Keep JWT/activity/effective WebDAV permission before multipart parsing; unauthorized/forbidden requests create
+      no temp, restore stage, row, asset or event.
+- [x] Enforce the existing compressed-limit-plus-1-MiB declared/actual body envelope before restore allocation.
+- [x] Accept exactly one file part named `file`, zero scalar/other file parts, and a non-empty UTF-8 `.zip` filename
+      of at most 255 bytes. Reject ambiguity before stage/preflight/transaction.
+- [x] Register handler-owned `multipart.Form.RemoveAll()` for every non-nil parsed form on success, invalid shape,
+      wrong extension, oversized file, stage failure and restore failure; never log temp paths or submitted names.
+- [x] Preserve compressed/entry/expanded ZIP budgets, path/symlink/duplicate checks, portable hashes/collisions,
+      caller/source ownership, one-transaction restore and safe 400/409/413/500 envelopes.
+- [x] Pass red/green shape and forced-disk cleanup tests, focused race/full/vet, real declared/chunked multipart probe,
+      frontend/build, WebDAV restore three-view and fresh/historical/portable/restart gates before local publication.
+
+The `7045827` overlay probe proved that a valid ZIP plus scalar and 34 MiB extra file still restores a Book and leaves
+the parsed temp after direct handler return. Full contract:
+[`compat/backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md`](compat/backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md).
+Contract `7a2a44a`, old-implementation red tests `20ac551` and implementation `a0fb1bd` landed in order. Focused/
+full/race/vet, frontend 741/741, production build, real Go HTTP shape/envelope/temp validation, WebDAV restore at
+1440/390/360 and fresh/historical/portable/restart gates pass. The locally built `a0fb1bd`/`latest` release resolves
+to OCI index `sha256:b25f5b05df983532bf656ec8647e553188db3ba7fb291b826cb45b65deae6f3c`.
+Status: `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 local-book archive rooted lifecycle review (2026-08-24 implemented/published)
+
+- [x] Resolve every imported-book owner/book root from trusted `LibraryDir`; do not accept a resolved owner root that
+      has escaped through a mounted root/ancestor symlink.
+- [x] Preserve a historical book-directory alias only when it resolves inside that same verified owner root and all
+      source/cache/write/delete consumers remain bound to the resolved real directory identity.
+- [x] Open source, chapter cache and original export as the same rooted regular file identity that passed path/type
+      validation; deterministic replacement must not redirect bytes.
+- [x] Keep `refresh-local` stage, metadata promotion and stale-content pruning under the verified book root; unsafe
+      roots/ancestors/entries must fail before DB, event or active-generation changes.
+- [x] Detach a last-reference archive identity-safely before recursive cleanup; a symlink or replacement must never
+      delete its target outside `library/`, while durable Book deletion remains committed.
+- [x] Preserve legal historical path rebase, archive bytes, progress/bookmarks, TXT/EPUB/UMD/CBZ, relative cache,
+      portable backup and startup migration without an eager scan or destructive migration.
+- [x] Pass focused/race/full/vet, real mounted owner/book/content/metadata symlink and replacement probes, frontend
+      full/build, Reader/BookManage three-view smoke and fresh/historical/portable/restart volume gates before release.
+
+The `/tmp` real HTTP probe on `OpenReader@20ba211` proved out-of-root refresh/read/write and post-delete directory
+removal. Required evidence is defined in
+[`compat/local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/local-book-archive-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Evidence: contract `cae9bf2`, alias correction `852df65`, red tests `92a5fa4`, implementation `125fd93`, focused/full/
+race/vet, frontend 741/741, build, post-fix real HTTP, Reader/BookManage three-view and fresh/historical/portable/restart
+volume gates. The locally built amd64/arm64 `125fd93`/`latest` release resolves to OCI index
+`sha256:777ca720981b8a3529009211ce179b430bb354cb01e2957681f191036699f6a5`. Status:
+`aligned / regression-validated / Docker-published / awaiting-device-verification`.
 
 ### Backup generation request lifecycle second audit (2026-08-17 implemented/published)
 
@@ -1086,11 +1133,52 @@ mounted-volume gate and local Docker publication still await explicit Docker soc
       fail closed with path/token/credential-free errors while leaving every mounted object unchanged.
 - [x] Capability purpose/user/book/fingerprint/expiry, EPUB CSP, MIME allowlists, byte/range behavior, private cache
       headers, old URLs and multi-user isolation remain unchanged.
-- [ ] Focused/race/full/vet, real EPUB/CBZ/audio/cover browser flows and fresh/historical/portable mounted-volume
+- [x] Focused/race/full/vet, real EPUB/CBZ/audio/cover browser flows and fresh/historical/portable mounted-volume
       gates pass before local Docker publication.
 
 Required evidence and scope exclusions are defined in
 [`compat/public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Implementation commit `a90f7b3` and its code-level gates are complete. EPUB passed all three required Chromium
-viewports; CBZ desktop and host HEAD/Range/mounted-symlink probes passed. The final checkbox remains open until the
-blocked CBZ/audio/cover browser reruns and fresh/historical/portable/restart volume gates can receive local approvals.
+Implementation commit `a90f7b3` and all code-level gates are complete. `5313c49` evidence covers EPUB/CBZ/audio/
+real cover at 1440/390/360, host and candidate HEAD/Range/mounted-symlink probes, plus fresh/historical/portable/
+restart volumes. The final evidence commit was built locally and published as `5e63eb1`/`latest` at OCI index
+`sha256:8b7bc4cd8542f79eccc54d393cf2d79041f5fe9a90b05776c473cd3f1e4c2cee`; both platform configs and a forced
+remote arm64 runtime check report full revision `5e63eb1854a95dc3fd79ebafec89f4723f37f8da`. Status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 HTTP server lifecycle review (2026-08-25 implemented/published)
+
+- [x] Replace `router.Run` with an explicit `http.Server` using a 512 KiB maximum header and a 10-second
+      `ReadHeaderTimeout`; keep global `ReadTimeout` and `WriteTimeout` disabled for valid long-lived work.
+- [x] Handle `SIGINT`/`SIGTERM`, stop accepting new connections, and complete or cancel work within one bounded
+      8-second shutdown budget instead of allowing Go's default signal exit to skip every defer.
+- [x] Close hijacked WebSocket clients, terminate SSE by the final deadline, and invoke cleanup context,
+      scheduler Stop and backup Stop exactly once without double-close panic.
+- [x] Prove header, listen-error, ordinary-request drain, forced timeout, SSE, WebSocket and real container stop/restart
+      behavior before publication; logs must remain credential-, query-, body-, database- and host-path-free.
+- [x] The inventory introduces no code, schema, migration, persistent path, route, response, backup format or UI change.
+
+Target contract:
+[`docs/compat/http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `5b06084`, red tests `6bee4e0`, and implementation `f394c1a` landed in order. Focused/race/full/vet,
+frontend 741/741, production build, real binary header/listen/SIGTERM/WebSocket, candidate Docker stop and
+fresh/historical/portable/restart volume gates passed. The locally built amd64/arm64 `f394c1a`/`latest` release is
+OCI index `sha256:4af0cf100434ed852fdf6727d351425cca6935c8f7f6a00eaec220de9865eafa`; both remote platform configs report
+the full revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 access-log query redaction review (2026-08-25 implemented/published)
+
+- [x] Replace every non-empty/raw query in access logs with one fixed `?<redacted>` marker before route/auth/status
+      decisions can affect logging; never parse, decode, hash or partially retain query keys/values.
+- [x] Preserve queryless path, method, status, latency and client IP, plus existing capability path-token redaction;
+      WebSocket JWT must converge to the same global query rule.
+- [x] Prove handlers still receive complete query values while 200/401/404, legacy/modern search, LocalStore,
+      Explore, encoded credentials and 256 KiB query requests cannot place secrets or proportional bytes in logs.
+- [x] The inventory changes no code, schema, migration, route, API result, filesystem path, backup format or UI.
+
+Target contract:
+[`docs/compat/access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md`](compat/access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md).
+Contract `9161ce5`, red tests `cce9efd`, and implementation `f88ecec` landed in order. Focused/race/vet/full,
+frontend 741/741, production build, real binary 200/401/404/256 KiB query and fresh/historical/portable/restart gates
+passed. The locally built amd64/arm64 `f88ecec`/`latest` release is OCI index
+`sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`; both remote platform configs report the
+full revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.

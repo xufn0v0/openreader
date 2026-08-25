@@ -30,13 +30,13 @@
 | Reader：设置第二轮复审 | `ReadSettings.vue`、`config.js`、`vuex.js#setConfig/setNightTheme`、`Reader.vue` TTS/read bar | `ReaderSettingsPanel.vue`、`ReaderSettingStepper.vue`、`stores/reader.js`、`ReaderTTSBar.vue`、appearance/mode composables | **2026-08-02 固定基准重建已完成并发布 `40f124f`**：方案 allowlist、无损重置、normal/kindle 双快照、14 内置背景、独立主题纹理、五字体单操作、精确顺序/divider/操作区和 TTS 去重均已落地；亮度、可编辑 stepper、字体预览/字号预设、纯黑白夜间和连续滚动/离散点击为明确允许差异。 | [`reader-settings-fixed-baseline-second-audit-p0-contract.md`](reader-settings-fixed-baseline-second-audit-p0-contract.md)：frontend 680/680、Go/build/diff，1440×900、390×844、360×800、1024×1366、1366×1024、强制手机 iPad 与新旧卷全部通过；`40f124f`/`latest` OCI index 为 `sha256:d9395b19f45bfe9412facbcdcec63e776c881c13437c6049e70140f3f87e6b45`，状态 `aligned / Docker-published / awaiting-device-verification`。 |
 | Reader：书内正文搜索 | `SearchBookContent.vue`、`vuex.js#dialog*`、`Reader.vue#showSearchContent`、`BookController.searchBookContent/searchChapter`、`SearchResult.kt` | `OverlayBookContentSearch.vue`、`useBookContentSearch.js`、`useReaderContentSearchIntent.js`、`useReaderSearchNavigation.js`、`readerBookSearch.js`、`backend/services/contentsearch`、`backend/api/books.go` | **2026-08-02 第二轮固定基准重建已完成并发布 `1801037`**。恢复动态 width/top/table、75% 非自动聚焦标题输入、100/250 列、非阻塞表格、上游 footer 与正常模式 gate；同 ID 换 URL 会 reset，前端 intent/Reader/现代及 legacy Go 全链保留原始空白查询。原始正文、精确/大小写/重叠、游标、取消、UTF-16、多用户、同/跨章跳转继续成立。 | [`book-content-search-fixed-baseline-second-audit-p2-contract.md`](book-content-search-fixed-baseline-second-audit-p2-contract.md)：frontend 659/659、Go/build，普通 Reader 桌面/手机/iPad、真实 EPUB 三视口及新旧卷通过；状态 `aligned / Docker-published`，OCI index `sha256:5d2fdb171e734d5debece77f91ae31495fc1ba7ee9eec28c88aa2b3f41eeeee5`。 |
 | Reader：登录失效与账号切换 | `plugins/axios.js` 的 `NEED_LOGIN`、根 `App.vue#login`、`Reader.vue#loginAuth` | `api/client.js`、`App.vue`、`AuthDialog.vue`、`stores/user.js`、Reader lifecycle/progress、`stores/overlay.js` | **P0 已完成并发布 `59e11a9`**：401 按真实拦截顺序先挂起旧 Reader 再清凭证，未认证根场景不渲染私有 DOM；overlay reset、同账号 generation 重挂载、异账号返回书架、安全 returnTo、旧进度写入抑制均已验证。 | [`reader-reauthentication-isolation-p0-contract.md`](reader-reauthentication-isolation-p0-contract.md)；1440×900、1024×1366、390×844、360×800、frontend 643/643、Go/build 和新旧卷门通过。 |
-| Reader：EPUB、漫画/CBZ、音频、连续跨章、TTS | `Reader.vue`、`Content.vue`、本地格式解析类 | `ReaderChapterContent.vue`、`ReaderEpubContent.vue`、`ReaderAudioContent.vue`、`ReaderTTSBar.vue`、`useReaderChapterReady.js`、格式 parser / cache | **EPUB、CBZ、连续跨章、音频和 TTS 固定基准切片均已完成实现、三视口验证和 Docker 发布**：音频恢复上游结构、边界行为与真实 autoplay；TTS 恢复显式 voice、贴底栏、可取消跨章和关闭段落定位。 | [`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md) 及前三份格式合同；本批 frontend 444/444、Go/build、Reader 全矩阵通过，镜像 `5260efd`/`latest` 已发布。当前 volume 脚本受 Codex socket 授权额度阻断，兼容证据继承无后端/持久化差异的 `370d0f7` 已通过门禁。 |
+| Reader：EPUB、漫画/CBZ、音频、连续跨章、TTS | `Reader.vue`、`Content.vue`、本地格式解析类 | `ReaderChapterContent.vue`、`ReaderEpubContent.vue`、`ReaderAudioContent.vue`、`ReaderTTSBar.vue`、`useReaderChapterReady.js`、格式 parser / cache | **EPUB、CBZ、连续跨章、音频和 TTS 固定基准切片均已完成实现、三视口验证和 Docker 发布**：音频恢复上游结构、边界行为与真实 autoplay；TTS 恢复显式 voice、贴底栏、可取消跨章和关闭段落定位。 | [`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md) 及前三份格式合同；当前 `5313c49` 复验再次通过 EPUB/CBZ/audio 三视口与 fresh/historical/portable/restart 卷门，CBZ smoke 自动主题前置由测试显式冻结。 |
 | Pinia 状态、缓存、同步、数据事务 | `plugins/vuex.js`、`plugins/cache.js`、后端 controller/model | `stores/*.js`、`utils/*cache*`、`backend/models`、`services`、`sync` | 书架、认证 scope 与阅读进度 P2 已完成并发布；**WebSocket 协议第二轮已测试先行实施并发布 `2ea6e8c`**：任意客户端 event relay、无条件 Origin、deleted-user 连接和全局 `users_update` 已关闭；服务端 event type/payload、同用户收敛、重连 REST 权威和数据格式保持。 | [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)、[`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md)；WebSocket 状态 `implemented / regression-validated / Docker-published`，Go/full race、frontend 706/706、build、三视口双客户端及新旧卷通过。 |
-| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。books.go 六个 JSON control、ReplaceRule、备份 generation/list/download、公开 upload read 和远程章节文本缓存生命周期均已发布。EPUB/CBZ/audio/cached-cover capability 的 pathname reopen/same-file 缺口已按 `2587299` 合同、`df49535` 红测、`a90f7b3` 实现顺序关闭；handler 只消费 service 验证的 opened handle。 | [`public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](public-capability-filesystem-read-lifecycle-fixed-baseline-second-audit-p2-contract.md) 状态 `implementation-complete / release-validation-pending`；full/race/vet、frontend/build、EPUB 三视口和宿主 mounted/Range 已通过，剩余浏览器/卷门与正式发布受本机授权额度阻断。 |
+| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。books.go 六个 JSON control、ReplaceRule、备份 generation/list/download、公开 upload read、远程章节文本缓存、公开 capability 文件读取和本地书 archive 生命周期均已发布。`POST /api/backup/restore-legado` multipart identity/cleanup 已随 `a0fb1bd` 关闭：只接受唯一 `file`、零 scalar/额外 file、255-byte UTF-8 ZIP filename，并由 handler 清理 parsed temp。 | [`backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md) 状态 `aligned / regression-validated / Docker-published / awaiting-device-verification`；`7a2a44a` 合同、`20ac551` 红测、`a0fb1bd` 实现顺序完整，auth/permission、logical/portable、transaction 和错误语义保持。 |
 | 书源解析、RSS、远程抓取 | `AnalyzeRule*`、`Rss*`、`BookSourceController.kt` | `backend/engine/source_*.go`、`rss_parser.go`、fetcher、`services/rss` | **CSS/JSONPath/XPath 书源主链、RSS 可见请求页语义、P2-N1/P2-N2 抓取边界和 RSS 持久提交边界均已发布**。refresh 只写 parser/remote 列并按 detail rule 保留权威正文；content cache 只写 content；state 只写 read/favourite；三者不再用全行 `Save` 覆盖。 | 抓取预算/SSRF 合同不重开；[`rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](rss-write-boundary-fixed-baseline-second-audit-p2-contract.md) 已用 trigger/API 证明列所有权、删除不复活、无孤儿 article 和远程工作后的 source/article 存活复验。 |
-| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | `3cef8df` 通过 frontend 741/741、Go full/focused race/vet、build、Reader 四视口、BookManage 五视口、侧边栏三视口、宿主/候选 mounted probe 与 named-volume restart；fresh/historical/portable 覆盖 TXT/EPUB/UMD/CBZ、relative-cache、owner isolation、restart 与 portable v1/v2 assets。 | 本机 amd64/arm64 发布 `3cef8df`/`latest`，OCI index `sha256:8cfe72e56af0cbb191d6b31fa243153a3ce14010614c5153881b262229facf86`；远端两平台 config 已确认完整 revision。用户生产环境运行提交未知。 |
+| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | `a0fb1bd` 通过 frontend 741/741、Go full/focused race/vet、build、真实 multipart HTTP 探针及 WebDAV restore 1440/390/360；fresh 与 historical trace 重跑覆盖 portable v1/v2 assets、cross-user、restart、TXT/EPUB/UMD/CBZ、relative-cache、owner isolation 和 archive hash。历史卷首次并行运行的瞬时 404 未能独立复现。 | 本机 amd64/arm64 发布 `a0fb1bd`/`latest`，OCI index `sha256:b25f5b05df983532bf656ec8647e553188db3ba7fb291b826cb45b65deae6f3c`；amd64/arm64 manifests 分别为 `sha256:4bd4e8e85e3213247191a1a2c7df37efade1a62a38d39851dab897766cc38224`、`sha256:a470eaf82724c71d0d8100dc60676b54d16dc5e122ba33cfd57090495a5b44e3`。用户生产环境运行提交未知。 |
 
-## 当前整体进度快照（2026-08-17，`3cef8df` 远程章节缓存生命周期已发布）
+## 当前整体进度快照（2026-08-25，`a0fb1bd` 备份恢复 multipart 边界已发布）
 
 按全量计划的模块/合同口径而不是代码行数估算，整体约 **99%**。该数字表示固定基准合同和测试先行
 实现覆盖度；用户配置、BookGroup/Category、Book、BookSource、Bookmark 与 RSS 写入/导入边界均完成
@@ -72,7 +72,14 @@
   ReplaceRule 五路、备份生成、backup list/download 与公开 upload resource rooted opened-file 边界均已
   完成合同、红测、实现、runtime、浏览器、卷门和发布；远程章节文本缓存共享文件系统
   生命周期已完成合同 `c6f9de8`、旧实现红测 `f8e5c04`、实现 `75cc238`、浏览器/runtime/卷门和
-  `3cef8df` Docker 发布；其它 action 长尾继续逐项取证。
+  `3cef8df` Docker 发布；公开 capability 文件读取生命周期已完成合同 `2587299`、红测 `df49535`、
+  实现 `a90f7b3`、完整回归/卷门和 `5e63eb1` Docker 发布；本地书 archive rooted filesystem
+  lifecycle 又按合同 `cae9bf2`、alias 勘误 `852df65`、红测 `92a5fa4`、实现与 Docker 发布
+  `125fd93` 关闭；backup upload multipart singularity/handler-owned cleanup 已按合同/红测/实现顺序
+  随 `a0fb1bd` 发布；HTTP server header/signal 生命周期又以 `5b06084`/`6bee4e0`/`f394c1a` 完成并发布；
+  access-log raw query 最后以 `9161ce5`/`cce9efd`/`f88ecec` 完成全 route 固定 marker 并发布。这些切片
+  状态均为 `aligned / regression-validated / Docker-published / awaiting-device-verification`；下一 action
+  必须重新从当前 `server.go`、进程边界和固定上游取证，其它 action 继续逐项审查。
   `c74be70` 已发布但尚待
   服务器部署；移动书架在
   390×844 线上真实账号复测中保持上游 390/350px 几何和内容高度行轨，但设备“明显窄”的反馈仍待
@@ -302,3 +309,30 @@ viewport 捕获段落、合并同批 mode/pageMode/排版变化、取消陈旧�
 页面模式合同通过。Docker 候选进一步通过真实后端 EPUB 三视口与普通/历史持久卷备份门禁，
 已发布 `a7254e3`/`latest`；远端 OCI 索引为
 `sha256:fd4c84bb9da97d4bbab39783d3949d610543195d169756cc2faa13a8e1c2722c`。
+
+## 2026-08-25 HTTP 服务生命周期固定基准复审
+
+备份 multipart 发布后重新扫描 process/server 边界，下一项 must-fix 是 Go PID 1 的请求头与终止信号
+合同。固定上游显式限制 512 KiB header 并以标准信号停止；当前 `router.Run` 使用 Go 默认 1 MiB header，
+没有 header deadline、signal handling 或 graceful shutdown，容器停止会跳过 cleanup/scheduler/backup
+defer。目标为 512 KiB、10 秒 header、8 秒总 drain、WebSocket hub close 和幂等 cleanup，同时保持全局
+read/write timeout 为零，避免破坏 SSE/WebSocket/大文件工作。详见
+[`http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md`](http-server-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `5b06084`、旧实现红测 `6bee4e0` 与实现 `f394c1a` 已依次关闭该边界。focused/race/full/vet、frontend
+741/741、build、真实二进制与 candidate stop、新旧/portable 卷门均通过；本机发布 `f394c1a`/`latest`，
+OCI index `sha256:4af0cf100434ed852fdf6727d351425cca6935c8f7f6a00eaec220de9865eafa`，两平台 config
+确认完整 revision。当前状态 **aligned / regression-validated / Docker-published / awaiting-device-verification**，
+整体比例仍为 99%。
+
+## 2026-08-25 访问日志 Query 脱敏固定基准复审
+
+HTTP lifecycle 发布后重新扫描 middleware/logging 边界，下一项 must-fix 是普通 raw query 原样进入
+access log。真实 `f394c1a` 已证明任意 health query 可写入阅读短语、编码 userinfo/token；现代/legacy
+正文搜索、Explore、LocalStore、RSS 和 source candidates 都有真实 query 面。目标保留 path 与运维字段，
+统一把 query 投影为固定 `?<redacted>`，不改变 handler 或数据。详见
+[`access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md`](access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md)。
+合同 `9161ce5`、旧实现红测 `cce9efd` 与实现 `f88ecec` 已依次关闭。focused/race/full/vet、frontend
+741/741、build、真实二进制与 fresh/historical/portable/restart 卷门均通过；本机发布 `f88ecec`/`latest`，
+OCI index `sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`，两平台 config
+确认完整 revision。当前状态 **aligned / regression-validated / Docker-published / awaiting-device-verification**，
+整体比例仍为 99%。
