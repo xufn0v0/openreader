@@ -2,6 +2,24 @@
 
 Use this checklist for security-sensitive changes and release reviews.
 
+## P2 trusted proxy and rate-limit identity (2026-08-25 implementation)
+
+- [x] Direct deployments trust only the TCP peer address; caller-controlled `X-Forwarded-For` and `X-Real-IP`
+  cannot select a new rate-limit bucket or forge the access-log client identity.
+- [x] Reverse-proxy deployments require an explicit `OPENREADER_TRUSTED_PROXIES` IP/CIDR list. Gin's validated
+  right-to-left chain algorithm remains the single identity source for both the limiter and logger.
+- [x] Empty list items, malformed IPs/CIDRs and wildcard shorthand fail before directories, SQLite, scheduler,
+  backup, middleware registration or listen. The default Compose deployment needs no configuration change.
+- [x] Existing 429 JSON, route exemptions, query/capability redaction, CORS, JWT, WebDAV, source proxy and mounted
+  data contracts remain unchanged.
+
+Evidence: contract `30b7630`, old-implementation red tests `db89593`, implementation `f5b3869`, focused/full/
+race/vet, frontend 741/741, production build, Compose and README variable checks, real-process default/trusted/invalid
+probes, and GitHub Actions `32828470325` fresh/historical/portable/restart gates. The published amd64/arm64 index is
+`sha256:6a2fc83bf79426e93423b1dd5756c8ea49b716d1321441d5c194efff9c03b066`. See
+[`docs/compat/trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md`](compat/trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md).
+Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
 ## Authentication and authorization
 
 - [ ] `OPENREADER_JWT_SECRET` is required and not logged.
@@ -1182,3 +1200,43 @@ frontend 741/741, production build, real binary 200/401/404/256 KiB query and fr
 passed. The locally built amd64/arm64 `f88ecec`/`latest` release is OCI index
 `sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`; both remote platform configs report the
 full revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 frontend public static tree review (2026-08-25 implemented/published)
+
+- [x] Serve only trusted frontend build output through the generic public-file fallback; `api`, `ws`, `webdav`,
+      `reader3`, `uploads` and `assets` retain their dedicated route and authorization behavior.
+- [x] Resolve nested paths through the existing rooted file opener, reject entry/ancestor symlinks and non-regular
+      files, and serve the same verified open handle so validation cannot be redirected by a pathname replacement.
+- [x] Keep Vue history routes ahead of the public-file fallback, and restrict the fallback to GET/HEAD; missing files,
+      directories, traversal, backslashes and unsupported methods retain safe 404/405 responses without host paths.
+- [x] Do not expose or modify `data`, `cache`, `library`, uploads, database rows, environment variables, backup data
+      or browser state. The change adds no schema or migration.
+- [x] Prove UTF-8 and encoded paths, MIME, HEAD, Range, 304, route priority, symlink/FIFO rejection, real Reader
+      asset decoding, mounted-volume compatibility and pulled-image behavior before publication.
+
+Contract `9d32418`, red tests `525a4b6`, and implementation `5163262` landed in order. Focused/race/full/vet,
+frontend 741/741, production build, real Go HTTP, three Chromium viewports and trusted Actions run `32851803480`
+passed. The amd64/arm64 `5163262`/`latest` release is OCI index
+`sha256:3a70be27680b32d51c11e20f56efa2be4824b12f8dff53135b45153dd2f2758d`; a fresh GHCR pull preserved the
+expected health revision and theme/background bytes. Status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`. Full contract:
+[`compat/frontend-public-static-tree-fixed-baseline-second-audit-p2-contract.md`](compat/frontend-public-static-tree-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 authenticated-session lifecycle review (2026-08-25 inventory)
+
+- [ ] Protected REST, WebDAV Bearer and WebSocket must all require a live User, matching auth generation and one
+      non-expired persisted session after validating HS256; failure reasons remain indistinguishable 401s.
+- [ ] Store only SHA-256 identities for cryptographically random session tokens; never persist or log raw JWT/JTI,
+      Authorization, password, claims, username or request query.
+- [ ] Implement seven-day sliding expiry, bounded 64-session retention, conditional renewal and current-session
+      logout without allowing logout/delete races to recreate a removed session.
+- [ ] Password reset must atomically update hash, increment auth generation and remove all target sessions. User
+      deletion and inactive cleanup must remove sessions before the User row and prevent stale-token side effects.
+- [ ] Adopt old JWTs only during one persisted seven-day migration window while the user remains at generation 1;
+      restart cannot reopen the window and a post-reset old token cannot revive.
+- [ ] Exclude sessions and token identities from every backup/export; prove historical migration, rollback,
+      REST/WebDAV/WS behavior, frontend best-effort logout, mounted volumes and pulled image before publication.
+
+Target contract:
+[`compat/authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is `inventory-complete / implementation-pending`; this inventory changes no application code or data.

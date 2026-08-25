@@ -635,3 +635,84 @@ capability token，却仍让普通 query 原样进入 Gin log。真实 `f394c1a`
 发布 `f88ecec`/`latest`，OCI index 为
 `sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`。当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 33. 可信代理、客户端身份与限流（2026-08-25 inventory）
+
+访问日志 query 脱敏发布后继续枚举 process/middleware 边界。当前 `gin.New()` 没有覆盖 Gin 1.10 的
+“信任全部代理”默认值，而全局 `RateLimiter` 和 access log 都以 `c.ClientIP()` 为身份。真实二进制将
+limit 设为 1 后，同一 TCP peer 使用同一 `X-Forwarded-For` 的第二次请求为 429，只变换 header 即再次
+得到 401；日志也把两个伪造值记录为客户端地址。
+
+固定上游 Nginx 文档证明显式反向代理是合法部署，但没有把任意直连请求方声明为可信代理，也没有
+客户端可自行选择限流桶的行为。目标是默认忽略 forwarded client-IP header，并以可选
+`OPENREADER_TRUSTED_PROXIES` 显式列出代理 IP/CIDR；非法配置须在 listen 前失败，可信链使用 Gin
+右到左算法，limiter/logger 共用同一验证身份。现有路由、429 envelope、限流豁免、CORS、JWT、
+WebDAV、graceful shutdown 和日志脱敏保持。完整合同见
+[`trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md`](trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md)。
+合同 `30b7630` 与旧实现红测 `db89593` 已按顺序推送。当前实现默认不信任 forwarded client headers，
+只接受 `OPENREADER_TRUSTED_PROXIES` 明确列出的 IP/CIDR；空项/非法项在任何持久或后台工作及 listen 前
+失败。focused/full/race/vet、frontend 741/741、build、Compose、README 配置映射及真实二进制三组探针
+通过。GitHub Actions `32828470325` 又通过原生镜像与 fresh/historical/portable/restart 卷门，发布
+`f5b3869`/`latest`；amd64/arm64 OCI index 为
+`sha256:6a2fc83bf79426e93423b1dd5756c8ea49b716d1321441d5c194efff9c03b066`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 34. 前端静态资源与 SPA 路由失败分流（2026-08-25 implemented/published）
+
+可信代理发布后继续枚举 process/router 边界。固定上游以 hash router 配合普通静态 handler，不把未知
+服务端请求改写成首页；OpenReader 为 Vue history route 增加 SPA fallback 属于必要技术适配，但当前
+`serveFrontend` 对所有 `NoRoute`、所有 method 都无条件发送 `index.html`，同时只挂载 `/assets`。
+
+真实 `acaae61` 二进制证明未知 `/api/*`、`/ws/*`、缺失 `/assets/*.js`、`PATCH /api/health`、未知页面
+和 `POST` 前端 route 都是 `200 text/html`；构建输出中的 `/manifest.webmanifest`、`/openreader.svg`
+也只能得到首页 HTML。目标是 rooted same-file 服务根级普通构建文件，只允许已注册 Vue history route
+在 GET/HEAD 回退，并让未知 route 与已注册路径错误 method 分别使用安全 JSON 404/405；WebDAV、
+OPTIONS、uploads/capability、CORS、日志和限流优先级保持。
+
+完整上游证据、路由 allowlist、wire envelope、文件安全边界和测试门见
+[`frontend-static-spa-route-boundary-fixed-baseline-second-audit-p2-contract.md`](frontend-static-spa-route-boundary-fixed-baseline-second-audit-p2-contract.md)。
+合同 `c079857`、勘误 `575f269`、旧实现红测 `3c87c89` 与实现 `bf114a6` 已按顺序推送。focused/race/
+full/vet、frontend 741/741、build、Compose、真实 Go 200/401/404/405/MIME/HEAD 与三视口 Chromium
+深链接通过。受信 Actions run `32847847945` 又通过原生候选、fresh/historical/portable/restart、双架构
+发布和平台核验；`bf114a6`/`latest` OCI index 为
+`sha256:ed700c5e4e04274b47d69a7c6613eeb8a02bb6838f40bbd22e2f53295386b6d3`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 35. 前端 public 静态子树（2026-08-25 implemented/published）
+
+frontend/static/router 发布后继续核对真实 production build 与 HTTP 路由可达性。Vite 已把
+`frontend/public/themes/*` 和 `frontend/public/bg/*` 原样输出到 `dist/`，Reader store 也以
+`/themes/*.png`、`/bg/*.jpg` 直接引用；固定上游普通 StaticHandler 同样服务完整 web 静态树。但当前
+Go `NoRoute` 只允许 Vue history route 和根级单文件，真实服务对 `themes/content_0.png` 与中文背景
+`bg/山水画.jpg` 均返回 JSON 404，manifest 则为 200。
+
+下一项 must-fix 是复用已发布 rooted same-file opener 服务受信 build 内普通 public 子树，同时保持
+API/WebDAV/WebSocket/uploads/assets namespace、已知 history route、统一 404/405、GET/HEAD/MIME/Range
+和 symlink/特殊文件边界。完整合同与红测门见
+[`frontend-public-static-tree-fixed-baseline-second-audit-p2-contract.md`](frontend-public-static-tree-fixed-baseline-second-audit-p2-contract.md)。
+合同 `9d32418`、旧实现红测 `525a4b6` 与实现 `5163262` 已按顺序推送。focused/race/full/vet、frontend
+741/741、build、Compose、真实 Go bytes/MIME/HEAD/Range/hash 和 1440/390/1024 Chromium Reader
+加载/解码均通过。受信 Actions run `32851803480` 又通过原生候选、fresh/historical/portable/restart、
+双架构发布和平台核验；`5163262`/`latest` OCI index 为
+`sha256:3a70be27680b32d51c11e20f56efa2be4824b12f8dff53135b45153dd2f2758d`。GHCR 回拉容器也确认
+health revision 与 theme/bg bytes。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 36. 认证会话生命周期（2026-08-25 inventory）
+
+继续按 auth/middleware/action 差集复审后，下一项 must-fix 收敛到登录后的 JWT 生命周期。固定上游
+`saveUserSession/checkAuth/logout` 为每个 token 保存七天期限、认证活动时滑动续期，并在退出时删除当前
+token；账号删除后也不再存在可供 token 定位的用户。
+
+当前 REST `AuthRequired` 和 WebDAV Bearer 只验证 HS256 签名与非零 `userId`，JWT 没有 expiry，前端
+logout 只清 localStorage，管理员改密也不撤销 token。删除用户后的旧 JWT 因而仍能进入受保护 REST，
+不先加载 User 的 handler 还可能重建孤立 user-owned 行；WS 已有独立 deleted-user 检查，但没有统一
+期限/撤销状态。
+
+目标是加法 `auth_version + user_sessions + migration marker`：新会话随机、数据库只存 hashed identity、
+七天滑动过期、每用户最多 64 个；老 JWT 只在幂等迁移 marker 后七天内收编。新增
+`POST /api/auth/logout` 仅撤销当前会话，管理员改密事务递增代次并撤销目标全部会话，删用户事务删除
+session；REST、WebDAV Bearer、WS 共用同一权威认证。WebDAV Basic、登录响应、现有用户数据和
+`data/cache/library` 不变。完整合同见
+[`authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md`](authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / implementation-pending**；本阶段没有修改应用或测试代码。

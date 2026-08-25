@@ -1203,3 +1203,32 @@ real binary 200/401/404/256 KiB query and fresh/historical/portable/restart gate
 is `f88ecec`/`latest`, OCI index
 `sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`. Full contract:
 [`access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md`](access-log-query-redaction-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 trusted-proxy client identity (2026-08-25 implemented/published)
+
+API methods, paths, authentication, request/response bodies, status codes and side effects remain unchanged. By
+default, rate-limit and access-log client identity now use the TCP peer and ignore forwarded client-IP headers.
+Deployments behind a reverse proxy may explicitly list that proxy's IP/CIDR in `OPENREADER_TRUSTED_PROXIES`; Gin's
+validated right-to-left chain then remains the common identity source for limiter and logger. Invalid lists fail
+before listen, while the existing 429 envelope and route exemptions remain unchanged.
+
+Status is **aligned / regression-validated / Docker-published / awaiting-device-verification**. Contract `30b7630`,
+red tests `db89593` and implementation `f5b3869` landed in order. Focused/full/race/vet, frontend 741/741, build,
+Compose, real-process default/trusted/invalid probes and GitHub Actions `32828470325` fresh/historical/portable/
+restart gates passed. The published amd64/arm64 `f5b3869`/`latest` OCI index is
+`sha256:6a2fc83bf79426e93423b1dd5756c8ea49b716d1321441d5c194efff9c03b066`. Full contract:
+[`trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md`](trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md).
+
+## P2 authenticated-session lifecycle (2026-08-25 inventory)
+
+`POST /api/auth/login` and `/register` retain `200 {token,user}`. The next implementation must make that token a
+user-bound, revocable, seven-day sliding session shared by protected REST, WebDAV Bearer and WebSocket auth. Every
+invalid signature, missing/deleted user, wrong auth generation, unknown/revoked session or expired session maps to
+the entry point's existing generic 401 without exposing the reason.
+
+Additive `POST /api/auth/logout` requires the current Bearer, has no body, returns 204, and revokes only that session;
+another login for the same user remains valid. Password reset keeps its current API envelope but atomically revokes
+all target-user sessions. WebDAV Basic remains credential-based and unchanged. Exact legacy-token transition,
+session cap, persistence and tests are defined in
+[`authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md`](authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / implementation-pending**.

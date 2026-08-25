@@ -32,16 +32,17 @@
 | Reader：登录失效与账号切换 | `plugins/axios.js` 的 `NEED_LOGIN`、根 `App.vue#login`、`Reader.vue#loginAuth` | `api/client.js`、`App.vue`、`AuthDialog.vue`、`stores/user.js`、Reader lifecycle/progress、`stores/overlay.js` | **P0 已完成并发布 `59e11a9`**：401 按真实拦截顺序先挂起旧 Reader 再清凭证，未认证根场景不渲染私有 DOM；overlay reset、同账号 generation 重挂载、异账号返回书架、安全 returnTo、旧进度写入抑制均已验证。 | [`reader-reauthentication-isolation-p0-contract.md`](reader-reauthentication-isolation-p0-contract.md)；1440×900、1024×1366、390×844、360×800、frontend 643/643、Go/build 和新旧卷门通过。 |
 | Reader：EPUB、漫画/CBZ、音频、连续跨章、TTS | `Reader.vue`、`Content.vue`、本地格式解析类 | `ReaderChapterContent.vue`、`ReaderEpubContent.vue`、`ReaderAudioContent.vue`、`ReaderTTSBar.vue`、`useReaderChapterReady.js`、格式 parser / cache | **EPUB、CBZ、连续跨章、音频和 TTS 固定基准切片均已完成实现、三视口验证和 Docker 发布**：音频恢复上游结构、边界行为与真实 autoplay；TTS 恢复显式 voice、贴底栏、可取消跨章和关闭段落定位。 | [`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md) 及前三份格式合同；当前 `5313c49` 复验再次通过 EPUB/CBZ/audio 三视口与 fresh/historical/portable/restart 卷门，CBZ smoke 自动主题前置由测试显式冻结。 |
 | Pinia 状态、缓存、同步、数据事务 | `plugins/vuex.js`、`plugins/cache.js`、后端 controller/model | `stores/*.js`、`utils/*cache*`、`backend/models`、`services`、`sync` | 书架、认证 scope 与阅读进度 P2 已完成并发布；**WebSocket 协议第二轮已测试先行实施并发布 `2ea6e8c`**：任意客户端 event relay、无条件 Origin、deleted-user 连接和全局 `users_update` 已关闭；服务端 event type/payload、同用户收敛、重连 REST 权威和数据格式保持。 | [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)、[`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md)；WebSocket 状态 `implemented / regression-validated / Docker-published`，Go/full race、frontend 706/706、build、三视口双客户端及新旧卷通过。 |
-| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。books.go 六个 JSON control、ReplaceRule、备份 generation/list/download、公开 upload read、远程章节文本缓存、公开 capability 文件读取和本地书 archive 生命周期均已发布。`POST /api/backup/restore-legado` multipart identity/cleanup 已随 `a0fb1bd` 关闭：只接受唯一 `file`、零 scalar/额外 file、255-byte UTF-8 ZIP filename，并由 handler 清理 parsed temp。 | [`backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md`](backup-restore-multipart-request-boundary-fixed-baseline-second-audit-p2-contract.md) 状态 `aligned / regression-validated / Docker-published / awaiting-device-verification`；`7a2a44a` 合同、`20ac551` 红测、`a0fb1bd` 实现顺序完整，auth/permission、logical/portable、transaction 和错误语义保持。 |
+| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。frontend/static/router 与 public 子树已随 `bf114a6`、`5163262` 关闭。下一项 must-fix 已收敛到认证会话生命周期：当前 JWT 无期限，REST/WebDAV Bearer 不验证 User 存活，logout/改密没有服务端撤销。 | [`authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md`](authenticated-session-lifecycle-fixed-baseline-second-audit-p2-contract.md) 已提取固定上游七天 token map/续期/退出语义，并定义 hashed session、旧 JWT 七天过渡、改密/删用户撤销及 REST/WebDAV/WS 共用认证；状态 `inventory-complete / implementation-pending`。 |
 | 书源解析、RSS、远程抓取 | `AnalyzeRule*`、`Rss*`、`BookSourceController.kt` | `backend/engine/source_*.go`、`rss_parser.go`、fetcher、`services/rss` | **CSS/JSONPath/XPath 书源主链、RSS 可见请求页语义、P2-N1/P2-N2 抓取边界和 RSS 持久提交边界均已发布**。refresh 只写 parser/remote 列并按 detail rule 保留权威正文；content cache 只写 content；state 只写 read/favourite；三者不再用全行 `Save` 覆盖。 | 抓取预算/SSRF 合同不重开；[`rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](rss-write-boundary-fixed-baseline-second-audit-p2-contract.md) 已用 trigger/API 证明列所有权、删除不复活、无孤儿 article 和远程工作后的 source/article 存活复验。 |
-| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | `a0fb1bd` 通过 frontend 741/741、Go full/focused race/vet、build、真实 multipart HTTP 探针及 WebDAV restore 1440/390/360；fresh 与 historical trace 重跑覆盖 portable v1/v2 assets、cross-user、restart、TXT/EPUB/UMD/CBZ、relative-cache、owner isolation 和 archive hash。历史卷首次并行运行的瞬时 404 未能独立复现。 | 本机 amd64/arm64 发布 `a0fb1bd`/`latest`，OCI index `sha256:b25f5b05df983532bf656ec8647e553188db3ba7fb291b826cb45b65deae6f3c`；amd64/arm64 manifests 分别为 `sha256:4bd4e8e85e3213247191a1a2c7df37efade1a62a38d39851dab897766cc38224`、`sha256:a470eaf82724c71d0d8100dc60676b54d16dc5e122ba33cfd57090495a5b44e3`。用户生产环境运行提交未知。 |
+| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release scripts | `5163262` 通过 frontend 741/741、Go full/focused race/vet、build、Compose、真实图片 bytes/MIME/HEAD/Range/hash、1440/390/1024 Chromium 加载解码与 GHCR 回拉容器；受信 Actions run `32851803480` 通过原生候选、fresh portable-v1/v2-assets/cross-user/restart 和 historical TXT/EPUB/UMD/CBZ/relative-cache/owner-isolation。 | amd64/arm64 发布 `5163262`/`latest`，OCI index `sha256:3a70be27680b32d51c11e20f56efa2be4824b12f8dff53135b45153dd2f2758d`；amd64/arm64 manifests 分别为 `sha256:da98b11603a334800b252c59bbef8807fa7096d93c4fcc333303c5b036d0b9c1`、`sha256:c586bda7b02dd7f5d4143fc7d6f516e46f582c5846962e894f5c38a9dd2edd19`。用户生产环境运行提交未知。 |
 
-## 当前整体进度快照（2026-08-25，`a0fb1bd` 备份恢复 multipart 边界已发布）
+## 当前整体进度快照（2026-08-25，认证会话生命周期 inventory 已完成）
 
 按全量计划的模块/合同口径而不是代码行数估算，整体约 **99%**。该数字表示固定基准合同和测试先行
 实现覆盖度；用户配置、BookGroup/Category、Book、BookSource、Bookmark 与 RSS 写入/导入边界均完成
-实现、全量、运行时、新旧卷和正式 Docker 发布；ReplaceRule 与备份生成请求边界亦已关闭。剩余约 1%
-为后续逐路由 action 审计、长尾固定基准复审与真实设备证据，不能从 direct binder 差集为空推导完成。
+实现、全量、运行时、新旧卷和正式 Docker 发布；ReplaceRule、备份、trusted proxy、frontend/static/
+router 失败分流和 public 静态子树亦已关闭。剩余约 1% 当前包含已确认的认证会话生命周期 must-fix、
+后续逐路由 action 审计、长尾固定基准复审与真实设备证据，不能从 direct binder 差集为空推导完成。
 
 - **P0 Reader 主链已覆盖**：工具层/面板状态机、正文排版、移动点击与连续滚动、设置、书签、正文
   搜索、登录恢复、普通文本、EPUB、CBZ/漫画、音频、连续跨章、TTS、夜间对比度均有专项合同和
@@ -336,3 +337,24 @@ access log。真实 `f394c1a` 已证明任意 health query 可写入阅读短语
 OCI index `sha256:832216dbacb0650a5a6cb30b14731432714f4d48393516aed10c957a97549a29`，两平台 config
 确认完整 revision。当前状态 **aligned / regression-validated / Docker-published / awaiting-device-verification**，
 整体比例仍为 99%。
+
+## 2026-08-25 可信代理、客户端身份与限流固定基准复审
+
+访问日志 query 脱敏发布后重新扫描 process/middleware 边界，下一项 must-fix 收敛为 Gin 默认可信代理
+与 `ClientIP()` 限流身份。当前 `gin.New()` 默认信任全部 IPv4/IPv6 peer，`RateLimiter` 和 access log
+又共同消费 `c.ClientIP()`；真实二进制在 limit=1 时已证明，同一 TCP peer 只需变换
+`X-Forwarded-For` 就能从 429 恢复为 401，日志也记录伪造地址。固定上游虽在 Nginx 示例中设置转发
+header，但没有把任意直连客户端声明为可信代理，也没有“请求方自行选择限流桶”的产品行为。
+
+目标为默认不信任代理、可选 `OPENREADER_TRUSTED_PROXIES` 显式 IP/CIDR 列表、非法配置 listen 前失败、
+可信链右到左投影，以及 limiter/logger 共用同一验证身份；现有 429 envelope、路由豁免、CORS、JWT、
+WebDAV、HTTP lifecycle 与 query/capability 脱敏保持。完整证据、配置/运行时/数据合同和红测门见
+[`trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md`](trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md)。
+合同 `30b7630` 与旧实现红测 `db89593` 已按顺序推送。当前实现默认 `SetTrustedProxies(nil)`，只在
+`OPENREADER_TRUSTED_PROXIES` 明确列出 IP/CIDR 后读取 forwarded client headers；配置在目录、SQLite、
+scheduler、backup、middleware 和 listen 前严格验证。focused/full/race/vet、frontend 741/741、build、
+Compose、README 42/42 变量和真实二进制 default/trusted/invalid 三组探针通过。GitHub Actions
+`32828470325` 又通过 native image、fresh/historical/portable/restart 卷门并发布 `f5b3869`/`latest`；
+amd64/arm64 OCI index 为
+`sha256:6a2fc83bf79426e93423b1dd5756c8ea49b716d1321441d5c194efff9c03b066`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；整体比例仍为 99%。
