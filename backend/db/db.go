@@ -1,6 +1,9 @@
 package db
 
 import (
+	"context"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,17 +12,35 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	gormlogger "gorm.io/gorm/logger"
 
 	"openreader/backend/config"
 	"openreader/backend/models"
+	"openreader/backend/services/sourcecompat"
 )
+
+const dataDirectoryPluginName = "openreader:data-directory"
+
+type dataDirectoryPlugin struct {
+	path string
+}
+
+func (p *dataDirectoryPlugin) Name() string {
+	return dataDirectoryPluginName
+}
+
+func (p *dataDirectoryPlugin) Initialize(*gorm.DB) error {
+	return nil
+}
 
 func Open(cfg config.Config) (*gorm.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.DatabasePath), 0o755); err != nil {
 		return nil, err
 	}
 
-	database, err := gorm.Open(sqlite.Open(cfg.DatabasePath), &gorm.Config{})
+	database, err := gorm.Open(sqlite.Open(cfg.DatabasePath), &gorm.Config{
+		Logger: databaseLogger(log.New(os.Stdout, "\r\n", log.LstdFlags)),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -35,12 +56,28 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 		}
 	}
 
+	if strings.TrimSpace(cfg.DataDir) != "" {
+		if err := database.Use(&dataDirectoryPlugin{path: cfg.DataDir}); err != nil {
+			return nil, err
+		}
+	}
 	return database, nil
+}
+
+func databaseLogger(writer gormlogger.Writer) gormlogger.Interface {
+	return gormlogger.New(writer, gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: false,
+		Colorful:                  true,
+		ParameterizedQueries:      true,
+	})
 }
 
 func AutoMigrate(database *gorm.DB) error {
 	if err := database.AutoMigrate(
 		&models.User{},
+		&models.UserSession{},
 		&models.UserSetting{},
 		&models.BookSource{},
 		&models.UserBookSource{},
@@ -64,7 +101,19 @@ func AutoMigrate(database *gorm.DB) error {
 	if err := migrateLegacyBookSourceOwnership(database); err != nil {
 		return err
 	}
+	if err := initializeAuthenticatedSessionMigration(database); err != nil {
+		return err
+	}
 	return backfillBookLastCheckTimes(database)
+}
+
+const authenticatedSessionMigrationKey = "authenticated-session-v1"
+
+func initializeAuthenticatedSessionMigration(database *gorm.DB) error {
+	return database.Clauses(clause.OnConflict{DoNothing: true}).Create(&models.SchemaMigration{
+		Key:       authenticatedSessionMigrationKey,
+		AppliedAt: time.Now().UTC(),
+	}).Error
 }
 
 const bookSourceOwnershipMigrationKey = "book-source-ownership-v1"
@@ -78,6 +127,10 @@ func migrateLegacyBookSourceOwnership(database *gorm.DB) error {
 	}
 	if applied > 0 {
 		return nil
+	}
+	seedDefaultNamespace, err := shouldSeedLegacyDefaultNamespace(database)
+	if err != nil {
+		return err
 	}
 
 	return database.Transaction(func(tx *gorm.DB) error {
@@ -94,7 +147,7 @@ func migrateLegacyBookSourceOwnership(database *gorm.DB) error {
 		for _, userID := range userIDs {
 			namespaces = append(namespaces, models.BookSourceNamespace{UserID: userID})
 		}
-		if len(sourceIDs) > 0 {
+		if len(sourceIDs) > 0 && seedDefaultNamespace {
 			namespaces = append(namespaces, models.BookSourceNamespace{UserID: 0})
 		}
 		if len(namespaces) > 0 {
@@ -105,7 +158,7 @@ func migrateLegacyBookSourceOwnership(database *gorm.DB) error {
 		}
 
 		associationUsers := userIDs
-		if len(sourceIDs) > 0 {
+		if len(sourceIDs) > 0 && seedDefaultNamespace {
 			associationUsers = append(append([]uint{}, userIDs...), 0)
 		}
 		associations := make([]models.UserBookSource, 0, len(associationUsers)*len(sourceIDs))
@@ -129,6 +182,28 @@ func migrateLegacyBookSourceOwnership(database *gorm.DB) error {
 			AppliedAt: time.Now(),
 		}).Error
 	})
+}
+
+func shouldSeedLegacyDefaultNamespace(database *gorm.DB) (bool, error) {
+	plugin, ok := database.Config.Plugins[dataDirectoryPluginName]
+	if !ok {
+		return true, nil
+	}
+	dataDirectory, ok := plugin.(*dataDirectoryPlugin)
+	if !ok || strings.TrimSpace(dataDirectory.path) == "" {
+		return true, nil
+	}
+	_, err := sourcecompat.ReadSnapshotFile(
+		context.Background(),
+		filepath.Join(dataDirectory.path, "defaultBookSources.json"),
+	)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func backfillBookLastCheckTimes(database *gorm.DB) error {

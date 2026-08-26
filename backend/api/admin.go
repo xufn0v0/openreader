@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log"
 	"net/http"
@@ -27,7 +28,7 @@ func (s *Server) requireAdmin(c *gin.Context) bool {
 		return false
 	}
 	var user models.User
-	if err := s.db.First(&user, userID).Error; err != nil || user.Role != "admin" {
+	if err := s.db.WithContext(c.Request.Context()).First(&user, userID).Error; err != nil || user.Role != "admin" {
 		c.JSON(http.StatusForbidden, errResp("FORBIDDEN", "admin access required"))
 		return false
 	}
@@ -103,14 +104,14 @@ func (s *Server) setUserSourcesAsDefault(c *gin.Context) {
 		return
 	}
 	var target models.User
-	if err := s.db.Select("id").First(&target, userID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := s.db.WithContext(c.Request.Context()).Select("id").First(&target, userID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	} else if err != nil {
 		internalError(c, "failed to load user")
 		return
 	}
-	count, err := s.saveDefaultSourceSnapshot(userID, true)
+	count, err := s.saveDefaultSourceSnapshotContext(c.Request.Context(), userID, true)
 	if errors.Is(err, booksources.ErrNamespaceNotInitialized) {
 		c.JSON(http.StatusConflict, gin.H{"error": "user sources are not initialized"})
 		return
@@ -161,7 +162,7 @@ func (s *Server) resetUserSources(c *gin.Context) {
 		return
 	}
 	var existing int64
-	if err := s.db.Model(&models.User{}).Where("id IN ?", ids).Count(&existing).Error; err != nil {
+	if err := s.db.WithContext(c.Request.Context()).Model(&models.User{}).Where("id IN ?", ids).Count(&existing).Error; err != nil {
 		internalError(c, "failed to load users")
 		return
 	}
@@ -169,16 +170,19 @@ func (s *Server) resetUserSources(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	_, _, err := s.ensureDefaultBookSourceNamespace()
+	s.defaultSourcesMu.Lock()
+	defer s.defaultSourcesMu.Unlock()
+	bookSources := booksources.New(s.db.WithContext(c.Request.Context()))
+	_, _, err := s.ensureDefaultBookSourceNamespaceLocked(c.Request.Context(), bookSources)
 	if errors.Is(err, os.ErrNotExist) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "default sources are not configured"})
 		return
 	}
 	if err != nil {
-		badRequest(c, "default sources are invalid")
+		internalError(c, "failed to load default sources")
 		return
 	}
-	result, err := s.bookSources.RestoreDefaultForUsers(ids)
+	result, err := bookSources.RestoreDefaultForUsers(ids)
 	if errors.Is(err, booksources.ErrNoDefault) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "default sources are not configured"})
 		return
@@ -263,6 +267,7 @@ func (s *Server) createUser(c *gin.Context) {
 		CanEditSources:  true,
 		CanAccessStore:  true,
 		CanAccessWebDAV: boolValue(true),
+		AuthVersion:     1,
 		LastActiveAt:    time.Now(),
 	}
 	if req.CanEditSources != nil {
@@ -414,7 +419,19 @@ func (s *Server) resetUserPassword(c *gin.Context) {
 		internalError(c, "failed to hash password")
 		return
 	}
-	if err := s.db.Model(&user).Update("password_hash", string(hash)).Error; err != nil {
+	if err := s.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&models.User{}).Where("id = ?", user.ID).Updates(map[string]any{
+			"password_hash": string(hash),
+			"auth_version":  gorm.Expr("auth_version + 1"),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return s.sessions.RevokeUser(c.Request.Context(), tx, user.ID)
+	}); err != nil {
 		internalError(c, "failed to reset password")
 		return
 	}
@@ -482,10 +499,10 @@ func (s *Server) userWorkspaceCleanupPlans(users []models.User) ([]userWorkspace
 // deleteUserData atomically removes every SQLite row owned by the requested
 // ordinary users. Files are intentionally a post-commit cleanup: rollback can
 // protect database data, but it cannot safely undo a removed mounted file.
-func (s *Server) deleteUserData(ids []uint, protectedUserID uint) ([]models.User, []userWorkspaceCleanupPlan, error) {
+func (s *Server) deleteUserData(ctx context.Context, ids []uint, protectedUserID uint) ([]models.User, []userWorkspaceCleanupPlan, error) {
 	var deletedUsers []models.User
 	var plans []userWorkspaceCleanupPlan
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Where("id IN ? AND role <> ?", ids, "admin")
 		if protectedUserID != 0 {
 			query = query.Where("id <> ?", protectedUserID)
@@ -532,6 +549,7 @@ func (s *Server) deleteUserData(ids []uint, protectedUserID uint) ([]models.User
 			{model: &models.ReplaceRule{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.UserSetting{}, where: "user_id IN ?", args: []any{deletedIDs}},
 			{model: &models.SourceFailure{}, where: "user_id IN ?", args: []any{deletedIDs}},
+			{model: &models.UserSession{}, where: "user_id IN ?", args: []any{deletedIDs}},
 		} {
 			if err := tx.Where(deletion.where, deletion.args...).Delete(deletion.model).Error; err != nil {
 				return err
@@ -600,7 +618,7 @@ func (s *Server) deleteUsers(c *gin.Context) {
 		badRequest(c, "no deletable users selected")
 		return
 	}
-	deletedUsers, plans, err := s.deleteUserData(ids, currentUserID)
+	deletedUsers, plans, err := s.deleteUserData(c.Request.Context(), ids, currentUserID)
 	if errors.Is(err, errNoDeletableUsers) {
 		badRequest(c, err.Error())
 		return
@@ -633,7 +651,7 @@ func (s *Server) cleanupInactiveUsers(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"deleted": 0})
 		return
 	}
-	deletedUsers, plans, err := s.deleteUserData(ids, 0)
+	deletedUsers, plans, err := s.deleteUserData(c.Request.Context(), ids, 0)
 	if err != nil {
 		internalError(c, "cleanup failed")
 		return
