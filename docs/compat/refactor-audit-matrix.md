@@ -22,7 +22,7 @@
 | Index 工作台、搜索、探索、侧边栏 | `web/src/views/Index.vue` | `layouts/AppLayout.vue`、`views/Home.vue`、`Search.vue`、`Discover.vue`、`stores/indexWorkspace.js` | **工作台主流程及设置/操作面第二轮已实现并发布 `3746d62`**：后端状态只检查同源 health；刷新缓存重取当前账号工作台所有者；重复书架/RSS/替换规则入口已清理；Home 恢复 `编辑 → 刷新 → RSS → 书海`；260/270 手势、固定底部图标、认证会话和 owner-v1 缓存继续通过。原作者公众号/TG 明确不复制，JWT 管理员、同源后端状态与可移植备份为允许适配。 | [`index-settings-action-surface-second-audit-p1-contract.md`](index-settings-action-surface-second-audit-p1-contract.md) 已通过 frontend 685/685、Go/build/diff、Index 三视口、移动侧边栏双视口、缓存/工作台三视口及新旧卷；状态 `aligned / Docker-published / awaiting-device-verification`，OCI index `sha256:eb57e0094baeb7d0cc354a0b97e5d366059fe47032d83fd2b5f42819a3d9e23b`。书架卡片布局与 overlay 内部仍按各自专项复审。 |
 | 书架、BookManage、BookGroup、BookInfo | `Index.vue` 普通 shelf、`BookManage.vue`、`BookGroup.vue`、`BookInfo.vue` | `Home.vue`、`OverlayBookManagement.vue`、`OverlayBookGroups.vue`、`BookInfoDialog.vue`/`BookInfoPanel.vue`、`BookCover.vue`、stores | BookManage、BookGroup、BookInfo 与可见布局第二轮均已发布。**手动刷新第二轮已随 `43635a1` 发布**：两个入口共用一次 check→缓存失效→权威 shelf 重载；后端恢复 16 并发、变量、目录替换、每书事务、陈旧结果拒绝和安全部分失败。 | [`bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md`](bookshelf-manual-refresh-fixed-baseline-second-audit-p1-contract.md) 状态 `aligned / Docker-published / awaiting-device-verification`；Go/full/race/vet、frontend 713/713、build、完整 Reader 浏览器合同及新旧卷均通过。`43635a1` OCI index 为 `sha256:0f75a0434d209af901cde81f86127f8e62fa78d6cb3610d6c10ef2e0863053c0`。 |
 | 书源与搜索/探索结果 | `Index.vue#toDetail`、`Index.vue#debugBookSource`、`Index.vue:720-890` 的书源管理器、`bookSourceDebug/*`、`Debugger.kt`、`Reader.vue#getCatalog`、`App.vue#getBookContent`、`Explore.vue`、`BookSource.vue`、`BookController.kt` | `SourceManager.vue`、`OverlaySources.vue`、`SourceDebug.vue`、`Search.vue`、`Discover.vue`、`RemoteBookResultList.vue`、`ExploreWorkspacePopover.vue`、`backend/api/source_debug.go`、`services/sourcedebug`、`remote_reader.go`、`services/remotereader`、Go source APIs | 书源 owner/API/解析主链、搜索/探索、临时 Reader 和独立书源调试器继续保持已发布；**可见书源管理器第二轮已按固定上游重建并作为 `c74be70` 发布**：恢复单 table、动态正常/失败标题、固定列/分组/footer、完整 reader-dev JSON 编辑器和独立本地/远程导入；删除移动卡片、Drawer 与额外 batch/health 命令。多用户事务、安全抓取、失败缓存、同步和旧 URL 保留。 | [`source-manager-fixed-baseline-second-audit-p1-contract.md`](source-manager-fixed-baseline-second-audit-p1-contract.md) 已通过 frontend 730/730、Go full/race/vet、build/diff、四视口浏览器和 fresh/historical volume；`usedBookNames` 当前用户投影、未知字段无迁移往返和 16 MiB 导入上限均有专项测试。状态 `aligned / Docker-published / awaiting-device-verification`，OCI index `sha256:3dd824fb006890504110124c48a84d0ce10aebab719eec7a3c9104f071e02eba`。 |
-| 本地导入、书仓、WebDAV | `Index.vue#importBookPreview/importMultiBooks`、`BookController.kt`、`LocalBook.kt`、`TextFile.kt`、`EpubFile.kt`、`UmdFile.kt`、`CbzFile.kt`、`LocalStore.vue`、`WebDAV.vue` | `OverlayBookImport.vue`、`OverlayStorageImport.vue`、`useStorageImportWorkflow.js`、`backend/api/direct_local_import_boundary.go`、`imports.go`、`localstore*`、`webdav*`、`services/localbook/*`、`engine/*_parser.go` | P1-E1…P1-E5、P2 parser 预算、TXT 默认规则和 mounted LocalStore/WebDAV 边界保持已发布。**直接浏览器导入第二轮已实现并发布 `429444a`**：恢复 1..64 多选、单本直达确认、多本共享批量/逐一状态机、同名稳定 identity、token-only 确认；三个 direct multipart 路由补齐认证后 actual-read 包络、严格 shape/metadata/category 和 handler-owned 临时文件清理。 | [`direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md`](direct-local-book-import-multipart-workflow-fixed-baseline-second-audit-p1-contract.md) 状态 `aligned / Docker-published / awaiting-device-verification`；frontend 737/737、Go full/race/vet、build、真实 HTTP、三视口 direct/storage flow 与 fresh/historical/portable 卷门均通过，OCI index `sha256:41f430a5fbf944b9a1dcf25aec6c9f6e92a11a3ff75e395d1a73120da5a6f4d5`。 |
+| 本地导入、书仓、WebDAV | `Index.vue#importBookPreview/importMultiBooks`、`BookController.kt`、`LocalBook.kt`、`TextFile.kt`、`EpubFile.kt`、`UmdFile.kt`、`CbzFile.kt`、`LocalStore.vue`、`WebDAV.vue` | `OverlayBookImport.vue`、`OverlayStorageImport.vue`、`useStorageImportWorkflow.js`、`backend/api/direct_local_import_boundary.go`、`imports.go`、`localstore*`、`webdav*`、`services/localbook/*`、`engine/*_parser.go` | P1-E1…P1-E5、P2 parser 预算、TXT 默认规则、mounted LocalStore/WebDAV 和直接多选导入保持已发布。**本地单书 refresh lifecycle 已随 `8df38f1` 关闭**：opened read/parse/stage/transaction 传播 caller context，post-stage 重验 owner/snapshot，guarded owned-field update 不能复活删除或覆盖编辑。 | [`local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md) 通过旧实现红测、focused/race/full/vet、三视口真实 BookInfo/Reader 和可信卷门；状态 `aligned / Docker-published / awaiting-device-verification`，OCI index `sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`。已签收 parser/rooted archive/BookInfo UI 不重开。 |
 | 外部 WebDAV 协议 | `WebdavController.kt` 的 `/reader3/webdav*`、Basic、OPTIONS/PROPFIND/MKCOL/PUT/GET/DELETE/MOVE/COPY/LOCK/UNLOCK | `backend/api/server.go`、`backend/api/webdav.go`、`middleware/webdav_auth.go`、`services/webdavfs` | **2026-07-22 已实施、全量验证并随 `544e1fb` 发布**：双前缀、Bearer/Basic、DAV 发现/列表、完整文件方法、调用者私有根、原子事务和逐组件 symlink 防护已通过 API/service/CORS、全量 Go/frontend/build、真实 Basic curl、三视口工作台、候选容器协议与新旧卷/便携备份门禁；现有 `/webdav` GET 适配器保留。 | [`webdav-protocol-p2-contract.md`](webdav-protocol-p2-contract.md)；后续 WebDAV 修改不得削弱 caller scope、事务和 symlink 合同。 |
 | 用户、备份、RSS、书签 | `UserManage.vue`、`AddUser.vue`、`BaseController.kt#saveUserSession`、`WebDAV.vue`、`Rss*`、`Bookmark*` 及对应 Kotlin 控制器 | `OverlayUserManagement.vue`、`backend/api/auth.go`/`admin.go`、`WebDAVBrowser.vue`、`RSSManager.vue`、`components/rss/*`、`services/rss`、`OverlayBookmarks.vue` | Bookmark 可见流程、会话/owner 隔离和 RSS 可见第二轮保持已发布；**RSS 写入/缓存并发边界已按测试先行关闭并发布 `0986d8e`**：source/article 使用 actual-read 单 JSON，source mutation 按用户串行事务化，existing row 改为显式列更新，refresh/content 在远程工作后复验存活并遵循正文优先级。Bookmark 写入边界继续由 `a9a55db` 签收。 | [`rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](rss-write-boundary-fixed-baseline-second-audit-p2-contract.md) 已通过 focused/full/race/vet、frontend 740/740、build、RSS 四视口、宿主 HTTP/SQLite trigger、GHCR 回拉容器纯 API 及新旧卷；状态 `aligned / Docker-published / awaiting-device-verification`，OCI index `sha256:9884d0e9b41c1a1a109f3034159ae2968fe9d889da063deaca2514e1ac371e25`。 |
 | 替换规则 | `ReplaceRule.vue`、`ReplaceRuleForm.vue`、`Reader.vue#filterContent/showTextFilterPrompt`、`ReplaceRuleController.kt`、`ReplaceRule.kt` | `OverlayReplaceRules.vue`、`useOverlayReplaceRules.js`、`services/replacerules`、`replace_rules.go`、`books.go#applyUserReplaceRules`、backup/restore | **P2 固定基准重建已完成并发布 `a7abcdd`；请求边界再随 `9f5a52b` 发布**：manager/editor、Reader、精确规则语义、`id ASC` pipeline、name restore identity 和 durable-only broadcast 保持签收；五个 JSON route 已补 actual-read 单 UTF-8 文档、稳定 413、PUT target-first 和 GORM request-context。 | 主模块见 [`replace-rule-fixed-baseline-p2-contract.md`](replace-rule-fixed-baseline-p2-contract.md)。请求边界见 [`replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md`](replace-rule-request-boundary-fixed-baseline-second-audit-p2-contract.md)，状态 `aligned / regression-validated / Docker-published / awaiting-device-verification`，`9f5a52b`/`latest` index 为 `sha256:7a72f2d01b26d1d28c35bb13970cb64a1f7dbf97ddebc3aa704957f58f2f56c3`；JWT/SQLite、legacy 空 scope、隐藏兼容 API 和有界 RE2 仍为允许差异。 |
@@ -32,18 +32,19 @@
 | Reader：登录失效与账号切换 | `plugins/axios.js` 的 `NEED_LOGIN`、根 `App.vue#login`、`Reader.vue#loginAuth` | `api/client.js`、`App.vue`、`AuthDialog.vue`、`stores/user.js`、Reader lifecycle/progress、`stores/overlay.js` | **P0 已完成并发布 `59e11a9`**：401 按真实拦截顺序先挂起旧 Reader 再清凭证，未认证根场景不渲染私有 DOM；overlay reset、同账号 generation 重挂载、异账号返回书架、安全 returnTo、旧进度写入抑制均已验证。 | [`reader-reauthentication-isolation-p0-contract.md`](reader-reauthentication-isolation-p0-contract.md)；1440×900、1024×1366、390×844、360×800、frontend 643/643、Go/build 和新旧卷门通过。 |
 | Reader：EPUB、漫画/CBZ、音频、连续跨章、TTS | `Reader.vue`、`Content.vue`、本地格式解析类 | `ReaderChapterContent.vue`、`ReaderEpubContent.vue`、`ReaderAudioContent.vue`、`ReaderTTSBar.vue`、`useReaderChapterReady.js`、格式 parser / cache | **EPUB、CBZ、连续跨章、音频和 TTS 固定基准切片均已完成实现、三视口验证和 Docker 发布**：音频恢复上游结构、边界行为与真实 autoplay；TTS 恢复显式 voice、贴底栏、可取消跨章和关闭段落定位。 | [`reader-audio-tts-fixed-baseline-p0-contract.md`](reader-audio-tts-fixed-baseline-p0-contract.md) 及前三份格式合同；当前 `5313c49` 复验再次通过 EPUB/CBZ/audio 三视口与 fresh/historical/portable/restart 卷门，CBZ smoke 自动主题前置由测试显式冻结。 |
 | Pinia 状态、缓存、同步、数据事务 | `plugins/vuex.js`、`plugins/cache.js`、后端 controller/model | `stores/*.js`、`utils/*cache*`、`backend/models`、`services`、`sync` | 书架、认证 scope 与阅读进度 P2 已完成并发布；**WebSocket 协议第二轮已测试先行实施并发布 `2ea6e8c`**：任意客户端 event relay、无条件 Origin、deleted-user 连接和全局 `users_update` 已关闭；服务端 event type/payload、同用户收敛、重连 REST 权威和数据格式保持。 | [`reading-progress-p2-contract.md`](reading-progress-p2-contract.md)、[`websocket-sync-p2-contract.md`](websocket-sync-p2-contract.md)；WebSocket 状态 `implemented / regression-validated / Docker-published`，Go/full race、frontend 706/706、build、三视口双客户端及新旧卷通过。 |
-| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。frontend/static/router、public 子树与认证会话生命周期均已关闭。当前新差集收敛为默认书源 JSON/SQLite 双持久边界：无界/symlink 文件读取、raw status error、并发交叉提交和旧卷自定义默认迁移仍待红测。 | [`default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md`](default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md) 已固定 SQLite authority、兼容镜像、16 MiB/300-source、same-file、取消/并发/recovery 与历史卷合同；状态 `inventory-complete / tests-and-implementation-pending`。上一会话切片仍为 `aligned / Docker-published / awaiting-device-verification`，OCI index `sha256:5d7fe23ba96107c5c545e9e44815514fe277e5a6f83eb25cb006859c5d515d78`。 |
+| Go REST、鉴权与错误语义 | Kotlin `*Controller.kt`、ReturnData、`YueduApi.kt` `/assets/*` | `backend/api/*.go`、middleware、前端 `api/*.js`、public capability routes | **按动作逐项复审；已关闭模块不从旧日志重开**。Explore、远程 BookInfo/TOC 和本地单书 refresh lifecycle 均已发布。当前 `Save` 差集又确认 Book metadata patch 与独立 category action 虽有精确 DTO，却仍把 transaction 前整行快照 `Save` 回库，可覆盖并发无关列或复活删除目标。 | [`book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md) 已固定 request-context transaction、transaction-time owner liveness、显式列 update、删除不复活和权威 response/event；状态 `inventory-complete / tests-and-implementation-pending`。旧 wire/UI/data 合同不重开。 |
 | 书源解析、RSS、远程抓取 | `AnalyzeRule*`、`Rss*`、`BookSourceController.kt` | `backend/engine/source_*.go`、`rss_parser.go`、fetcher、`services/rss` | **CSS/JSONPath/XPath 书源主链、RSS 可见请求页语义、P2-N1/P2-N2 抓取边界和 RSS 持久提交边界均已发布**。refresh 只写 parser/remote 列并按 detail rule 保留权威正文；content cache 只写 content；state 只写 read/favourite；三者不再用全行 `Save` 覆盖。 | 抓取预算/SSRF 合同不重开；[`rss-write-boundary-fixed-baseline-second-audit-p2-contract.md`](rss-write-boundary-fixed-baseline-second-audit-p2-contract.md) 已用 trigger/API 证明列所有权、删除不复活、无孤儿 article 和远程工作后的 source/article 存活复验。 |
-| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release workflow | `a0edce3` 通过 frontend 742/742、Go full/race/vet、build、Compose、四视口重新认证、真实 API 会话合同与 GHCR 回拉容器；受信 Actions run `32914105929` 通过原生候选、fresh portable 和 historical volume 门禁后发布。 | amd64/arm64 发布 `a0edce3`/`latest`，OCI index `sha256:5d7fe23ba96107c5c545e9e44815514fe277e5a6f83eb25cb006859c5d515d78`；manifests 分别为 `sha256:dc50d7db9eb1bddb8c3a094fd507fa1e1f4631b633cacc58d635070b1ba606ab`、`sha256:1785dee2ec3d62894a20b35c33535fc1bd2c9167585b12bc567b71c71bff13df`。用户生产环境运行提交未知。 |
+| 测试、构建、Docker、卷升级 | 上游功能契约；OpenReader Docker/data 约束 | `frontend/tests`、`scripts/smoke`、`backend/**/*_test.go`、Dockerfile、release workflow | `8df38f1` 通过 frontend 742/742、Go full/race/vet、build、Compose、本地格式/归档回归、BookInfo -> refresh-local -> Reader 三视口和 GHCR 回拉容器；受信 Actions run `33068512106` 通过原生候选、fresh portable、historical volume 与 published-platform 门后发布。 | amd64/arm64 发布 `8df38f1`/`latest`，OCI index `sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`；manifests 分别为 `sha256:c2a753bbf1dae93bb5c11fe5ec2a478a07950cdcae902d843c4d6bb119e3e587`、`sha256:a83a45245ca889f9c09a18371a9cb066df36a4c3101b7374aeba9785b1ccfc7d`。上一发布批次的文档签收提交为 `0815849`；用户生产环境运行提交未知。 |
 
-## 当前整体进度快照（2026-08-26，默认书源快照 inventory 已完成）
+## 当前整体进度快照（2026-08-27，本地书 refresh lifecycle 已发布）
 
 按全量计划的模块/合同口径而不是代码行数估算，整体约 **99%**。该数字表示固定基准合同和测试先行
 实现覆盖度；用户配置、BookGroup/Category、Book、BookSource、Bookmark 与 RSS 写入/导入边界均完成
 实现、全量、运行时、新旧卷和正式 Docker 发布；ReplaceRule、备份、trusted proxy、frontend/static/
-router 失败分流、public 静态子树和认证会话生命周期亦已关闭。剩余约 1% 当前包含已确认的默认书源
-快照文件/事务 must-fix、后续逐路由 action 审计、长尾固定基准复审与真实设备证据，不能从 direct
-binder 差集为空推导完成。
+router 失败分流、public 静态子树、认证会话生命周期、默认书源快照文件/事务边界、Explore
+入口/分页/取消生命周期、远程 BookInfo/TOC 和本地书 refresh handler 的取消/陈旧提交亦已关闭。剩余
+约 1% 当前包含已确认的 Book patch/category full-row `Save` must-fix、后续逐路由 action 审计、长尾
+固定基准复审与真实设备证据，不能从 direct binder、`Save` 或 contextless 调用差集缩小推导完成。
 
 - **P0 Reader 主链已覆盖**：工具层/面板状态机、正文排版、移动点击与连续滚动、设置、书签、正文
   搜索、登录恢复、普通文本、EPUB、CBZ/漫画、音频、连续跨章、TTS、夜间对比度均有专项合同和
@@ -68,7 +69,11 @@ binder 差集为空推导完成。
   JSON control 的 16 KiB/32 KiB/1 MiB single UTF-8 object、Book/TOC/category admission、batch cache /
   export / remote add / change-source 取消，ReplaceRule 五路 512 KiB/16 MiB/128 KiB/4 MiB actual-read 单
   UTF-8 document 与 transaction 取消、server-only WebSocket/recipient scope、备份事务 worker，以及
-  ordinary/portable 备份生成 safe-500、可取消 gate/DB/copy 和 durable rename 边界。
+  ordinary/portable 备份生成 safe-500、可取消 gate/DB/copy 和 durable rename，以及默认书源 JSON/SQLite
+  same-file、串行提交、旧卷显式快照和启动修复边界，以及 Explore source-first/declared-entry/page/
+  cancellation 与零迟到失败缓存边界，以及远程 BookInfo/TOC request context、refresh post-fetch owner
+  snapshot 复验、删除不复活与陈旧结果 409 边界，以及本地书 opened read/parse/stage/transaction 取消、
+  post-stage archive snapshot 复验、guarded owned-field update 和 inactive generation 清理边界。
 - **尚未完成的主线**：其余尚未逐动作签约的 Go REST/错误/事务语义；仍待第二轮固定基准复审的长尾组件；
   以及后续真实设备反馈暴露出的上游可见偏差。reading progress、books.go 六个 JSON control 和
   ReplaceRule 五路、备份生成、backup list/download 与公开 upload resource rooted opened-file 边界均已
@@ -358,4 +363,69 @@ Compose、README 42/42 变量和真实二进制 default/trusted/invalid 三组�
 `32828470325` 又通过 native image、fresh/historical/portable/restart 卷门并发布 `f5b3869`/`latest`；
 amd64/arm64 OCI index 为
 `sha256:6a2fc83bf79426e93423b1dd5756c8ea49b716d1321441d5c194efff9c03b066`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；整体比例仍为 99%。
+
+## 2026-08-27 Explore 请求生命周期固定基准复审
+
+默认书源快照关闭后重新扫描 query 驱动远程工作的动作，下一项 must-fix 收敛为
+`GET /api/explore/:sourceId`：旧 handler 接受未在 source 规则中声明的入口、page 无上限，并以
+`context.Background()` 执行 fetch/parser，允许扩大 source 远程能力且在 caller 离开后写迟到失败缓存。
+固定上游 chooser 只发送当前 source `exploreUrl` 的已声明 entry，并以 page 1 起步递增。
+
+合同 `2035965`、取消边界勘误 `9262864`、旧实现红测 `f9527c4` 与实现 `938d956` 已按顺序关闭：
+source lookup 保持 404 优先；page 限制为 `1..100000`；非空入口必须不超过 8192 UTF-8 bytes 且精确匹配
+当前规则声明；HTTP request context 贯穿 fetch/parser，caller cancellation 不写 source failure 或迟到业务
+响应。旧 query alias、默认入口、URL options、结果 JSON、chooser 与分页 UI 保持。
+
+focused/race/full/vet、frontend 742/742、build、Compose、真实 Go HTTP 和 Index workspace 1440x900、
+1024x1366、390x844、360x800 Chromium 合同通过。受信 GitHub Actions run `32962930310` 再通过 native、
+fresh/historical/portable 与 published-platform 门并发布 `938d956`/`latest`；OCI index 为
+`sha256:40cd73c3106736d88d361ae9fc81c3daf2ef1a7534b1b4db81bea46e9c6bc777`，amd64/arm64 manifests 为
+`sha256:eb260e471b1da51d190e0eac2752b7ef99ac79c76af90ba91d48ae7da056c3ad`、
+`sha256:22fd2fb203358a87a6d1ba29e0e59009c76a8b9328a480fbc8dace750cc625be`。不可变标签本地回拉和
+`/api/health` 完整 revision 已确认。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；整体比例仍为 99%。
+
+## 2026-08-27 远程 BookInfo/TOC 请求生命周期固定基准复审
+
+Explore 发布后重新枚举当前 handler 到 source engine 的调用，下一项 must-fix 收敛为
+`POST /api/reader/remote-sessions` 与 `POST /api/books/:id/refresh`。旧实现将两路 BookInfo/TOC 工作放入
+`context.Background()`；单书 refresh 又在远程工作后使用旧 Book 快照全行 `Save`，可在并发删除后
+fallback insert，或覆盖后续换源、变量和 metadata 编辑。
+
+合同 `0148f63`、旧实现红测 `928ce39` 与实现 `48f52c6` 已按顺序关闭：两路 fetch 传播 HTTP request
+context；refresh transaction 重读 caller-owned Book 并验证 `source_id/url/variable/updated_at`，使用 guarded
+owned-field update。取消不写 session/failure/catalogue/event；并发删除不复活 Book/Chapter；并发换源、
+变量或 metadata 编辑保持，caller 有效的迟到结果稳定返回 409。正常 BookInfo/TOC、章节引用恢复、cache/
+image prune、lastCheckTime、source failure 和一次 shelf broadcast 保持。
+
+focused/race/full/vet、frontend 742/742、build、Compose、真实 parser workflow、真实 HTTP 取消/删除探针和
+remote-reader 1440x900、390x844、360x800 Chromium 合同通过。受信 GitHub Actions run `33045811548`
+再通过 native、fresh/historical/portable 与 published-platform 门并发布 `48f52c6`/`latest`；OCI index 为
+`sha256:6447fd11480b1652c0f513d05b50dc66bb3aea61762030cd18435677324098f4`，amd64/arm64 manifests 为
+`sha256:c3fa70c812e333e3fde84f52c8d0ba9f3c0b7eb89ec97c6c53b9ab7167dc63f4`、
+`sha256:e63842d1f7baffa6249a5862cd18cb4a2caecb603f531996a3be2b2d468bb7d4`。不可变标签回拉、完整 revision
+label 与 `/api/health` 已确认。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；整体比例仍为 99%。
+
+## 2026-08-27 本地书 Refresh 请求生命周期固定基准复审（已实施/发布）
+
+远程 BookInfo/TOC 发布后继续从当前路由与 GORM `Save` 差集取证，下一项 must-fix 收敛为
+`POST /api/books/:id/refresh-local`。现有 body admission、opened regular source、parser budgets、rooted
+archive 和正常 stage -> transaction -> promote 已签收；但 source read、最长 1 GiB legacy parse、逐章
+stage 和 transaction 不传播 request context，transaction 又先替换 Chapter，再以读取前整行 Book
+`Save`。因此并发删除可被复活，并发标题/作者/封面/简介/分类/追更编辑可被迟到结果覆盖。
+
+固定上游 `BookInfo.vue#refreshLocalBook` 与 `BookController#refreshLocalBook/editShelfBook` 只在当前请求
+更新仍存在的 shelf Book，不会重新添加已删除目标。新合同要求取消在 commit 前停止后续阶段并清理请求
+stage；transaction 重读 caller-owned Book，验证 source/url/archive/tocRule/updatedAt snapshot；陈旧结果
+固定 409；成功只更新 local-catalogue owned fields。解析格式、TOC rule、引用重绑、active generation、
+rooted filesystem、API/UI 和卷格式保持。完整矩阵与红测门见
+[`local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `474b992`、旧实现红测 `e6138f3` 与实现 `8df38f1` 已按顺序落地。实现传播 caller context，在
+transaction 内重读 owner Book 并校验完整 archive/snapshot，以 guarded local-catalogue field update 取代
+全行 `Save`；取消、并发删除和并发编辑均不再提交迟到目录、文件或 event。focused/race/full/vet、
+frontend 742/742、build、Compose、BookInfo/Reader 三视口及可信 Actions run `33068512106` 的 native、
+fresh/historical/portable/platform 门通过；`8df38f1`/`latest` OCI index 为
+`sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`。当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**；整体比例仍为 99%。

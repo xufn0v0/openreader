@@ -719,16 +719,111 @@ frontend 742/742、build、四视口浏览器、真实 API 和 Actions run `3291
 `a0edce3`/`latest` OCI index 为
 `sha256:5d7fe23ba96107c5c545e9e44815514fe277e5a6f83eb25cb006859c5d515d78`。
 
-## 37. 默认书源快照文件系统与提交生命周期（2026-08-26 inventory）
+## 37. 默认书源快照文件系统与提交生命周期（2026-08-26 implemented/published）
 
 认证会话发布后从当前 `server.go` 重新枚举尚未签约的 action。下一项 must-fix 收敛到
 `GET/POST /api/sources/default*`、目标用户设默认、管理员批量重置及旧卷
 `data/defaultBookSources.json` 初始化边界。固定上游完整复制目标用户文件并以存在的空数组表示有效
 空默认；OpenReader 的 SQLite namespace 是允许的关系模型翻译，但必须和兼容镜像表达同一快照。
 
-当前固定文件使用无界 `os.ReadFile` 且跟随 symlink/special file；status 将 raw `err.Error()` 放入 200；
-两个 save 先写文件后写 SQLite、没有共享 serialization boundary，可由 A/B 交错得到不同最终快照；
-ownership-v1 迁移又会先用旧全局活动源配置 default，使历史自定义 JSON 缺少迁移证据。精确 API、
-SQLite/文件 authority、16 MiB/300-source、same-file regular read、取消/并发/恢复和历史卷测试见
+旧实现的无界/symlink 读取、raw status error、A/B 交叉提交和旧卷默认覆盖已由 `6d8b8f1` 红测固定，
+`07761b5` 校正串行化测试后，由 `a36b888` 关闭。新实现以 SQLite 为迁移后的运行时权威，固定 JSON
+为有界 legacy 输入和 canonical mirror；所有默认动作和启动修复共用生命周期锁，请求 context 贯穿
+GORM/文件 I/O，ownership-v1 直接升级保留安全显式 JSON（含空数组）及普通用户旧 source ID。精确 API、
+16 MiB/300-source、same-file regular read、取消/并发/恢复和历史卷测试见
 [`default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md`](default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md)。
-当前状态 **inventory-complete / tests-and-implementation-pending**；本阶段不修改应用或测试。
+当前状态 **aligned / regression-validated / Docker-published / awaiting-device-verification**。Go full/race/vet、
+frontend 742/742、build、四视口、真实 HTTP、GHCR 回拉和 Actions run
+`32919553203` 新旧卷门均通过；`a36b888`/`latest` OCI index 为
+`sha256:63979a0e01d8942a9c594d444e6d5cdf28f0ac5c382825f71a051a52b02a21e4`。
+
+## 38. Explore 入口、分页与请求取消（2026-08-26 implemented）
+
+默认书源快照发布后重新从当前 `server.go`、query 驱动远程工作和固定上游取证。下一项 must-fix
+收敛到 `GET /api/explore/:sourceId`：固定上游 chooser 只发送该 source `exploreUrl` 中选中的
+`ruleFindUrl`，第一页为 1，后续只复用入口并递增 page；OpenReader 的 JWT/owned source、现代 JSON
+和通用抓取安全是已签收适配。
+
+旧 handler 允许任意 `url`/`exploreUrl` override、page 只校验 `>=1`，并调用使用
+`context.Background()` 的 engine wrapper。结果是客户端可把 source 首次请求 header/proxy policy 带到
+未声明公网入口，超长 query/page 没有动作边界，浏览器离开或 Axios 超时后远程 fetch/parse 仍继续，
+迟到 request failure 还可能进入 caller 的 `source_failures`。
+
+目标保持 source 404 优先、query/响应字段、chooser/结果状态和 parser 顺序；新增 `page=1..100000`、
+8192-byte source-declared entry admission，并把 request context 贯穿 fetch/parser。取消不写业务错误、
+Explore 业务行、失败缓存或事件；认证 activity/session 中间件保持。真正 source request failure 继续按
+现有 caller-scoped 600 秒缓存。完整合同与
+红测门见
+[`explore-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](explore-request-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `2035965`、取消边界勘误 `9262864` 与旧实现红测 `f9527c4` 已按测试先行顺序落地；`938d956`
+实现 source-first lookup、`1..100000`、8192-byte declared-entry allowlist 和 request-context cancellation。
+focused/race/full/vet、frontend 742/742、build、Compose、真实 HTTP 与四视口 Index workspace 均通过。
+受信 Actions run `32962930310` 又通过 native、fresh/historical/portable 和平台门并发布
+`938d956`/`latest`；OCI index 为
+`sha256:40cd73c3106736d88d361ae9fc81c3daf2ef1a7534b1b4db81bea46e9c6bc777`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 39. 远程 BookInfo/TOC 取消与陈旧提交（2026-08-27 implemented）
+
+Explore 发布后重新枚举所有从 handler 进入 source engine 的调用。除测试/内部 compatibility wrapper 外，
+只剩 `POST /api/reader/remote-sessions` 与 `POST /api/books/:id/refresh` 仍调用固定
+`context.Background()` 的 `FetchBookInfoAndTOCWithVariables`。前者违反已发布临时会话合同中的取消零
+session/零 failure；后者还在远程工作后用抓取前 Book 快照替换目录并全行 `Save`，并发删除、换源、URL/
+variable 或 metadata 更新可能被迟到结果复活/覆盖。
+
+目标让两路 BookInfo/TOC fetch 传播 request context。显式 refresh 在 chapter mutation 前以事务重读并
+验证 `id/user/source/url/variable/updated_at`，陈旧结果固定 409 且零目录/cache/event 副作用；正常完整
+BookInfo + TOC、章节引用恢复、lastCheckTime、错误和 UI 保持。完整合同与红测门见
+[`remote-book-detail-toc-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](remote-book-detail-toc-request-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `0148f63`、旧实现红测 `928ce39` 与实现 `48f52c6` 已按测试先行顺序落地。两路 fetch 现传播
+request context；refresh 在事务内重读 owner Book 并验证 `source_id/url/variable/updated_at`，以 guarded
+owned-field update 取代可 fallback insert 的全行 `Save`。caller 取消零 session/failure/catalogue/event，
+并发删除不能复活 Book/Chapter，并发换源、变量或 metadata 编辑不能被迟到结果覆盖；有效 caller 的
+陈旧结果稳定为 409。
+
+focused/race/full/vet、frontend 742/742、build、Compose、真实 parser/HTTP，以及 remote-reader
+1440x900、390x844、360x800 Chromium 均通过。可信 Actions run `33045811548` 又通过 native、
+fresh/historical/portable 与 published-platform 门并发布 `48f52c6`/`latest`；OCI index 为
+`sha256:6447fd11480b1652c0f513d05b50dc66bb3aea61762030cd18435677324098f4`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 40. 本地书刷新取消与陈旧提交（2026-08-27 implemented/published）
+
+远程 BookInfo/TOC lifecycle 发布后继续从当前 `server.go` 和持久 `Save` 调用差集取证。下一项 must-fix
+收敛为 `POST /api/books/:id/refresh-local`：它虽已具备 owner/body admission、rooted opened-file 和
+stage -> transaction -> promote，但 opened source read、最多 1 GiB legacy parse、逐章 staging 和 GORM
+transaction 均不传播 request context；transaction 又先替换 Chapter，再用读取/解析前的整行 Book
+`Save`。并发删除可被 fallback insert 复活，并发标题/作者/封面/简介/分类/追更编辑可被覆盖。
+
+固定上游在当前请求执行 `updateFromLocal(true)` 后，只用 `editShelfBook` 更新仍存在的 shelf item，不会
+重新添加已删除目标。目标因此是在 transaction 前重读并验证
+`id/user/source/url/library/original/toc/source-file/tocRule/updatedAt`，取消或陈旧结果均不得替换目录、提升
+generation、剪枝或广播；有效 caller 的陈旧结果固定 409。正常解析格式、TOC rule、章节引用、rooted
+archive、promotion、响应与 UI 保持。完整合同与红测门见
+[`local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `474b992`、旧实现红测 `e6138f3` 与实现 `8df38f1` 已按测试先行顺序落地。opened read、parser
+边界、逐章 stage 和 transaction 现传播 caller context；transaction 在 chapter mutation 前重读 owner
+Book 并验证完整归档/snapshot，以 guarded owned-field update 取代全行 `Save`。caller 取消零活动
+catalogue/file/event 副作用；并发删除不能复活 Book/Chapter，并发正常编辑不能被迟到 refresh 覆盖；
+有效 caller 的陈旧结果稳定为 409。
+
+focused/race/API full、Go full/vet、frontend 742/742、build、Compose，以及 BookInfo -> local refresh ->
+Reader 的 1440x900、390x844、360x800 Chromium 均通过。可信 Actions run `33068512106` 又通过 native、
+fresh/historical/portable 与 published-platform 门并发布 `8df38f1`/`latest`；OCI index 为
+`sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 41. Book patch 与分组提交列所有权（2026-08-27 inventory）
+
+本地 refresh 发布后继续从当前持久 `Save` 差集与已签收合同反查，下一项 must-fix 收敛为
+`PUT /api/books/:id` 和 `PUT /api/books/:id/category`。两路虽然已有 bounded DTO、owner-first lookup、
+字段/Category 校验和事务，但仍在 transaction 前读取整行 Book，随后 `tx.Save(&book)`；显式 patch 因此
+仍可覆盖读取后完成的 metadata/追更/primary category，目标被并发删除时还可 fallback insert，分组动作
+可能同时留下 relation。已有所谓 concurrent 测试只预置状态后顺序保存，没有覆盖 read-modify-save race。
+
+固定上游局部 shelf/group 动作通过 `editShelfBook` 重取现有条目并只修改动作拥有字段，目标已不存在时
+不会重新添加。新合同要求 request-context transaction 在任何 mutation 前重读 owner Book，metadata
+只更新请求显式列，category 只更新 relation 与 legacy `category_id`，成功后重载当前 Book 再广播；并发
+无关列按列合并，并发删除稳定 owner-safe 404 且零复活/孤儿/event。完整合同与红测门见
+[`book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / tests-and-implementation-pending**；本阶段不修改应用或测试代码。

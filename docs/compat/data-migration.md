@@ -1195,7 +1195,7 @@ red tests `2396537` and implementation `a0edce3` landed in order. Actions run `3
 volume gates; the published OCI index is
 `sha256:5d7fe23ba96107c5c545e9e44815514fe277e5a6f83eb25cb006859c5d515d78`.
 
-## P2 default book-source compatibility mirror migration (2026-08-26 inventory)
+## P2 default book-source compatibility mirror migration (2026-08-26 implemented/published)
 
 - A direct pre-ownership upgrade with a safe valid `data/defaultBookSources.json` must preserve that explicit default,
   including `[]`, while existing users retain all legacy active-source associations and stable source IDs.
@@ -1208,4 +1208,50 @@ volume gates; the published OCI index is
 
 Full contract:
 [`default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md`](default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md).
-Status is **inventory-complete / tests-and-implementation-pending**.
+Contract `1c5f7b5`, red tests `6d8b8f1`, test correction `07761b5` and implementation `a36b888` landed in order.
+Direct pre-ownership custom/nonempty and explicit-empty upgrades, already-migrated stale-mirror restart, stable user
+source IDs, database rollback, backup omission, fresh/historical/portable volumes and pulled-image 0600 mirror all
+passed. Actions run `32919553203` published OCI index
+`sha256:63979a0e01d8942a9c594d444e6d5cdf28f0ac5c382825f71a051a52b02a21e4`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P2 local-book refresh request lifecycle compatibility (2026-08-27 implemented/published)
+
+- The target adds no schema, migration, startup scan, persistent path, environment variable, archive generation,
+  backup member, route, payload, browser key or UI state.
+- Existing regular current/historical `LibraryPath`, `OriginalFile`, `TOCFile`, `SourceFile`, local archive bytes and
+  TXT/EPUB/UMD/CBZ/PDF/Markdown parser outputs remain authoritative. Rooted archive and opened-file rules are not
+  reopened.
+- A cancelled or stale refresh must discard only its uncommitted result and request-owned inactive stage. It must not
+  rewrite the current Book/Chapter/Progress/Bookmark rows, promote metadata/cache, prune active data or resurrect a
+  concurrently deleted Book.
+- A successful refresh continues to replace the catalogue and rebind references, but updates only local-catalogue
+  fields. Existing title/author/cover/intro/category/can-update and mounted path fields are not owned by a late
+  refresh result.
+- Rollback to an older image sees the same SQLite and filesystem formats; it only reintroduces stale `Save` and
+  cancellation risks.
+
+Target contract:
+[`local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `474b992`, red tests `e6138f3` and implementation `8df38f1` landed in order. Cancellation and stale
+delete/edit results now leave Book/Chapter/Progress/Bookmark, active metadata/cache and the original archive
+unchanged; successful refresh still uses the existing generation and backup formats. Trusted Actions run
+`33068512106` passed fresh/historical/portable gates and published OCI index
+`sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P2 Book patch/category write lifecycle compatibility (2026-08-27 inventory)
+
+- The target adds no schema, migration, startup scan, persistent path, environment variable, backup member or
+  browser state.
+- Existing Book/Category/BookCategory IDs, fields, relations, timestamps and logical/portable/Legado/WebDAV rows
+  remain authoritative; the change affects only future HTTP transaction column ownership.
+- Metadata patch owns only submitted metadata/category/can-update columns. The dedicated category action owns only
+  the caller Book's relations and legacy primary category. Concurrent writes to other columns must survive.
+- A target deleted after the first owner lookup remains deleted; no Book, relation, chapter, progress or bookmark may
+  be recreated. Cancellation before commit creates no durable row, timestamp or event.
+- Rollback sees the same SQLite and backup formats; it only reintroduces stale full-row `Save` risks.
+
+Target contract:
+[`book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / tests-and-implementation-pending**; no data or application code changed in inventory.

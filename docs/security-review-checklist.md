@@ -20,6 +20,23 @@ probes, and GitHub Actions `32828470325` fresh/historical/portable/restart gates
 [`docs/compat/trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md`](compat/trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md).
 Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
 
+## P2 Book patch/category write lifecycle (2026-08-27 inventory)
+
+- [ ] Use request-context transactions for `PUT /api/books/:id` and `/api/books/:id/category`; cancellation before
+      commit must create no Book/relation/timestamp/event side effect.
+- [ ] Re-read the caller-owned Book inside the transaction before any relation or row mutation; a concurrent delete
+      must remain deleted and return the same owner-safe 404 without fallback insert or orphan relations.
+- [ ] Replace both full-row `Save` calls with explicit owned-column updates. Metadata patch owns only submitted
+      fields; category assignment owns only `category_id` plus caller-scoped BookCategory rows.
+- [ ] Reload the current Book inside the successful transaction and broadcast only its complete post-commit shelf
+      projection, preserving concurrent metadata, follow, group, source and catalogue state.
+- [ ] Prove the old read-modify-save races first, then pass focused/race/full/vet, real API/browser and
+      fresh/historical/portable publication gates without changing schema or backup formats.
+
+Target contract:
+[`compat/book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is `inventory-complete / tests-and-implementation-pending`; no application or test code changed in inventory.
+
 ## Authentication and authorization
 
 - [ ] `OPENREADER_JWT_SECRET` is required and not logged.
@@ -310,23 +327,24 @@ backup gates. Locally published `ceb4baa`/`latest` resolve to OCI index
 - [ ] Final resolved path is verified to remain under the allowed root.
 - [ ] Local store, uploads, cache, backups, and WebDAV all use rooted paths.
 
-### P2 remote chapter-text cache filesystem lifecycle (2026-08-17 inventory)
+### P2 remote chapter-text cache filesystem lifecycle (2026-08-17 implemented/published)
 
-- [ ] Remote chapter cache read/stat/remove accepts only relative or current-root absolute identities that resolve to
+- [x] Remote chapter cache read/stat/remove accepts only relative or current-root absolute identities that resolve to
       regular files below `cache/`; root/ancestor/entry symlinks, directories and special files fail closed.
-- [ ] Remote chapter cache reads use one same-file-verified handle and the configured source-response byte budget;
+- [x] Remote chapter cache reads use one same-file-verified handle and the configured source-response byte budget;
       mounted outside bytes, host paths and OS errors never enter chapter responses or cache API errors.
-- [ ] Remote cache writes use a verified parent, private stage and atomic rename; unsafe targets, cancellation and
+- [x] Remote cache writes use a verified parent, private stage and atomic rename; unsafe targets, cancellation and
       failures do not truncate an existing file, write outside the root, publish a DB path or leave temporary files.
-- [ ] Stats count only actual safe non-empty chapter files and remain current-user scoped. Clear/prune removes only
+- [x] Stats count only actual safe non-empty chapter files and remain current-user scoped. Clear/prune removes only
       verified regular files after commit and only when an all-user reference query proves them unreferenced.
-- [ ] File publication plus DB reference and reference-query plus prune share one process serialization boundary, so
+- [x] File publication plus DB reference and reference-query plus prune share one process serialization boundary, so
       concurrent cache writes and cleanup cannot leave a newly referenced path missing.
 
-Current source inventory shows lexical-prefix validation followed by `os.ReadFile/Stat/Remove`, direct
-`MkdirAll/WriteFile`, stale DB-path counting, and delete-on-reference-query-error behavior. Status is
-`inventory-complete / tests-and-implementation-pending`; checklist items remain open until old-implementation red
-tests, the complete implementation, runtime/mounted-volume probes and release gates pass. Full contract:
+Contract `c6f9de8`, old-implementation red tests `f8e5c04`, implementation `75cc238` and release evidence
+`3cef8df` landed in order. Focused/race/full/vet, frontend/build, Reader/BookManage/sidebar browser flows,
+mounted-host/container probes and fresh/historical/portable gates passed. OCI index
+`sha256:8cfe72e56af0cbb191d6b31fa243153a3ce14010614c5153881b262229facf86`; status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`. Full contract:
 [`compat/remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/remote-chapter-cache-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
 
 ### P2 public upload-resource filesystem boundary (2026-08-17 inventory)
@@ -1246,18 +1264,86 @@ kept WS query redacted and GORM SQL parameterized. OCI index:
 `sha256:5d7fe23ba96107c5c545e9e44815514fe277e5a6f83eb25cb006859c5d515d78`. Status is
 `aligned / regression-validated / Docker-published / awaiting-device-verification`.
 
-## P2 default book-source snapshot boundary (2026-08-26 inventory)
+## P2 default book-source snapshot boundary (2026-08-26 implemented/published)
 
-- [ ] Read only the fixed `data/defaultBookSources.json` as a same-file-verified non-symlink regular file with a
+- [x] Read only the fixed `data/defaultBookSources.json` as a same-file-verified non-symlink regular file with a
       16 MiB actual-read and 300-source cap; reject directories/FIFO/devices/sockets and replacement races.
-- [ ] Keep configured SQLite default namespace authoritative, but preserve a safe explicit legacy file (including
+- [x] Keep configured SQLite default namespace authoritative, but preserve a safe explicit legacy file (including
       `[]`) on direct pre-ownership upgrades without rewriting existing user source IDs or private namespaces.
-- [ ] Serialize current-user/target-user save, restore, admin reset, mirror publication and startup repair so one
+- [x] Serialize current-user/target-user save, restore, admin reset, mirror publication and startup repair so one
       completed generation owns both SQLite and canonical JSON; cancellation/failure emits no false event.
-- [ ] Return stable path-free errors and logs. Never expose raw OS/SQLite text, host path, source URL/header/cookie,
+- [x] Return stable path-free errors and logs. Never expose raw OS/SQLite text, host path, source URL/header/cookie,
       username, JWT, JSON body or temporary filename.
-- [ ] Keep mirror/migration state out of ordinary/portable/Legado backup and pass fresh/historical/restart volumes.
+- [x] Keep mirror/migration state out of ordinary/portable/Legado backup and pass fresh/historical/restart volumes.
 
 Target contract:
 [`compat/default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md`](compat/default-book-source-snapshot-filesystem-transaction-fixed-baseline-second-audit-p2-contract.md).
-Status is `inventory-complete / tests-and-implementation-pending`; no application or test code changes in inventory.
+Contract `1c5f7b5`, red tests `6d8b8f1`, correction `07761b5` and implementation `a36b888` landed in order. Go
+full/race/vet, frontend/build, path-free real HTTP, four-viewport browser, fresh/historical/portable
+Actions gates and pulled-image mirror checks passed. OCI index
+`sha256:63979a0e01d8942a9c594d444e6d5cdf28f0ac5c382825f71a051a52b02a21e4`; status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 Explore request lifecycle (2026-08-26 implemented)
+
+- [x] Resolve the caller-owned active source before query validation; foreign, detached and disabled sources retain
+      one 404 and cannot be probed through page/entry error differences.
+- [x] Accept only page `1..100000` and an at-most-8192-byte entry declared by that source's current explore rule;
+      arbitrary relative/same-origin/cross-origin URL and request-option injection fail before remote work.
+- [x] Preserve declared relative/absolute templates, URL options and existing response/UI semantics without treating
+      a client override as a new remote-fetch capability.
+- [x] Propagate the HTTP request context through fetch and parsing. Cancellation stops work and never writes an
+      Explore business row, source failure, event or path/query/header/body-bearing response/log; shared auth
+      activity/session middleware remains unchanged.
+- [x] Prove owner priority, exact boundaries, zero-request rejection, cancellation and real chooser pagination before
+      publication; keep existing fetcher SSRF/redirect/size/timeout policy unchanged.
+
+Target contract:
+[`compat/explore-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/explore-request-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `2035965`, cancellation correction `9262864`, red tests `f9527c4` and implementation `938d956` landed in
+order. Focused/race/full/vet, frontend 742/742, build, Compose, real HTTP, four-viewport Chromium and trusted Actions
+run `32962930310` fresh/historical/portable/platform gates passed. `938d956`/`latest` OCI index is
+`sha256:40cd73c3106736d88d361ae9fc81c3daf2ef1a7534b1b4db81bea46e9c6bc777`; a pulled container reported the full
+revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 remote BookInfo/TOC request lifecycle (2026-08-27 implemented/published)
+
+- [x] Propagate the caller request context through temporary-session creation and explicit remote-book refresh;
+      cancellation must stop BookInfo/TOC work and create no session, failure row, catalogue write or event.
+- [x] Re-read the owned Book in the refresh transaction after remote work and reject deleted or changed
+      source/url/variable/updated-at snapshots before chapter mutation.
+- [x] Replace the refresh full-row `Save` with owned-field updates that cannot fallback-insert a deleted Book or
+      overwrite a newer source, parser variable or metadata edit.
+- [x] Preserve normal BookInfo/TOC, progress/bookmark rebinding, cache prune, lastCheckTime, source failure and one
+      durable shelf event semantics; do not reopen other remote actions or visible Reader/BookInfo flows.
+- [x] Prove cancellation and delete/change/edit races on the old implementation before coding, then pass focused/race,
+      full/vet, real HTTP/browser and fresh/historical/portable publication gates.
+
+Target contract:
+[`compat/remote-book-detail-toc-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/remote-book-detail-toc-request-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `0148f63`, red tests `928ce39` and implementation `48f52c6` landed in order. Focused/race/full/vet,
+frontend 742/742, build, Compose, real parser/HTTP, three-viewport Chromium and trusted Actions run `33045811548`
+fresh/historical/portable/platform gates passed. `48f52c6`/`latest` OCI index is
+`sha256:6447fd11480b1652c0f513d05b50dc66bb3aea61762030cd18435677324098f4`; a pulled container reported the full
+revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 local-book refresh request lifecycle (2026-08-27 implemented/published)
+
+- [x] Propagate request cancellation through opened-source reading, parser phase boundaries, per-chapter staging and
+      the GORM transaction; cancellation before commit creates no active catalogue/file/event side effect.
+- [x] Re-read the caller-owned Book after read/parse/stage and reject deleted or changed
+      source/url/library/original/toc/source-file/toc-rule/updated-at snapshots before chapter mutation.
+- [x] Replace full-row `Save` with guarded owned-field updates so refresh cannot fallback-insert a deleted Book or
+      overwrite concurrent metadata/category/can-update edits.
+- [x] Clean only the cancelled/stale request's inactive stage; preserve active generation, original archive, current
+      metadata/cache, progress/bookmarks and the already-published rooted archive boundary.
+- [x] Prove old cancellation/delete/edit failures before implementation, then pass focused/race/full/vet, real
+      HTTP/browser and fresh/historical/portable publication gates.
+
+Target contract:
+[`compat/local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/local-book-refresh-request-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `474b992`, red tests `e6138f3` and implementation `8df38f1` landed in order. Focused/race/full/vet,
+frontend 742/742, build, Compose, real three-viewport BookInfo/Reader and trusted Actions run `33068512106`
+fresh/historical/portable/platform gates passed. `8df38f1`/`latest` OCI index is
+`sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`; a pulled container reported the full
+revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
