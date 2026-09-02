@@ -147,9 +147,14 @@ func (s *Server) bookCategoryIDs(userID uint, book models.Book) []uint {
 }
 
 func (s *Server) bookCategoryIDsByBookID(userID uint, books []models.Book) map[uint][]uint {
+	result, _ := loadBookCategoryIDsByBookID(s.db, userID, books)
+	return result
+}
+
+func loadBookCategoryIDsByBookID(db *gorm.DB, userID uint, books []models.Book) (map[uint][]uint, error) {
 	result := make(map[uint][]uint, len(books))
 	if len(books) == 0 {
-		return result
+		return result, nil
 	}
 	bookIDs := make([]uint, 0, len(books))
 	legacyByBookID := make(map[uint]*uint, len(books))
@@ -158,7 +163,7 @@ func (s *Server) bookCategoryIDsByBookID(userID uint, books []models.Book) map[u
 		legacyByBookID[book.ID] = book.CategoryID
 	}
 	var rows []models.BookCategory
-	_ = s.db.Where("user_id = ? AND book_id IN ?", userID, bookIDs).Order("id asc").Find(&rows).Error
+	err := db.Where("user_id = ? AND book_id IN ?", userID, bookIDs).Order("id asc").Find(&rows).Error
 	for _, row := range rows {
 		result[row.BookID] = append(result[row.BookID], row.CategoryID)
 	}
@@ -168,7 +173,7 @@ func (s *Server) bookCategoryIDsByBookID(userID uint, books []models.Book) map[u
 			result[book.ID] = []uint{*legacyByBookID[book.ID]}
 		}
 	}
-	return result
+	return result, err
 }
 
 func normalizeBookCategoryIDs(book models.Book, categoryIDs []uint) []uint {
@@ -414,6 +419,12 @@ type bookUpdateRequest struct {
 	CanUpdate      *bool   `json:"canUpdate"`
 }
 
+// bookPatchWriteLifecycleTestHook pauses a validated write before its
+// transaction so contract tests can deterministically exercise stale reads.
+var bookPatchWriteLifecycleTestHook func(string)
+
+var errBookPatchTargetNotFound = errors.New("book not found during patch")
+
 func (s *Server) updateBook(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	bookID, ok := parseUintParam(c, "id")
@@ -493,22 +504,81 @@ func (s *Server) updateBook(c *gin.Context) {
 	if request.CanUpdate != nil {
 		book.CanUpdate = *request.CanUpdate
 	}
+	updates := make(map[string]any)
+	if request.Title != nil {
+		updates["title"] = book.Title
+	}
+	if request.Author != nil {
+		updates["author"] = book.Author
+	}
+	if request.CoverURL != nil {
+		updates["cover_url"] = book.CoverURL
+	}
+	if request.CustomCoverURL != nil {
+		updates["custom_cover_url"] = book.CustomCoverURL
+	}
+	if request.Intro != nil {
+		updates["intro"] = book.Intro
+	}
+	if categoryIDSet || categoryIDsSet {
+		if book.CategoryID == nil {
+			updates["category_id"] = nil
+		} else {
+			updates["category_id"] = *book.CategoryID
+		}
+	}
+	if request.CanUpdate != nil {
+		updates["can_update"] = book.CanUpdate
+	}
+	if bookPatchWriteLifecycleTestHook != nil {
+		bookPatchWriteLifecycleTestHook("metadata")
+	}
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&book).Error; err != nil {
+	ctx := c.Request.Context()
+	if ctx.Err() != nil {
+		return
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current models.Book
+		if err := tx.Where("id = ? AND user_id = ?", bookID, userID).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errBookPatchTargetNotFound
+			}
 			return err
 		}
-		if categoryIDsSet {
-			return s.setBookCategories(tx, userID, book.ID, nextCategoryIDs)
-		}
-		if categoryIDSet {
-			if request.CategoryID == nil {
-				return s.setBookCategories(tx, userID, book.ID, nil)
+		if len(updates) > 0 {
+			write := tx.Model(&models.Book{}).
+				Where("id = ? AND user_id = ?", current.ID, current.UserID).
+				Updates(updates)
+			if write.Error != nil {
+				return write.Error
 			}
-			return s.setBookCategories(tx, userID, book.ID, []uint{*request.CategoryID})
+			if write.RowsAffected != 1 {
+				return errBookPatchTargetNotFound
+			}
 		}
-		return nil
+		if categoryIDsSet {
+			if err := s.setBookCategories(tx, userID, current.ID, nextCategoryIDs); err != nil {
+				return err
+			}
+		} else if categoryIDSet {
+			if request.CategoryID == nil {
+				if err := s.setBookCategories(tx, userID, current.ID, nil); err != nil {
+					return err
+				}
+			} else if err := s.setBookCategories(tx, userID, current.ID, []uint{*request.CategoryID}); err != nil {
+				return err
+			}
+		}
+		return tx.Where("id = ? AND user_id = ?", current.ID, current.UserID).First(&book).Error
 	}); err != nil {
+		if ctx.Err() != nil || isRequestContextError(err) {
+			return
+		}
+		if errors.Is(err, errBookPatchTargetNotFound) {
+			notFound(c, "book not found")
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update book"})
 		return
 	}
@@ -571,6 +641,10 @@ type bookIDsRequest struct {
 	Format  string `json:"format"`
 }
 
+// batchBookCategoryWriteLifecycleTestHook exposes deterministic transaction
+// barriers for package-level lifecycle contract tests.
+var batchBookCategoryWriteLifecycleTestHook func(string, *gorm.DB, uint)
+
 func (s *Server) batchBooks(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
 	request, ok := decodeBookControlRequest[batchBooksRequest](c, maxBookControlRequestBodyBytes, "invalid batch payload")
@@ -626,8 +700,18 @@ func (s *Server) batchBooks(c *gin.Context) {
 	var affected int64
 	var deletedIDs []uint
 	var updatedBooks []models.Book
+	var updatedCategoryIDs map[uint][]uint
 	var cleanupPlans []bookCleanupPlan
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	ctx := c.Request.Context()
+	categoryAction := request.Action == "category" || request.Action == "category-add" || request.Action == "category-remove"
+	transactionDB := s.db
+	if categoryAction {
+		if ctx.Err() != nil {
+			return
+		}
+		transactionDB = s.db.WithContext(ctx)
+	}
+	err := transactionDB.Transaction(func(tx *gorm.DB) error {
 		switch request.Action {
 		case "delete":
 			var books []models.Book
@@ -647,35 +731,89 @@ func (s *Server) batchBooks(c *gin.Context) {
 				affected++
 			}
 		case "category", "category-add", "category-remove":
-			if err := tx.Where("user_id = ? AND id IN ?", userID, request.BookIDs).Find(&updatedBooks).Error; err != nil {
+			var currentBooks []models.Book
+			if err := tx.Where("user_id = ? AND id IN ?", userID, request.BookIDs).Find(&currentBooks).Error; err != nil {
 				return err
 			}
-			for i := range updatedBooks {
+			currentByID := make(map[uint]models.Book, len(currentBooks))
+			for _, book := range currentBooks {
+				currentByID[book.ID] = book
+			}
+			currentBooks = currentBooks[:0]
+			for _, bookID := range request.BookIDs {
+				if book, exists := currentByID[bookID]; exists {
+					currentBooks = append(currentBooks, book)
+				}
+			}
+			categoryIDsByBookID, err := loadBookCategoryIDsByBookID(tx, userID, currentBooks)
+			if err != nil {
+				return err
+			}
+			for i := range currentBooks {
 				nextIDs := requestCategoryIDs(*request)
 				if request.Action == "category-add" {
-					nextIDs = mergeCategoryID(updatedBooks[i], s.bookCategoryIDs(userID, updatedBooks[i]), request.CategoryID)
+					nextIDs = mergeCategoryID(currentBooks[i], categoryIDsByBookID[currentBooks[i].ID], request.CategoryID)
 				} else if request.Action == "category-remove" {
-					nextIDs = removeCategoryID(updatedBooks[i], s.bookCategoryIDs(userID, updatedBooks[i]), request.CategoryID)
+					nextIDs = removeCategoryID(currentBooks[i], categoryIDsByBookID[currentBooks[i].ID], request.CategoryID)
 				}
-				if err := s.setBookCategories(tx, userID, updatedBooks[i].ID, nextIDs); err != nil {
-					return err
-				}
+				var primaryCategoryID any
 				if len(nextIDs) > 0 {
-					updatedBooks[i].CategoryID = &nextIDs[0]
-				} else {
-					updatedBooks[i].CategoryID = nil
+					primaryCategoryID = nextIDs[0]
 				}
-				if err := tx.Save(&updatedBooks[i]).Error; err != nil {
+				if batchBookCategoryWriteLifecycleTestHook != nil {
+					batchBookCategoryWriteLifecycleTestHook("before_book_write", tx, currentBooks[i].ID)
+				}
+				write := tx.Model(&models.Book{}).
+					Where("id = ? AND user_id = ?", currentBooks[i].ID, userID).
+					Update("category_id", primaryCategoryID)
+				if write.Error != nil {
+					return write.Error
+				}
+				if write.RowsAffected == 0 {
+					continue
+				}
+				if err := s.setBookCategories(tx, userID, currentBooks[i].ID, nextIDs); err != nil {
 					return err
+				}
+				if batchBookCategoryWriteLifecycleTestHook != nil {
+					batchBookCategoryWriteLifecycleTestHook("after_book_write", tx, currentBooks[i].ID)
 				}
 				affected++
 			}
+			updatedBooks = make([]models.Book, 0, affected)
+			if affected == 0 {
+				updatedCategoryIDs = map[uint][]uint{}
+				return nil
+			}
+			var reloaded []models.Book
+			if err := tx.Where("user_id = ? AND id IN ?", userID, request.BookIDs).Find(&reloaded).Error; err != nil {
+				return err
+			}
+			reloadedByID := make(map[uint]models.Book, len(reloaded))
+			for _, book := range reloaded {
+				reloadedByID[book.ID] = book
+			}
+			for _, bookID := range request.BookIDs {
+				if book, exists := reloadedByID[bookID]; exists {
+					updatedBooks = append(updatedBooks, book)
+				}
+			}
+			affected = int64(len(updatedBooks))
+			updatedCategoryIDs, err = loadBookCategoryIDsByBookID(tx, userID, updatedBooks)
+			return err
 		default:
 			return fmt.Errorf("unsupported batch action")
 		}
 		return nil
 	})
 	if err != nil {
+		if categoryAction {
+			if ctx.Err() != nil || isRequestContextError(err) {
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update book categories"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -690,7 +828,14 @@ func (s *Server) batchBooks(c *gin.Context) {
 	case "category", "category-add", "category-remove":
 		items := make([]bookListItem, 0, len(updatedBooks))
 		for _, book := range updatedBooks {
-			items = append(items, s.bookShelfListItem(userID, book))
+			var progress models.ReadingProgress
+			_ = s.db.Where("user_id = ? AND book_id = ?", userID, book.ID).First(&progress).Error
+			items = append(items, s.projectBookShelfListItem(
+				book,
+				updatedCategoryIDs[book.ID],
+				progress,
+				s.cachedChapterCount(book.ID, book.SourceID),
+			))
 		}
 		if len(items) > 0 {
 			_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": items})
@@ -1864,12 +2009,46 @@ func (s *Server) updateBookCategory(c *gin.Context) {
 	} else {
 		book.CategoryID = nil
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := s.setBookCategories(tx, userID, book.ID, nextIDs); err != nil {
+	if bookPatchWriteLifecycleTestHook != nil {
+		bookPatchWriteLifecycleTestHook("category")
+	}
+	ctx := c.Request.Context()
+	if ctx.Err() != nil {
+		return
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current models.Book
+		if err := tx.Where("id = ? AND user_id = ?", bookID, userID).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errBookPatchTargetNotFound
+			}
 			return err
 		}
-		return tx.Save(&book).Error
+		var categoryID any
+		if len(nextIDs) > 0 {
+			categoryID = nextIDs[0]
+		}
+		write := tx.Model(&models.Book{}).
+			Where("id = ? AND user_id = ?", current.ID, current.UserID).
+			Update("category_id", categoryID)
+		if write.Error != nil {
+			return write.Error
+		}
+		if write.RowsAffected != 1 {
+			return errBookPatchTargetNotFound
+		}
+		if err := s.setBookCategories(tx, userID, current.ID, nextIDs); err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND user_id = ?", current.ID, current.UserID).First(&book).Error
 	}); err != nil {
+		if ctx.Err() != nil || isRequestContextError(err) {
+			return
+		}
+		if errors.Is(err, errBookPatchTargetNotFound) {
+			notFound(c, "book not found")
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update category"})
 		return
 	}

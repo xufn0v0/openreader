@@ -20,22 +20,63 @@ probes, and GitHub Actions `32828470325` fresh/historical/portable/restart gates
 [`docs/compat/trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md`](compat/trusted-proxy-client-identity-rate-limit-fixed-baseline-second-audit-p2-contract.md).
 Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
 
-## P2 Book patch/category write lifecycle (2026-08-27 inventory)
+## P2 Book patch/category write lifecycle (2026-08-30 implemented/published)
 
-- [ ] Use request-context transactions for `PUT /api/books/:id` and `/api/books/:id/category`; cancellation before
+- [x] Use request-context transactions for `PUT /api/books/:id` and `/api/books/:id/category`; cancellation before
       commit must create no Book/relation/timestamp/event side effect.
-- [ ] Re-read the caller-owned Book inside the transaction before any relation or row mutation; a concurrent delete
+- [x] Re-read the caller-owned Book inside the transaction before any relation or row mutation; a concurrent delete
       must remain deleted and return the same owner-safe 404 without fallback insert or orphan relations.
-- [ ] Replace both full-row `Save` calls with explicit owned-column updates. Metadata patch owns only submitted
+- [x] Replace both full-row `Save` calls with explicit owned-column updates. Metadata patch owns only submitted
       fields; category assignment owns only `category_id` plus caller-scoped BookCategory rows.
-- [ ] Reload the current Book inside the successful transaction and broadcast only its complete post-commit shelf
+- [x] Reload the current Book inside the successful transaction and broadcast only its complete post-commit shelf
       projection, preserving concurrent metadata, follow, group, source and catalogue state.
-- [ ] Prove the old read-modify-save races first, then pass focused/race/full/vet, real API/browser and
+- [x] Prove the old read-modify-save races first, then pass focused/race/full/vet, real API/browser and
       fresh/historical/portable publication gates without changing schema or backup formats.
 
 Target contract:
 [`compat/book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Status is `inventory-complete / tests-and-implementation-pending`; no application or test code changed in inventory.
+Contract `8e1a2e4`, red tests `946df03`, correction `7aad4b7`, implementation `4b0a599`, focused/race/full/vet,
+BookManage/BookInfo three-view browser checks and Actions run `33308641504` passed. Published OCI index is
+`sha256:03158e390e967f6ef4f6addc9125de504bdd781aa81e85ed5aaa403d58ead0fd`; status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 Category patch write lifecycle (2026-08-31 implementation)
+
+- [x] Run `PUT /api/categories/:id` in a request-context transaction and re-read the caller-owned Category before
+      mutation; cancellation before commit creates no row/time/event side effect.
+- [x] Replace full-row `Save` with an owner-guarded update of only submitted `name/color/show`; preserve concurrent
+      reorder and unsubmitted partial writes.
+- [x] Keep a concurrently deleted target deleted and return the existing flat 404 without fallback insert or false
+      `category_update`/`book_groups_update` events.
+- [x] Treat empty/no-known-field patches as 200 without UPDATE, reload the current Category on every success, and
+      prove response/event authority with deterministic old-implementation failures.
+- [x] Pass focused/race/full/vet, BookGroup real API/browser and fresh/historical/portable publication gates without
+      changing schema, backup formats or the signed wire/UI contract.
+
+Target contract:
+[`compat/category-patch-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/category-patch-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `835f950`, red tests `73b1655`, implementation `92c3ae7` and five-viewport browser validation passed.
+Trusted Actions run `33361011263` published `090a643`/`latest` OCI index
+`sha256:0e0532f202ab0090005fd07642e61b551febf0b3a1c44e518fe2bfbf9df1875f`; status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`.
+
+## P2 Batch Book Category write lifecycle (2026-08-31 inventory)
+
+- [ ] Run all three batch category actions in one request-context transaction; cancellation before commit creates no
+      Book/BookCategory/time/event side effect.
+- [ ] Read current category relations through the same transaction and propagate read failures instead of treating
+      them as an empty group set.
+- [ ] Replace full-row Book `Save` with an owner-guarded `category_id` update; preserve all unrelated Book columns.
+- [ ] Keep targets deleted after the owner precheck deleted, omit them from actual `affected/books/event`, and never
+      use fallback insert.
+- [ ] Reload surviving Book rows and relations before commit, and return path/value-free errors without raw SQLite
+      text.
+- [ ] Pass focused/race/full/vet, BookManage real API/browser and fresh/historical/portable publication gates without
+      changing schema, backup formats, signed wire limits or visible batch UX.
+
+Target contract:
+[`compat/batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is `inventory-complete / tests-and-implementation-pending`; no application or test code changed.
 
 ## Authentication and authorization
 

@@ -1240,7 +1240,7 @@ unchanged; successful refresh still uses the existing generation and backup form
 `sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`. Status is
 **aligned / regression-validated / Docker-published / awaiting-device-verification**.
 
-## P2 Book patch/category write lifecycle compatibility (2026-08-27 inventory)
+## P2 Book patch/category write lifecycle compatibility (2026-08-30 implemented/published)
 
 - The target adds no schema, migration, startup scan, persistent path, environment variable, backup member or
   browser state.
@@ -1254,4 +1254,41 @@ unchanged; successful refresh still uses the existing generation and backup form
 
 Target contract:
 [`book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Status is **inventory-complete / tests-and-implementation-pending**; no data or application code changed in inventory.
+Contract `8e1a2e4`, red tests `946df03`, envelope correction `7aad4b7` and implementation `4b0a599` landed in order.
+Focused/race/full tests proved cancellation, concurrent delete and column merge without schema, backup or mounted-root
+changes. Actions run `33308641504` passed fresh portable and historical-volume gates and published OCI index
+`sha256:03158e390e967f6ef4f6addc9125de504bdd781aa81e85ed5aaa403d58ead0fd`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P2 Category patch write lifecycle compatibility (2026-08-31 implementation)
+
+- The target adds no schema, migration, startup scan, persistent path, environment variable, backup member or
+  browser state.
+- Existing Category IDs, names, colors, visibility, sort order, timestamps, BookCategory/Book references and
+  logical/portable/Legado/WebDAV rows remain authoritative.
+- `PUT /api/categories/:id` writes own only submitted `name/color/show`; concurrent sort order and unsubmitted
+  fields survive. A target deleted after the first owner lookup remains deleted.
+- Cancellation before commit and empty/no-known-field patches create no durable row or timestamp change. Rollback
+  sees the same SQLite and backup formats and only reintroduces stale full-row `Save` risks.
+
+Target contract:
+[`category-patch-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](category-patch-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `835f950`, red tests `73b1655` and implementation `92c3ae7` passed focused/race/full/vet and real API gates.
+Actions run `33361011263` passed fresh portable and historical-volume compatibility and published OCI index
+`sha256:0e0532f202ab0090005fd07642e61b551febf0b3a1c44e518fe2bfbf9df1875f`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P2 Batch Book Category write lifecycle compatibility (2026-08-31 inventory)
+
+- The target adds no schema, migration, startup scan, persistent path, environment variable, backup member or
+  browser state.
+- Existing Book/Category/BookCategory IDs and relations, legacy primary category, all Book metadata, timestamps and
+  logical/portable/Legado/WebDAV rows remain authoritative.
+- Batch category actions may replace/add/remove only caller-owned BookCategory rows and guarded `books.category_id`;
+  they must not write back unrelated Book columns or recreate a deleted Book.
+- Request cancellation and relation-read failures roll back the complete batch. Rollback reads the same SQLite and
+  backup formats and only reintroduces contextless relation reads, full-row `Save`, and stale event risks.
+
+Target contract:
+[`batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / tests-and-implementation-pending**; no data, application or test code changed.

@@ -813,7 +813,7 @@ fresh/historical/portable 与 published-platform 门并发布 `8df38f1`/`latest`
 `sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`。当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
-## 41. Book patch 与分组提交列所有权（2026-08-27 inventory）
+## 41. Book patch 与分组提交列所有权（2026-08-30 implemented/published）
 
 本地 refresh 发布后继续从当前持久 `Save` 差集与已签收合同反查，下一项 must-fix 收敛为
 `PUT /api/books/:id` 和 `PUT /api/books/:id/category`。两路虽然已有 bounded DTO、owner-first lookup、
@@ -826,4 +826,49 @@ fresh/historical/portable 与 published-platform 门并发布 `8df38f1`/`latest`
 只更新请求显式列，category 只更新 relation 与 legacy `category_id`，成功后重载当前 Book 再广播；并发
 无关列按列合并，并发删除稳定 owner-safe 404 且零复活/孤儿/event。完整合同与红测门见
 [`book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](book-patch-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `8e1a2e4`、旧实现红测 `946df03`、404 envelope 勘误 `7aad4b7` 与实现 `4b0a599` 已按顺序落地。
+两路 transaction 现传播 caller context，在 mutation 前重读 owner Book；metadata 使用提交字段 update map，
+category 使用 guarded primary category update 后替换 caller relation，成功事务重载当前 Book。取消零写入/
+event，并发删除稳定 owner-safe 404 且不复活 Book/relation，并发 metadata/category/canUpdate 按列合并，
+`{}` 不推进时间。
+
+focused/adjacent/race、API full、Go full/vet、frontend 742/742、build、Compose，以及 BookManage 与 BookInfo
+1440x900、390x844、360x800 真实 API/Chromium 均通过。可信 Actions run `33308641504` 通过 native、
+fresh/historical/portable 与 published-platform 门并发布 `4b0a599`/`latest`；OCI index 为
+`sha256:03158e390e967f6ef4f6addc9125de504bdd781aa81e85ed5aaa403d58ead0fd`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 42. Category patch 提交列所有权（2026-08-31 implementation）
+
+Book patch/category 发布后继续从当前 full-row `Save` 差集与既有合同反查，下一项 must-fix 收敛为
+`PUT /api/categories/:id`。既有 BookGroup wire 合同声称该 DTO 只改显式 `name/color/show`，但 handler
+仍在 transaction 外读取整行 Category 后 `s.db.Save(&category)`；读取后完成的 reorder、show/color 或
+rename 可被迟到写覆盖，删除目标可被 fallback insert 复活，取消与 `{}` 也仍会落库/更新时间。
+
+固定上游 `saveBookGroup` 每次从当前用户 namespace 重新定位现有条目后替换，删除后的 group 不会被迟到
+保存重新加入。OpenReader 的部分 DTO/SQLite 是允许适配；目标是在 request-context transaction 内先重读
+owner Category，只更新请求显式列，成功重载权威 Category 后广播，并发无关列合并、删除保持 404、空
+patch 不 UPDATE。完整合同与红测门见
+[`category-patch-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](category-patch-write-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `835f950`、旧实现红测 `73b1655` 和实现 `92c3ae7` 已按顺序落地：handler 使用
+request-context transaction 重读 owner target，只更新显式列，空 patch 不 UPDATE，并发删除
+保持 404 且成功 event 使用重载行。focused/race/full/vet、frontend 742/742、build、Compose、BookGroup
+五视口真实 API 与可信 Actions run `33361011263` 全部通过；`090a643`/`latest` OCI index 为
+`sha256:0e0532f202ab0090005fd07642e61b551febf0b3a1c44e518fe2bfbf9df1875f`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 43. Batch Book Category 提交列所有权（2026-08-31 inventory）
+
+Category patch 关闭后继续对存量 full-row `Save` 做当前路由/当前合同反查，下一项 must-fix
+收敛为 `POST /api/books/batch` 的 `category/category-add/category-remove`。现有 handler 的
+owner/wire 前置校验已签收，但 category branch 仍以 contextless transaction 运行，
+`category-add/remove` 通过 `s.db` 绕过 tx 读取关系并忽略错误，最后用 `tx.Save`
+提交完整 Book 快照并直接用该快照广播。
+
+固定上游 `BookManage.vue#addBookGroupMulti/removeBookGroupMulti` 和
+`BookController.kt#addBookGroupMulti/removeBookGroupMulti/editShelfBook` 会对每本书从当前用户
+bookshelf namespace 重新定位现存条目后修改 group，已删除条目不重新加入。OpenReader
+继续保留 many-to-many 和幂等 remove 允许适配，但必须改为 request-context 同一 transaction
+关系读写、guarded `category_id` 与权威重载。完整合同与红测门见
+[`batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
 当前状态 **inventory-complete / tests-and-implementation-pending**；本阶段不修改应用或测试代码。
