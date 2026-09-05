@@ -60,23 +60,49 @@ Trusted Actions run `33361011263` published `090a643`/`latest` OCI index
 `sha256:0e0532f202ab0090005fd07642e61b551febf0b3a1c44e518fe2bfbf9df1875f`; status is
 `aligned / regression-validated / Docker-published / awaiting-device-verification`.
 
-## P2 Batch Book Category write lifecycle (2026-08-31 inventory)
+## P2 Batch Book Category write lifecycle (2026-08-31 implementation)
 
-- [ ] Run all three batch category actions in one request-context transaction; cancellation before commit creates no
+- [x] Run all three batch category actions in one request-context transaction; cancellation before commit creates no
       Book/BookCategory/time/event side effect.
-- [ ] Read current category relations through the same transaction and propagate read failures instead of treating
+- [x] Read current category relations through the same transaction and propagate read failures instead of treating
       them as an empty group set.
-- [ ] Replace full-row Book `Save` with an owner-guarded `category_id` update; preserve all unrelated Book columns.
-- [ ] Keep targets deleted after the owner precheck deleted, omit them from actual `affected/books/event`, and never
+- [x] Replace full-row Book `Save` with an owner-guarded `category_id` update; preserve all unrelated Book columns.
+- [x] Keep targets deleted after the owner precheck deleted, omit them from actual `affected/books/event`, and never
       use fallback insert.
-- [ ] Reload surviving Book rows and relations before commit, and return path/value-free errors without raw SQLite
+- [x] Reload surviving Book rows and relations before commit, and return path/value-free errors without raw SQLite
       text.
 - [ ] Pass focused/race/full/vet, BookManage real API/browser and fresh/historical/portable publication gates without
       changing schema, backup formats, signed wire limits or visible batch UX.
 
 Target contract:
 [`compat/batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Status is `inventory-complete / tests-and-implementation-pending`; no application or test code changed.
+Contract `271b545`, red tests `5b04825` and implementation `95aa598` landed in order. Local focused/race/full/vet,
+frontend 742/742, build, Compose and BookManage three-viewport real API/browser gates passed. Trusted Actions run
+`33366021370` was triggered for the remaining fresh/historical/portable and publication gates; its final result
+and digest still require retrieval. Status is
+`aligned / regression-validated / Docker-publication-pending-verification`.
+
+## P2 Remote Book existing-add write lifecycle (2026-09-04 implementation)
+
+- [x] Re-read the existing caller-owned URL target in one request-context transaction before any category mutation;
+      cancellation before commit creates no Book/BookCategory/time/event side effect.
+- [x] Replace full-row Book `Save` with an owner-guarded `category_id` update and exact relation replacement;
+      preserve source/url/metadata/variable/catalogue/can-update fields.
+- [x] Keep a target deleted after the URL lookup deleted, return an owner-safe 404, and never fallback-insert a
+      partial Book or broadcast a false shelf update.
+- [x] Reload current Book and relations before success; return stable path/value-free persistence errors without raw
+      SQLite, URL, source rule, variable, host path or body text.
+- [x] Preserve existing 200/201, URL identity, omitted/empty category behavior, active-source/owner/body priority and
+      BookInfo/result-card visible actions.
+- [ ] Pass focused/race/full/vet, real API/browser and fresh/historical/portable publication gates without schema,
+      backup, mounted-root or UI changes.
+
+Target contract:
+[`compat/remote-book-existing-add-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/remote-book-existing-add-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `594e17f`, red tests `1342583` and implementation `4c2ef7c` landed in order. Local focused/race/full/vet,
+frontend 742/742, build, Compose and BookInfo three-viewport real API/browser gates passed. Trusted Actions was
+triggered; final fresh/historical/portable, platform and digest evidence remains pending. Status is
+`aligned / regression-validated / Docker-publication-pending-verification`.
 
 ## Authentication and authorization
 

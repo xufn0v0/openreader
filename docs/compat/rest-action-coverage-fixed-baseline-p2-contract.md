@@ -857,7 +857,7 @@ request-context transaction 重读 owner target，只更新显式列，空 patch
 `sha256:0e0532f202ab0090005fd07642e61b551febf0b3a1c44e518fe2bfbf9df1875f`。当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
-## 43. Batch Book Category 提交列所有权（2026-08-31 inventory）
+## 43. Batch Book Category 提交列所有权（2026-08-31 implementation）
 
 Category patch 关闭后继续对存量 full-row `Save` 做当前路由/当前合同反查，下一项 must-fix
 收敛为 `POST /api/books/batch` 的 `category/category-add/category-remove`。现有 handler 的
@@ -871,4 +871,31 @@ bookshelf namespace 重新定位现存条目后修改 group，已删除条目不
 继续保留 many-to-many 和幂等 remove 允许适配，但必须改为 request-context 同一 transaction
 关系读写、guarded `category_id` 与权威重载。完整合同与红测门见
 [`batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
-当前状态 **inventory-complete / tests-and-implementation-pending**；本阶段不修改应用或测试代码。
+合同 `271b545`、旧实现红测 `5b04825` 与实现 `95aa598` 已按顺序落地。handler 现在使用
+request-context transaction 读取当前 relation，传播读取错误，只以 owner guard 更新 `category_id`，
+消失目标不会 fallback insert；提交前按请求顺序重载实际存活 Book/relation，response/event 不再使用
+初始快照。focused/race/full/vet、frontend 742/742、build、Compose 与 BookManage 1440x900、390x844、
+360x800 真实 Go/SQLite/API/Chromium 均通过。当前状态
+**aligned / regression-validated / Docker-publication-pending-verification**；可信 Actions run
+`33366021370` 已触发，最终卷门、平台与 digest 证据尚待重新读取。
+
+## 44. Remote Book existing-add 提交列所有权（2026-09-04 implementation）
+
+Batch Book Category 实施后继续从当前持久 `Save` 与既有专项合同做差集，下一项 must-fix 收敛为
+`POST /api/books/remote` 的 existing URL `200` 分支。新 URL 的 BookInfo/TOC、body/owner/source/parser
+边界和 BookInfo/结果卡可见动作均已签收；但 URL 命中后，显式分组仍先替换 relation，再把查询得到的
+完整 `models.Book` 交给 `tx.Save`，可覆盖并发 source/url/metadata/variable/catalogue/can-update 字段，
+并在目标删除后 fallback insert，response/event 也继续使用 pre-transaction 快照。
+
+固定上游 `BookController.kt#saveBook` 每次读取当前用户 bookshelf namespace 后定位已有项；OpenReader
+保留已发布的 URL identity、200/201、JWT 多用户和 many-to-many 适配。本轮只要求 existing 分组写在
+request-context transaction 内重读 owner target，仅 guarded 更新 `category_id`/relation，删除获胜，
+取消/错误回滚，并重载当前 projection。完整合同与红测门见
+[`remote-book-existing-add-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](remote-book-existing-add-write-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `594e17f`、旧实现红测 `1342583` 与实现 `4c2ef7c` 已按顺序落地。existing branch 现在在
+request-context transaction 内重读 owner Book，只 guarded 更新 primary category 与 relation，严格
+重载 Book/relation 后再构造 200 response/event；删除保持 404，取消和 relation error 回滚，省略/空
+分组保持 no-op。focused/race/full/vet、frontend 742/742、build、Compose 与 BookInfo 1440x900、
+390x844、360x800 真实 Go/SQLite/API/Chromium 均通过。当前状态
+**aligned / regression-validated / Docker-publication-pending-verification**；实现提交已触发可信 Actions，
+最终卷门、平台与 digest 证据待读取。

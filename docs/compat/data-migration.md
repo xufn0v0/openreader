@@ -1278,7 +1278,7 @@ Actions run `33361011263` passed fresh portable and historical-volume compatibil
 `sha256:0e0532f202ab0090005fd07642e61b551febf0b3a1c44e518fe2bfbf9df1875f`. Status is
 **aligned / regression-validated / Docker-published / awaiting-device-verification**.
 
-## P2 Batch Book Category write lifecycle compatibility (2026-08-31 inventory)
+## P2 Batch Book Category write lifecycle compatibility (2026-08-31 implementation)
 
 - The target adds no schema, migration, startup scan, persistent path, environment variable, backup member or
   browser state.
@@ -1291,4 +1291,27 @@ Actions run `33361011263` passed fresh portable and historical-volume compatibil
 
 Target contract:
 [`batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](batch-book-category-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Status is **inventory-complete / tests-and-implementation-pending**; no data, application or test code changed.
+Contract `271b545`, red tests `5b04825` and implementation `95aa598` landed in order. Focused/race/full/vet,
+frontend 742/742, build, Compose and three-viewport real API/browser gates passed without schema, backup or mounted
+root changes. Trusted Actions run `33366021370` was triggered by the implementation commit; its final
+fresh/historical/portable, platform and digest evidence still requires retrieval. Status is
+**aligned / regression-validated / Docker-publication-pending-verification**.
+
+## P2 Remote Book existing-add write lifecycle compatibility (2026-09-04 implementation)
+
+- The target adds no schema, migration, startup scan, persistent path, environment variable, backup member or
+  browser state.
+- Existing Book/Category/BookCategory/Chapter/Progress/Bookmark/Candidate rows, source/url/metadata/variable/
+  catalogue fields and logical/portable/Legado/WebDAV backups remain authoritative.
+- An explicit category selection for an existing caller URL may replace only caller BookCategory rows and guarded
+  `books.category_id`; it must not write unrelated Book columns or fallback-insert a deleted Book.
+- Omitted/empty categories preserve the current memberships and timestamp. Cancellation and persistence failures
+  leave all rows/time/events unchanged. Rollback reads the same formats and only reintroduces stale `Save` risks.
+
+Target contract:
+[`remote-book-existing-add-write-lifecycle-fixed-baseline-second-audit-p2-contract.md`](remote-book-existing-add-write-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Contract `594e17f`, red tests `1342583` and implementation `4c2ef7c` landed in order. Focused/race/full/vet,
+frontend 742/742, build, Compose and three-viewport real API/browser gates passed without schema, backup or mounted
+root changes. The implementation commit triggered trusted Actions; final fresh/historical/portable, platform and
+digest evidence still requires retrieval. Status is
+**aligned / regression-validated / Docker-publication-pending-verification**.
