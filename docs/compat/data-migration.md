@@ -1315,3 +1315,66 @@ frontend 742/742, build, Compose and three-viewport real API/browser gates passe
 root changes. The implementation commit triggered trusted Actions; final fresh/historical/portable, platform and
 digest evidence still requires retrieval. Status is
 **aligned / regression-validated / Docker-publication-pending-verification**.
+
+## P0/P2 Reader chapter-content request lifecycle compatibility (2026-09-09 implemented)
+
+- The target adds no schema, migration, startup scan, persistent root, environment variable, backup member or
+  browser storage key.
+- Existing `books.variable`, `chapters.variable/cache_path`, Book/Chapter/Source IDs and timestamps remain
+  authoritative. A future content result may update only variables and the current chapter cache path after its
+  caller/source/book/chapter/initial-variable snapshot is still current.
+- Stale, cancelled or failed work must not restore variables cleared by a source semantic edit, publish a path for a
+  replaced chapter, overwrite a current cache file, recreate a deleted Chapter, or repopulate browser cache cleared
+  by a book/source transition.
+- Existing safe relative/current-absolute cache paths stay lazy-readable. Opportunistic path normalization becomes
+  an old-path-guarded single-column update; no existing row or file is scanned or rewritten during upgrade.
+- Rollback reads the same SQLite, cache and backup formats and only reintroduces stale response/state and full-row
+  Chapter `Save` risks.
+
+Target contract:
+[`reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md).
+Contract `c500e81`, red tests `5bf7c66` and implementation `0a8a0ef` landed in order. The implementation uses guarded
+single-/owned-column updates and staged cache publication without adding a schema migration, startup rewrite, backup
+member, mounted root or environment variable. Existing rows, paths and archives remain readable. Focused/race/full,
+frontend 748/748, build, Compose and four-viewport browser checks passed. Trusted Actions run `34321320014` then
+passed fresh/portable, historical volume and published-platform gates and published `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P0/P2 Reader source-change write lifecycle compatibility (2026-09-09 implemented)
+
+- The target adds no schema, migration, startup scan, persistent root, environment variable, backup member or browser
+  storage key.
+- Existing Book, Chapter, ReadingProgress, Bookmark and BookSourceCandidate rows remain authoritative. Source change
+  may replace the catalogue and update only its explicit source/metadata/catalogue Book columns after the initial
+  Book identity and caller-active target Source semantics still match.
+- Stale, cancelled or failed work must not recreate a deleted Book, replace a newer catalogue, rebind current
+  progress/bookmarks, overwrite unrelated Book columns, change candidates, or prune cache/image files.
+- Existing candidate derivation, cache hashes, Chapter IDs, position fallback and all logical/portable/Legado/WebDAV
+  backup formats remain unchanged. Rollback reads the same data and only reintroduces full-row Save/stale-commit risk.
+
+Target contract:
+[`reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md).
+Contract `31b2963`, old-implementation red tests `5734f74` and implementation `3bb465f` landed in order. The guarded
+explicit-column update and authoritative reload add no schema, startup rewrite, backup member, mounted root or
+environment variable. Focused/adjacent/race/full/vet, frontend 748/748, build, Compose and four-viewport Chromium
+checks passed. Trusted Actions run `34321320014` passed fresh/portable, historical volume and published-platform
+gates and published `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P0/P2 Reader local chapter-cache rebuild lifecycle compatibility (2026-09-09 inventory)
+
+- The target adds no schema, migration, startup scan, persistent root, environment variable, backup member or browser
+  storage key.
+- Existing local Book, Chapter and caller-owned archive rows/files remain authoritative. Cache miss may publish only
+  a derived `content/` file and guarded `chapters.cache_path` after the Book/archive/Chapter snapshot is still current.
+- Stale, cancelled or failed work must not recreate a deleted Chapter, conflict with a replacement catalogue, alter
+  title/URL/index/resource/variable/time columns, overwrite the active refresh generation or leave a final orphan.
+- Existing safe relative and historical absolute cache paths, local format archives, parser budgets and all ordinary/
+  portable/Legado/WebDAV backup formats remain unchanged. Request-private stage files are derived and excluded.
+- Rollback reads the same data and only reintroduces contextless rebuild, full-row Save and direct-final-file risks.
+
+Target contract:
+[`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / tests-and-implementation-pending**; no data, application or test code changed.

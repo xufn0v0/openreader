@@ -1213,6 +1213,63 @@ amd64/arm64 release is `f394c1a`/`latest`, OCI index
 | Remote refresh/change-source and chapter content | The server reads/writes optional Book/Chapter variables around existing parser calls. Chapter content stores the returned Book/Chapter map atomically with its cache path. | Existing paths and successful response bodies do not change. A source semantics change clears obsolete state rather than translating or exposing it. |
 | Backup restore | `bookshelf.json.variable` and optional `chapterVariables.json` are accepted. | Old archives need neither field. New maps are fully validated before restore mutation and target only the authenticated destination user's source-name-resolved book/chapters; source/book/chapter database IDs are never variable identity. |
 
+### P0/P2 Reader chapter-content request lifecycle (2026-09-09 implemented)
+
+`GET /api/books/:id/chapters/:index/content` retains JWT, server-authoritative index, normal
+`200 {chapter,content,format,...}` and safe parser/source `502` responses. A remote result whose caller-owned Book,
+active Source semantic snapshot, Chapter identity, or initial Book/Chapter variable state changed while work was in
+flight must commit no variable/cache state and returns path/value-free
+`409 {"error":"chapter content changed; retry"}`. Caller cancellation emits no synthetic response and neither stale
+nor cancelled work writes `source_failures`.
+
+Search, export and ordinary/stream cache callers reuse the same guarded loader without changing their existing
+envelopes. Frontend chapter GETs must carry an abort signal, and only the current Reader book URL/source/chapter
+generation may apply a response or write browser/memory cache. Exact upstream evidence, current gaps and red-test
+requirements are in
+[`reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md).
+Contract `c500e81`, red tests `5bf7c66` and implementation `0a8a0ef` landed in order. Snapshot revalidation,
+request-context persistence, guarded owned-column updates, staged cache publication and frontend AbortSignal/generation
+guards now enforce the contract. Focused/race/full/vet, frontend 748/748, build, Compose and delayed-source browser
+checks at four viewports passed. Trusted Actions run `34321320014` then passed native, fresh/portable, historical
+volume and published-platform gates and published `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+### P0/P2 Reader source-change write lifecycle (2026-09-09 implemented)
+
+`POST /api/books/:id/change-source` keeps its JWT, owner-first lookup, 1 MiB single-object body, selected-source
+fetch, normal `200` shelf object, safe parser `400`, owner-safe initial `404`, transactionally replaced catalogue,
+progress/bookmark reconciliation and candidate projection. After remote work, the transaction must revalidate the
+initial Book source identity and the caller's active target-Source semantic snapshot before any chapter mutation.
+
+A deleted Book, a newer source switch, or a changed/unavailable target Source returns
+`409 {"error":"book changed during source switch"}` with no row/file/failure/event side effect. A valid commit uses
+explicit source/metadata/catalogue columns over the transaction-current Book, preserves unrelated category/custom
+cover/update/local-archive fields, reloads the authoritative Book, and uses that row for candidate, response and event.
+Exact evidence and red-test requirements are in
+[`reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md).
+Contract `31b2963`, old-implementation red tests `5734f74` and implementation `3bb465f` landed in order. The
+transaction now performs the required Book/association/Source revalidation, guarded owned-column update and
+authoritative reload. Focused/adjacent/race/full/vet, frontend 748/748, build, Compose and four-viewport Chromium
+checks passed. Trusted Actions run `34321320014` passed native, fresh/portable, historical volume and
+published-platform gates and published `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+### P0/P2 Reader local chapter-cache rebuild lifecycle (2026-09-09 inventory)
+
+The local-book cache-miss branch of `GET /api/books/:id/chapters/:index/content` keeps its JWT, owner-first lookup,
+server-authoritative index, normal text response and existing safe initial errors. A rebuilt result must revalidate
+the current local Book/archive and complete Chapter parse/cache snapshot before publishing any file or path.
+
+Deletion, `refresh-local`, archive/TOC replacement, Chapter identity change or caller cancellation makes the result
+stale and must not recreate a Chapter, overwrite the active cache generation or leave an unreferenced final file.
+Stale work uses the existing `409 {"error":"chapter content changed; retry"}`; persistence errors remain safe and
+path-free. A valid commit may update only `chapters.cache_path` with an old-snapshot guard and authoritative reload.
+Exact evidence and red-test requirements are in
+[`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / tests-and-implementation-pending**; no application or test code changed.
+
 ## P2 access-log query projection (2026-08-25 implemented/published)
 
 All route methods, paths, auth, query parsing, responses and side effects remain unchanged. The shared access logger

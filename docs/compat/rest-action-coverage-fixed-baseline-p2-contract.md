@@ -899,3 +899,64 @@ request-context transaction 内重读 owner Book，只 guarded 更新 primary ca
 390x844、360x800 真实 Go/SQLite/API/Chromium 均通过。当前状态
 **aligned / regression-validated / Docker-publication-pending-verification**；实现提交已触发可信 Actions，
 最终卷门、平台与 digest 证据待读取。
+
+## 45. Reader 章节正文请求与持久提交生命周期（2026-09-09 implemented）
+
+Remote Book existing-add 实施后，继续从共享章节 loader、持久 variable/cache path 和 Reader 换源动作做
+当前差集。固定上游 `Reader.vue#getContent` 在响应落地前比较当前 `bookUrl` 和 index，迟到旧正文不展示；
+上游正文 parser 只修改本次内存 Book/BookChapter，cache 文件按当前书 URL/index 派生，不把旧 chapter
+实体写回目录。
+
+OpenReader 现以 generation/scope guard 和 AbortSignal 约束主章节请求及 browser cache；换源清理会取消
+旧请求，迟到成功/失败不能改变当前正文、提示或缓存。后端远程 fetch 后在 request-context transaction
+内重验 caller/source/book/chapter/initial-variable snapshot，只 guarded 更新拥有列，并以 staged/backup
+文件事务发布 cache；legacy path 归一化也不再 full-row `Save(chapter)` 或插入已删除章节。
+
+目标以前端 generation + AbortSignal 和后端 request-context snapshot-guarded owned-column commit 收敛，
+陈旧结果安全 409、零 source failure/变量/path/file/浏览器缓存副作用。完整合同与红测门见
+[`reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md)。
+合同 `c500e81`、旧实现红测 `5bf7c66` 和实现 `0a8a0ef` 已按顺序落地。focused/race/full/vet、frontend
+748/748、build、Compose 与四视口延迟换源浏览器验证通过。可信 Actions run `34321320014` 又通过 native、
+fresh/portable、historical volume 与 published-platform 门，并发布 `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 46. Reader 换源写入生命周期（2026-09-09 implemented）
+
+章节正文生命周期实施后，继续从当前持久 `Save` 和远程工作后的 transaction 做差集。固定上游
+`setBookSource` 在抓取目标来源后通过 `editShelfBook` 重新读取 namespace 内现存书架项，只修改来源
+字段；目录完成后再次重读并更新 latest chapter/count。已删除书不会被重新加入，远程工作前的整本
+Book 快照也不会覆盖当前条目。
+
+旧 OpenReader 在 fetch 后不重读 Book 或目标 Source，先替换 Chapter/重绑 Progress/Bookmark，再
+`tx.Save(&book)`。旧实现红测确定性证明了并发删除复活、较早换源覆盖、目标 Source 失效后提交，以及
+CategoryID、CustomCoverURL、CanUpdate 等非换源列被旧快照覆盖。
+
+目标是在任何目录 mutation 前复验初始 Book source identity 与 caller-active target Source semantics，
+以 transaction-current Book 计算显式换源列、guarded update 并权威重载；陈旧结果安全 409，零 row/file/
+failure/event 副作用。完整合同与红测门见
+[`reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md)。
+合同 `31b2963`、旧实现红测 `5734f74` 和实现 `3bb465f` 已按顺序落地。focused/adjacent/race/full/vet、
+frontend 748/748、build、Compose 与四视口 Chromium 均通过。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。可信 Actions run
+`34321320014` 的 native、fresh/portable、historical volume 与 published-platform 门全部通过；发布的
+`a7917ed`/`latest` OCI index 为
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。
+
+## 47. Reader 本地章节缓存回建生命周期（2026-09-09 inventory）
+
+换源写入关闭后继续扫描共享章节 loader 的本地分支。固定上游从当前 namespace 的本地 Book/Chapter
+直接读取文件范围或 EPUB/UMD 资源；正文读取不会把旧目录实体写回 shelf/catalogue，EPUB 的可选文本
+cache 也只是派生文件。
+
+OpenReader 在 cache miss 时通过 `rebuildLocalChapterText` 重新读取/解析 archive，然后直接写最终
+`content/<hash>`，修改旧 Chapter struct 的 URL/cache path 并执行 contextless `s.db.Save(chapter)`，且
+忽略写入错误。读取期间若删除 Book 或完成 `refresh-local`，迟到请求可 fallback insert 旧 Chapter、覆盖
+新目录字段/active generation 或留下 orphan；archive inode current 检查不能证明 DB 仍引用该实体。
+
+目标是贯穿 caller context，在最终文件/DB 发布前复验 local Book/archive 和完整 Chapter parse/cache
+snapshot，只以 guarded single-column update 写 `cache_path`，并以 request-private stage + per-cache
+coordinator 收敛 promote/rollback。stale 复用现有安全 409，正常 TXT/EPUB/UMD/旧卷恢复保持。完整合同与
+红测门见
+[`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / tests-and-implementation-pending**；本阶段不修改应用或测试代码。

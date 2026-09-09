@@ -60,16 +60,14 @@ test('loads, stores, and marks fresh content for the active book', async () => {
   const fixture = createController()
   const data = await fixture.controller.load(3, { refresh: true })
   assert.deepEqual(data, validContent(3))
-  assert.deepEqual(fixture.calls, [
-    [
-      'load',
-      { id: 7, url: 'https://example.com/book/7' },
-      7,
-      3,
-      { refresh: true },
-    ],
-    ['cached', 3],
-  ])
+  assert.equal(fixture.calls[0][0], 'load')
+  assert.deepEqual(fixture.calls[0][1], { id: 7, url: 'https://example.com/book/7' })
+  assert.equal(fixture.calls[0][2], 7)
+  assert.equal(fixture.calls[0][3], 3)
+  assert.equal(fixture.calls[0][4].refresh, true)
+  assert.ok(fixture.calls[0][4].signal instanceof AbortSignal)
+  assert.equal(fixture.calls[0][4].signal.aborted, false)
+  assert.deepEqual(fixture.calls[1], ['cached', 3])
   assert.deepEqual(fixture.controller.get(3), validContent(3))
 })
 
@@ -106,6 +104,39 @@ test('deduplicates concurrent loads for the same book and chapter', async () => 
   resolveLoad(validContent(2))
   assert.deepEqual(await first, validContent(2))
   assert.deepEqual(await second, validContent(2))
+})
+
+test('clearing a book aborts its in-flight chapter request', async () => {
+  let capturedOptions
+  let resolveLoad
+  const fixture = createController({
+    loadBrowserContent: (_book, _bookId, _index, options) => {
+      capturedOptions = options
+      return new Promise((resolve, reject) => {
+        resolveLoad = resolve
+        options.signal?.addEventListener('abort', () => {
+          const error = new Error('chapter request cancelled')
+          error.name = 'AbortError'
+          reject(error)
+        }, { once: true })
+      })
+    },
+  })
+
+  const pending = fixture.controller.load(1).then(
+    data => ({ status: 'fulfilled', data }),
+    error => ({ status: 'rejected', error }),
+  )
+  fixture.controller.clear(fixture.book.value, fixture.bookId.value)
+  if (!capturedOptions?.signal?.aborted) resolveLoad(validContent(1))
+  const result = await pending
+
+  assert.ok(capturedOptions.signal instanceof AbortSignal)
+  assert.equal(capturedOptions.signal.aborted, true)
+  assert.equal(result.status, 'rejected')
+  assert.equal(result.error.name, 'AbortError')
+  assert.equal(fixture.controller.get(1), null)
+  assert.deepEqual(fixture.calls, [])
 })
 
 test('preloads uncached neighboring chapters within the configured radius', async () => {

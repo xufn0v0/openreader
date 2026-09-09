@@ -104,6 +104,65 @@ frontend 742/742, build, Compose and BookInfo three-viewport real API/browser ga
 triggered; final fresh/historical/portable, platform and digest evidence remains pending. Status is
 `aligned / regression-validated / Docker-publication-pending-verification`.
 
+## P0/P2 Reader chapter-content request lifecycle (2026-09-09 implemented)
+
+- [x] Reject a remote result unless the caller-owned Book, active Source semantics, Chapter identity and initial
+      Book/Chapter variables still match the fetch snapshot; stale work must not repopulate source-cleared state.
+- [x] Propagate request context through the persistence transaction and check guarded row counts; cancellation,
+      source/catalogue replacement and deletion create no variable/path/file/failure side effect.
+- [x] Publish remote cache content only with a successful current snapshot under the existing cache coordination
+      boundary; stale work cannot overwrite current bytes or leave a visible orphan/reference mismatch.
+- [x] Replace legacy cache-path full-row Chapter `Save` with an old-path-guarded single-column update that cannot
+      overwrite metadata/variables or fallback-insert a deleted/replaced chapter.
+- [x] Give Reader chapter requests an AbortSignal and generation/scope guard so late success/failure cannot change
+      current content, format, loading/error, browser/memory cache, layout, preload or progress.
+- [x] Pass deterministic old-implementation red tests, focused/race/full/vet, frontend full/build, delayed-source
+      browser and fresh/historical/portable publication gates without schema/backup/root changes.
+
+Target contract:
+[`compat/reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md`](compat/reader-chapter-content-request-lifecycle-fixed-baseline-second-audit-p0-contract.md).
+Contract `c500e81`, red tests `5bf7c66` and implementation `0a8a0ef` landed in order. Status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`. Trusted Actions run
+`34321320014` published `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`.
+
+## P0/P2 Reader local chapter-cache rebuild lifecycle (2026-09-09 inventory)
+
+- [ ] Propagate caller context through bounded local archive reads and cache writes; check cancellation around parser
+      and EPUB recovery work before any durable publication.
+- [ ] Revalidate the caller-owned local Book, archive same-file identity and complete Chapter parse/cache snapshot
+      after rebuild work; deletion and `refresh-local` replacement must win without row resurrection.
+- [ ] Replace full-row Chapter `Save` with an old-snapshot-guarded `cache_path` update; never persist synthetic URL or
+      overwrite title/index/resource/variable/timestamps from a stale struct.
+- [ ] Stage rebuilt cache privately and coordinate validation, promote, guarded DB update and rollback so stale,
+      cancelled or failed work leaves no final orphan and cannot overwrite an active refresh generation.
+- [ ] Pass deterministic old-implementation red tests, focused/race/full/vet, local format/old-volume regression,
+      frontend/build, four-viewport Reader and trusted fresh/historical/portable publication gates.
+
+Target contract:
+[`compat/reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is `inventory-complete / tests-and-implementation-pending`; no application or test code changed.
+
+## P0/P2 Reader source-change write lifecycle (2026-09-09 implemented)
+
+- [x] Revalidate the caller-owned Book and its initial source ID/URL after target-source remote work and before any
+      Chapter/Progress/Bookmark mutation; deletion and a newer source switch must win without resurrection.
+- [x] Revalidate the caller's active, enabled target-Source association and parser/fetch semantic snapshot; source
+      edit, delete, detach or COW remap makes the remote result stale.
+- [x] Replace full-row Book `Save` with guarded explicit source/metadata/catalogue columns over the transaction-current
+      row; preserve category, custom cover, update flag and local-archive fields.
+- [x] Roll back Book/catalogue/reference/candidate changes together on stale, cancellation, guarded-row or candidate
+      failure; stale work must not prune cache/image files or write source-failure/event state.
+- [x] Reload the committed Book for candidate, response and durable-only event projection; prove old implementation
+      failures, focused/race/full/vet, frontend/build, four-viewport browser and trusted publication gates.
+
+Target contract:
+[`compat/reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md`](compat/reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md).
+Contract `31b2963`, red tests `5734f74` and implementation `3bb465f` landed in order. Status is
+`aligned / regression-validated / Docker-published / awaiting-device-verification`. Trusted Actions run
+`34321320014` published `a7917ed`/`latest` OCI index
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`.
+
 ## Authentication and authorization
 
 - [ ] `OPENREADER_JWT_SECRET` is required and not logged.

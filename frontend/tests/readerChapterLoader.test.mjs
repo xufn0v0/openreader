@@ -30,7 +30,8 @@ function createController(overrides = {}) {
     cancelProgressSave: () => calls.push(['cancel']),
     getMemoryContent: () => null,
     loadContent: async (index, options) => {
-      calls.push(['load', index, options])
+      const { signal: _signal, ...recordedOptions } = options
+      calls.push(['load', index, recordedOptions])
       return {
         chapter: { id: index + 1, title: `第 ${index + 1} 章` },
         content: `正文 ${index}`,
@@ -112,6 +113,58 @@ test('records load failures and always releases loading guards', async () => {
     ['cancel'],
     ['frame'],
   ])
+})
+
+test('discards an older main load that finishes after the active chapter', async () => {
+  const pending = new Map()
+  const fixture = createController({
+    loadContent: index => new Promise(resolve => {
+      pending.set(index, resolve)
+    }),
+  })
+
+  const first = fixture.controller.load(0)
+  const second = fixture.controller.load(1)
+  pending.get(1)(validLoaderContent(1))
+  await second
+  pending.get(0)(validLoaderContent(0))
+  await first
+
+  assert.equal(fixture.state.currentIndex.value, 1)
+  assert.equal(fixture.state.chapter.value.id, 2)
+  assert.equal(fixture.state.content.value, '正文 1')
+  assert.deepEqual(
+    fixture.calls.filter(call => ['layout', 'restore', 'preload', 'mark'].includes(call[0])),
+    [
+      ['layout'],
+      ['restore', 0, {}],
+      ['preload', 1],
+      ['mark', fixture.currentProgress],
+    ],
+  )
+})
+
+test('aborts the previous main request when another chapter starts loading', async () => {
+  const signals = []
+  const pending = new Map()
+  const fixture = createController({
+    loadContent: (index, options) => {
+      signals.push(options.signal)
+      return new Promise(resolve => {
+        pending.set(index, resolve)
+      })
+    },
+  })
+
+  const first = fixture.controller.load(0)
+  const second = fixture.controller.load(1)
+  assert.ok(signals[0] instanceof AbortSignal)
+  assert.equal(signals[0].aborted, true)
+  assert.equal(signals[1].aborted, false)
+  pending.get(1)(validLoaderContent(1))
+  assert.equal(await second, true)
+  pending.get(0)(validLoaderContent(0))
+  assert.equal(await first, false)
 })
 
 test('keeps EPUB document metadata out of the ordinary paragraph renderer', async () => {
@@ -206,3 +259,11 @@ test('stores cached image mappings and passes them to presentation after loading
   assert.deepEqual(fixture.state.cachedImages.value, { [remote]: capability })
   assert.deepEqual(presented.cachedImages, { [remote]: capability })
 })
+
+function validLoaderContent(index) {
+  return {
+    chapter: { id: index + 1, title: `第 ${index + 1} 章` },
+    content: `正文 ${index}`,
+    format: 'text',
+  }
+}

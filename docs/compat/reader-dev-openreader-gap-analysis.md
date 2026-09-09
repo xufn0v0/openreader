@@ -3992,3 +3992,44 @@ default/trusted/invalid 进程探针及 GitHub Actions `32828470325` fresh/histo
 已发布 `f5b3869`/`latest`，amd64/arm64 OCI index 为
 `sha256:6a2fc83bf79426e93423b1dd5756c8ea49b716d1321441d5c194efff9c03b066`；当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-09-09 Reader 换源写入生命周期第二轮固定基准复审
+
+章节正文请求生命周期关闭后继续扫描远程工作后的持久 `Save`。固定上游 `setBookSource` 在抓取目标
+来源后通过 `editShelfBook` 重读当前 namespace 的现存书架项，只修改来源字段；目录完成后再次重读并
+更新 latest chapter/count。旧 OpenReader 的 `changeBookSource` 不在 fetch 后重读 Book 或目标 Source，
+先替换章节/重绑位置，再将 pre-fetch `models.Book` 交给 `tx.Save`，response/event/candidate 也使用该快照。
+
+因此删除目标可被 fallback insert 复活并留下章节，较早换源可覆盖较新的来源/目录/variable，目标
+Source 的编辑、禁用、删除或 COW 重映射不会阻止旧规则结果提交，CategoryID、CustomCoverURL、
+CanUpdate 和本地归档等非换源列也可能丢失。目标是在所有目录 mutation 前复验 Book source identity 与
+caller-active target Source semantics，以 transaction-current Book 计算显式拥有列并 guarded update，
+随后权威重载；陈旧结果为安全 409 且零 row/file/failure/event 副作用。
+
+完整矩阵与测试先行门见
+[`reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md`](reader-source-change-write-lifecycle-fixed-baseline-second-audit-p0-contract.md)。
+合同 `31b2963`、旧实现红测 `5734f74` 和实现 `3bb465f` 已按顺序关闭。实现于目录 mutation 前重读并
+复验 Book、association 与目标 Source，以 transaction-current Book 计算显式拥有列、guarded update 并
+权威重载；删除、新换源和目标 Source 失效均安全 409，非换源列保持。focused/adjacent/race/full/vet、
+frontend 748/748、build、Compose 与 1440x900、390x844、360x800、1024x1366 Chromium 均通过。
+可信 Actions run `34321320014` 又通过 native、fresh/portable、historical volume 和 published-platform 门；
+`a7917ed`/`latest` amd64/arm64 OCI index 为
+`sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。当前状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-09-09 Reader 本地章节缓存回建生命周期第二轮固定基准复审
+
+换源写入发布后继续扫描章节 loader 的本地 cache-miss 分支。固定上游按当前 namespace 的本地
+Book/Chapter 从文件范围或 EPUB/UMD 资源读取正文，不把旧目录实体写回 catalogue；EPUB 文本 cache 是
+派生文件。OpenReader 则在 `rebuildLocalChapterText` 中丢失 caller context，直接写最终 `content/<hash>`，
+随后把读取前 Chapter 整行 `Save` 且忽略错误。
+
+因此读取期间删除 Book 或完成 `refresh-local` 时，迟到请求可 fallback insert 旧 Chapter、覆盖替换目录
+字段或 active generation，并在取消/DB 失败时留下 orphan。现有 archive same-file 检查只证明目录 inode
+未被替换，不能证明数据库仍由当前用户的同一 Book/Chapter 引用。
+
+目标是在发布前复验 local Book/archive 和完整 Chapter parse/cache snapshot，只 guarded 更新
+`chapters.cache_path`，以 request-private stage 和 per-cache coordinator 收敛文件/DB，并传播 caller
+context。完整矩阵与测试先行门见
+[`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态：**inventory-complete / tests-and-implementation-pending**；本阶段未修改应用或测试代码。
