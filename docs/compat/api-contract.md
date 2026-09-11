@@ -1256,7 +1256,7 @@ published-platform gates and published `a7917ed`/`latest` OCI index
 `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
 **aligned / regression-validated / Docker-published / awaiting-device-verification**.
 
-### P0/P2 Reader local chapter-cache rebuild lifecycle (2026-09-09 inventory)
+### P0/P2 Reader local chapter-cache rebuild lifecycle (2026-09-10 implemented)
 
 The local-book cache-miss branch of `GET /api/books/:id/chapters/:index/content` keeps its JWT, owner-first lookup,
 server-authoritative index, normal text response and existing safe initial errors. A rebuilt result must revalidate
@@ -1268,7 +1268,35 @@ Stale work uses the existing `409 {"error":"chapter content changed; retry"}`; p
 path-free. A valid commit may update only `chapters.cache_path` with an old-snapshot guard and authoritative reload.
 Exact evidence and red-test requirements are in
 [`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Status is **inventory-complete / tests-and-implementation-pending**; no application or test code changed.
+Contract `1b2ea90`, old-implementation red tests `b75f640` and implementation `a131aa9` landed in order. The local
+loader now carries caller context, revalidates the complete Book/archive/Chapter snapshot, stages the derived file,
+updates only guarded `chapters.cache_path`, and authoritatively reloads the result. Deletion, refresh, source
+replacement, cancellation and injected DB/publish failures leave no resurrected row or final orphan. Focused/race,
+Go full/vet, frontend 748/748, build, Compose and four-viewport Chromium checks passed. Status is
+Trusted Actions run `34471037381` then passed backend/frontend/Compose, native, fresh/portable, historical-volume
+and published-platform gates. It published the `a131aa9`/`latest` amd64/arm64 OCI index
+`sha256:17fcb8f7c5a1b91781af5a168c9ed2dd4053dbf0f68afc5d5871388c163b19a7`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+### P2 user-asset filesystem/reference lifecycle (2026-09-10 inventory)
+
+- `POST /api/uploads` keeps its JWT, multipart budget, single file/type admission, content checks and
+  `201 {url,name,size,type}` response. Unsafe rooted paths fail closed; copy/sync/close/cancel/random/publish failure
+  must leave no final asset and never overwrite an existing file.
+- `DELETE /api/uploads` keeps its bounded single-JSON request, owner checks, idempotent safe-missing success and
+  `409 upload is still in use`. It may remove only the caller's current rooted regular entry.
+- `POST /api/books`, `PUT /api/books/:id` and `PUT /api/settings/:key` keep their existing wire contracts. Only a
+  newly introduced current-user asset URL requires current rooted-file admission; an unchanged historical/missing
+  URL remains compatible.
+- A concurrent reference write and delete must serialize per caller: reference-first yields the existing delete
+  `409`; delete-first yields the existing Book `400 invalid custom cover url` or a flat Setting `400`. Both may not
+  report success while leaving a dangling row.
+- Portable v2 export/restore keeps its manifest, placeholder and cross-user rewrite formats, but asset bytes must be
+  read from one rooted opened handle and promotion/DB commit must share the same caller coordination boundary.
+
+Target contract:
+[`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / tests-and-implementation-pending**.
 
 ## P2 access-log query projection (2026-08-25 implemented/published)
 

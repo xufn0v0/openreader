@@ -4017,7 +4017,7 @@ frontend 748/748、build、Compose 与 1440x900、390x844、360x800、1024x1366 
 `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。当前状态：
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
-## 2026-09-09 Reader 本地章节缓存回建生命周期第二轮固定基准复审
+## 2026-09-10 Reader 本地章节缓存回建生命周期第二轮固定基准复审
 
 换源写入发布后继续扫描章节 loader 的本地 cache-miss 分支。固定上游按当前 namespace 的本地
 Book/Chapter 从文件范围或 EPUB/UMD 资源读取正文，不把旧目录实体写回 catalogue；EPUB 文本 cache 是
@@ -4032,4 +4032,28 @@ Book/Chapter 从文件范围或 EPUB/UMD 资源读取正文，不把旧目录实
 `chapters.cache_path`，以 request-private stage 和 per-cache coordinator 收敛文件/DB，并传播 caller
 context。完整矩阵与测试先行门见
 [`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
-当前状态：**inventory-complete / tests-and-implementation-pending**；本阶段未修改应用或测试代码。
+合同 `1b2ea90`、旧实现红测 `b75f640` 和实现 `a131aa9` 已按顺序关闭。新实现贯穿 caller
+context，在回建后和 transaction 内复验 Book/archive/完整 Chapter snapshot，只 guarded 更新
+`cache_path`，并以 request-private stage 和本地 cache coordinator 收敛 publish/rollback。EPUB
+resource recovery 只修改工作副本。删除、refresh、字段/archive 替换、取消、DB 和 publish
+故障均有确定性测试。focused/race、Go full/vet、frontend 748/748、build、Compose 和四视口
+Chromium 通过。可信 Actions run `34471037381` 又通过 backend/frontend/Compose、native、
+fresh/portable、historical volume 和 published-platform 门；`a131aa9`/`latest` amd64/arm64 OCI index 为
+`sha256:17fcb8f7c5a1b91781af5a168c9ed2dd4053dbf0f68afc5d5871388c163b19a7`。当前状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-09-10 用户资产文件系统与引用生命周期第二轮固定基准复审
+
+本地章节 cache 回建发布后，当前 route/path/引用差集收敛为用户上传资产。固定上游在 Reader 设置和
+BookInfo 中保持“上传→写引用”的可见顺序；OpenReader 已发布随机私有 URL、上传内容预算、引用中
+`409`、公开 rooted read 和 portable v2 跨用户重写，这些合同不重开。
+
+当前上传以 `MkdirAll` + Gin `SaveUploadedFile` 直写 final，删除/封面验证按词法路径操作；祖先 symlink
+可使写入或删除越出 `data/uploads`，copy/close/取消失败也可能留下部分 final。Book/Setting 新引用与
+删除之间没有共享提交边界，portable 导出/恢复还可能把 symlink 后的 user root 误作新安全根。
+
+目标是 rooted current-entry 文件操作、context-aware staged no-overwrite publication，以及 caller-scoped
+引用协调：最终只能是引用先提交后删除 `409`，或删除先完成后新引用失败。历史/缺失 URL 可原样保留，
+公开读取、UI、API、SQLite schema 和 ordinary/portable 格式均保持。完整矩阵与测试先行门见
+[`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / tests-and-implementation-pending**。

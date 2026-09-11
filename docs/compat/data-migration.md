@@ -1363,7 +1363,7 @@ gates and published `a7917ed`/`latest` OCI index
 `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
 **aligned / regression-validated / Docker-published / awaiting-device-verification**.
 
-## P0/P2 Reader local chapter-cache rebuild lifecycle compatibility (2026-09-09 inventory)
+## P0/P2 Reader local chapter-cache rebuild lifecycle compatibility (2026-09-10 implemented)
 
 - The target adds no schema, migration, startup scan, persistent root, environment variable, backup member or browser
   storage key.
@@ -1377,4 +1377,29 @@ gates and published `a7917ed`/`latest` OCI index
 
 Target contract:
 [`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md).
-Status is **inventory-complete / tests-and-implementation-pending**; no data, application or test code changed.
+Contract `1b2ea90`, old-implementation red tests `b75f640` and implementation `a131aa9` landed in order. The guarded
+single-column update and staged publication add no schema, migration, startup rewrite, backup member, mounted root or
+environment variable. Cancellation, stale snapshots and DB/publish failure now restore or remove staged/final files;
+normal and historical cache paths remain readable. Focused/race, Go full/vet, frontend 748/748, build, Compose and
+four-viewport Chromium checks passed. Trusted Actions run `34471037381` then passed native, fresh/portable,
+historical-volume and published-platform gates and published the `a131aa9`/`latest` amd64/arm64 OCI index
+`sha256:17fcb8f7c5a1b91781af5a168c9ed2dd4053dbf0f68afc5d5871388c163b19a7`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+## P2 user-asset filesystem/reference lifecycle compatibility (2026-09-10 inventory)
+
+- The target adds no SQLite table, column, index, migration marker, persistent root, environment variable, backup
+  member or browser storage key.
+- Existing `data/uploads/users/<user>/<kind>/<name>` regular assets and stable URLs remain in place. Upgrade performs
+  no scan, move, rename or URL rewrite; request-private stage files are transient and excluded from backup.
+- Existing Book `custom_cover_url` and UserSetting JSON remain authoritative. Legacy, external and already-missing
+  URLs remain readable, removable and logically restorable; only newly introduced current-user URLs require a
+  currently rooted regular asset.
+- Logical backup remains URL-only. Portable v1/v2 manifest, placeholder and cross-user rewriting stay byte-format
+  compatible while export reads one rooted handle and restore coordinates asset promotion with rewritten row commit.
+- Symlink/special-file paths that old versions followed now fail closed for upload, delete and portable asset I/O.
+  Rollback reads unchanged valid rows/files but reintroduces path-following, partial-final and dangling-reference risk.
+
+Target contract:
+[`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Status is **inventory-complete / tests-and-implementation-pending**.

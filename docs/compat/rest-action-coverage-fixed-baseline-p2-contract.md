@@ -943,7 +943,7 @@ frontend 748/748、build、Compose 与四视口 Chromium 均通过。当前状�
 `a7917ed`/`latest` OCI index 为
 `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。
 
-## 47. Reader 本地章节缓存回建生命周期（2026-09-09 inventory）
+## 47. Reader 本地章节缓存回建生命周期（2026-09-10 implemented）
 
 换源写入关闭后继续扫描共享章节 loader 的本地分支。固定上游从当前 namespace 的本地 Book/Chapter
 直接读取文件范围或 EPUB/UMD 资源；正文读取不会把旧目录实体写回 shelf/catalogue，EPUB 的可选文本
@@ -959,4 +959,29 @@ snapshot，只以 guarded single-column update 写 `cache_path`，并以 request
 coordinator 收敛 promote/rollback。stale 复用现有安全 409，正常 TXT/EPUB/UMD/旧卷恢复保持。完整合同与
 红测门见
 [`reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md`](reader-local-chapter-cache-rebuild-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
-当前状态 **inventory-complete / tests-and-implementation-pending**；本阶段不修改应用或测试代码。
+合同 `1b2ea90`、旧实现红测 `b75f640` 和实现 `a131aa9` 已按顺序提交。当前 loader 贯穿 caller
+context、双重复验 Book/archive/Chapter snapshot、仅更新 guarded `cache_path`，并以 stage/
+transaction/rollback 收敛文件与 SQLite。删除、refresh、并发字段编辑、取消、source inode 替换、
+DB/publish 故障和同章并发均已锁定。focused/race、Go full/vet、frontend 748/748、build、
+Compose 和四视口 Chromium 通过。可信 Actions run `34471037381` 又通过 native、fresh/portable、
+historical volume 和 published-platform 门；发布的 `a131aa9`/`latest` amd64/arm64 OCI index 为
+`sha256:17fcb8f7c5a1b91781af5a168c9ed2dd4053dbf0f68afc5d5871388c163b19a7`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 48. 用户资产文件系统与引用生命周期（2026-09-10 inventory）
+
+本地章节 cache 回建发布后继续从已签收 upload wire、公开 rooted read、Book/Setting 引用和 portable v2
+资产闭包之间做动作差集。固定上游保持“上传后写引用”的可见顺序，但其原名覆盖、路径跟随和无引用
+检查不是产品合同。OpenReader 已有随机私有 URL、内容校验、引用中 `409` 和跨用户 portable 重写；当前
+缺口在这些已声明语义之间的物理提交边界。
+
+现有上传仍用 `MkdirAll` + Gin `SaveUploadedFile` 直写最终路径，删除和 Book 封面验证按词法路径重新
+打开；portable 导出/恢复可把经 symlink 解析后的 user root 当作新边界。引用检查又不与 Book/Setting
+写入协调，因此并发时可能出现“新引用成功、删除也成功”的断引用。
+
+目标是从受信 `data/uploads` 逐组件拒绝 symlink/特殊文件，以 request-private stage 和无覆盖发布收敛
+上传失败，并让当前用户的 Book/Setting 新引用、删除和 portable promote/commit 共用 caller-scoped
+coordinator。已有历史/缺失 URL、API shape、Reader/BookInfo UI、公开读和备份格式保持。完整合同与
+确定性红测门见
+[`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / tests-and-implementation-pending**。
