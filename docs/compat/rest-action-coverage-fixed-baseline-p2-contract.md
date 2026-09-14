@@ -921,6 +921,23 @@ fresh/portable、historical volume 与 published-platform 门，并发布 `a7917
 `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
+2026-09-13 真机反馈补充：连续 window 的多个远程章节会共享 Book variable，后完成请求可能正确返回
+stale 409，但前端曾将 `chapter content changed; retry` 原样渲染。补充合同 `e19581b`、红测 `811d679`
+和修复 `2bbb276` 保留后端保护，并把精确 409 改为按 Book scope 串行自动重取一次；取消/切书会终止
+排队，重复冲突使用中文可操作错误。frontend 752/752、build 和四视口注入 409 Chromium 通过，状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；修复已包含于
+`3e8cec7`/`latest` OCI index
+`sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`。
+
+2026-09-14 第二次真机反馈否决了后续 `e1631d0` 的整书串行方案。重新对照 `d0600ab..HEAD` 后确认：
+正文 `@put` 位于 Chapter variable scope，相邻章无需共享提交目标；`e1631d0` 的 `user/book` gate 反而
+使后续章节排队，而浏览器 12 秒超时短于单次书源 15 秒预算。合同 `981d400`、旧实现 Gin 并发红测
+`99cfc88` 与实现 `0ecc4d9` 已把 gate 收缩为 `user/book/chapter`，保留同章合并、staged CAS、取消和
+换源保护，同时恢复相邻章并行。可信 Actions run `34816091195` 通过全部校验与发布门并发布
+`5b79ad3`/`latest` OCI index
+`sha256:558d4476ab2857905f194f18157da9a8b195477ad7733e08160ddf45af4a2e69`。当前状态 **implemented /
+regression-validated / Docker-published / awaiting-device-verification**。
+
 ## 46. Reader 换源写入生命周期（2026-09-09 implemented）
 
 章节正文生命周期实施后，继续从当前持久 `Save` 和远程工作后的 transaction 做差集。固定上游
@@ -968,7 +985,7 @@ historical volume 和 published-platform 门；发布的 `a131aa9`/`latest` amd6
 `sha256:17fcb8f7c5a1b91781af5a168c9ed2dd4053dbf0f68afc5d5871388c163b19a7`。当前状态
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
-## 48. 用户资产文件系统与引用生命周期（2026-09-10 inventory）
+## 48. 用户资产文件系统与引用生命周期（2026-09-13 implemented）
 
 本地章节 cache 回建发布后继续从已签收 upload wire、公开 rooted read、Book/Setting 引用和 portable v2
 资产闭包之间做动作差集。固定上游保持“上传后写引用”的可见顺序，但其原名覆盖、路径跟随和无引用
@@ -984,4 +1001,51 @@ historical volume 和 published-platform 门；发布的 `a131aa9`/`latest` amd6
 coordinator。已有历史/缺失 URL、API shape、Reader/BookInfo UI、公开读和备份格式保持。完整合同与
 确定性红测门见
 [`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
-当前状态 **inventory-complete / tests-and-implementation-pending**。
+合同 `478654a`、旧实现红测 `947dfcb` 和实现 `3e8cec7` 已按顺序落地。上传/删除/portable 使用受信
+uploads root、逐组件验证和打开目录句柄内的 stage/linkat/renameat/unlinkat；portable 导出从同一打开
+regular handle 完成验证、摘要和 ZIP copy。Book/Setting 新引用与删除使用 caller-scoped coordinator，
+Setting 引用改为 JSON 精确字符串遍历，已有相同/缺失 URL 保持。
+
+focused/race、API/backup full、Go full/vet、frontend 752/752、build 与 Compose 通过；未改变 schema、
+稳定 URL、持久目录、环境变量或 backup wire。可信 Actions run `34747604054` 又通过 native、fresh/
+portable、historical volume 与 published-platform 门，并发布 `3e8cec7`/`latest` amd64/arm64 OCI index
+`sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 49. 管理员删除用户工作区文件系统生命周期（2026-09-14 implemented）
+
+用户资产 lifecycle 关闭后继续复核持久目录删除动作。固定上游 `UserController.kt#deleteUsers` 删除目标
+用户的单一 `storage/data/<username>` namespace；OpenReader 因多用户数据布局扩展为 WebDAV、LocalStore、
+本地归档、上传和封面缓存五类私有目录，并保持 SQLite 事务提交后清理。
+
+当前工作区计划只做绝对词法前缀后调用 `os.RemoveAll`。隔离反例已经证明：将 `root/users` 设为指向
+root 外目录的 symlink 后，删除 `root/users/victim` 会直接移除外部 sentinel，链接本身仍存在。旧用户名
+经 `SafeFilename` 投影碰撞时，删除一个账号还可能清除仍存账号共用的 username 目录。
+
+目标是从 `DataDir`、`LocalStoreDir`、`LibraryDir`、`CacheDir` 的当前 rooted handle 逐组件拒绝
+symlink/特殊文件，在打开父目录内验证 identity、原子 detach 后再 root-confined 递归清理；碰撞目录
+fail closed，而 ID 路径可独立清理。SQLite-first、缺失目录幂等、path-free `cleanupFailures` 和现有 API/UI
+保持。完整合同与红测门见
+[`admin-user-workspace-cleanup-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](admin-user-workspace-cleanup-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+合同 `386f555`、旧实现红测 `0f61853` 与实现 `016a346` 已按顺序落地。Go 1.24 rooted handle 配合
+`renameat/openat/unlinkat` 完成 current-identity detach 和 root-confined recursive removal；历史 username
+投影碰撞只保留共享路径，ID 路径继续清理。focused/race/full/vet、frontend 754/754、build 与 Compose
+通过。可信 Actions run `34825873958` 又通过 native、fresh/portable、historical volume 和
+published-platform 门，并发布 `016a346`/`latest` OCI index
+`sha256:50031b016e22c18d6c06634ed4e809be9570bff48f8840dffae3d460b1595881`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 50. WebDAV DELETE 文件系统生命周期（2026-09-14 inventory）
+
+继续扫描持久文件删除动作后，原生 WebDAV `DELETE` 的验证到删除窗口成为下一项差异。固定上游在当前
+用户 WebDAV home 下递归删除文件或目录，缺失 `404`、成功 `200`；OpenReader 还需保留已部署
+`/webdav` 的成功 `204`、caller 私有根和安全适配。
+
+当前 `webdavfs.Service.Remove` 虽逐组件拒绝静态 symlink，却在验证后把绝对路径交给
+`os.RemoveAll`。父目录在窗口内被替换为根外 symlink 时，删除可沿新路径触碰外部同名实体。目标是
+从受信 root handle 逐组件验证，在同一打开父目录内核对目标 identity、原子 detach，再仅相对已打开
+quarantine 句柄删除 regular file 或递归目录；替换、特殊文件和不支持的 rooted 操作 fail closed。
+
+完整矩阵与测试先行门见
+[`webdav-delete-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-delete-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / implementation-pending**。

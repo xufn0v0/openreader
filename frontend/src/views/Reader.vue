@@ -143,9 +143,9 @@
       @wheel="handleReaderWheel"
       @click="handleReaderContentClick"
     >
-      <header class="reader-page-head">
-        <span>{{ book?.title || '阅读中' }}</span>
-        <span>{{ chapterLabel }}</span>
+      <header v-if="showRunningChapterHeader" class="reader-page-head">
+        <span class="reader-running-chapter-title">{{ runningChapterLabel }}</span>
+        <span v-if="!isMobileReader">{{ chapterLabel }}</span>
       </header>
 
       <article
@@ -208,6 +208,7 @@
       <ReaderClickZones
         v-if="chapterFormat !== 'epub' && !isAudioChapter"
         :mode="effectiveReaderMode"
+        :document-scroll="usesDocumentScroll"
         :show-overlay="showClickZoneOverlay"
         @tap="handleTapZone"
         @close-overlay="showClickZoneOverlay = false"
@@ -1415,7 +1416,15 @@ const bodyStyle = computed(() => {
   return baseStyle
 })
 
+function formatRunningChapterLabel(index, title) {
+  const ordinal = `第 ${Math.max(0, Number(index) || 0) + 1} 章`
+  const normalizedTitle = String(title || '').trim()
+  return normalizedTitle ? `${ordinal} ${normalizedTitle}` : ordinal
+}
+
 const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
+const runningChapterLabel = computed(() => formatRunningChapterLabel(currentIndex.value, chapter.value?.title))
+const showRunningChapterHeader = computed(() => !isAudioChapter.value && !isCBZBook(book.value))
 const isMobileReader = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))
 const desktopWorkspacePanel = computed(() => {
   if (isMobileReader.value) return ''
@@ -2520,9 +2529,15 @@ function readError(err, fallback) {
 
 .reader-page-head {
   align-items: center; color: rgba(36,40,44,0.45);
-  display: flex; font-size: 14px; justify-content: space-between;
+  display: flex; font-size: 14px; gap: 16px; justify-content: space-between;
   padding: 10px 65px 0; pointer-events: none;
-  position: absolute; left: 0; right: 0; top: 0; z-index: 1;
+  position: absolute; left: 0; right: 0; top: 0; z-index: 5;
+}
+.reader-running-chapter-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .reader-content {
   font-family: var(--reader-font-family);
@@ -2560,6 +2575,40 @@ function readError(err, fallback) {
   display: block;
   height: min(40vh, 280px);
 }
+
+.reader-shell.document-scroll {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.reader-shell.document-scroll .reader-page {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.reader-shell.document-scroll .reader-content {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.reader-shell.document-scroll:not(.mini-interface) .reader-page-head {
+  position: fixed;
+  right: auto;
+  left: 50%;
+  width: var(--reader-frame-width);
+  box-sizing: border-box;
+  transform: translateX(-50%);
+}
+
+.reader-shell.document-scroll:not(.mini-interface) .reader-page::after {
+  position: fixed;
+  right: calc(50vw - var(--reader-frame-width) / 2);
+  left: calc(50vw - var(--reader-frame-width) / 2);
+}
+
 /* 翻页模式 */
 .reader-shell.flip .reader-content {
   overflow: hidden;
@@ -2631,7 +2680,24 @@ function readError(err, fallback) {
   box-shadow: none;
 }
 
-.reader-shell.mini-interface .reader-page-head { display: none; }
+.reader-shell.mini-interface .reader-page-head {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  width: 100vw;
+  height: calc(30px + env(safe-area-inset-top));
+  padding: calc(6px + env(safe-area-inset-top)) 16px 6px;
+  box-sizing: border-box;
+  background: inherit;
+  color: var(--reader-text);
+  font-size: 12px;
+  opacity: 0.58;
+}
+
+.reader-shell.mini-interface.flip .reader-page-head {
+  position: relative;
+}
 
 .reader-shell.mini-interface .reader-content {
   box-sizing: border-box;

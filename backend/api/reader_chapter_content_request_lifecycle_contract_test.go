@@ -9,11 +9,179 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"openreader/backend/engine"
 	"openreader/backend/models"
 )
+
+func TestReaderConcurrentSameChapterLoadsSharePublishedResult(t *testing.T) {
+	fixture := newReaderChapterContentLifecycleFixture(t, "chapterconcurrentduplicate")
+	var fetches atomic.Int32
+	restoreHTTPClient := engine.SetHTTPClientForTesting(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		fetches.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`<main class="content">shared remote content</main><span class="token">shared token</span>`)),
+			Header:     make(http.Header),
+			Request:    request,
+		}, nil
+	})})
+	t.Cleanup(restoreHTTPClient)
+
+	firstFetched := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var hookCalls atomic.Int32
+	installReaderChapterContentLifecycleHook(t, func(stage string, _ context.Context, book models.Book, chapter models.Chapter) {
+		if stage != "after_remote_fetch" || book.ID != fixture.book.ID || chapter.ID != fixture.chapter.ID {
+			return
+		}
+		if hookCalls.Add(1) == 1 {
+			close(firstFetched)
+			<-releaseFirst
+		}
+	})
+
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	go func() {
+		responses <- performReaderChapterContentLifecycleRequest(fixture, context.Background())
+	}()
+	select {
+	case <-firstFetched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first chapter request did not reach the remote-fetch boundary")
+	}
+	go func() {
+		responses <- performReaderChapterContentLifecycleRequest(fixture, context.Background())
+	}()
+
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		var chapter models.Chapter
+		if err := fixture.server.db.First(&chapter, fixture.chapter.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if chapter.Variable != fixture.chapter.Variable {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(releaseFirst)
+
+	for range 2 {
+		select {
+		case response := <-responses:
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "shared remote content") {
+				t.Errorf("concurrent same-chapter response = %d %s, want shared 200", response.Code, response.Body.String())
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("concurrent chapter request did not finish")
+		}
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("same chapter remote fetches = %d, want one published request", fetches.Load())
+	}
+}
+
+func TestReaderAdjacentChapterLoadsDoNotQueueBehindSameBook(t *testing.T) {
+	fixture := newReaderChapterContentLifecycleFixture(t, "chapteradjacentparallel")
+	secondChapter := models.Chapter{
+		BookID:   fixture.book.ID,
+		Index:    1,
+		Title:    "second chapter",
+		URL:      fixture.source.BaseURL + "/chapter/second",
+		Variable: `{"chapter":"second"}`,
+	}
+	if err := fixture.server.db.Create(&secondChapter).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	restoreHTTPClient := engine.SetHTTPClientForTesting(&http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		started <- request.URL.Path
+		<-release
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(
+				`<main class="content">` + request.URL.Path + `</main><span class="token">` + request.URL.Path + `</span>`,
+			)),
+			Header:  make(http.Header),
+			Request: request,
+		}, nil
+	})})
+	t.Cleanup(restoreHTTPClient)
+
+	results := make(chan *httptest.ResponseRecorder, 2)
+	load := func(index int) {
+		results <- performReaderChapterContentLifecycleRequestAtIndex(
+			fixture,
+			context.Background(),
+			index,
+		)
+	}
+
+	go load(fixture.chapter.Index)
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("first adjacent chapter did not start its remote request")
+	}
+	go load(secondChapter.Index)
+
+	overlapped := false
+	select {
+	case <-started:
+		overlapped = true
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(release)
+
+	for range 2 {
+		select {
+		case response := <-results:
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "/chapter/") {
+				t.Errorf("adjacent chapter response = %d %s", response.Code, response.Body.String())
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("adjacent chapter load did not finish")
+		}
+	}
+	if !overlapped {
+		t.Fatal("second adjacent chapter queued behind the first chapter of the same book")
+	}
+}
+
+func TestReaderChapterGateWaiterCanCancelWithoutBlockingOtherBooks(t *testing.T) {
+	_, server := setupTestServer(t)
+	firstKey := readerChapterGateKey{userID: 1, bookID: 1, chapterID: 1}
+	releaseFirst, err := server.acquireReaderChapterGate(context.Background(), firstKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	waitingContext, cancelWaiting := context.WithCancel(context.Background())
+	cancelWaiting()
+	if _, err := server.acquireReaderChapterGate(waitingContext, firstKey); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled gate wait error = %v, want context.Canceled", err)
+	}
+
+	releaseOther, err := server.acquireReaderChapterGate(context.Background(), readerChapterGateKey{userID: 1, bookID: 2, chapterID: 1})
+	if err != nil {
+		t.Fatalf("different book gate was blocked: %v", err)
+	}
+	releaseOther()
+	releaseFirst()
+
+	server.remoteChapterMu.Lock()
+	defer server.remoteChapterMu.Unlock()
+	if len(server.remoteChapterMap) != 0 {
+		t.Fatalf("released chapter gates retained %d entries", len(server.remoteChapterMap))
+	}
+}
 
 func TestReaderChapterContentRejectsSourceSemanticChangeAfterFetch(t *testing.T) {
 	fixture := newReaderChapterContentLifecycleFixture(t, "chapterstalesource")
@@ -292,9 +460,17 @@ func performReaderChapterContentLifecycleRequest(
 	fixture readerChapterContentLifecycleFixture,
 	ctx context.Context,
 ) *httptest.ResponseRecorder {
+	return performReaderChapterContentLifecycleRequestAtIndex(fixture, ctx, fixture.chapter.Index)
+}
+
+func performReaderChapterContentLifecycleRequestAtIndex(
+	fixture readerChapterContentLifecycleFixture,
+	ctx context.Context,
+	index int,
+) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(
 		http.MethodGet,
-		"/api/books/"+strconv.FormatUint(uint64(fixture.book.ID), 10)+"/chapters/0/content",
+		"/api/books/"+strconv.FormatUint(uint64(fixture.book.ID), 10)+"/chapters/"+strconv.Itoa(index)+"/content",
 		nil,
 	).WithContext(ctx)
 	request.Header.Set("Authorization", fixture.auth)

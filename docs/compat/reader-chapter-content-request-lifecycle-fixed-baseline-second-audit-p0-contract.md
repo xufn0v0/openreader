@@ -155,3 +155,33 @@ GitHub Actions run `34321320014` 的 backend/frontend/Compose、native image、f
 volume 和 published-platform 门全部通过，并将包含该实现的 `a7917ed`/`latest` 发布为 amd64/arm64 OCI
 index `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`。两平台 config 均报告完整
 revision `a7917ed0540f43e1bea8f958dfd5d7736ed0a9f0`。
+
+## 9. 2026-09-13 真机反馈：并发预载冲突不得成为可见正文
+
+用户在正常章节加载中看到了后端保护错误 `chapter content changed; retry`。取证确认连续阅读会并发加载
+多个相邻远程章节；这些请求共享并持久更新 Book variable，同章的普通加载与刷新也可能重叠。先完成的
+请求提交新 variable 后，后完成请求会按第 4 节正确判定初始快照陈旧并返回 409。该保护本身正确，但
+前端直接把内部冲突显示为章节错误，违反固定上游“陈旧结果静默丢弃，最终显示当前章节正文”的合同。
+
+修复合同如下：
+
+1. 后端 409、snapshot guard、cache 文件事务和 API envelope 保持不变，不通过放宽陈旧校验掩盖冲突。
+2. Reader 只识别 `409 {"error":"chapter content changed; retry"}` 为可恢复陈旧冲突；首次冲突不进入
+   可见 error/content block，而是在同一 Book cache scope 内排队重取一次。
+3. 同一 Book scope 的冲突重取必须串行执行，使前一个请求提交后的 Book variable 成为下一个请求的新
+   快照，避免连续 window 的多个立即重试再次互相判旧。初次请求仍可保持既有并发和去重语义。
+4. 排队和重取都沿用原请求的 AbortSignal 与 Book scope 校验。切书、换源、目录刷新、cache clear、
+   session reset 或 unmount 后不得再发请求、写 memory/browser cache 或标记章节已缓存。
+5. 只自动重取一次；重取仍冲突、其它 409 或网络/parser 错误继续交给现有错误路径。持续冲突的可见
+   文案不得直接暴露英文内部实现错误，应转换为可操作的“章节状态已更新，请重试”。
+6. 测试必须覆盖首次 409 后成功、多个章节冲突重取的最大并发数为 1、重复冲突/非目标 409 不循环，
+   以及 clear/abort 发生在排队期间时不重取、不缓存。
+
+合同补充 `e19581b`、旧实现红测 `811d679` 与修复 `2bbb276` 已按顺序落地。共享 loader 仅对精确 stale
+409 自动重取一次，并按 Book cache scope 串行冲突重取；普通初次请求、同章去重和连续预载并发不变。
+scope clear/AbortSignal 会终止正在执行或排队的重取，重复冲突转换为可操作中文错误。focused/相邻章节
+测试、frontend **752/752**、Vite build，以及注入首次 409 的 1440x900、390x844、360x800、1024x1366
+Chromium 均通过。该修复已包含于 `3e8cec7`；可信 Actions run `34747604054` 又通过 backend/frontend、
+build/Compose、native、fresh/portable、historical volume 与 published-platform 门，并发布 `3e8cec7`/
+`latest` amd64/arm64 OCI index
+`sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`。

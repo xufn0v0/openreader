@@ -361,6 +361,15 @@ func (s *Server) createBook(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var unlockAssets func()
+	if customCoverURL != "" {
+		var err error
+		unlockAssets, err = s.lockUserAssets(c.Request.Context(), userID)
+		if err != nil {
+			return
+		}
+		defer unlockAssets()
+	}
 	if err := s.validateBookCustomCoverURL(userID, "", customCoverURL); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid custom cover url"})
 		return
@@ -440,6 +449,7 @@ type bookUpdateRequest struct {
 var bookPatchWriteLifecycleTestHook func(string)
 
 var errBookPatchTargetNotFound = errors.New("book not found during patch")
+var errBookInvalidCustomCover = errors.New("invalid custom cover url during patch")
 
 func (s *Server) updateBook(c *gin.Context) {
 	userID, _ := middleware.UserID(c)
@@ -498,10 +508,6 @@ func (s *Server) updateBook(c *gin.Context) {
 		if !ok {
 			return
 		}
-		if err := s.validateBookCustomCoverURL(userID, book.CustomCoverURL, customCoverURL); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid custom cover url"})
-			return
-		}
 		book.CustomCoverURL = customCoverURL
 	}
 	if request.Intro != nil {
@@ -546,13 +552,21 @@ func (s *Server) updateBook(c *gin.Context) {
 	if request.CanUpdate != nil {
 		updates["can_update"] = book.CanUpdate
 	}
-	if bookPatchWriteLifecycleTestHook != nil {
-		bookPatchWriteLifecycleTestHook("metadata")
-	}
-
 	ctx := c.Request.Context()
 	if ctx.Err() != nil {
 		return
+	}
+	var unlockAssets func()
+	if request.CustomCoverURL != nil {
+		var err error
+		unlockAssets, err = s.lockUserAssets(ctx, userID)
+		if err != nil {
+			return
+		}
+		defer unlockAssets()
+	}
+	if bookPatchWriteLifecycleTestHook != nil {
+		bookPatchWriteLifecycleTestHook("metadata")
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current models.Book
@@ -561,6 +575,11 @@ func (s *Server) updateBook(c *gin.Context) {
 				return errBookPatchTargetNotFound
 			}
 			return err
+		}
+		if request.CustomCoverURL != nil {
+			if err := s.validateBookCustomCoverURL(userID, current.CustomCoverURL, book.CustomCoverURL); err != nil {
+				return errBookInvalidCustomCover
+			}
 		}
 		if len(updates) > 0 {
 			write := tx.Model(&models.Book{}).
@@ -595,6 +614,10 @@ func (s *Server) updateBook(c *gin.Context) {
 			notFound(c, "book not found")
 			return
 		}
+		if errors.Is(err, errBookInvalidCustomCover) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid custom cover url"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update book"})
 		return
 	}
@@ -609,10 +632,11 @@ func (s *Server) validateBookCustomCoverURL(userID uint, currentURL string, next
 	if err != nil || asset.UserID != userID || asset.Kind != "covers" {
 		return os.ErrPermission
 	}
-	info, err := os.Stat(asset.Path)
-	if err != nil || !info.Mode().IsRegular() {
-		return os.ErrNotExist
+	opened, err := s.openUserUploadAsset(asset)
+	if err != nil {
+		return err
 	}
+	_ = opened.File.Close()
 	return nil
 }
 
@@ -3044,6 +3068,17 @@ type readerChapterContentSnapshot struct {
 	source  models.BookSource
 }
 
+type readerChapterGateKey struct {
+	userID    uint
+	bookID    uint
+	chapterID uint
+}
+
+type readerChapterGate struct {
+	token chan struct{}
+	refs  int
+}
+
 // readerChapterContentLifecycleTestHook exposes deterministic boundaries for
 // request-lifecycle contract tests without changing production behavior.
 var readerChapterContentLifecycleTestHook func(string, context.Context, models.Book, models.Chapter)
@@ -3091,6 +3126,44 @@ func (s *Server) loadChapterTextContextResultWithPolicy(ctx context.Context, boo
 	}
 
 	if content == "" && chapter.URL != "" && book.SourceID > 0 {
+		release, err := s.acquireReaderChapterGate(ctx, readerChapterGateKey{
+			userID:    book.UserID,
+			bookID:    book.ID,
+			chapterID: chapter.ID,
+		})
+		if err != nil {
+			return "", err
+		}
+		defer release()
+
+		currentBook, currentChapter, err := s.reloadReaderChapterFetchState(ctx, *book, *chapter)
+		if err != nil {
+			return "", err
+		}
+		*book = currentBook
+		*chapter = currentChapter
+		if !policy.Refresh && chapter.CachePath != "" {
+			if cached, path, cacheErr := s.readChapterCache(*book, chapter.CachePath); cacheErr == nil {
+				if path != "" && path != chapter.CachePath {
+					normalizedPath := s.remoteChapterCachePath(path)
+					if normalizedPath == "" {
+						normalizedPath = path
+					}
+					s.normalizeChapterCachePath(ctx, chapter, normalizedPath)
+				}
+				content = string(cached)
+			}
+		}
+		if content != "" {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			if policy.ApplyReaderReplaceRules && !epubreader.IsLocalEPUB(*book) && book.Type != 1 {
+				content = s.applyUserReplaceRules(*book, content)
+			}
+			return content, nil
+		}
+
 		source, err := s.bookSources.FindForBook(book.UserID, book.SourceID)
 		if err != nil {
 			return "", err
@@ -3135,6 +3208,74 @@ func (s *Server) loadChapterTextContextResultWithPolicy(ctx context.Context, boo
 		content = s.applyUserReplaceRules(*book, content)
 	}
 	return content, nil
+}
+
+func (s *Server) acquireReaderChapterGate(ctx context.Context, key readerChapterGateKey) (func(), error) {
+	s.remoteChapterMu.Lock()
+	if s.remoteChapterMap == nil {
+		s.remoteChapterMap = make(map[readerChapterGateKey]*readerChapterGate)
+	}
+	gate := s.remoteChapterMap[key]
+	if gate == nil {
+		gate = &readerChapterGate{token: make(chan struct{}, 1)}
+		gate.token <- struct{}{}
+		s.remoteChapterMap[key] = gate
+	}
+	gate.refs++
+	s.remoteChapterMu.Unlock()
+
+	select {
+	case <-ctx.Done():
+		s.releaseReaderChapterGateRef(key, gate)
+		return nil, ctx.Err()
+	case <-gate.token:
+		return func() {
+			gate.token <- struct{}{}
+			s.releaseReaderChapterGateRef(key, gate)
+		}, nil
+	}
+}
+
+func (s *Server) releaseReaderChapterGateRef(key readerChapterGateKey, gate *readerChapterGate) {
+	s.remoteChapterMu.Lock()
+	defer s.remoteChapterMu.Unlock()
+	gate.refs--
+	if gate.refs == 0 && s.remoteChapterMap[key] == gate {
+		delete(s.remoteChapterMap, key)
+	}
+}
+
+func (s *Server) reloadReaderChapterFetchState(
+	ctx context.Context,
+	requestedBook models.Book,
+	requestedChapter models.Chapter,
+) (models.Book, models.Chapter, error) {
+	var book models.Book
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", requestedBook.ID, requestedBook.UserID).
+		First(&book).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.Book{}, models.Chapter{}, errReaderChapterContentStale
+		}
+		return models.Book{}, models.Chapter{}, err
+	}
+	if book.SourceID != requestedBook.SourceID || book.Type != requestedBook.Type || book.URL != requestedBook.URL {
+		return models.Book{}, models.Chapter{}, errReaderChapterContentStale
+	}
+
+	var chapter models.Chapter
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND book_id = ?", requestedChapter.ID, requestedBook.ID).
+		First(&chapter).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.Book{}, models.Chapter{}, errReaderChapterContentStale
+		}
+		return models.Book{}, models.Chapter{}, err
+	}
+	if chapter.Index != requestedChapter.Index || chapter.URL != requestedChapter.URL || chapter.Title != requestedChapter.Title {
+		return models.Book{}, models.Chapter{}, errReaderChapterContentStale
+	}
+	return book, chapter, nil
 }
 
 func (s *Server) normalizeChapterCachePath(ctx context.Context, chapter *models.Chapter, normalizedPath string) {

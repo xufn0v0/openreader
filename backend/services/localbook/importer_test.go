@@ -141,6 +141,174 @@ func TestImporterPreparedPreviewIsTheConfirmedChapterSource(t *testing.T) {
 	}
 }
 
+func TestImporterRehydratesUniqueReaderDevLocalPlaceholderInPlace(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir:      filepath.Join(root, "data"),
+		CacheDir:     filepath.Join(root, "cache"),
+		LibraryDir:   filepath.Join(root, "library"),
+		DatabasePath: filepath.Join(root, "data", "openreader.db"),
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "readerdev-placeholder", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	placeholder := models.Book{
+		UserID: user.ID, SourceID: 0, Title: "迁移本地书", Author: "原作者",
+		URL: "storage/data/default/迁移本地书.txt", ChapterCount: 2,
+	}
+	if err := database.Create(&placeholder).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress := models.ReadingProgress{
+		UserID: user.ID, BookID: placeholder.ID, ChapterIndex: 0, ChapterTitle: "第二章", Offset: 23,
+	}
+	if err := database.Create(&progress).Error; err != nil {
+		t.Fatal(err)
+	}
+	bookmark := models.Bookmark{
+		UserID: user.ID, BookID: placeholder.ID, ChapterIndex: 0, Offset: 9, Title: "迁移书签",
+	}
+	if err := database.Create(&bookmark).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	request := ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "迁移本地书.txt", Extension: ".txt",
+		Data: []byte("新增前言\n第一章\n正文一\n第二章\n正文二"), Title: placeholder.Title,
+		Author: placeholder.Author, TOCRule: `^第.+章$`,
+	}
+	importer := NewImporter(cfg, database)
+	_, prepared, err := importer.Prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := importer.ImportPrepared(request, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.ID != placeholder.ID || book.URL != placeholder.URL || book.OriginalFile == "" || book.LibraryPath == "" {
+		t.Fatalf("rehydrated book = %+v, want original placeholder identity with archive", book)
+	}
+	var bookCount int64
+	if err := database.Model(&models.Book{}).Where("user_id = ? AND title = ? AND author = ?", user.ID, placeholder.Title, placeholder.Author).Count(&bookCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if bookCount != 1 {
+		t.Fatalf("rehydrated local book count = %d, want one", bookCount)
+	}
+	var chapters []models.Chapter
+	if err := database.Where("book_id = ?", placeholder.ID).Order("`index` asc").Find(&chapters).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(chapters) != 3 || chapters[2].Title != "第二章" {
+		t.Fatalf("rehydrated chapters = %+v", chapters)
+	}
+	if err := database.First(&progress, progress.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if progress.BookID != placeholder.ID || progress.ChapterID != chapters[2].ID || progress.ChapterIndex != 2 || progress.ChapterTitle != "第二章" || progress.Offset != 23 {
+		t.Fatalf("rehydrated progress = %+v", progress)
+	}
+	if err := database.First(&bookmark, bookmark.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if bookmark.BookID != placeholder.ID || bookmark.Offset != 9 || bookmark.Title != "迁移书签" {
+		t.Fatalf("rehydrated bookmark = %+v", bookmark)
+	}
+}
+
+func TestImporterDoesNotOverwriteAmbiguousReaderDevLocalPlaceholders(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir: filepath.Join(root, "data"), CacheDir: filepath.Join(root, "cache"),
+		LibraryDir: filepath.Join(root, "library"), DatabasePath: filepath.Join(root, "data", "openreader.db"),
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "ambiguous-placeholder", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, oldURL := range []string{"storage/data/default/a.txt", "storage/data/default/b.txt"} {
+		if err := database.Create(&models.Book{
+			UserID: user.ID, SourceID: 0, Title: "同名本地书", Author: "同一作者", URL: oldURL,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	book, err := NewImporter(cfg, database).Import(ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "同名本地书.txt", Extension: ".txt",
+		Title: "同名本地书", Author: "同一作者", Data: []byte("第一章\n正文"), TOCRule: `^第.+章$`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.URL == "storage/data/default/a.txt" || book.URL == "storage/data/default/b.txt" {
+		t.Fatalf("ambiguous placeholder was overwritten: %+v", book)
+	}
+	var count int64
+	if err := database.Model(&models.Book{}).Where("user_id = ? AND title = ?", user.ID, "同名本地书").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("same-name books = %d, want two untouched placeholders plus one import", count)
+	}
+}
+
+func TestImporterRehydratedCBZPreparesReaderResources(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		DataDir: filepath.Join(root, "data"), CacheDir: filepath.Join(root, "cache"),
+		LibraryDir: filepath.Join(root, "library"), DatabasePath: filepath.Join(root, "data", "openreader.db"),
+		JWTSecret: "rehydrated-cbz-secret",
+	}
+	database, err := readerdb.Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := readerdb.AutoMigrate(database); err != nil {
+		t.Fatal(err)
+	}
+	user := models.User{Username: "rehydrated-cbz", PasswordHash: "hash"}
+	if err := database.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	placeholder := models.Book{
+		UserID: user.ID, SourceID: 0, Title: "CBZ prepared", Author: "作者", URL: "storage/data/default/book.cbz",
+	}
+	if err := database.Create(&placeholder).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	book, err := NewImporter(cfg, database).Import(ImportRequest{
+		UserID: user.ID, UserName: user.Username, FileName: "book.cbz", Extension: ".cbz", Data: localBookTestCBZ(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.ID != placeholder.ID {
+		t.Fatalf("rehydrated CBZ id = %d, want placeholder %d", book.ID, placeholder.ID)
+	}
+	entries, err := os.ReadDir(filepath.Join(cfg.LibraryDir, book.LibraryPath, ".cbz-resources"))
+	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
+		t.Fatalf("rehydrated CBZ resource tree: entries=%+v err=%v", entries, err)
+	}
+}
+
 func TestImporterEPUBPreviewStoresCatalogueOnlyAndConfirmationPreparesReaderResources(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Config{

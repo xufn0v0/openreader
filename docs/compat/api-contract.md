@@ -416,7 +416,7 @@ the persisted `lastLoginAt` contract and kept `lastActiveAt` as a response-only 
 | `PUT /api/admin/users/:id/password` | `{password}` with at least eight characters. | Changes one ordinary user's password and broadcasts once. | Administrator only. `403` for administrator target, `404` missing id, `400` invalid password/body. |
 | `POST /api/admin/users/:id/sources/default` | No body. | Copies the target user's already-initialized active source list, including an explicit empty list, to the default template without modifying any user's namespace. Returns `{count}`. | Administrator only. `404` missing target; `409` target namespace not initialized; no lazy initialization or caller-source fallback. |
 | `POST /api/admin/users/sources/reset` | `{ids:number[]}`. | Validates all deduplicated targets, then reconciles each target to the current default in one transaction. Returns `{reset,imported,updated,skipped}`, emits one target-scoped `sources_update` per user and one administrator `users_update` after commit. | Administrator only. `400` empty IDs; `404` missing target or missing default. Any validation/write failure leaves the full batch unchanged. |
-| `POST /api/admin/users/batch-delete` | `{ids:number[]}`. | Deletes only selected ordinary users and every user-owned SQLite row, source namespace and association in one transaction. Only after commit it removes the validated private WebDAV, LocalStore, imported-library, and upload descendants; response includes safe numeric `cleanupFailures` without a host path. Unreferenced source snapshots may then be reclaimed. Emits one update after commit. | Administrator only. `400` empty/protected-only input; the current user and every administrator are excluded. A post-commit cleanup failure never rolls back the completed row deletion. |
+| `POST /api/admin/users/batch-delete` | `{ids:number[]}`. | Deletes only selected ordinary users and every user-owned SQLite row, source namespace and association in one transaction. Only after commit it removes private WebDAV, LocalStore, imported-library, upload and cover-cache descendants through rooted parent handles and current-identity detach; colliding legacy username projections are preserved. Response includes safe numeric `cleanupFailures` without a host path. Unreferenced source snapshots may then be reclaimed. Emits one update after commit. | Administrator only. `400` empty/protected-only input; the current user and every administrator are excluded. Root/ancestor/target symlinks and special files fail closed; a post-commit cleanup failure never rolls back the completed row deletion. |
 | `POST /api/admin/cleanup-inactive` | None. | Compatibility-only background action: finds inactive ordinary users and calls the same complete deletion plan; it is not exposed in the upstream-aligned UI. | Administrator only; administrators are never deleted. |
 
 The physical `book_sources` rows are shareable immutable snapshots, not a global user-visible list.
@@ -1235,6 +1235,40 @@ volume and published-platform gates and published `a7917ed`/`latest` OCI index
 `sha256:36c7d42ee048a061e44f639fa45ac5e1060bcc0e70583990de0655addf309d76`. Status is
 **aligned / regression-validated / Docker-published / awaiting-device-verification**.
 
+Device feedback on 2026-09-13 showed that normal concurrent chapter preloading could correctly trigger this stale
+409 while the Reader incorrectly rendered its internal English message. Supplement `e19581b`, red tests `811d679`
+and fix `2bbb276` now keep the backend conflict unchanged while the shared Reader loader serializes one exact stale
+retry per Book cache scope. Abort/scope retirement cancels queued retries; repeated conflicts become
+`章节状态已更新，请重试`. Frontend 752/752, build and four-viewport injected-409 Chromium passed. Actions run
+`34747604054` passed all validation and publication gates and published the `3e8cec7`/`latest` amd64/arm64 OCI
+index `sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
+
+Second device feedback on 2026-09-14 rejected the later `e1631d0` whole-book serialization workaround. The historical
+`d0600ab..HEAD` comparison showed that content `@put` executes in Chapter-variable scope, while the `user/book` gate
+made unrelated adjacent chapters wait behind one another. Because the browser request timeout is 12 seconds and one
+server-side source request may use 15 seconds, that queue can surface as a false network failure. Contract `981d400`,
+old-implementation Gin concurrency test `99cfc88`, and implementation `0ecc4d9` now scope the gate to
+`user/book/chapter`: duplicate requests for one chapter still share the published cache, adjacent chapters run in
+parallel, and all snapshot/CAS/cancellation/source-change protections remain. Local full/vet/race, frontend 754/754,
+build, and Compose passed. Trusted Actions run `34816091195` passed every validation and publication gate and
+published `5b79ad3`/`latest` as amd64/arm64 OCI index
+`sha256:558d4476ab2857905f194f18157da9a8b195477ad7733e08160ddf45af4a2e69`. Status is **implemented /
+regression-validated / Docker-published / awaiting-device-verification**.
+
+Third device feedback on 2026-09-14 showed that `5b79ad3` still surfaced the generic network fallback. Fixed-upstream
+evidence gives chapter content a dedicated 30-second client timeout, while both OpenReader chapter APIs inherited the
+generic 12-second budget. `0a8a0ef` had also attached the first caller's AbortSignal directly to a deduplicated request,
+so an immediate same-chapter replacement joined a Promise the old caller had already cancelled. Contract `1512534`,
+red tests `46e4933`, and implementation `c7fbf73` now give shelf/temporary chapter GETs 30 seconds and separate the
+shared transport from caller subscriptions. One caller cancellation cannot terminate a request still owned by a new
+subscriber; the last departed subscriber still cancels transport, and scope clear remains immediate. Frontend
+756/756, build, Go full/vet, Compose, and 13-second delayed temporary-Reader Chromium at 1440x900, 390x844 and
+360x800 passed. Trusted Actions run `34853164985` passed all validation/publication gates and published
+`c7fbf73`/`latest` as amd64/arm64 OCI index
+`sha256:874b0262c48a19c6861f80ca8cfdb157b6c419ebc46e7a7f4dd320358b8897ca`. Status is **implemented /
+regression-validated / Docker-published / awaiting-device-verification**.
+
 ### P0/P2 Reader source-change write lifecycle (2026-09-09 implemented)
 
 `POST /api/books/:id/change-source` keeps its JWT, owner-first lookup, 1 MiB single-object body, selected-source
@@ -1297,6 +1331,24 @@ and published-platform gates. It published the `a131aa9`/`latest` amd64/arm64 OC
 Target contract:
 [`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md).
 Status is **inventory-complete / tests-and-implementation-pending**.
+
+### P2 user-asset filesystem/reference lifecycle (2026-09-13 implemented)
+
+`POST /api/uploads`, `DELETE /api/uploads`, Book `customCoverUrl`, UserSetting asset strings and portable v2 retain
+their existing routes, JWT ownership, limits, response shapes, stable URLs and archive formats. New writes now use a
+rooted store that rejects symlink/special-file components and publishes a fully copied, synced private stage with
+no-overwrite semantics. Delete checks exact Book fields and recursively decoded JSON strings instead of SQL
+substrings, then removes only the verified current regular entry.
+
+New Book/Setting references and deletion share a caller-scoped coordinator: reference-first yields the existing 409,
+while delete-first makes the new reference fail 400. Existing identical or already-missing URLs remain compatible.
+Portable export validates, hashes and writes one opened handle; restore promotion, rewritten rows and rollback use the
+same rooted/coordinated boundary. Contract `478654a`, red tests `947dfcb` and implementation `3e8cec7` landed in
+order. Focused/race, API/backup full, Go full/vet, frontend 752/752, build and Compose passed. Actions run
+`34747604054` passed native, fresh/portable, historical-volume and published-platform gates and published the
+`3e8cec7`/`latest` amd64/arm64 OCI index
+`sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`. Status is
+**aligned / regression-validated / Docker-published / awaiting-device-verification**.
 
 ## P2 access-log query projection (2026-08-25 implemented/published)
 

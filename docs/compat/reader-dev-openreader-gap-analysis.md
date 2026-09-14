@@ -4057,3 +4057,70 @@ BookInfo 中保持“上传→写引用”的可见顺序；OpenReader 已发布
 公开读取、UI、API、SQLite schema 和 ordinary/portable 格式均保持。完整矩阵与测试先行门见
 [`user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md`](user-asset-filesystem-reference-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
 当前状态 **inventory-complete / tests-and-implementation-pending**。
+
+## 2026-09-13 Reader 章节 stale 409 真机反馈复审
+
+真机正常阅读出现 `chapter content changed; retry`。固定上游在当前 bookUrl/index 已变化时静默丢弃迟到
+正文，不展示内部冲突；OpenReader 后端 409 snapshot guard 正确，但连续 window 的相邻章节共享 Book
+variable，后完成请求会成为预期 stale，前端原样显示因而构成 P0 可见回归。
+
+补充合同 `e19581b`、旧实现红测 `811d679` 和修复 `2bbb276` 已按顺序落地。共享章节 loader 只对精确
+stale 409 在同一 Book cache scope 内串行重取一次，初次请求并发和同章去重不变；AbortSignal/scope
+clear 取消排队，重复冲突转为中文可操作错误。focused/相邻测试、frontend 752/752、build 和四视口
+注入 409 Chromium 通过。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**；修复已包含于
+`3e8cec7`/`latest` OCI index
+`sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`。
+
+## 2026-09-13 用户资产文件系统与引用生命周期实施
+
+合同 `478654a`、旧实现红测 `947dfcb` 与实现 `3e8cec7` 已按顺序完成。上传和 portable promote 改为从
+受信 uploads root 逐组件验证，在已打开目录句柄内完成 private stage、sync/close 与 no-overwrite
+publication；删除使用同目录 `renameat` quarantine 并只移除已验证 current regular entry。portable 导出
+在一个 rooted opened handle 上完成内容校验、摘要和 ZIP copy，不再验证后按路径重开。
+
+Book/Setting 新资产引用、删除与 portable restore 使用 caller-scoped coordinator；Setting 引用由 SQL
+substring 改为有界 JSON 递归精确字符串集合。由此竞争只可能收敛为“引用成功、删除 409”或“删除成功、
+新引用 400”，历史相同/缺失 URL 保持兼容。8 个确定性红测、focused/race、API/backup full、Go full/vet、
+frontend 752/752、build 和 Compose 已通过。可信 Actions run `34747604054` 又通过 native、fresh/portable、
+historical volume 与 published-platform 门，并发布 `3e8cec7`/`latest` amd64/arm64 OCI index
+`sha256:c2c686d83ff63afb3e764e0a1878d176673d65a49d5ab7e9b5d7fc1a9d96c52d`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-09-14 管理员删除用户工作区文件系统生命周期第二轮固定基准复审
+
+用户资产 lifecycle 关闭后继续复核持久目录删除动作。固定上游 `UserController.kt#deleteUsers` 只删除
+目标用户的 `storage/data/<username>` namespace；OpenReader 允许把清理扩展到 WebDAV、LocalStore、
+本地归档、上传和封面缓存五类私有目录，但不能把“目标 namespace”放宽为任意词法后代。
+
+当前 `privateUserWorkspacePath` 只做绝对路径前缀检查，随后裸调用 `os.RemoveAll`。隔离文件系统反例已
+证明中间 `users` symlink 会使该调用删除配置根外 sentinel；不同历史用户名经 `SafeFilename` 投影到
+同一目录时，也可能删除仍存用户的数据。目标是以四个配置根的 rooted handle 逐组件拒绝 symlink/
+特殊文件，在已打开父目录内按同一 identity detach 后再递归清理；碰撞 username 目录 fail closed，
+ID 目录仍可独立清理。SQLite-first、缺失目录幂等、path-free `cleanupFailures` 和现有 API/UI 保持。
+
+完整矩阵与测试先行门见
+[`admin-user-workspace-cleanup-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](admin-user-workspace-cleanup-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+取证提交时状态为 **inventory-complete / implementation-pending**。
+
+合同 `386f555`、旧实现红测 `0f61853` 和实现 `016a346` 已按顺序关闭该差异。实现以 Go 1.24
+`os.Root` 打开受信根，并在已打开父目录内用 `renameat/openat/unlinkat` 完成 identity detach 与递归
+删除；根/祖先/目标/内部 symlink、特殊文件和校验后替换均 fail closed。删除计划在事务内识别仍存
+username 的 `SafeFilename` 碰撞并保留共享路径，ID 路径不受影响。focused/race/full/vet、frontend
+754/754、build、Compose 及可信 Actions run `34825873958` 的 native、fresh/portable、historical volume、
+published-platform 门全部通过；已发布 `016a346`/`latest` OCI index
+`sha256:50031b016e22c18d6c06634ed4e809be9570bff48f8840dffae3d460b1595881`。当前状态：
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-09-14 WebDAV DELETE 文件系统生命周期第二轮固定基准复审
+
+原生 WebDAV 协议已签收的路由、认证、状态和 caller scope 不重开。本轮仅复核 `DELETE` 从路径验证到
+物理删除的动作生命周期。固定上游要求在当前用户 WebDAV home 下递归删除文件/目录，缺失 `404`、
+成功 `200`；OpenReader 的 `/webdav` 成功 `204` 仍作为部署兼容层保留。
+
+当前 `Service.Remove` 在 `Resolve`/`Lstat` 后按绝对路径调用 `os.RemoveAll`。若父目录在该窗口内被
+替换为指向 root 外的 symlink，删除可沿新路径触碰外部同名实体。目标是使用受信 root handle 和已打开
+父目录完成逐组件验证、同 identity detach 及 handle-relative 文件/目录递归删除；任何替换和特殊文件
+均 fail closed，wire/data contract 不变。完整矩阵与测试先行门见
+[`webdav-delete-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-delete-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+当前状态 **inventory-complete / implementation-pending**。
