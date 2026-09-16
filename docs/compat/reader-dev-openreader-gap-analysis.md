@@ -80,6 +80,22 @@ amd64/arm64 OCI index 均为
 `sha256:771df515341f46f35a07b7f62de913490cdefe4489f3016d7d82f4436aa8f75d`。当前状态为
 **aligned / regression-validated / Docker-published / awaiting-device-verification**。
 
+## 2026-09-15 Reader detached 书源章节提交回归复审
+
+用户在前三轮章节修复镜像后仍复现普通章节网络错误。本轮逐项比较正常基线 `d0600ab` 到当前版本，
+定位到 `0a8a0ef` 新增的正文提交校验与既有书源数据合同冲突：`FindForBook` 明确允许当前书籍继续使用
+active 或 detached source association，提交校验却只接受 `detached=false`。因此清空、恢复或替换书源
+列表后仍被书籍引用的 detached snapshot 可以成功抓取正文，却固定在 cache/variable 发布前返回
+`409 chapter content changed; retry`；重试不会改变该持久状态。
+
+合同纠正 `7e83024`、旧实现红测 `015d255` 与修复 `8bebcbf` 已按顺序落地。提交阶段现在接受当前用户的
+existing association，但不会重新激活 detached source；关联缺失、删书、换源、目录替换、source 行或
+抓取语义变化、变量/cache CAS 和取消保护均保持。focused/race/full/vet、frontend 757/757、build、
+Compose 及真实 Go/SQLite/API/Chromium 1440x900、390x844、360x800 验证通过。可信 Actions run
+`34963585121` 已通过所有验证和发布门，并发布 `8bebcbf`/`latest` amd64/arm64 OCI index
+`sha256:5d097551c7d5c37bc54b69030ef07146d7b24888583ba2abc3903b7eff8d6a03`；用户生产环境运行提交仍未知，
+状态为 **implemented / regression-validated / Docker-published / awaiting-device-verification**。
+
 ## 2026-08-09 P1 搜索/探索临时 Reader 会话第二轮
 
 固定上游仍由 `Index.vue#toDetail` 把未入架搜索结果写入浏览器 `readingBook`，再由目录/正文动作按书源重建；只有显式 `saveBook` 才持久化。OpenReader 的用户绑定高熵服务端会话是 JWT/Vue 3 下隐藏书源凭证的技术栈等价适配，但原实现的 create body 无上限、内存 map 无单会话/用户/进程预算，且非法章节 index 会提前续期，均判定为 `must-fix`。
@@ -4123,4 +4139,10 @@ published-platform 门全部通过；已发布 `016a346`/`latest` OCI index
 父目录完成逐组件验证、同 identity detach 及 handle-relative 文件/目录递归删除；任何替换和特殊文件
 均 fail closed，wire/data contract 不变。完整矩阵与测试先行门见
 [`webdav-delete-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-delete-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
-当前状态 **inventory-complete / implementation-pending**。
+合同 `7d364ff`、旧实现红测 `2c96481` 和实现 `daa435d` 已按顺序关闭。新实现从受信 WebDAV boundary
+打开 root/parent/target，同 identity detach 后仅以句柄相对方式删除 regular file 或递归目录；root、
+parent、target 的验证后替换和内部 symlink 都不能越出 caller root。两路状态、缺失语义、私有目录和
+备份布局不变。focused/race/full/vet、frontend `757/757`、build、Compose、Linux 双架构编译、真实
+Basic/curl 协议 smoke 及可信 Actions run `34960341835` 全部门通过；已发布 `daa435d`/`latest` OCI
+index `sha256:f563313d1d38358ba354189a62fd47beda2ba4f83d2c1e9f15ddd8ae131cd417`。当前状态
+**aligned / regression-validated / Docker-published / awaiting-device-verification**。
