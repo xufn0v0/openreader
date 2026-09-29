@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 
 	"openreader/backend/engine"
 	"openreader/backend/models"
@@ -44,6 +47,61 @@ func TestReaderLocalChapterCacheRebuildDoesNotResurrectDeletedBook(t *testing.T)
 	response := performReaderLocalChapterCacheRebuildLifecycleRequest(fixture, context.Background())
 	assertReaderLocalChapterCacheRebuildLifecycleStale(t, response)
 	assertReaderLocalChapterCacheRebuildLifecycleRows(t, fixture, 0, 0)
+	assertReaderLocalChapterCacheRebuildLifecycleFileAbsent(t, fixture)
+}
+
+func TestReaderLocalChapterCacheRebuildHistoricalNullMetadata(t *testing.T) {
+	for _, field := range []struct{ table, column string }{
+		{"chapters", "url"}, {"chapters", "is_volume"}, {"chapters", "tag"},
+		{"books", "toc_file"}, {"books", "source_file"},
+	} {
+		t.Run(field.table+"_"+field.column, func(t *testing.T) {
+			fixture := newReaderLocalChapterCacheRebuildLifecycleFixture(t, "historicalnull")
+			id := fixture.chapter.ID
+			if field.table == "books" {
+				id = fixture.book.ID
+			}
+			if err := fixture.server.db.Table(field.table).Where("id = ?", id).UpdateColumn(field.column, nil).Error; err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				response := performReaderLocalChapterCacheRebuildLifecycleRequest(fixture, context.Background())
+				if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "旧解析正文") {
+					t.Fatalf("attempt %d: %d %s", attempt, response.Code, response.Body.String())
+				}
+			}
+			var count int64
+			if err := fixture.server.db.Table(field.table).Where("id = ? AND "+field.column+" IS NULL", id).Count(&count).Error; err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatal("read normalized stored metadata instead of preserving NULL")
+			}
+			if _, err := os.Stat(fixture.cacheFile); err != nil {
+				t.Fatalf("cache not published: %v", err)
+			}
+		})
+	}
+}
+
+func TestReaderLocalChapterCacheRebuildRejectsHistoricalNullMutationAtWrite(t *testing.T) {
+	fixture := newReaderLocalChapterCacheRebuildLifecycleFixture(t, "nullmutation")
+	if err := fixture.server.db.Model(&models.Chapter{}).Where("id = ?", fixture.chapter.ID).UpdateColumn("tag", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	const callback = "test:historical-null-mutation"
+	if err := fixture.server.db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "chapters" {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Exec("UPDATE chapters SET tag = ? WHERE id = ?", "changed", fixture.chapter.ID).Error; err != nil {
+				t.Error(err)
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { fixture.server.db.Callback().Update().Remove(callback) })
+	response := performReaderLocalChapterCacheRebuildLifecycleRequest(fixture, context.Background())
+	assertReaderChapterStaleReason(t, response, "chapter-write")
 	assertReaderLocalChapterCacheRebuildLifecycleFileAbsent(t, fixture)
 }
 
@@ -307,7 +365,8 @@ func TestReaderLocalChapterCacheRebuildCoordinatesSameChapterRequests(t *testing
 		switch {
 		case response.Code == http.StatusOK:
 			okCount++
-		case response.Code == http.StatusConflict && response.Body.String() == `{"error":"chapter content changed; retry"}`:
+		case response.Code == http.StatusConflict:
+			assertReaderLocalChapterCacheRebuildLifecycleStale(t, response)
 			staleCount++
 		default:
 			t.Errorf("same-chapter response = %d %s", response.Code, response.Body.String())
@@ -485,7 +544,14 @@ func performReaderLocalChapterCacheRebuildLifecycleRequest(
 
 func assertReaderLocalChapterCacheRebuildLifecycleStale(t *testing.T, response *httptest.ResponseRecorder) {
 	t.Helper()
-	if response.Code != http.StatusConflict || response.Body.String() != `{"error":"chapter content changed; retry"}` {
+	var payload struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode stale local rebuild response %q: %v", response.Body.String(), err)
+	}
+	if response.Code != http.StatusConflict || payload.Error != errReaderChapterContentStale.Error() || payload.Reason == "" {
 		t.Errorf("stale local rebuild = %d %s, want stable 409", response.Code, response.Body.String())
 	}
 }

@@ -214,3 +214,79 @@
   `sha256:d805484871070bbb6215e48015da14cc58b78a2bcc33bc1c584516cac636f371` 和
   `sha256:dccb59866f3b9a611fbc0d81286f6b4d1ddbcd8774f20f91c67e83cda6478cb5`。用户生产环境尚未升级
   验证，当前状态为 **implemented / regression-validated / Docker-published / awaiting-device-verification**。
+
+## 2026-09-29 第五次生产反馈：`8bebcbf` 仍稳定返回两次 stale 409
+
+本轮不再把第四次修复视为生产关闭。生产公开健康检查返回完整 commit
+`8bebcbf67c49eb9ccd20310ff45f6624c4296beb`，与 GHCR `latest` index
+`sha256:5d097551c7d5c37bc54b69030ef07146d7b24888583ba2abc3903b7eff8d6a03` 一致；故障不是浏览器未刷新或
+生产未升级。
+
+在用户已登录的生产 Chrome 中清空 Network 后，对
+`https://openreader.yuchsh.top/books/39/read?resume=1` 点击一次“重新加载”，得到确定性证据：
+
+1. 主请求 `GET /api/books/39/chapters/0/content` 在约 191–215 ms 返回
+   `409 {"error":"chapter content changed; retry"}`。
+2. 前端按既有合同自动重试一次；第二个同路径请求在约 165–199 ms 返回完全相同的 409 body。
+3. 过滤全部 `chapters/` 请求后仍只有上述同章两次请求；主章失败前没有相邻章预载请求。因此这次故障
+   不能继续归因于相邻章节并发、12 秒预算、网络 502 或 detached-only 条件。
+4. 两次请求均在不足 250 ms 内稳定失败，说明当前粗粒度 stale 错误隐藏了一个可重复的服务端提交门
+   分支。现有 API/日志无法区分 association、source semantic、Book identity/variable、Chapter
+   identity/variable/cache path、guarded write 或成功加载后的最终 chapter re-read。
+
+诊断合同先于下一次行为修复：
+
+1. 对外 HTTP 状态和既有 `error` 字段保持 `409` 与 `chapter content changed; retry`，保证现有前端精确
+   重试继续工作。
+2. 响应增加稳定、非敏感的 `reason` code，只描述失败的合同门，不返回 URL、规则、变量、路径、用户或
+   source 内容。允许值限定为 `association`、`source`、`book-identity`、`book-variable`、
+   `chapter-identity`、`chapter-variable`、`chapter-cache`、`book-write`、`chapter-write` 和
+   `final-chapter`。
+3. 后端内部必须保留 `errors.Is(err, errReaderChapterContentStale)`，并让测试能断言具体 reason；不得通过
+   reason code 放宽任何 CAS、所有权或取消保护。
+4. 先用旧实现红测证明两个不同 stale 分支只能得到同一无原因 body，再实现 reason 投影；发布后只需
+   再取一次生产 Response 即可将根因收敛到一个具体门，然后继续执行该门的“合同→红测→实现”。
+5. 本诊断切片不修改成功响应、SQLite schema、cache 文件、三个持久目录、书源抓取行为或前端可见文案，
+   也不得被描述为已修复生产正文加载。
+
+## 第五次诊断实现、发布与生产部署边界
+
+### 2026-09-29 生产已升级：旧导入书籍 chapter-write 复现
+
+用户确认 Mac 本地直连与反代均失败，且旧导入书籍集中受影响；健康端点已确认
+`c1e1dbb`，两次正文 Response 均为 `409`、`reason=chapter-write`。该 code 同时用于远程章节提交和
+本地缓存重建，不能仅凭 code 宣称远程书源错误。当前本地重建 SQL 对 nullable `url/is_volume/tag`
+及 Book 的 `toc_file/source_file` 等字段直接比较 Go 零值；历史 NULL 被读取为零值后无法匹配原行。
+
+本轮合同：沿用既有本地原文读取与按章缓存恢复行为，SQL 条件必须与 Go snapshot 对 nullable 字段的
+零值语义一致。只在比较时将 NULL 投影为空字符串或 false/0，不批量重写旧记录、不重导入、不删除
+目录/进度/文件。身份、所有权、非空值变化、取消、并发目录替换和 guarded write 仍受保护。
+先补逐字段 NULL 的真实 Gin/SQLite 本地重建红测，要求正文 200、缓存发布、第二次读取成功且原始
+nullable 元数据仍为 NULL；另在最终 write 前改变 NULL 字段为非空值，要求 409 且不发布缓存。
+该确定性兼容缺陷修复后仍须在生产原书验证，方可关闭此次用户故障。
+
+实现证据：合同 `4466345`、红测 `b1d74b2`、修复 `db1ea21`。五个独立 NULL fixture 均在旧实现
+返回精确 `chapter-write`；修复后第一次正文读取与第二次缓存读取均 200，原 nullable metadata 保持 NULL。
+最终 write 前的 NULL-to-nonempty 修改仍返回 409，未发布缓存。章节 URL 的最终 re-read 同步采用
+NULL/空串等价比较，避免提交成功后又被 `final-chapter` 拒绝。
+历史提交 `1367a28`（2026-06-24）新增 nullable `is_volume/tag`，没有数据库默认值；这解释了早期导入
+行为何具有该形态。固定上游 `fa22f271` 的 `BookController.kt#getBookContent` 本地分支直接返回
+`LocalBook.getContent`，没有因这些空 metadata 拒绝正文的行为。源码回归：Go 全量、local rebuild
+race、vet、frontend 757/757、Vite、Compose 均通过。Actions `36558964029` 负责发布门禁；原书生产
+验证尚未完成，不将确定性 fixture 成功等同于用户故障已关闭。
+
+- 合同 `7057f52`、旧实现红测 `f9b6c08` 与诊断实现 `c1e1dbb` 已按顺序落地。stale sentinel 仍支持
+  `errors.Is`，HTTP 仍返回 409 和原有 `error`；新增 `reason` 只投影上述白名单合同门，不包含 URL、规则、
+  variable、cache path、用户或 source 内容。测试分别固定 `source` 与 `book-variable` 分支，并覆盖共享的
+  本地书 cache rebuild stale envelope。
+- Go focused/full/race/vet、frontend 757/757、Vite production build 与 Compose config 通过。可信 GitHub
+  Actions run `36516861894` 又通过 backend/frontend/build/Compose、native、fresh/portable、historical
+  volume 和 published-platform 全部门，并发布 `c1e1dbb`/`latest`。amd64/arm64 OCI index 为
+  `sha256:3d5eceaf00c0ceb6fcbb10121ef5fca444b2ea35756ebd4f2084b76d95f201d8`；平台 manifests 分别为
+  `sha256:40ae9885afd2f0027c15c9fb82eea6818af501a63cfc6c0535db40b7f59b78b6` 和
+  `sha256:ee4d94e98ca7d78ae3ae2a736734444e0b0eda5c4f26f06cee1e2dee8fefbacd`。
+- 发布后公开 `/api/health` 仍返回生产 commit
+  `8bebcbf67c49eb9ccd20310ff45f6624c4296beb`。用户的 OpenReader 登录态可用，但 Portainer 与 1Panel 均
+  未登录，本机 batch SSH 也没有服务器权限；因此 `c1e1dbb` 尚未部署，不能从旧生产响应获得 reason，
+  更不能将该诊断切片描述为正文修复。当前状态为
+  **diagnostic-implemented / regression-validated / Docker-published / production-awaiting-upgrade**。
