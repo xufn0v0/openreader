@@ -1430,3 +1430,36 @@ Reader snapshot reads project those values to Go zero values. Cache-rebuild guar
 projection (empty text / false / zero), while retaining exact checks for nonempty changes and ownership.
 Use query-time COALESCE only: no schema migration, metadata backfill, reimport, or data/cache/library cleanup.
 Test each nullable predicate and a concurrent NULL-to-nonempty mutation before cache publication.
+
+Implemented in `db1ea21`: five historical NULL fixtures pass rebuild and cache-hit reads, preserve original
+NULL metadata, and still reject a concurrent nonempty mutation. No data migration is required. Production
+reports the same fix commit; the user confirmed the original book recovered on 2026-10-04. This closes the
+reported original-book incident without claiming an exhaustive verification of all historical volumes.
+# 2026-10-04 WebDAV PUT 数据保护
+
+后续 COPY opened-tree/stage 合同不改变用户目录或 SQLite/备份格式；取消/失败不能丢弃旧目标、
+source 或同期新 final，无法恢复时须保留旧字节 quarantine。现已实施、通过隔离卷实测，详见
+[`webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+
+历史硬链接正常复制不改 source；仅适配本请求确认的共享 inode rename ctime。旧数据无启动扫描、
+迁移、重写或目录清理。完整新树发布后遇到未知旧成员/stage 停止清理，返回 201 与固定 pending
+头并保留剩余 quarantine；不声称已删除旧成员可回滚。可信 Actions `37189091695` 已通过
+fresh/historical/portable/backup 与双架构发布门，`463b487` 已发布；生产 `db1ea21` 未变。
+
+MOVE 后续合同同样不改 SQLite/根目录/备份格式；必须保留现有 WebDAV、LocalStore 与章节缓存
+shared Move 使用的文件路径和失败补偿。采用同 inode rename、不改写 source 权限；补偿遇到
+newcomer 不覆盖，留存可恢复 quarantine。历史硬链接、nested symlink 只原位移动而不跟随。
+现已按合同/红测实施、通过旧权限/硬链接/FIFO/links 与 Linux 双 tmpfs EXDEV 保留字节测试；
+LocalStore 原 JSON 与 cache publish/restore、历史 NULL Reader 回归保持。MOVE 本候选的可信
+fresh/historical/portable/backup 门仍待发布 workflow，见
+[`webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+
+后续进度接收仅更新既有 ReadingProgress，不新增 schema、配置或备份成员；外部毫秒时间不作为
+数据库 CAS 版本。上传成功、SQL 失败时保留原始文件，响应诊断并允许重传补偿，不宣称跨存储原子性。
+现已实施并通过初次/既有进度、caller 私有根、重复/旧时间、SQL 失败补偿与真实浏览器恢复测试。
+此处本地测试不替代可信工作流 fresh/historical/portable 卷门，也不代表另一台 Mac 已升级。
+
+将上传 stage、提交与清理收敛到同一 opened parent；失败保持旧 final，不追随上传期间替换的目录。
+不改变 `data/webdav`、用户私有目录、SQLite 或 ordinary/portable 备份布局；无需迁移或重新上传。
+完整生命周期合同见
+[`webdav-put-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-put-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。

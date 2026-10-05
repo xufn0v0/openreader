@@ -1428,3 +1428,36 @@ full/race/vet, frontend 742/742, build, four-viewport SourceManager/UserManage, 
 Actions run `32919553203` fresh/historical/portable gates passed. The pulled `a36b888` image reported the full
 revision and repeated save/status with a private canonical mirror. OCI index:
 `sha256:63979a0e01d8942a9c594d444e6d5cdf28f0ac5c382825f71a051a52b02a21e4`.
+# 2026-10-04 WebDAV PUT 生命周期复审
+
+COPY 后续生命周期合同见
+[`webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)：
+保留双前缀、Destination、Overwrite:T、Basic/Bearer 和 201 空 body；root/source/parent/target/stage
+在工作期间身份变更走既有 unsafe 403 空 body，不增加进度上传副作用。已按合同/红测实施，
+Basic/Bearer 双前缀 Gin、普通用户私有根与真实 Basic/curl 请求已通过；可信 Actions `37189091695`
+完成所有卷/备份/双架构门并发布 `463b487`，OCI digest 见聚焦合同。MOVE 后续工作未计入该发布。
+完整 COPY 发布确认后旧 quarantine/stage 清理失败不伪称复制失败：201 空 body 加
+`X-OpenReader-WebDAV-Cleanup: pending`，保留未清理字节，不回滚已提交完整新树。
+
+MOVE 后续 request/filesystem 合同见
+[`webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+保留两路 MOVE、Destination/Overwrite:T、caller scope、201/400/403/409/412 空 body；授权后取消
+不得移动 source。提交后的旧目标 cleanup pending 保持 201 与固定诊断头，不伪称失败。
+LocalStore rename 的同种已提交情形保留 200 原 JSON 并加诊断头，不改变缓存补偿 caller 的恢复
+语义。合同 `ff1fbfa`、红测 `9b6a5f6` 后已实施，取消/target 变更、普通用户私有根、有效进度 JSON
+零 PUT 副作用与三路实际提交后 pending 响应已测试。最新真实 Basic/curl 与 LocalStore HTTP
+正常改名 200/path、下载 bytes/旧名 404 通过；Docker 候选仍待可信发布终态，不记作生产升级。
+
+接收侧进度同步已按合同/红测/实现落地，新增两路 raw 上传到 caller-owned ReadingProgress 的接收
+副作用；已完成三视口在线/冷启动与无回声验证，可信 Actions `37186333157` 又完成卷门与 `8dc61c3`
+双架构发布；不代表用户另一台 Mac 已升级。
+WebDAV progress ingress 的合同与测试门见
+[`webdav-progress-ingress-fixed-baseline-second-audit-p2-contract.md`](webdav-progress-ingress-fixed-baseline-second-audit-p2-contract.md)。
+该接收适配保留双前缀 raw PUT 201 空 body；文件提交后阅读进度 SQL/取消失败用
+`X-OpenReader-Progress-Sync: failed` 标识，不伪造跨存储同步成功，不回滚已上传文件。
+
+`PUT /reader3/webdav/*path` 和 `PUT /webdav/*path` 保持认证后的 raw body 上传，无新增 query/body
+字段；成功 201、parent 缺失/非目录 409、目录 target 405、超限 413、一般 I/O 500 均为空 body。
+上传期间 root/parent/target/stage identity 改变属于 unsafe lifecycle，返回 403 空 body，不能覆盖
+替换实体。caller cancellation 不新增错误正文。详见
+[`webdav-put-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-put-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。

@@ -1,5 +1,56 @@
 # OpenReader 全量上游复审矩阵
 
+## 2026-10-04 当前切片：WebDAV PUT 生命周期与进度接收
+
+从当前服务和固定上游重新取证，PUT 在 body 读取后仍按绝对路径 chmod/replace/cleanup，且没有复验
+target 与 stage identity。新差异 **P2 must-fix / inventory-complete**，见
+[`webdav-put-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-put-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+正常 201/409/405、认证、原始 body 和私有根保持；失败保留原文件属于允许的数据保护强化。先红测，
+后 opened-parent staged publication；已签收 DELETE 与原书恢复不重开。
+
+合同 `894222c`、确定性红测 `616418b` 已落地，现已实施同 parent fd staging、root/ancestor/target/stage
+identity 复验和 no-overwrite publication。上传失败、取消与同期新 final 均保留既有字节；共享
+LocalStore/章节缓存相邻回归通过。Go/full/race/vet、frontend/build、Compose、服务 Linux 双架构
+交叉编译和本机隔离卷 Basic/curl 已通过。
+可信 Actions `37184286362` 已成功发布 `70d4fa8` 双架构 OCI index
+`sha256:1fc8dd5a898d568660053082e60d8517096ea6b89f96e6bba0ca904fe0eb8e04`；状态
+**implemented / regression-validated / Docker-published / awaiting-device-verification**。
+生产仍确认 `db1ea21`，不把新实现本地通过记作生产部署或设备签收。
+
+下一项已从固定上游提取可见 **must-fix**：外部 App 的 WebDAV `bookProgress` 上传没有回写网页
+进度；现有出站镜像不等于双向同步。见
+[`webdav-progress-ingress-fixed-baseline-second-audit-p2-contract.md`](webdav-progress-ingress-fixed-baseline-second-audit-p2-contract.md)。
+合同 `9190091` / `49642f0`、红测 `180132a` 后已实施；状态
+**implemented / regression-validated / Docker-published / awaiting-device-verification**。真实上传、私有根、旧时间/重传/CAS、
+SQL 失败补偿诊断和三视口 Go/SQLite/WebSocket 在线/冷启动精确 offset、零回声已通过。
+frontend 762/762、Go/full/race/vet、build/Compose 通过；可信 Actions `37186333157` 全部门禁成功，
+已发布 `8dc61c3` amd64/arm64 OCI index
+`sha256:fa593e4764dff16291814cf0b283b32c170404d104ea27107b483ff0a8d3fcb9`。
+原书加载已验收保持关闭，整体审计未完成。
+
+COPY 初检之后的绝对 source/stage/publication/cleanup 已在合同与旧实现八项红测后改为 opened
+tree、同 parent stage、identity/metadata 复验和 no-replace 补偿；固定上游行为和允许安全适配见
+[`webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+状态 **implemented / regression-validated / Docker-published / awaiting-device-verification**。Go/full/race/vet、frontend
+762/762/build、Compose、Linux 双架构编译、非 root Linux arm64 文件系统测试与最新二进制隔离
+Basic/curl 通过。历史硬链接 source 与旧 target 共享 inode 的自有 rename ctime 已限定适配，
+移开后真实修改仍拒绝；发布后的未知清理实体保留并返回固定 pending 诊断。
+可信 Actions `37189091695` 全门成功，已发布 `463b487` 双架构 OCI index
+`sha256:cac29fea5b028c3927336fcb2d3fb07f95afb4bff90c7e9cb7fcdcd6e77216ea`；生产仍确认 `db1ea21`。
+MOVE 的同类路径与取消缺口单独保留未完成，不从 PUT/DELETE/COPY 的验证推导它通过。
+
+MOVE 下一切片合同已从固定 `WebdavController.kt` 394–428 提取，状态
+**implemented / regression-validated / Docker-publication-pending**，见
+[`webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+同时纳入共享 LocalStore rename / 章节缓存 stage-backup-publish-restore；取消、identity、no-replace
+恢复与 owned cleanup 不可仅覆盖外部 DAV handler。红测 `9b6a5f6` 已证明授权后取消仍返回 201
+并移动源文件；两个接收边界 fixture 的旧实现未触发，不当作旧竞态证据。后续实施回归与设备签收
+仍单独记录，不能从 COPY 已发布推导 MOVE 已发布。现已实施同 inode/no-replace MoveTree、
+request context 和 owned cleanup；内部 background Move 保持缓存补偿，LocalStore 已提交 pending
+保持 200 原 JSON。Go/full/race/vet、frontend 762/762/build、Compose、Linux 双架构编译、非 root
+Linux权限/硬链接/双tmpfs EXDEV、真实 Basic/curl 与 LocalStore HTTP、三视口真实 Reader 相邻
+回归通过。Docker 候选仍待可信卷/备份/平台门，原书恢复与整体未完成状态分别保持。
+
 基准：`changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。
 
 上游工作副本：`/private/tmp/reader-dev-upstream-audit`。本矩阵创建于
@@ -102,8 +153,8 @@ Reader 主正文迟到响应、持久 variable/cache 提交与换源写入边界
   Reader source-change post-fetch Book/association/Source 复验、显式拥有列更新与权威响应投影，以及
   本地章节 cache-miss 的 caller context、Book/archive/Chapter snapshot、guarded `cache_path`、
   staged publication/rollback 与 EPUB recovery 非持久化边界。
-- **尚未完成的主线**：用户资产 filesystem/reference lifecycle 已完成专项 inventory，待按合同加入旧实现
-  红测并实施 rooted staged upload/delete、Book/Setting 引用协调与 portable 同句柄/协调提交；此外仍有
+- **尚未完成的主线**：用户资产 filesystem/reference lifecycle 已按 `478654a/947dfcb/3e8cec7` 完成
+  合同、红测、实现和可信双架构发布（下方闭环记录权威），不再从旧 pending 文案重开；目前仍有
   其余尚未逐动作签约的 Go REST/错误/事务语义、待第二轮固定基准复审的长尾组件，以及后续真实设备
   反馈暴露出的上游可见偏差。reading progress、books.go 六个 JSON control 和
   ReplaceRule 五路、备份生成、backup list/download 与公开 upload resource rooted opened-file 边界均已
@@ -472,3 +523,18 @@ Production `c1e1dbb` still returns `chapter-write` for old imported books, inclu
 Must-fix: local cache rebuild predicates disagree with Go snapshot zero values for historical SQL NULLs.
 Allowed adaptation: normalize NULL only in guarded comparisons; preserve original metadata and all stale-write protections.
 Required evidence: field-by-field NULL fixtures, concurrent mutation rejection, and production book verification.
+
+## 2026-10-04 production verification completed
+
+Contract `4466345`, red tests `b1d74b2`, implementation `db1ea21`, and regression evidence `f8f6d9a`
+landed in order. Five historical NULL fixtures now return 200 for rebuild and cached reads without rewriting
+nullable metadata; a real concurrent NULL-to-nonempty change still returns 409 without publishing cache.
+Go full/focused race/vet, frontend 757/757, Vite and Compose passed. Trusted Actions
+[`36558964029`](https://github.com/changshengyu/openreader/actions/runs/36558964029) passed release gates and
+published `ghcr.io/changshengyu/openreader:db1ea21` (and `latest` at publication), OCI index
+`sha256:61fb9e471315a8654b38f5e272c8e912e57f7da57044d0394d1c201772db00ee`.
+Production `/api/health` reports `db1ea216f9849bc44a90b5b760241df1c6d069b0`; the user explicitly confirmed
+the original book recovered on 2026-10-04. This incident is **device-verified / closed**. Browser automation
+remained unavailable (`Debugger unattached`), so production acceptance is user-reported rather than an
+automated browser pass. Other books, formats and Reader interactions retain their own verification status;
+the overall audit percentage is unchanged.

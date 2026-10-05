@@ -1500,3 +1500,32 @@ frontend 742/742, build, Compose, real three-viewport BookInfo/Reader and truste
 fresh/historical/portable/platform gates passed. `8df38f1`/`latest` OCI index is
 `sha256:1f6c8c509457043400f19e181b4d52fb8c648d5f84509c7b4fbdd44fdb610232`; a pulled container reported the full
 revision. Status is `aligned / regression-validated / Docker-published / awaiting-device-verification`.
+# 2026-10-04 WebDAV 进度接收
+
+已复核并测试：只识别 scoped/rooted 规范路径的两级进度文件，不按客户端 ID 定位书籍；SQL 与
+WebSocket 限 caller，URL/name-author 歧义跳过；正文识别只捕获 16 KiB+1，UTF-8 单对象、显式
+非负 index/offset、有效过去时间受限；普通上传预算和原字节不改。SQL/取消失败只暴露固定诊断头，
+不泄漏路径、credentials 或数据库错误；仅 commit 后通知，无出站 mirror 回声。无新外部 fetch。
+
+# 2026-10-04 WebDAV COPY 生命周期
+
+已复核并测试：source/destination 从同一受信 boundary 打开，复验 root/私有 user ancestor、parent、
+完整源树、target 和 stage；source symlink/special 禁止，旧目标子 symlink 只按已接收 inode unlink，
+不追随根外路径。失败补偿 no-replace，不覆盖 newcomer；owned-only 清理保留未知实体。历史
+硬链接只接受已确认自有 rename 的 ctime 变化，后续外部修改仍拒绝。双前缀 Basic/Bearer 与普通
+用户隔离、无进度 JSON COPY 副作用均有测试。错误空 body、提交后固定 pending 诊断头，不暴露
+路径、令牌或 credentials；无新增远程 fetch。MOVE 同类风险仍未关闭。
+
+# 2026-10-04 WebDAV MOVE 生命周期（已实施/回归，发布待门禁）
+
+- [x] 绑定两侧 trusted root/user ancestors/source/target，禁止工作阶段追随替换实体。
+- [x] 授权后的 caller cancellation 阻止提交；八项确定性旧实现红测已经复现错误 201/移动。
+- [x] no-replace install/restore 不覆盖 newcomer source/final；旧字节只按 owned inode 清理。
+- [x] 历史 nested symlink/special 仅随 source 目录 inode rename，不遍历其外部内容；共享硬链接
+      自有 rename ctime 适配不放宽外部修改检查。
+- [x] LocalStore rename / 章节缓存共享调用的状态、路径、失败补偿和私有根保持；进度 JSON MOVE
+      不触发 PUT 接收；错误与 pending 头不泄漏主机路径或 credentials。
+
+合同 `compat/webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`；以上已有本项
+Go/race/真实请求及非 root Linux 实测，不从相邻 COPY 推导。恢复受阻保留 quarantine、提交后未知
+实体 pending 头已验证；未暴露主机路径/令牌，无新外部 fetch/应用配置/迁移。可信发布门待终态。
