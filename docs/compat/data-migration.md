@@ -2,7 +2,70 @@
 
 Status: working compatibility ledger; implemented migrations and remaining action-level audits are recorded below.
 
+## 2026-10-08 read/list lifecycle inventory (no migration)
+
+The implemented and Docker-published
+[`webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)
+does not change SQLite, configuration, roots, cache generations, backups or old URLs. Existing administrator
+and private-user roots remain in place; read/list operations never repair, chmod, delete or create missing
+child directories. Legitimate lazy-root initialization retains the reviewed08de4de behavior. Symlink/special
+entities are retained, with existing DAV rejection versus LocalStore hiding preserved. Background shared
+Open/Stat callers need regression checks, not silent changes to import tokens, progress ingress, restore or
+cache compensation. Contract3ecf48a preceded red80bb48c and application edits; full/race, nonroot Linux,
+isolated fresh three-account HTTP and adjacent real Reader checks pass. Candidate-specific historical/fresh/
+portable/backup/platform gates passed trusted Actions37747103667 exact11235c3. Exact/latest index is
+sha256:c3aa7a6c1ecc897de83a145d58e86a48084219249dcdd1161ac9c42f663dafa3. No production upgrade is inferred.
+
+Directory creation08de4de independently completed trusted Actions37740704252, including fresh/historical/
+portable/backup and amd64/arm64 publication. Exact/latest OCI index is
+sha256:7ab7cb27c3f1a114e0987f6f4c7b1100a3ebda2f228b73cc3e1ee144b046a08c. Production health remains
+db1ea21; original user-book recovery stays closed. Read/list red commit80bb48c is not an implementation or
+release candidate and does not alter schema, mounted roots or backup membership.
+
+## 2026-10-08 storage-import source-read implemented (no migration)
+
+The next [`storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md)
+preserves mounted roots, staged token format/TTL, prepared snapshots, old book/cache URLs and backups.
+Only mounted-source plan/scan/bounded-read admission is in scope; token stage/load/cleanup and full parser/
+SQL/cache commit lifecycle are separately unclosed. Contract772fae2 preceded36 confirmed reds; fixture
+replacements preserve source/foreign bytes and reveal unauthorized-to-this-admission stage/library state
+in disposable test roots only. Implementation retains original root/ancestor/file handles through source
+handoff, request cancellation and all owned-handle closes; no repair, production scan, chmod or migration.
+Token-only paths still never admit mounted roots. Hidden/missing/empty/200/dedup/000 and staged-source
+removal/reparse/confirm controls pass on real isolated Go+SQLite HTTP for historical admin layout and two
+ordinary users. No whole-batch rollback or complete stage/TTL/parser/SQL lifecycle claim; prior durable imports
+remain with a precise prior-success notification after later source cancellation. Full/race/frontend/Linux and
+Reader controls pass; final-candidate5cfc53d fresh/historical/portable/backup/platform gates passed trusted
+Actions37754329331. Exact/latest OCI index independently matches
+sha256:ba5456fe6aeac3ba3145b7bb9b58c75e00fa07de500e5536246fc08f081bf4cd. Production remainsdb1ea21;
+the next staged-cache lifecycle audit is independent and does not authorize a migration.
+
 ## User-facing migration contract (2026-08-11)
+
+Stage-filesystem implementation (2026-10-10) does not introduce a migration. See
+[`local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Retain `cache/import-previews/<numeric-user>/<48hex>.book/.json/.parsed.json`, token-prefixed temporary
+names, metadata fields/UTC,24h TTL/hourly cleanup,700 new directories/600 new files and old permissions.
+Keep old two-file tokens, source-independent retry, matched prepared no-reparse, ordinary fallback and
+failure-retained/success-consumed behavior. Finite1MiB metadata rejects oversized untrusted cache without
+deleting unknown bytes. Root/bundle sessions and owned cleanup must retain newcomer/link/special entities,
+active tokens and durable books; no SQL/config/root/archive/backup/browser-key changes or exactly-once claim.
+The shared native/session implementation turns120 old-app reds green. Legacy/permission/TTL/active-token/
+FD/durable controls and final isolated three-user real HTTP plus confirmed-Reader browser pass;
+intermediate bundle full API race passes but final source full race and candidate-specific Docker
+historical/fresh/portable/backup/publication remain pending. Production db1ea21 is independently healthy,
+not upgraded; local service/native tests in an older Linux runtime are not a candidate-volume proof.
+Exact0a full race and local fresh/historical/portable/backup later passed, with an initial unreproduced
+historical404 retained as unknown. Review then confirmed token-collision compensation could delete old
+metadata or accept old parsed data. Independent red7b47c8d preceded the original-absence guard, preserving
+all preexisting bundle files and existing wire errors. Collision/fullGo/vet/exact race/real HTTP/Linux controls
+pass; new exact-SHA candidate gates and trusted publication are still pending. No migration is introduced.
+Final stage publication supersedes that pending state: exactb2b32f7 fullrace and its original-sh
+fresh/historical/portable/backup/restart gates pass, trusted Actions38040641233 terminalsuccess.
+Independent exact/latest OCI index sha256:ed57cc69e10e2bfcc90f401fee578f13c2df513faee97123886416ebbf92f4dc
+and both actual Linux platform config revisions verifyb2. Production remains last-readonlydb1ea21healthy;
+this is not an upgrade or migration. Initial library allocation/rollback ownership, full SQL/category/parser
+ctx and complete audit remain unknown; signed already-imported archive behavior is not reopened.
 
 The English and Chinese READMEs now expose three distinct, supported migration paths. These are documentation
 of existing behavior and do not authorize a new schema or filesystem migration:
@@ -1437,6 +1500,13 @@ reports the same fix commit; the user confirmed the original book recovered on 2
 reported original-book incident without claiming an exhaustive verification of all historical volumes.
 # 2026-10-04 WebDAV PUT 数据保护
 
+目录创建后续合同覆盖 fresh配置根、既有管理员根与private user初始化，见
+[`webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+不改layout/schema/backup，不chmod既有目录；取消/失败只回收owned-empty新层，未知实体保留。
+LocalStore缺失子路径的列表操作不得新建目录，固定上游语义404已实施；根惰性初始化能力保持，也须承接请求取消。
+18旧红灯转绿；fresh-root/旧权限/owned-empty回收/未知保留与真实HTTP通过。无schema/配置/layout或
+backup成员变化；最终候选的新旧卷/backup门仍待可信工作流，不从前一MOVE已发布推导完成。
+
 后续 COPY opened-tree/stage 合同不改变用户目录或 SQLite/备份格式；取消/失败不能丢弃旧目标、
 source 或同期新 final，无法恢复时须保留旧字节 quarantine。现已实施、通过隔离卷实测，详见
 [`webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
@@ -1450,8 +1520,8 @@ MOVE 后续合同同样不改 SQLite/根目录/备份格式；必须保留现有
 shared Move 使用的文件路径和失败补偿。采用同 inode rename、不改写 source 权限；补偿遇到
 newcomer 不覆盖，留存可恢复 quarantine。历史硬链接、nested symlink 只原位移动而不跟随。
 现已按合同/红测实施、通过旧权限/硬链接/FIFO/links 与 Linux 双 tmpfs EXDEV 保留字节测试；
-LocalStore 原 JSON 与 cache publish/restore、历史 NULL Reader 回归保持。MOVE 本候选的可信
-fresh/historical/portable/backup 门仍待发布 workflow，见
+LocalStore 原 JSON 与 cache publish/restore、历史 NULL Reader 回归保持。MOVE `5338f26` 的可信
+Actions `37192132525` 已通过 fresh/historical/portable/backup 门并完成双架构发布，见
 [`webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
 
 后续进度接收仅更新既有 ReadingProgress，不新增 schema、配置或备份成员；外部毫秒时间不作为

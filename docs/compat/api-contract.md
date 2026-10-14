@@ -2,7 +2,71 @@
 
 Status: working contract. Keep this file updated when endpoint semantics change.
 
+## 2026-10-08 read/list lifecycle (implemented and Docker-published)
+
+The next fixed-baseline contract is
+[`webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Both DAV prefixes keep authenticated file GET, standard PROPFIND207/Depth0-or-one, existing unsafe403/404
+empty errors and Range/conditional responses; `/reader3/webdav` directoryGET405 and `/webdav` private
+directoryGET207 remain distinct. LocalStore keeps list200 `{path,recursive,items}`, missing-child404,
+download/Range, fixed JSON errors and hidden-entry semantics. The pending change must bind caller boundary,
+ancestors, metadata and bytes to original opened handles and observe request cancellation after root
+initialization. No new route, request field, response shape or499 is authorized. Independent red commit80bb48c
+confirms30 failures in namespace admission, FIFO blocking and authorized cancellation. The fd-bound implementation
+now turns these green, preserves complete internal File.Name labels, and passes full/race/vet plus isolated
+three-account real HTTP and three-viewport real Reader controls. The HTTP suite is a trusted Actions prerequisite;
+candidate-specific volume/backup/platform publication passed trusted Actions37747103667 for exact11235c3,
+independent of directory image08de4de. Exact11235c3/latest share OCI index
+sha256:c3aa7a6c1ecc897de83a145d58e86a48084219249dcdd1161ac9c42f663dafa3.
+
+Earlier directory candidate08de4de was Docker-published by trusted Actions37740704252; at that publication
+exact/latest OCI index was sha256:7ab7cb27c3f1a114e0987f6f4c7b1100a3ebda2f228b73cc3e1ee144b046a08c.
+See the directory contract for platform digests. Production remainsdb1ea21; no remote upgrade was performed.
+
+## 2026-10-08 storage import source-read (implemented and Docker-published)
+
+See [`storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+The four LocalStore/WebDAV preview/import POST routes retain bounded JSON, raw200-item and expanded200-item
+admission, response/item errors, permissions and token-only mounted-root independence. Absolute directory
+expansion and separate background plan/read admissions have36 actual fired red counterexamples after
+contract772fae2:18 foreign planned names, changed empty namespaces, authorized cancellation with staged/
+book/category state, and four same-name replacement sources accepted into stage/library. Independent
+normal/token-only/encoding/request controls pass. The implementation now binds one caller read scope
+through recursive source selection and bounded-byte handoff; 36 initial and 8 deeper/in-read reds are green.
+Cancellation/deadline terminates with safe500 `{error:"import source read canceled"}`, changed admitted
+identity with400 `{error:"invalid path"}`; ordinary file I/O remains per-item. Earlier committed books are
+retained and notified independently if a later source cancels (two actual intermediate reds fixed).
+Full/race/vet, real three-account HTTP, Reader three-viewports, Linux and frontend gates pass; candidate-specific
+trusted volume/backup/platform and OCI publication passed Actions37754329331 for exact5cfc53d. Exact/latest
+index independently matches sha256:ba5456fe6aeac3ba3145b7bb9b58c75e00fa07de500e5536246fc08f081bf4cd;
+production is stilldb1ea21 (independent read-only health on2026-10-10).
+This does not authorize new UI, hidden filtering, missing404 instead of skip, SQL rollback claims or499.
+
 ## Global rules
+
+Stage audit (2026-10-10), **aligned / regression-validated / Docker-published / awaiting-device-verification**:
+[`local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+All seven direct/LocalStore/WebDAV POST routes retain authentication, fields and normal200/201/item errors;
+opaque invalid-token400/direct and200/per-item storage, initial stage400/direct and200/per-item storage,
+prepared-save500/direct and200/per-item storage fixed safe errors are preserved. Stage-work cancellation
+newly terminates with500 `{error:"local import stage canceled"}`, no499; prior durable books remain and are
+notified. Native identity failures must not be converted into ordinary prepared cache miss or leak PathError.
+Durable-after-consume failure retains success and unknown residue. Independent contract4104499 preceded
+120 actual old-app reds and the service-owned implementation. These and durable-success/event controls
+now pass, including seven-route publication status/error controls. Intermediate bundle full API race
+passes (886.942s); final classification version full Go/vet, exact race and three-viewport confirmed
+Reader pass. Final full API race and candidate-specific Docker/volume/publication are pending. Local success is
+not production upgrade evidence; see the focused contract section10 for exact gate distinctions.
+Subsequent exact0a full race and local candidate volumes passed; final ownership review found two
+random-token collision reds, independently committed/pushed as7b47c8d before the guard. Creation now
+requires original absence of all three bundle files before cleanup/writes, using the existing safe stage
+error mapping. Collision controls, fullGo/vet, exact race, frontend762 and real HTTP pass. New exact-SHA
+full race and candidate release gates remain pending; confirmed Reader three-viewports also pass. See section11 for superseding evidence.
+Final evidence supersedes those historical pending statements: exactb2b32f7 fullrace/API870.086s and
+same-SHA candidate volume/backup gates pass; trusted Actions38040641233 terminalsuccess publishes
+b2b32f7/latest. Independent index is sha256:ed57cc69e10e2bfcc90f401fee578f13c2df513faee97123886416ebbf92f4dc,
+both real platform configs verify fullb2 revision. No API/data migration; production lastdb1ea21healthy,
+not upgraded. Full parser/SQL/category/archive ctx remains outside this stage slice. See section12.
 
 - Public API root: `/api`.
 - Auth: `Authorization: Bearer <jwt>` for protected `/api` endpoints.
@@ -1430,6 +1494,16 @@ revision and repeated save/status with a private canonical mirror. OCI index:
 `sha256:63979a0e01d8942a9c594d444e6d5cdf28f0ac5c382825f71a051a52b02a21e4`.
 # 2026-10-04 WebDAV PUT 生命周期复审
 
+目录创建后续合同见
+[`webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+状态 implemented / regression-validated / Docker-publication-pending；双前缀 MKCOL existing-dir/recursive201空body、regular409/rootunsafe403
+和 Basic/Bearer 保持。授权后取消不得初始化根/创建目录；LocalStore directory保持201原pathJSON。
+固定上游列表不创建缺失子目录：`GET /api/local-store?path=<missing-child>` 将返回404固定
+`{"error":"local store path not found"}`且无子目录写入，根惰性初始化与已有空目录200保持。
+合同 `d06f954`、红测 `d5f00bc` 后已实施；18旧红灯与actual working-root403/上传parent取消转绿，
+真实协议/LocalStoreHTTP状态和无写入副作用通过。最终Go/最新Linux/二进制fresh卷HTTP也通过；
+可信Docker门仍待核验，生产health仍db1ea21，不计生产升级。
+
 COPY 后续生命周期合同见
 [`webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-copy-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)：
 保留双前缀、Destination、Overwrite:T、Basic/Bearer 和 201 空 body；root/source/parent/target/stage
@@ -1446,7 +1520,8 @@ MOVE 后续 request/filesystem 合同见
 LocalStore rename 的同种已提交情形保留 200 原 JSON 并加诊断头，不改变缓存补偿 caller 的恢复
 语义。合同 `ff1fbfa`、红测 `9b6a5f6` 后已实施，取消/target 变更、普通用户私有根、有效进度 JSON
 零 PUT 副作用与三路实际提交后 pending 响应已测试。最新真实 Basic/curl 与 LocalStore HTTP
-正常改名 200/path、下载 bytes/旧名 404 通过；Docker 候选仍待可信发布终态，不记作生产升级。
+正常改名 200/path、下载 bytes/旧名 404 通过；实现 `5338f26` 的 Actions `37192132525` 已终态
+成功并完成双架构发布，digest 见聚焦合同；不记作生产升级。
 
 接收侧进度同步已按合同/红测/实现落地，新增两路 raw 上传到 caller-owned ReadingProgress 的接收
 副作用；已完成三视口在线/冷启动与无回声验证，可信 Actions `37186333157` 又完成卷门与 `8dc61c3`

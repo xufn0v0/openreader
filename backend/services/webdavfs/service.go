@@ -3,7 +3,6 @@ package webdavfs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -31,6 +30,10 @@ const maxImportPathBytes = 4096
 // Tests use this hook to replace a target ancestor after lexical validation.
 // Package tests are not parallel while the hook is installed.
 var beforeRemoveTestHook func(root, relative string)
+
+// A nonparallel test seam after identity admission, before validation/read.
+// Nil in production; fixtures cannot replace the fd-relative implementation.
+var afterReadAdmissionTestHook func(operation, root, relative string)
 
 type Service struct {
 	boundary string
@@ -83,6 +86,13 @@ func (s *Service) Root() string {
 }
 
 func (s *Service) EnsureRoot() error {
+	return s.EnsureRootContext(context.Background())
+}
+
+func (s *Service) EnsureRootContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.rejectSymlinks(s.root); err != nil {
 		return err
 	}
@@ -91,10 +101,11 @@ func (s *Service) EnsureRoot() error {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
-		return fmt.Errorf("create WebDAV root: %w", err)
+	relative, err := filepath.Rel(s.boundary, s.root)
+	if err != nil {
+		return ErrUnsafePath
 	}
-	return s.rejectSymlinks(s.root)
+	return directoryCreationError(rootedfs.CreateDirectories(ctx, s.boundary, relative))
 }
 
 func (s *Service) Resolve(rawPath string) (string, string, error) {
@@ -114,92 +125,15 @@ func (s *Service) Resolve(rawPath string) (string, string, error) {
 }
 
 func (s *Service) Stat(rawPath string) (Resource, error) {
-	target, relative, err := s.Resolve(rawPath)
-	if err != nil {
-		return Resource{}, err
-	}
-	info, err := os.Lstat(target)
-	if errors.Is(err, os.ErrNotExist) {
-		return Resource{}, ErrNotFound
-	}
-	if err != nil {
-		return Resource{}, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
-		return Resource{}, ErrUnsafePath
-	}
-	return Resource{RelativePath: relative, Info: info}, nil
+	return s.StatContext(context.Background(), rawPath)
 }
 
 func (s *Service) List(rawPath string, depth int) ([]Resource, error) {
-	target, relative, err := s.Resolve(rawPath)
-	if err != nil {
-		return nil, err
-	}
-	info, err := os.Lstat(target)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
-		return nil, ErrUnsafePath
-	}
-	resources := []Resource{{RelativePath: relative, Info: info}}
-	if depth <= 0 || !info.IsDir() {
-		return resources, nil
-	}
-	entries, err := os.ReadDir(target)
-	if err != nil {
-		return nil, err
-	}
-	for _, entry := range entries {
-		entryPath := filepath.Join(target, entry.Name())
-		entryInfo, err := os.Lstat(entryPath)
-		if err != nil {
-			return nil, err
-		}
-		if entryInfo.Mode()&os.ModeSymlink != 0 || (!entryInfo.IsDir() && !entryInfo.Mode().IsRegular()) {
-			return nil, ErrUnsafePath
-		}
-		entryRelative := filepath.ToSlash(filepath.Join(filepath.FromSlash(relative), entry.Name()))
-		resources = append(resources, Resource{RelativePath: entryRelative, Info: entryInfo})
-	}
-	return resources, nil
+	return s.ListContext(context.Background(), rawPath, depth)
 }
 
 func (s *Service) Open(rawPath string) (*os.File, os.FileInfo, error) {
-	target, _, err := s.Resolve(rawPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	info, err := os.Lstat(target)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, nil, ErrUnsafePath
-	}
-	if info.IsDir() {
-		return nil, info, ErrIsDirectory
-	}
-	if !info.Mode().IsRegular() {
-		return nil, nil, ErrUnsafePath
-	}
-	file, err := os.Open(target)
-	if err != nil {
-		return nil, nil, err
-	}
-	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(info, openedInfo) {
-		_ = file.Close()
-		return nil, nil, ErrUnsafePath
-	}
-	return file, openedInfo, nil
+	return s.OpenContext(context.Background(), rawPath)
 }
 
 func (s *Service) Put(ctx context.Context, rawPath string, source io.Reader, maxBytes int64) error {
@@ -243,6 +177,13 @@ func (s *Service) Put(ctx context.Context, rawPath string, source io.Reader, max
 }
 
 func (s *Service) Mkdir(rawPath string) error {
+	return s.MkdirContext(context.Background(), rawPath)
+}
+
+func (s *Service) MkdirContext(ctx context.Context, rawPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	target, relative, err := s.Resolve(rawPath)
 	if err != nil {
 		return err
@@ -250,24 +191,24 @@ func (s *Service) Mkdir(rawPath string) error {
 	if relative == "" {
 		return ErrUnsafePath
 	}
-	if info, statErr := os.Lstat(target); statErr == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return ErrUnsafePath
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if !info.Mode().IsRegular() {
-			return ErrUnsafePath
-		}
-		return ErrConflict
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
+	boundaryRelative, err := filepath.Rel(s.boundary, target)
+	if err != nil {
+		return ErrUnsafePath
 	}
-	if err := os.MkdirAll(target, 0o755); err != nil {
+	return directoryCreationError(rootedfs.CreateDirectories(ctx, s.boundary, boundaryRelative))
+}
+
+func directoryCreationError(err error) error {
+	switch {
+	case errors.Is(err, rootedfs.ErrUnsafePath):
+		return ErrUnsafePath
+	case errors.Is(err, rootedfs.ErrNotDirectory):
+		return ErrNotDirectory
+	case errors.Is(err, rootedfs.ErrDirectoryConflict):
+		return ErrConflict
+	default:
 		return err
 	}
-	return s.rejectSymlinks(target)
 }
 
 func (s *Service) Remove(rawPath string) error {

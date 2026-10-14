@@ -1514,9 +1514,9 @@ WebSocket 限 caller，URL/name-author 歧义跳过；正文识别只捕获 16 K
 不追随根外路径。失败补偿 no-replace，不覆盖 newcomer；owned-only 清理保留未知实体。历史
 硬链接只接受已确认自有 rename 的 ctime 变化，后续外部修改仍拒绝。双前缀 Basic/Bearer 与普通
 用户隔离、无进度 JSON COPY 副作用均有测试。错误空 body、提交后固定 pending 诊断头，不暴露
-路径、令牌或 credentials；无新增远程 fetch。MOVE 同类风险仍未关闭。
+路径、令牌或 credentials；无新增远程 fetch。MOVE 同类风险在后续专项中独立关闭。
 
-# 2026-10-04 WebDAV MOVE 生命周期（已实施/回归，发布待门禁）
+# 2026-10-04 WebDAV MOVE 生命周期（已实施/回归/可信发布）
 
 - [x] 绑定两侧 trusted root/user ancestors/source/target，禁止工作阶段追随替换实体。
 - [x] 授权后的 caller cancellation 阻止提交；八项确定性旧实现红测已经复现错误 201/移动。
@@ -1528,4 +1528,78 @@ WebSocket 限 caller，URL/name-author 歧义跳过；正文识别只捕获 16 K
 
 合同 `compat/webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`；以上已有本项
 Go/race/真实请求及非 root Linux 实测，不从相邻 COPY 推导。恢复受阻保留 quarantine、提交后未知
-实体 pending 头已验证；未暴露主机路径/令牌，无新外部 fetch/应用配置/迁移。可信发布门待终态。
+实体 pending 头已验证；未暴露主机路径/令牌，无新外部 fetch/应用配置/迁移。实现 `5338f26`
+可信 Actions `37192132525` 全部门成功，双架构 exact OCI 已核验；生产 `db1ea21` 未升级。
+
+# 2026-10-08 目录创建生命周期（已实施/本地回归/可信发布）
+
+- [x] 绑定configured anchor/root/users/user/parent identity，实际工作期替换fixture触发并不跟随。
+- [x] request context覆盖MKCOL、root初始化、LocalStore upload/create父层；第二层取消只回收owned空目录，未知成员保留。
+- [x] missing-child LocalStore list404且无子目录创建；合法根惰性初始化与空目录200保持。
+- [x] 本地新根/ordinary user隔离、非rootLinux权限/unknown/newcomer/嵌套/空白与相邻token/cache race。
+- [x] 最终候选08de4de可信fresh/historical/portable/backup/双架构发布门，Actions37740704252终态success。
+
+聚焦合同 `compat/webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md`；
+合同与18项旧实现红灯先于应用修改。已有Go/race/真实HTTP和非rootLinux证据，不以相邻MOVE代替。
+无新fetch/配置/schema/host-path或credentials泄漏；错误固定JSON/空body。GET/PROPFIND/Open
+独立生命周期尚待后续动作审查。最终Go/vet/race/最新Linux与fresh临时卷二进制HTTP复验exit0；
+可信卷/备份/双架构发布门已独立核验；exact08de4de/latest index为
+sha256:7ab7cb27c3f1a114e0987f6f4c7b1100a3ebda2f228b73cc3e1ee144b046a08c，生产未升级。
+
+# 2026-10-08 WebDAV / LocalStore read-list（已实施并发布，设备验收独立）
+
+- [x] 固定基准及当前Stat/List/Open和LocalStore绝对扫描源码已映射；记录源码窗口，不称已复现。
+- [x] 30项实际admission/open/list替换与授权后cancel红测；fixture fired，旧List泄漏诱饵名，原字节未变。
+- [x] fd-relative boundary/users/user/parent/final身份绑定及request context实施。
+- [x] regular NOFOLLOW/NONBLOCK、FIFO有界拒绝、000 native metadata/权限不改与句柄清理验证。
+- [x] DAV整体unsafe与LocalStore隐藏策略、Range/conditional、两用户及管理员旧布局根真实HTTP回归。
+- [x] 共享cache/archive/import/restore全量/race与真实Reader三视口相邻回归。
+- [x] 该候选可信新旧卷/portable/backup/双架构发布门与exact OCI：37747103667终态success，
+  11235c3/latest index sha256:c3aa7a6c1ecc897de83a145d58e86a48084219249dcdd1161ac9c42f663dafa3。
+
+见 `compat/webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`。
+nil-in-production接缝未改变原行为；FIFO旧阻塞已用测试peer有界释放并join，000/Range/conditional/
+returned-handle控制组独立通过。新读流程namespace/deep-cancel/子项替换门通过，无诱饵bytes/names
+进入成功响应；不承诺原inode内容不可变或全FS原子快照。生成完整File.Name保留内部身份复验标签，
+从原parent Openat获取fd，不恢复absolute Open。最终非rootLinux与真实HTTP均使用隔离临时数据。
+无新远程fetch、配置/数据迁移或密码日志；不改当前生产db1ea21，不重开原书已恢复事件。
+08de4de目录创建已由可信运行37740704252单独验证并发布，不能从它推导read/list通过。
+
+# 2026-10-08 storage-import source-read（已实施、验证与可信发布）
+
+固定源码及已部署API/token差异见
+`compat/storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`。
+absolute directory walk和独立plan→read admission已在合同772fae2推送后确认36红灯：20目录替换
+fired（18诱饵名、2空计划）、12授权后cancel仍stage或Book/Chapter/category/广播、4同名regular
+替换实际进入暂存/library字节。只发生于一次性测试根，不宣称生产泄漏。
+token-only不访问mounted根、raw/expanded200项、稳定link/special隐藏且neighbor保留、当前hidden
+导入和empty/missing结果不可破坏。请求ctx只保护本切片source bytes交付边界，不签收stage/TTL/
+parser/SQL整个生命周期。追加8深层/读取中红灯后实施same-scope原opened scan/read，所有44初始
+红灯转绿。root/deep/read/handoff cancel、deep identity变更、late同inode link/FIFO有界join、
+200/201共享祖先引用和原生fd关闭、正常hidden/neighbor/token-only/GB18030/JSON/权限控制通过。
+最终full/race/vet、双普通用户/管理员旧根真实HTTP与Reader三视口、双架构编译及非rootLinux
+全服务通过；未知扫描cardinality/depth/FD上限和完整stage/TTL/parser/SQL仍独立未完成。
+无新fetch、密码日志、host-path诊断或用户数据改动；候选5cfc53d可信Actions37754329331已终态
+success，新旧卷/portable/backup/platform全部通过，exact/latest registry index独立核验为
+sha256:ba5456fe6aeac3ba3145b7bb9b58c75e00fa07de500e5536246fc08f081bf4cd。生产db1ea21未升级。
+
+# 2026-10-10 import stage lifecycle（实施，本地验证中）
+
+- [x] 固定上游与七个现有route/shared stage/prepared/consume/startup-TTL调用链已映射；合同4104499先推。
+- [x] 初轮90项旧应用实际red/API5.805s：工作期替换/取消/误删、stable link、FIFO及预算；接缝实际触发，FIFO peer有界释放join；正常控组通过。无应用修复，feature only不发布。
+- [x] 追加30旧应用红灯先推送，再实施；原cache/user/bundle session、regular no-follow/nonblock、1MiB metadata与原预算/ctx；120红灯转绿。
+- [x] prepared原target publication、同tokenactive lease与TTL协调、未知实体不覆盖/owned回收；补actual write/final bundle反例。
+- [x] durable成功只消费原bundle、cleanup原scan/entity identity及background逐项取消；取消第二项保留前项及通知/提交后取消成功通过。
+- [x] stable/late link/FIFO、目录/same-name替换、000/700/600/nochmod、FD/idle lease/partial init未知成员和非root Linux native控制。
+- [x] fullGo/vet/frontend762/build、三用户真实HTTP/storage/Reader及三视口真实Chromium。
+- [x] 最终write分类版full/API103.532s+vet、exact race120+30控制/API70.957s、最终三用户HTTP及confirmed Reader三视口；prepared写入失败不误报读取token400。
+- [x] 最终b2源码完整API race870.086s终态、同SHA本地Docker新旧卷/portable/backup及可信Actions38040641233全门终态成功；不用中间bundle/dirty证据替代。
+- [x] 0a确切full race878.190s及本地候选新旧卷通过；发布前所有权复审得到两个实际token碰撞红灯，独立red7b47c8d推feature后才加三entry原缺失guard，旧文件不被新Create补偿/接收。新修复fullGo/vet、exact race、frontend762、真实HTTP及非root Linux service绿。
+- [x] 碰撞修复版Chromium三个视口确认后真实Reader正文、取消/单本/批量/逐本全部通过，无mock/横溢出/章节失败。
+- [x] 碰撞修复b2确切提交full race/同SHA卷门/可信双架构发布全部通过；exact/latest独立OCI index ed57cc69…一致，两实际平台config完整revision均b2。生产最后只读db1ea21healthy，未升级。
+- [ ] 完整parser/SQL/category/初始library归档所有权与ctx、跨进程exactly-once/扫描预算/设备和整体审计；不由本stage发布推导完成。
+
+合同 `compat/local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`。
+本项不称生产复现；stage/saveParsed的storage PathError映射已统一安全
+字符串，错误不得带host path/token/temp。保留旧用户数据/权限/format/重试和durable事件，不新增
+fetch/credentials日志或schema。完整parser/SQL原子取消与跨进程exactly-once仍unknown。

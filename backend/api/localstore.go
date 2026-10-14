@@ -28,6 +28,16 @@ type localStoreItem struct {
 	Importable   bool      `json:"importable"`
 }
 
+// Nonparallel tests cancel after authorized lazy-root initialization. This is
+// an observation seam only; it does not implement request-aware file reading.
+var beforeStoreReadTestHook func(action string)
+
+func runStoreReadTestHook(action string) {
+	if beforeStoreReadTestHook != nil {
+		beforeStoreReadTestHook(action)
+	}
+}
+
 func (s *Server) listLocalStore(c *gin.Context) {
 	if !s.requireLocalStoreAccess(c) {
 		return
@@ -41,18 +51,18 @@ func (s *Server) listLocalStore(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resource, err := service.Stat(relativePath)
+	runStoreReadTestHook("local-list")
+	reader, err := service.AdmitRead(c.Request.Context(), relativePath)
 	if errors.Is(err, webdavfs.ErrNotFound) && relativePath != "" {
-		if err := service.Mkdir(relativePath); err != nil {
-			writeLocalStoreFilesystemError(c, err, "failed to create local store")
-			return
-		}
-		resource, err = service.Stat(relativePath)
+		c.JSON(http.StatusNotFound, gin.H{"error": "local store path not found"})
+		return
 	}
 	if err != nil {
 		writeLocalStoreFilesystemError(c, err, "failed to read local store")
 		return
 	}
+	defer reader.Close()
+	resource := reader.Resource
 	if !resource.Info.IsDir() {
 		if !resource.Info.Mode().IsRegular() {
 			writeLocalStoreFilesystemError(c, webdavfs.ErrUnsafePath, "failed to read local store")
@@ -61,72 +71,15 @@ func (s *Server) listLocalStore(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read local store"})
 		return
 	}
-	targetDir, _, err := service.Resolve(relativePath)
+	recursive := c.Query("recursive") == "1" || strings.EqualFold(c.Query("recursive"), "true")
+	resources, err := reader.ListLocal(recursive)
 	if err != nil {
 		writeLocalStoreFilesystemError(c, err, "failed to read local store")
 		return
 	}
-	recursive := c.Query("recursive") == "1" || strings.EqualFold(c.Query("recursive"), "true")
-
 	items := make([]localStoreItem, 0)
-	if recursive {
-		err := filepath.WalkDir(targetDir, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if path == targetDir {
-				return nil
-			}
-			if entry.Type()&os.ModeSymlink != 0 {
-				return nil
-			}
-			if strings.HasPrefix(entry.Name(), ".") {
-				if entry.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			info, err := entry.Info()
-			if err != nil {
-				return nil
-			}
-			if !entry.IsDir() && !info.Mode().IsRegular() {
-				return nil
-			}
-			rel, err := filepath.Rel(targetDir, path)
-			if err != nil {
-				return nil
-			}
-			items = append(items, makeLocalStoreItem(entry.Name(), cleanRelativePath(filepath.Join(relativePath, rel)), info, entry.IsDir()))
-			return nil
-		})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read local store"})
-			return
-		}
-	} else {
-		entries, err := os.ReadDir(targetDir)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read local store"})
-			return
-		}
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), ".") {
-				continue
-			}
-			if entry.Type()&os.ModeSymlink != 0 {
-				continue
-			}
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-			if !entry.IsDir() && !info.Mode().IsRegular() {
-				continue
-			}
-			itemPath := cleanRelativePath(filepath.Join(relativePath, entry.Name()))
-			items = append(items, makeLocalStoreItem(entry.Name(), itemPath, info, entry.IsDir()))
-		}
+	for _, resource := range resources[1:] {
+		items = append(items, makeLocalStoreItem(resource.Info.Name(), resource.RelativePath, resource.Info, resource.Info.IsDir()))
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].IsDir != items[j].IsDir {
@@ -135,6 +88,10 @@ func (s *Server) listLocalStore(c *gin.Context) {
 		return strings.ToLower(items[i].Path) < strings.ToLower(items[j].Path)
 	})
 
+	if err := reader.Validate(); err != nil {
+		writeLocalStoreFilesystemError(c, err, "failed to read local store")
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"path":      relativePath,
 		"recursive": recursive,
@@ -174,7 +131,7 @@ func (s *Server) uploadToLocalStore(c *gin.Context) {
 		return
 	}
 	if upload.path != "" {
-		if err := service.Mkdir(upload.path); err != nil {
+		if err := service.MkdirContext(c.Request.Context(), upload.path); err != nil {
 			writeLocalStoreFilesystemError(c, err, "failed to create directory")
 			return
 		}
@@ -251,7 +208,8 @@ func (s *Server) downloadFromLocalStore(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot download local store root"})
 		return
 	}
-	file, info, err := service.Open(relativePath)
+	runStoreReadTestHook("local-download")
+	file, info, err := service.OpenContext(c.Request.Context(), relativePath)
 	if errors.Is(err, webdavfs.ErrNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "local store item not found"})
 		return
@@ -268,7 +226,7 @@ func (s *Server) downloadFromLocalStore(c *gin.Context) {
 	if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": info.Name()}); disposition != "" {
 		c.Header("Content-Disposition", disposition)
 	}
-	http.ServeContent(c.Writer, c.Request, info.Name(), info.ModTime(), file)
+	serveOpenedStoreFile(c, file, info)
 }
 
 func (s *Server) createLocalStoreDirectory(c *gin.Context) {
@@ -300,7 +258,7 @@ func (s *Server) createLocalStoreDirectory(c *gin.Context) {
 		return
 	}
 	if parentPath != "" {
-		if err := service.Mkdir(parentPath); err != nil {
+		if err := service.MkdirContext(c.Request.Context(), parentPath); err != nil {
 			writeLocalStoreFilesystemError(c, err, "failed to create parent directory")
 			return
 		}
@@ -318,7 +276,7 @@ func (s *Server) createLocalStoreDirectory(c *gin.Context) {
 		writeLocalStoreFilesystemError(c, err, "failed to create directory")
 		return
 	}
-	if err := service.Mkdir(relativePath); err != nil {
+	if err := service.MkdirContext(c.Request.Context(), relativePath); err != nil {
 		if errors.Is(err, webdavfs.ErrConflict) {
 			c.JSON(http.StatusConflict, gin.H{"error": "failed to create directory"})
 		} else {
@@ -425,6 +383,7 @@ func (s *Server) importFromLocalStore(c *gin.Context) {
 	if !ok {
 		return
 	}
+	defer plan.Close()
 	categoryIDs := categoryIDsFromRequest(req.CategoryID, req.CategoryIDs)
 	if len(req.CategoryIDs) > 0 {
 		if !s.validateCategoryIDs(c, userID, categoryIDs) {
@@ -449,17 +408,17 @@ func (s *Server) importFromLocalStore(c *gin.Context) {
 
 	for _, target := range plan.targets {
 		if target.override.ImportToken != "" {
-			importRequest, err := s.stagedStorageImportRequest(userID, userName, target.override.ImportToken, target.override, primaryCategoryID)
+			book, err := s.importStagedStorageBook(c.Request.Context(), userID, userName, target.override.ImportToken, target.override, primaryCategoryID, importer)
 			if err != nil {
+				if writeLocalImportStageCancellation(c, err, "") {
+					if len(importedBooks) > 0 {
+						_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
+					}
+					return
+				}
 				imported = append(imported, gin.H{"path": target.relativePath, "error": err.Error()})
 				continue
 			}
-			book, err := s.importStagedLocalBook(userID, target.override.ImportToken, importer, importRequest)
-			if err != nil {
-				imported = append(imported, gin.H{"path": target.relativePath, "error": err.Error()})
-				continue
-			}
-			s.removeStagedLocalImport(userID, target.override.ImportToken)
 			if len(categoryIDs) > 0 {
 				_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
 			}
@@ -473,8 +432,14 @@ func (s *Server) importFromLocalStore(c *gin.Context) {
 			imported = append(imported, gin.H{"path": file.relativePath, "error": file.validationError})
 			continue
 		}
-		data, err := s.readBoundedLocalStoreImport(plan.service, file.relativePath)
+		data, err := s.readBoundedStorageImport(c.Request.Context(), plan.service, file, "local-file-read")
 		if err != nil {
+			if writeStorageImportLifecycleError(c, err) {
+				if len(importedBooks) > 0 {
+					_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
+				}
+				return
+			}
 			imported = append(imported, gin.H{"path": file.relativePath, "error": localStoreImportReadError(err)})
 			continue
 		}
@@ -518,11 +483,15 @@ func (s *Server) previewLocalStoreImport(c *gin.Context) {
 	if !ok {
 		return
 	}
+	defer plan.Close()
 	results := make([]gin.H, 0)
 	for _, target := range plan.targets {
 		if target.override.ImportToken != "" {
-			preview, importToken, err := s.reparseStagedStorageImport(userID, target.override.ImportToken, target.override)
+			preview, importToken, err := s.reparseStagedStorageImport(c.Request.Context(), userID, target.override.ImportToken, target.override)
 			if err != nil {
+				if writeLocalImportStageCancellation(c, err, "") {
+					return
+				}
 				results = append(results, gin.H{"path": target.relativePath, "error": err.Error(), "importToken": importToken})
 				continue
 			}
@@ -534,12 +503,16 @@ func (s *Server) previewLocalStoreImport(c *gin.Context) {
 			results = append(results, gin.H{"path": file.relativePath, "error": file.validationError})
 			continue
 		}
-		data, err := s.readBoundedLocalStoreImport(plan.service, file.relativePath)
+		data, err := s.readBoundedStorageImport(c.Request.Context(), plan.service, file, "local-file-read")
 		if err != nil {
+			if writeStorageImportLifecycleError(c, err) {
+				return
+			}
 			results = append(results, gin.H{"path": file.relativePath, "error": localStoreImportReadError(err)})
 			continue
 		}
 		preview, importToken, err := s.previewStagedStorageImportData(
+			c.Request.Context(),
 			userID,
 			filepath.Base(filepath.FromSlash(file.relativePath)),
 			file.extension,
@@ -547,6 +520,9 @@ func (s *Server) previewLocalStoreImport(c *gin.Context) {
 			target.override,
 		)
 		if err != nil {
+			if writeLocalImportStageCancellation(c, err, "") {
+				return
+			}
 			results = append(results, gin.H{"path": file.relativePath, "error": err.Error(), "importToken": importToken})
 			continue
 		}
@@ -556,6 +532,7 @@ func (s *Server) previewLocalStoreImport(c *gin.Context) {
 }
 
 type localStoreImportFile struct {
+	reader          *webdavfs.Reader
 	filePath        string
 	relativePath    string
 	extension       string

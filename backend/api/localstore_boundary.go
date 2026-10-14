@@ -1,10 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,7 +49,50 @@ type localStoreImportTarget struct {
 
 type localStoreImportPlan struct {
 	service *webdavfs.Service
+	scope   *webdavfs.ReadScope
 	targets []localStoreImportTarget
+}
+
+func (p *localStoreImportPlan) Close() {
+	for _, target := range p.targets {
+		if target.file.reader != nil {
+			_ = target.file.reader.Close()
+		}
+	}
+	if p.scope != nil {
+		_ = p.scope.Close()
+	}
+}
+
+// Nonparallel observation seam at actual source planning/read boundaries.
+// Nil in production; it adds no identity or cancellation checks.
+var storageImportSourceReadTestHook func(stage, root, relative string)
+
+type observedStorageImportReader struct {
+	io.Reader
+	ctx      context.Context
+	service  *webdavfs.Service
+	relative string
+}
+
+func (r observedStorageImportReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		runStorageImportSourceReadTestHook("source-read", r.service, r.relative)
+	}
+	if canceled := r.ctx.Err(); canceled != nil {
+		return 0, canceled
+	}
+	return n, err
+}
+
+func runStorageImportSourceReadTestHook(stage string, service *webdavfs.Service, relative string) {
+	if storageImportSourceReadTestHook != nil {
+		storageImportSourceReadTestHook(stage, service.Root(), relative)
+	}
 }
 
 func (s *Server) parseLocalStoreUpload(c *gin.Context) (*parsedLocalStoreUpload, error) {
@@ -195,7 +239,7 @@ func (s *Server) localStoreFileService(c *gin.Context) (*webdavfs.Service, bool)
 		writeLocalStoreFilesystemError(c, err, "failed to access local store")
 		return nil, false
 	}
-	if err := service.EnsureRoot(); err != nil {
+	if err := service.EnsureRootContext(c.Request.Context()); err != nil {
 		writeLocalStoreFilesystemError(c, err, "failed to create local store")
 		return nil, false
 	}
@@ -278,6 +322,12 @@ func (s *Server) prepareLocalStoreImport(c *gin.Context, request localBookImport
 	}
 
 	plan := localStoreImportPlan{targets: make([]localStoreImportTarget, 0, len(normalizedPaths))}
+	complete := false
+	defer func() {
+		if !complete {
+			plan.Close()
+		}
+	}()
 	seen := make(map[string]bool)
 	for _, relativePath := range normalizedPaths {
 		requestedOverride := overrides[relativePath]
@@ -300,7 +350,7 @@ func (s *Server) prepareLocalStoreImport(c *gin.Context, request localBookImport
 			}
 			plan.service = service
 		}
-		files, err := s.localStoreImportFilesWithService(plan.service, relativePath)
+		files, err := plan.collectImportFiles(c.Request.Context(), relativePath, seen)
 		if err != nil {
 			writeLocalStoreImportPlanError(c, err)
 			return localStoreImportPlan{}, false
@@ -323,69 +373,80 @@ func (s *Server) prepareLocalStoreImport(c *gin.Context, request localBookImport
 			}
 		}
 	}
+	complete = true
 	return plan, true
 }
 
+// Metadata-only compatibility helper. Live handlers retain the owned readers
+// through collectImportFiles instead of reopening these paths after planning.
 func (s *Server) localStoreImportFilesWithService(service *webdavfs.Service, relativePath string) ([]localStoreImportFile, error) {
-	resource, err := service.Stat(relativePath)
+	plan := localStoreImportPlan{service: service}
+	defer plan.Close()
+	files, err := plan.collectImportFiles(context.Background(), relativePath, nil)
+	for i := range files {
+		_ = files[i].reader.Close()
+		files[i].reader = nil
+	}
+	return files, err
+}
+
+func (plan *localStoreImportPlan) collectImportFiles(ctx context.Context, relativePath string, seen map[string]bool) ([]localStoreImportFile, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if plan.scope == nil {
+		scope, err := plan.service.AdmitReadScope(ctx)
+		if errors.Is(err, webdavfs.ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		plan.scope = scope
+		runStorageImportSourceReadTestHook("source-admission", plan.service, relativePath)
+	}
+	reader, err := plan.scope.Admit(relativePath)
 	if errors.Is(err, webdavfs.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	resource := reader.Resource
 	if !resource.Info.IsDir() {
-		extension := strings.ToLower(filepath.Ext(resource.RelativePath))
-		file := localStoreImportFile{relativePath: resource.RelativePath, extension: extension}
-		if !resource.Info.Mode().IsRegular() {
-			return nil, webdavfs.ErrUnsafePath
+		if seen[resource.RelativePath] {
+			_ = reader.Close()
+			return nil, nil
 		}
+		extension := strings.ToLower(filepath.Ext(resource.RelativePath))
+		file := localStoreImportFile{relativePath: resource.RelativePath, extension: extension, reader: reader}
 		if !isImportableExtension(extension) {
 			file.validationError = "unsupported file type"
 		}
 		return []localStoreImportFile{file}, nil
 	}
 
-	directoryPath, _, err := service.Resolve(relativePath)
-	if err != nil {
-		return nil, err
-	}
+	defer reader.Close()
 	files := make([]localStoreImportFile, 0)
-	err = filepath.WalkDir(directoryPath, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == directoryPath || entry.IsDir() {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		extension := strings.ToLower(filepath.Ext(entry.Name()))
-		if !isImportableExtension(extension) {
-			return nil
-		}
-		relative, err := filepath.Rel(service.Root(), path)
-		if err != nil {
-			return err
-		}
-		files = append(files, localStoreImportFile{
-			relativePath: filepath.ToSlash(relative),
-			extension:    extension,
-		})
-		if len(files) > maxLocalStoreImportItems {
+	err = reader.WalkFiles(func(resource webdavfs.Resource) bool {
+		return !seen[resource.RelativePath] && isImportableExtension(strings.ToLower(filepath.Ext(resource.RelativePath)))
+	}, func(child *webdavfs.Reader) error {
+		if len(plan.targets)+len(files) >= maxLocalStoreImportItems {
 			return errLocalStoreImportTooMany
 		}
+		files = append(files, localStoreImportFile{
+			relativePath: child.Resource.RelativePath,
+			extension:    strings.ToLower(filepath.Ext(child.Resource.RelativePath)),
+			reader:       child,
+		})
 		return nil
+	}, func(relative string) {
+		runStorageImportSourceReadTestHook("directory-scan", plan.service, relative)
 	})
 	if err != nil {
+		for _, file := range files {
+			_ = file.reader.Close()
+		}
 		return nil, err
 	}
 	sort.SliceStable(files, func(i, j int) bool {
@@ -394,19 +455,50 @@ func (s *Server) localStoreImportFilesWithService(service *webdavfs.Service, rel
 	return files, nil
 }
 
-func (s *Server) readBoundedLocalStoreImport(service *webdavfs.Service, relativePath string) ([]byte, error) {
-	if service == nil {
+func (s *Server) readBoundedStorageImport(ctx context.Context, service *webdavfs.Service, source localStoreImportFile, stage string) ([]byte, error) {
+	if service == nil || source.reader == nil {
 		return nil, errLocalStoreImportRead
 	}
-	file, _, err := service.Open(relativePath)
+	defer source.reader.Close()
+	runStorageImportSourceReadTestHook(stage, service, source.relativePath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	file, _, err := source.reader.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	return s.readBoundedLocalImport(file)
+	data, err := s.readBoundedLocalImport(observedStorageImportReader{Reader: file, ctx: ctx, service: service, relative: source.relativePath})
+	if err != nil {
+		return nil, err
+	}
+	runStorageImportSourceReadTestHook("source-handoff", service, source.relativePath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := source.reader.ValidateAncestors(); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func writeStorageImportLifecycleError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "import source read canceled"})
+	case errors.Is(err, webdavfs.ErrUnsafePath), errors.Is(err, webdavfs.ErrNotDirectory):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+	default:
+		return false
+	}
+	return true
 }
 
 func writeLocalStoreImportPlanError(c *gin.Context, err error) {
+	if writeStorageImportLifecycleError(c, err) {
+		return
+	}
 	if errors.Is(err, errLocalStoreImportTooMany) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "too many paths"})
 		return

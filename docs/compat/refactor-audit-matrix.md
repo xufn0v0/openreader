@@ -40,7 +40,7 @@ Basic/curl 通过。历史硬链接 source 与旧 target 共享 inode 的自有 
 MOVE 的同类路径与取消缺口单独保留未完成，不从 PUT/DELETE/COPY 的验证推导它通过。
 
 MOVE 下一切片合同已从固定 `WebdavController.kt` 394–428 提取，状态
-**implemented / regression-validated / Docker-publication-pending**，见
+**implemented / regression-validated / Docker-published / awaiting-device-verification**，见
 [`webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-move-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
 同时纳入共享 LocalStore rename / 章节缓存 stage-backup-publish-restore；取消、identity、no-replace
 恢复与 owned cleanup 不可仅覆盖外部 DAV handler。红测 `9b6a5f6` 已证明授权后取消仍返回 201
@@ -49,9 +49,87 @@ MOVE 下一切片合同已从固定 `WebdavController.kt` 394–428 提取，状
 request context 和 owned cleanup；内部 background Move 保持缓存补偿，LocalStore 已提交 pending
 保持 200 原 JSON。Go/full/race/vet、frontend 762/762/build、Compose、Linux 双架构编译、非 root
 Linux权限/硬链接/双tmpfs EXDEV、真实 Basic/curl 与 LocalStore HTTP、三视口真实 Reader 相邻
-回归通过。Docker 候选仍待可信卷/备份/平台门，原书恢复与整体未完成状态分别保持。
+回归通过。实现 `5338f26` 的可信 Actions `37192132525` 全部门成功；exact tag 与 latest 已确认
+同一 amd64/arm64 OCI index `sha256:28a0b797a289f8cf2cd54b0054471fe3b0ce3a197c2c4bc41a1bd7c9f2430a94`。
+生产 health 仍为 `db1ea21`，原书恢复与整体未完成状态分别保持。
+
+下一项 directory-creation lifecycle 已按合同/红测实施，状态 **implemented / regression-validated / Docker-published / awaiting-device-verification**，
+见 [`webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-directory-creation-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+MKCOL / EnsureRoot / LocalStore parent 的绝对 MkdirAll 与无 request context 是生命周期 must-fix；
+LocalStore missing-child list 自动创建并200与固定上游读取报错偏离，需404且不创建。保留根惰性
+初始化、递归父层、旧权限/私有布局和所有正常协议，不增加上游没有的可见控件。合同 `d06f954`
+后18项旧实现红测已确定性复现取消后创建和missing list写盘；正常fresh/递归/幂等控制组不失败。
+现已实施original configured anchor/parent与no-replace mkdir、owned-empty-only回收和request context；
+missing list404无子目录写入。18红灯转绿，实际identity/取消fixture fired，重复并发/权限/非rootLinux、
+相邻API race、frontend762/build和真实Basic+LocalStoreHTTP通过。最终Go full/vet/race、最新Linux
+二进制与fresh隔离Go/SQLite协议复验均exit0；本项Actions `37740704252` 已终态success，所有新旧卷/
+portable/backup/platform门通过，exact `08de4de` 和 `latest` 为同一双架构index
+`sha256:7ab7cb27c3f1a114e0987f6f4c7b1100a3ebda2f228b73cc3e1ee144b046a08c`，不从 MOVE 发布推导完成，
+不把旧实现未注入的identity race说成已复现。
+
+下一项 read/list lifecycle 已从固定上游与 `08de4de` 源码盘点，状态
+**implemented / regression-validated / Docker-published / awaiting-device-verification**，见
+[`webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](webdav-read-list-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+两前缀 GET/PROPFIND 与 LocalStore list/download 在路径检查后仍绝对读取，未绑定整个 caller
+boundary/ancestor identity，也未把 root初始化后的 request cancellation带入读取与扫描。
+合同 `3ecf48a` 提交推送后，30项红测确认Stat接收替换namespace、List诱饵名、late同inode
+symlink被接受、FIFO阻塞及授权后取消仍返回成功数据；fixture均实际触发，原文件/诱饵保留。
+现已实施全boundary/ancestor绑定、native fd-root metadata、NOFOLLOW/NONBLOCK、fd-relative扫描
+及request context；30红灯转绿。完整File.Name标签回退另补合同/红测后修复，未削弱Reader身份验证。
+最终Go full/vet/service和相邻API race、frontend762/build、Compose、Linux双架构编译/非root全包、
+三账户临时卷真实HTTP以及真实Go/SQLite/Chromium Reader三视口通过；独立可信运行37747103667
+全部新旧卷/portable/backup/platform门success，exact11235c3/latest为同一index
+sha256:c3aa7a6c1ecc897de83a145d58e86a48084219249dcdd1161ac9c42f663dafa3，生产仍db1ea21。
+保留正常 XML/JSON、Depth、recursive/hidden 策略差异、
+下载 Range/conditional 和历史私有根；不把 import展开、共享内部caller或目录创建发布算作本项完成。
+目录创建实现 `08de4de` 已推送并发布，可信运行 `37740704252` 已终态success；生产仍db1ea21。
+
+下一项 storage-import source read 已按合同/红测实施，状态
+**implemented / regression-validated / Docker-published / awaiting-device-verification**，见
+[`storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md`](storage-import-source-read-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+目录展开仍绝对WalkDir/entry.Info，plan→byte read是不同background admission，无requestctx；
+合同772fae2推送后36项红灯实际触发：20目录planner接收替换（18诱饵名/2空计划）、12授权后
+cancel仍stage或写Book/Chapter/BookCategory、4同名regular替换实际stage/library接受诱饵字节。
+追加深层/读取中8红灯提交6b32778后才实施；同一caller原opened scope、逐层fd扫描、实际Read/
+handoff ctx与owned shared-fd Close让44项原红灯转绿，不称生产漏洞。深层替换、late link/FIFO
+有界join、合法opened rename、200/201资源释放、双用户/管理员真实HTTP、原token和Reader内容
+均通过。前项已提交后项取消的通知又先补两红灯再修正，仅通知已成功书，不宣称整批rollback。
+最终Go/full/race/vet、frontend762/build/Compose、Linux双架构编译/arm64非root全服务和实际
+Chromium三视口通过；候选5cfc53d可信运行37754329331终态success，fresh/historical/portable/
+backup/platform全部通过；exact/latest OCI独立核验为
+sha256:ba5456fe6aeac3ba3145b7bb9b58c75e00fa07de500e5536246fc08f081bf4cd，生产仍db1ea21。
+保留token-only不访问mounted根、200项、missing/empty、hidden和
+stable link/special目录策略；不把普通read/list或SQL/stage全生命周期算作本项完成。
 
 基准：`changshengyu/reader-dev@fa22f271849d45f93349ae1636223e27b16a4691`。
+
+## 2026-10-10 本地 import stage 文件系统生命周期（已发布，待设备验收）
+
+**aligned / regression-validated / Docker-published / awaiting-device-verification**，见
+[`local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-import-stage-filesystem-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+stage create/load、prepared publication/read、成功consume、startup/hourly TTL清理分别走绝对路径，
+metadata无界、context未贯穿、cleanup按name且prepared cache miss吞掉身份变化。合同4104499先
+推送后，90项旧应用实际红灯确认替换/取消/FIFO/误删/预算缺口（API5.805s），不称生产漏洞。
+无未触发fixture/未join；正常historical/TTL/GB18030/同token重试控制通过。目标覆盖三入口七route与cleanup完整stage session，不缩成单个symlink检查；保持
+24h/48hex/旧两三文件、失败token重试、match无重parse、普通cache miss、durable成功通知及旧错误。
+允许native/bounded/ctx/owned cleanup安全适配；不迁移用户数据，不签收完整parser/SQL事务或跨进程
+exactly-once。追加red3572f02之后，120反例全绿；shared importstage/PrivateScope覆盖同一session
+create/load/prepared/handoff/consume/TTL，23控制及metadata-write最终bundle反例补验通过。
+fullGo/vet/frontend762/build/三用户真实HTTP/三视口Chromium/非root Linux native控制通过；
+最后分类版full/API103.532s、exact race70.957s及confirmed Reader三视口通过；中间bundle full
+API race25m预算下886.942s终态通过，最终分类版full race尚需完整run，不能冒充当前全部绿。候选Docker/
+fresh/historical/portable/backup/OCI仍待办；5cfc53d旧发布不替代本项，生产health仍db1ea21。
+补记：0a40298确切完整race878.190s、本地Go1.24候选及新旧卷/portable/backup门已通过（首轮
+historical404未复现且原因unknown，保留失败记录）。发布前exclusive/owned复审又得两个实际
+随机token碰撞红灯：旧metadata被补偿误删、旧parsed被新stage接收；book碰撞绿色控制保持。
+独立red7b47c8d已远端核验后才加原三文件absence guard，两个反例转绿且book控制保持；fullGo
+API100.565s/vet、exact race72.899s、frontend762/build/Compose、三账号HTTP、非root Linux service
+及三视口confirmed Reader通过。最终b2完整race/API870.086s及同SHA本地新旧卷/portable/backup
+全部终态通过后，main才快进b2；可信Actions38040641233全门终态success，发布b2b32f7/latest。
+两标签独立Registry核验同一OCI index
+`sha256:ed57cc69e10e2bfcc90f401fee578f13c2df513faee97123886416ebbf92f4dc`，实际amd64/arm64
+config完整revision均b2b32f7。以上待办段为历史阶段，最终证据见合同第12节；生产最后只读仍
+db1ea21healthy，未升级，不重开已恢复原书事件。完整parser/SQL/category/初始归档/扫描预算仍unknown。
 
 上游工作副本：`/private/tmp/reader-dev-upstream-audit`。本矩阵创建于
 2026-07-13，用来替代“当前实现/既有测试通过即可视为重构完成”的判断方式。

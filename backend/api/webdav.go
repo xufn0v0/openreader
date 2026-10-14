@@ -82,7 +82,7 @@ func (s *Server) webDAVFileService(c *gin.Context) (*webdavfs.Service, bool) {
 		writeWebDAVServiceError(c, err)
 		return nil, false
 	}
-	if err := service.EnsureRoot(); err != nil {
+	if err := service.EnsureRootContext(c.Request.Context()); err != nil {
 		writeWebDAVServiceError(c, err)
 		return nil, false
 	}
@@ -99,33 +99,45 @@ func (s *Server) webdavGetOrList(c *gin.Context) {
 	if !ok {
 		return
 	}
-	resource, err := service.Stat(relPath)
+	reader, err := service.AdmitRead(c.Request.Context(), relPath)
 	if err != nil {
 		writeWebDAVServiceError(c, err)
 		return
 	}
-	if resource.Info.IsDir() {
+	defer reader.Close()
+	if reader.Resource.Info.IsDir() {
 		if isUpstreamWebDAVRequest(c) {
+			if err := reader.Validate(); err != nil {
+				writeWebDAVServiceError(c, err)
+				return
+			}
 			c.Status(http.StatusMethodNotAllowed)
 			return
 		}
-		s.webdavList(c, relPath)
+		runStoreReadTestHook("dav-list")
+		resources, err := reader.List(1)
+		if err != nil {
+			writeWebDAVServiceError(c, err)
+			return
+		}
+		if err := reader.Validate(); err != nil {
+			writeWebDAVServiceError(c, err)
+			return
+		}
+		writeWebDAVDirectoryList(c, resources)
 		return
 	}
-	s.webdavGet(c)
-}
-
-func (s *Server) webdavList(c *gin.Context, relPath string) {
-	service, ok := s.webDAVFileService(c)
-	if !ok {
-		return
-	}
-	resources, err := service.List(relPath, 1)
+	runStoreReadTestHook("dav-get")
+	file, info, err := reader.Open()
 	if err != nil {
 		writeWebDAVServiceError(c, err)
 		return
 	}
+	defer file.Close()
+	serveOpenedStoreFile(c, file, info)
+}
 
+func writeWebDAVDirectoryList(c *gin.Context, resources []webdavfs.Resource) {
 	type fileEntry struct {
 		Name         string `xml:"displayname"`
 		IsDir        bool   `xml:"iscollection"`
@@ -154,21 +166,6 @@ func (s *Server) webdavList(c *gin.Context, relPath string) {
 	}
 
 	c.XML(http.StatusMultiStatus, response)
-}
-
-func (s *Server) webdavGet(c *gin.Context) {
-	relPath := strings.TrimPrefix(c.Param("path"), "/")
-	service, ok := s.webDAVFileService(c)
-	if !ok {
-		return
-	}
-	file, info, err := service.Open(relPath)
-	if err != nil {
-		writeWebDAVServiceError(c, err)
-		return
-	}
-	defer file.Close()
-	http.ServeContent(c.Writer, c.Request, info.Name(), info.ModTime(), file)
 }
 
 func (s *Server) webdavPut(c *gin.Context) {
@@ -209,7 +206,7 @@ func (s *Server) webdavMkcol(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := service.Mkdir(strings.TrimPrefix(c.Param("path"), "/")); err != nil {
+	if err := service.MkdirContext(c.Request.Context(), strings.TrimPrefix(c.Param("path"), "/")); err != nil {
 		writeWebDAVServiceError(c, err)
 		return
 	}
@@ -336,11 +333,12 @@ func (s *Server) webdavPropfind(c *gin.Context) {
 	if !ok {
 		return
 	}
+	runStoreReadTestHook("dav-propfind")
 	depth := 1
 	if strings.TrimSpace(c.GetHeader("Depth")) == "0" {
 		depth = 0
 	}
-	resources, err := service.List(strings.TrimPrefix(c.Param("path"), "/"), depth)
+	resources, err := service.ListContext(c.Request.Context(), strings.TrimPrefix(c.Param("path"), "/"), depth)
 	if err != nil {
 		writeWebDAVServiceError(c, err)
 		return
@@ -369,6 +367,9 @@ func (s *Server) webdavPropfind(c *gin.Context) {
 				Prop:   property,
 			},
 		})
+	}
+	if c.Request.Context().Err() != nil {
+		return
 	}
 	c.Header("Content-Type", "application/xml; charset=utf-8")
 	c.Status(http.StatusMultiStatus)
@@ -646,6 +647,7 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 	if !ok {
 		return
 	}
+	defer plan.Close()
 	categoryIDs := categoryIDsFromRequest(req.CategoryID, req.CategoryIDs)
 	if len(req.CategoryIDs) > 0 {
 		if !s.validateCategoryIDs(c, userID, categoryIDs) {
@@ -670,17 +672,17 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 
 	for _, target := range plan.targets {
 		if target.override.ImportToken != "" {
-			importRequest, err := s.stagedStorageImportRequest(userID, userName, target.override.ImportToken, target.override, primaryCategoryID)
+			book, err := s.importStagedStorageBook(c.Request.Context(), userID, userName, target.override.ImportToken, target.override, primaryCategoryID, importer)
 			if err != nil {
+				if writeLocalImportStageCancellation(c, err, "") {
+					if len(importedBooks) > 0 {
+						_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
+					}
+					return
+				}
 				imported = append(imported, gin.H{"path": target.relativePath, "error": err.Error()})
 				continue
 			}
-			book, err := s.importStagedLocalBook(userID, target.override.ImportToken, importer, importRequest)
-			if err != nil {
-				imported = append(imported, gin.H{"path": target.relativePath, "error": err.Error()})
-				continue
-			}
-			s.removeStagedLocalImport(userID, target.override.ImportToken)
 			if len(categoryIDs) > 0 {
 				_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
 			}
@@ -694,8 +696,14 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 			imported = append(imported, gin.H{"path": file.relativePath, "error": file.validationError})
 			continue
 		}
-		data, err := s.readBoundedWebDAVImport(plan.service, file.relativePath)
+		data, err := s.readBoundedStorageImport(c.Request.Context(), plan.service, file, "webdav-file-read")
 		if err != nil {
+			if writeStorageImportLifecycleError(c, err) {
+				if len(importedBooks) > 0 {
+					_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
+				}
+				return
+			}
 			imported = append(imported, gin.H{"path": file.relativePath, "error": webDAVImportReadError(err)})
 			continue
 		}
@@ -741,11 +749,15 @@ func (s *Server) previewWebDAVImport(c *gin.Context) {
 	if !ok {
 		return
 	}
+	defer plan.Close()
 	results := make([]gin.H, 0)
 	for _, target := range plan.targets {
 		if target.override.ImportToken != "" {
-			preview, importToken, err := s.reparseStagedStorageImport(userID, target.override.ImportToken, target.override)
+			preview, importToken, err := s.reparseStagedStorageImport(c.Request.Context(), userID, target.override.ImportToken, target.override)
 			if err != nil {
+				if writeLocalImportStageCancellation(c, err, "") {
+					return
+				}
 				results = append(results, gin.H{"path": target.relativePath, "error": err.Error(), "importToken": importToken})
 				continue
 			}
@@ -757,12 +769,16 @@ func (s *Server) previewWebDAVImport(c *gin.Context) {
 			results = append(results, gin.H{"path": file.relativePath, "error": file.validationError})
 			continue
 		}
-		data, err := s.readBoundedWebDAVImport(plan.service, file.relativePath)
+		data, err := s.readBoundedStorageImport(c.Request.Context(), plan.service, file, "webdav-file-read")
 		if err != nil {
+			if writeStorageImportLifecycleError(c, err) {
+				return
+			}
 			results = append(results, gin.H{"path": file.relativePath, "error": webDAVImportReadError(err)})
 			continue
 		}
 		preview, importToken, err := s.previewStagedStorageImportData(
+			c.Request.Context(),
 			userID,
 			webDAVImportFileName(file.relativePath),
 			file.extension,
@@ -770,6 +786,9 @@ func (s *Server) previewWebDAVImport(c *gin.Context) {
 			target.override,
 		)
 		if err != nil {
+			if writeLocalImportStageCancellation(c, err, "") {
+				return
+			}
 			results = append(results, gin.H{"path": file.relativePath, "error": err.Error(), "importToken": importToken})
 			continue
 		}
