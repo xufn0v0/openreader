@@ -4,7 +4,7 @@
 
 A self-hosted ebook reader with multi-device sync, online book sources, local book import, WebDAV, RSS, and a reader experience aligned with reader-dev.
 
-![Go 1.24+](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)
+![Go 1.26.9+](https://img.shields.io/badge/Go-1.26.9+-00ADD8?logo=go)
 ![Vue 3.5](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js)
 ![SQLite WAL](https://img.shields.io/badge/SQLite-WAL-brightgreen)
 ![Status: WIP](https://img.shields.io/badge/status-WIP-F59E0B)
@@ -229,6 +229,8 @@ OpenReader does not read the container's `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PR
 
 ### Local Development
 
+Source builds require Go 1.26.9 or newer. Docker users do not need to install Go or compile the image locally.
+
 ```bash
 git clone https://github.com/changshengyu/openreader.git
 cd openreader
@@ -288,7 +290,7 @@ Use `TAG`, `IMAGE`, `PUSH`, and `PLATFORMS` when you need to change the tag, ima
 
 | Layer | Technology |
 |---|---|
-| Backend | Go 1.24, Gin, GORM, SQLite WAL |
+| Backend | Go 1.26.9+, Gin, GORM, SQLite WAL |
 | Frontend | Vue 3.5, Vite, Pinia, Vue Router, Element Plus |
 | Realtime | Gorilla WebSocket |
 | Parsing | goquery, reader-dev/Legado compatibility adapters, local format parsers |

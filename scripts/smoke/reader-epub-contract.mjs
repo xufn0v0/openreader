@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { openSmokeBrowser } from './playwright-runtime.mjs'
+import { readShellDocumentTitle, waitForDocumentTitle } from './document-title.mjs'
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -17,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const baseURL = process.env.TARGET_URL || 'http://127.0.0.1:8080'
+const shellTitle = readShellDocumentTitle()
 const outputDir = process.env.SMOKE_OUTPUT_DIR || tmpdir()
 
 function expectedBookmarkDialogWidth(viewport) {
@@ -707,10 +709,48 @@ async function assertFrameContract(page, viewport, resourceResponses) {
     await page.mouse.click(Math.round(viewport.width / 2), Math.round(viewport.height / 2))
     await page.waitForTimeout(150)
   }
-  await page.waitForFunction(() => document.body.textContent.includes('3 / 3'))
+  await page.waitForFunction(() => (
+    document.querySelector('.reader-running-chapter-title')?.textContent?.trim() === '第 3 章 第二章'
+  ))
+  await waitForDocumentTitle(page, 'EPUB 浏览器契约 - 第二章', `${viewport.width}: EPUB cross-document link must update the tab title`)
+  assert.equal(
+    await page.locator('.reader-page-head .reader-running-chapter-title').isVisible(),
+    true,
+    'running header must visibly show the current EPUB chapter',
+  )
+  if (viewport.width <= 750) {
+    assert.match(
+      await page.locator('.reader-mobile-bottom.visible .mobile-progress-slider-row > span').innerText(),
+      /^第 \d+\/\d+ 页$/,
+      'mobile tool layer must show upstream in-chapter page progress',
+    )
+  } else {
+    const desktopProgress = page.locator('.reader-page-control .progress-box')
+    assert.equal(
+      await desktopProgress.isVisible(),
+      true,
+      'fixed upstream desktop right rail must keep the book progress entry',
+    )
+    assert.match(
+      (await desktopProgress.innerText()).trim(),
+      /^\d+%$/,
+      'fixed upstream desktop right rail shows book progress as N%',
+    )
+  }
+  assert.equal(
+    await page.locator('.reader-page-head').evaluate(element => element.textContent.trim()),
+    '第 3 章 第二章',
+    'running header shows only the current chapter title',
+  )
+  assert.equal(
+    await page.evaluate(() => document.body.textContent.includes('3 / 3')),
+    false,
+    'fixed upstream reader has no chapter N / M counter, visible or hidden',
+  )
 
   await page.goBack({ waitUntil: 'domcontentloaded' })
   assert.equal(new URL(page.url()).pathname, '/', 'EPUB cross-chapter navigation must not consume browser back history')
+  assert.equal(await page.evaluate(() => document.title), shellTitle, `${viewport.width}: leaving the Reader must restore the shell tab title`)
   assert.equal(await page.locator('iframe.epub-iframe').count(), 0, 'browser back must return to the bookshelf instead of the previous EPUB chapter')
 }
 

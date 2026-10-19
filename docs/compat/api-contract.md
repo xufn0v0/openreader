@@ -2,6 +2,114 @@
 
 Status: working contract. Keep this file updated when endpoint semantics change.
 
+## 2026-10-16 SQLite WAL/OS-C supplement (contract-only, API unchanged)
+
+Focused SQLite/WAL/OS-C contract extracts pinnedfa22 logical ZIP/namespace recovery and inventories
+actual C/runtime conditions. No rawSQL or arbitraryDB upload API is added. Existing bound-value REST/
+auth/status/errors, settings/progress/group UPSERT, Reader URLs and JSON/portable backup remain.
+Future necessary dependency maintenance requires bounded red/normal controls before implementation;
+neither library SQL examples nor package version gaps prove a current API exploit. No production action.
+
+Update (branch only, unreleased): build commit 7a1bf82 applies driver v1.14.36/SQLite 3.51.3. No route,
+auth, request/response, status or error format changes; bound-value SQL, cancellation and connection reuse
+are held by owned controls. See focused contract section 10.
+
+## 2026-10-16 frontend dependency advisory supplement (published, API unchanged)
+
+See focused frontend dependency advisory contract. Preserve two actual Axios.create instances, /api vs
+root URL semantics,12000ms defaults, own Authorization and matching-token401 invalidation; normal
+response/error/cancel/timeout/nativeFormData/import bodies and numeric Reader resume URLs unchanged.
+Pinned upstream request/loginAuth reinitialization is re-extracted; existing REST/JWT adaptations remain,
+not replaced by upstream accessToken-query/300second/isSuccess framing. Tests precede dependencies/gate.
+Conditional library fixtures are not public API exploit proof. No implementation/production change yet.
+
+After independent7ff39d9, actual app-client HTTP controls pass both API/root URL, own Basic/Bearer,
+JSON/nativeFormData, current-vs-late token401/login exclusions, cancel and timeout on ownedloopback.
+Thirteen library-only red leaves are separate; no application API/body/error/session changes yet.
+
+Superseding delivery: focused section8 records publishedfc4692c/Actions38868093878SUCCESS and exact
+two-platform OCI/config/binary/frontend-byte checks. Complete788tests/build/109gatecontracts, owned
+actualclient HTTP plus wholepublishedarm64 UIlogin/nativebrowsermultipart/Reader threeviewports and
+realHTTPsession revoke controls pass. Reauthfourviewport mock-layer contract separately passes.
+No API/auth/status/body/error/timeout/cancel/session/oldURL change or production operation; OS/C,
+parser/device/full audit remain open. The earlier no-implementation paragraphs are historical checkpoints.
+
+## 2026-10-16 runtime foundation delivery (API unchanged)
+
+Implementation b2632a4 passed trustedActions38841543709 and published bothLinux architectures; focused
+runtime contract section12 records exactOCI/config/binary evidence. Fullrace, source-builtHTTP, candidate
+volumes and threeviewport Reader controls passed. Existing auth/status/error, numericresumeURLs, imports
+and caller isolation remain unchanged; no token/session migration or forced reauthentication. Frontend/
+OS-C/wideradvisory/device acceptance remain open; production anotherMac was not operated or reverified.
+
+## 2026-10-15 runtime/dependency advisory inventory (no API change)
+
+See [`runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md`](runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md).
+JWT parser and XPath evaluation have actual application call paths to affected dependency symbols;
+behavioral reds must precede any implementation. Auth statuses/errors, HS256/claims/session/legacy token
+semantics, rule fields/normal outputs, routes and caller isolation remain unchanged. No forced logout,
+new token schema or production probe is authorized. Source-host scans and stripped candidate module
+matches are not production exploit or complete audit proof; frontend Node/SSR/Windows conditions are distinct.
+
+Independent93fd5fd preceded3actual behavior-red leaves/11green controls, stable across3 ordinary runs
+and focusedrace. Malformed JWT still yields its original invalid-session result but amplifies allocation;
+normal HS256/algorithm rejection/default-key compatibility and ordinary XPath outputs remain green.
+No API/dependency/production change yet; see focused section7, recovered and verified2026-10-16.
+
+After independent8fb3970 red verification, jwt5.2.2/xpath1.3.6 now make3behavior reds green without
+auth/parser/API business-code changes. All11controls, fullGo/API116.144s, engine/authsession package race,
+vet and frontend762/build pass. This is a local core checkpoint only; other dependencies, runtime/base,
+candidate HTTP/browser/volumes/audits/publication remain open. No production upgrade or new schema.
+
+Foundation supplemental tests, after bccaac3: actual document parsing fails to terminate on tiny malformed
+HTML; dependency-level NFC/NFKC iteration makes no progress. Three new red leaves/five controls repeat
+under race; old JWT/XPath14 cases stay green. Norm is not a proven exposed API path. No route/error/auth/
+dependency/base change yet; implementation and candidate gates remain pending (focused section9).
+
+After verifiedd3cc2d1, minimumGo1.26.9 and necessary net/crypto/sys/text foundation are implemented,
+without handler/auth/parser business changes.22focused cases/fullGo/API126.002s/vet/frontend762/build
+pass; complete API race is still live, not signed off. Runtime pins are updated but candidate/HTTP/browser/
+volume/release gates remain pending. Source report has0package/symbol matches and1unimported OpenPGP
+module match; this is not whole-image clearance or a production upgrade (focused section10).
+
+## 2026-10-15 local-import durable commit (core validated and published, follow-up open)
+
+The initial contract-only inventory below is historical; implementation evidence follows it.
+The four direct/TXT-alias/LocalStore/WebDAV confirm routes are inventoried in
+[`local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Normal auth/body/limits/201 direct and 200 storage item schemas remain unchanged. The entire item must
+include archive/resources, Book/Chapter and requested memberships before success/consume/event; at the
+initial baseline, ignored category errors and pathname archive rollback were source-level must-fix, not yet reds.
+Target internal durability errors are fixed `failed to import book` (direct500/storage200-item); actual
+archive/SQL cancellation terminates with500 `local book import canceled`, distinct from stage cancellation.
+Previously committed batch items retain success/notification. No499, whole-batch rollback, migration,
+exactly-once or production-upgrade claim. Independent477587f contract and38c8f07/09d9fd6 actual reds
+preceded implementation. Four handlers now pass caller ctx/full selected memberships to one owned archive+
+Book/Chapter/category transaction and use authoritative committed Book/relations. Placeholder updates
+only owned columns; failure retains retry tokens and unknown filesystem entities. The stage guard is
+checked before commit; consumption and scoped success events are post-durable only.207 reds, additional
+late-SQL/column/batch/native controls, fullGo/vet/frontend762/build, three-user HTTP and Chromiumthree
+viewports pass. Superseding terminal evidence: exactb4ff9ca complete fullrace passes (API998.650s),
+same-SHA Go1.24/CGO candidate original fresh/historical/portable-v1/v2/backup/restart gates pass first try.
+Trusted Actions38745709308 completed successfully for fullb4, including all validation/publication/platform
+gates. Public registry exact/latest bytes and both actual platform configs independently verify fullb4;
+index `sha256:60e97193265ff47808a3910cae1d0bf8a8cec6a3c7b5b4a12efeb7bab144c6ee`.
+Placeholder deletion/rebind coverage and
+full parserCPU/scan/peakFD/overall audit remain open; these core results do not sign off every required
+control. Post-publication production read-only health is b2b32f7, not a b4 upgrade. See focused contract
+sections10–12. No API/data/schema migration or production mutation was performed.
+
+Next coverage-only inventory (focused section13) keeps every route/error unchanged: placeholder identity
+lost after selection but before item tx must fail with existing direct500/storage200-item safe durability
+error, without resurrection, success event or retry-token consumption. External committed deletion/owner/
+source/URL/archive rebind is preserved, not rolled back by importer compensation. Existing guards are
+not yet test evidence; no new implementation, red count or production issue is claimed by this inventory.
+
+Superseding coverage result after independent87e5a72: all48API plus36service pre-item-tx external mutation
+controls pass, as do focusedrace/normal-restoration controls, fullGo/API119.156s and vet. The post-external
+snapshot, failed-stage retry and zero-event assertions hold with unchanged safe response shapes.
+These are post-b4 controls, not new pre-implementation reds; no app/API/production change or new Docker run.
+
 ## 2026-10-08 read/list lifecycle (implemented and Docker-published)
 
 The next fixed-baseline contract is

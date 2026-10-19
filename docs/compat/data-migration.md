@@ -2,6 +2,118 @@
 
 Status: working compatibility ledger; implemented migrations and remaining action-level audits are recorded below.
 
+## 2026-10-16 SQLite WAL/OS-C supplement (contract-only, no migration)
+
+See focused SQLite/WAL/OS-C contract. Maintain WAL, pooled connections, busytimeout5000, oldDB/table/
+index/row semantics and mounteddata/cache/library, logical/portable backup and restored ownership.
+Do not delete WAL/SHM, disable WAL, serialize to oneconnection, copy a live bareDB, change schemas/
+tokens or silently reinterpret stored values to avoid a dependency fix. CurrentSQLite3.45.1 needs the
+documentedWAL-reset maintenance; minimumcandidate3.51.3/driver1.14.36 is verifiedmetadata, not yet
+applied. Newcontract→boundedactualtests→implementation and exactoldvolume/recovery gates required.
+
+Update (branch only, unreleased): build commit 7a1bf82 applies driver v1.14.36/SQLite 3.51.3 with no
+schema, migration or storage-format change; WAL, pooled connections, busy_timeout and synchronous stay
+as before. Old-DB, fresh/historical volume and portable-backup gates still run in Actions before any
+release. See focused contract section 10.
+
+## 2026-10-16 frontend dependency advisory supplement (published, no migration)
+
+Focused frontend dependency contract inventories necessary same-major client/build patches only. Existing
+JWT/session/browserkeys, numericURLs, SQLite/GORM/data/cache/library, original archives/backup/portable/
+WebDAV and user-isolation semantics must remain. Full lock audit includes dev/optional/peer; no omit-dev,
+force latest, transitive-as-direct additions or silent schema/runtime redesign. Contracts then actual tests
+before changes; candidate historical/portable/backup gates remain mandatory. Production remains untouched.
+
+Independent7ff39d9 precedes test-only13library-red/13green controls; all files/maps/credentials/loopback
+servers are self-owned and reaped. App/lock/data/session/schema unchanged; Node22 same outcomes do
+not replace the future new-candidate historical/portable/backup gates. No production probes or migration.
+
+Superseding delivery: fc4692c/Actions38868093878SUCCESS, exactlocalarm64 and CInativeamd64 candidate
+fresh/historical/portable-v1-v2/assets/crossuser/restart pass. Independently verified wholepublishedarm64
+image was actually pulled by index digest and additionally passes the same new/oldvolume gates and
+realUIlogin/nativeupload/Reader threeviews; details in focused frontend contractsection8. No SQLite/
+schema/data/cache/library/backup/WebDAV/token/browserkey/URL migration, no production writes or upgrade.
+Only this maintenance slice is delivered; OS/C/parserCPU/scan/peakFD/late-tx/device/fullrefactor stay open.
+
+## 2026-10-16 runtime foundation published (no migration)
+
+The Go1.26.9/MVS/officialbase/security-gate slice b2632a4 passed trustedActions38841543709, including
+exactnativeamd64 fresh/historical/portable-v1-v2/cross-user/restart/hash gates, and published bothLinux
+architectures. IndependentOCI/config/actualbinary evidence and the limits of localarm64/runtime checks
+are in focused runtime contract section12. No SQLite/GORM/schema, mount/archive/cache/backup, session/
+token/URL/browserkey migration; data/cache/library and oldaccounts/books retained. Source minimumGo
+is explicit in bothREADMEs; consumers still pull images. Production anotherMac not operated/reverified;
+frontend/OS-C/otheraudit/device work remains open, not silently considered resolved by this release.
+
+## 2026-10-15 runtime/dependency advisory inventory (no migration)
+
+[`runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md`](runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md)
+records the next toolchain/module/client/build/base-image audit. Future necessary Go-minimum/base pin
+updates must be explicit; no blanket latest update, SQLite/GORM/schema, root/archive/backup, token/session,
+browser-key or production migration is authorized. Preserve all old mounts, URLs, permissions, parser and
+RootedFS lifecycle behavior; same-SHA historical/portable/backup gates are still mandatory after implementation.
+Only read-only official metadata/scans and an isolated candidate-binary extraction have run so far.
+
+Superseding test-only checkpoint after93fd5fd:3actual old-dependency red leaves (JWT custom/compat
+allocation, XPath1=1) and11green controls, stable ordinary/race. Recovered logs/remote verified10-16;
+no app/module/lock/base/schema/session or production changes. Historical-volume gates remain mandatory
+after implementation, not inferred from the bounded self-owned experiments.
+
+Minimal jwt5.2.2/xpath1.3.6 implementation follows verified8fb3970; only module versions/checksums changed.
+Three original reds/11controls, fullGo/API116.144s, parser/auth package race, vet, frontend762/build PASS.
+No session/token/data/URL/schema migration; other modules/base/go-minimum remain unchanged at this
+checkpoint. Future Go1.26.9/MVS/base updates and exact-candidate historical/portable gates still required.
+
+Supplemental foundation tests add3actual red leaves/5controls for document parsing and dependency-level
+normalization. No schema/module/base/lock change or user-data operation; subprocesses are owned and
+reaped. This stage remains test-only and cannot replace future exact-candidate old-volume/backup gates.
+
+Subsequent foundation implementation afterd3cc2d1 explicitly raises source minimum toGo1.26.9, selects
+net0.60/crypto0.57/sys0.48/text0.42 and supported pinned officialGo/Node/Alpine bases. Both READMEs expose
+the new build requirement; Docker consumers still do not compile locally. No schema/root/archive/backup/
+token/URL/key/env migration or production operation. FullGo/API126.002s/default frontend/build gates
+pass, fullrace remains live; actual new-base candidate/historical/portable/runtime gates are still pending.
+
+## 2026-10-15 local-import durable commit implementation (no migration)
+
+See [`local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+The initial inventory paragraph is retained as historical; current implementation evidence follows it.
+Initial archive allocation, raw/body/resources/source/TOC, per-item Book/Chapter/category transaction,
+owned failure compensation and durable token/event handoff form the next complete boundary. Existing
+library/data/safe-user/friendly suffixes, public755/644, relative archive fields, numeric URLs, format/
+resource markers, placeholder progress/bookmarks and portable consumers remain unchanged. This is only
+inventory: no new tests/application/schema/scan/chmod/cleanup of user data, no claim that signed stageb2
+or already-imported archive125fd93 covers initial allocation/rollback. Unknown newcomer entities must
+be retained; SQL rollback cannot justify absolute RemoveAll or a full filesystem atomicity claim.
+
+Implementation now retains one native owned tree through initial raw/body/resource/JSON and item SQL
+durability; public755/644 and existing marker600 remain, stage defaults700/600 are unchanged. New and
+placeholder imports share guarded owned-column/Chapter/category persistence and authoritative results;
+failed compensation removes only original owned entries/empty dirs, retaining unknown residue. No schema,
+stored path, resource marker, portable/backup or browser-key migration.207 actual reds and new chunk/FD/
+SQL/batch controls, final fullGo/vet, frontend762, real three-account HTTP and Readerthree-viewports pass.
+NativeLinuxarm64 passes nonroot/networknone/read-only runtime; amd64 compiles only. Exactb4ff9ca final
+fullrace passes (API998.650s); same-SHA Go1.24/CGO candidate original fresh/historical/portable-v1/v2/
+backup/restart gates pass first try. Trusted Actions38745709308 completed successfully for exactfullb4,
+including validation/publication/platform gates. Independent public-registry bytes/config checks verify
+both true Linux platform revisions; exactb4ff9ca/latest index is
+`sha256:60e97193265ff47808a3910cae1d0bf8a8cec6a3c7b5b4a12efeb7bab144c6ee`, not inferred from oldb2.
+Production current readonlyhealth is fullb2b32f7healthy; no remote mutation/upgrade. FullparserCPU,
+exactly-once, scan/peakFD budgets and overall audit remain independently open. Additional placeholder
+external deletion/rebind controls are follow-up work, not proven by the existing column-merge controls.
+
+Coverage-only follow-up inventory (focused section13): test-owned SQLite target mutations after
+placeholder selection but before item tx must remain committed if confirmation rejects. Compare against
+the post-external-change snapshot; never undo or resurrect the target, touch an existing bait archive,
+consume a failed token or claim full cross-process atomicity. Both automatic and explicit portable
+RestoreExisting need controls. No application/schema/path/backup/production change in this inventory.
+
+That independent87e5a72 inventory is now supplemented by48API/36service actual independent-pool SQL
+mutation controls, all ordinary/race PASS. FullGo/API119.156s and vet pass. External committed snapshots,
+old bait hashes, retry stage and zero success events are preserved; both auto and explicitRestore covered
+for TXT/EPUB/CBZ. No application or migration was needed. This does not establish late in-tx external
+concurrency, full parserCPU, scan/peakFD or cross-process exactly-once, and is not a new volume release.
+
 ## 2026-10-08 read/list lifecycle inventory (no migration)
 
 The implemented and Docker-published

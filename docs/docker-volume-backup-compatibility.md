@@ -187,3 +187,33 @@ This is not a pulled-container health or production-upgrade claim. Last independ
 health remains `db1ea216f9849bc44a90b5b760241df1c6d069b0`, statusok, on another Mac. No mounted
 data/schema/API/backup-format migration or production write. Fullparser/SQL/category/initialarchive
 lifecycle, scan budgets and overall device/audit acceptance remain unfinished; see the focused stage contract.
+
+## 2026-10-15 Local import durable commit shared-core release
+
+Exact application `b4ff9ca61bd4e761ab23dd50067c3e78ff10441f` passed fullGo/vet,
+complete API/service/native/resource/engine race (API998.650s), frontend762/762/build/Compose,
+isolated three-user Go+SQLite HTTP and actual Chromium1440x900/390x844/360x800 confirmed Reader.
+NativeLinuxarm64 package tests ran nonroot/networknone/read-only; amd64 locally compiled only.
+Same-SHA local Go1.24/CGO arm64 candidate original-sh fresh/historical gates both passed first try:
+portable-v1/v2-assets, cross-user, backup/restart, TXT/EPUB/UMD/CBZ, relative-cache, owner/hash,
+progress/bookmark and logical/portable restore. Own fixtures/logs were retained; all containers stopped.
+An older stage0a historical404 remains unknown/unreproduced, not newly attributed or silently erased.
+
+Trusted [Actions38745709308](https://github.com/changshengyu/openreader/actions/runs/38745709308)
+completed successfully for exactfullb4, including all backend/frontend/HTTP/native/fresh/historical/
+portable/backup/publication/platform steps. Independent public Registry API checks at
+2026-10-15T14:08:46.920Z verified actual bytes/header SHA256 and both actual Linux configs:
+
+- `ghcr.io/changshengyu/openreader:b4ff9ca` and `latest` index
+  `sha256:60e97193265ff47808a3910cae1d0bf8a8cec6a3c7b5b4a12efeb7bab144c6ee`;
+- amd64 manifest `sha256:018ba1a38abd715fab512cacd68d5b53e9a8d2463766d3b5b7c11ba64cc5171a`;
+- arm64 manifest `sha256:92f962345f44959bc392b2590f2a715d143cb1df7a2a8e06cdb273fab944a0f6`.
+
+Both configs report OS/architecture and fullb4 OCI revision. This is remote-artifact verification,
+not a local forced-pull/runtime or two-platform complete native-test claim. Post-publication production
+read-only health still reports `b2b32f7b40bb8cefc18d316aefb29865aede9872`, statusok,
+build2026-10-10T09:13:53Z; no remote container upgrade, production writes or mounted data migration.
+Archive layout/public755-644/marker600/private-stage700-600, old URLs, schema and backup formats remain.
+The shared core is published; extra placeholder external deletion/rebind coverage, fullparserCPU,
+scan/peakFD budgets, exactly-once, device/advisory/overall audit remain open. See
+[`local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md), sections10–12.

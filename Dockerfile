@@ -2,14 +2,14 @@
 # registry's mutable-tag metadata endpoint is temporarily unavailable.
 # Frontend assets are architecture-independent. Build them on the native
 # runner platform so multi-platform releases never execute Node under QEMU.
-FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine3.23@sha256:baf676f7d0e552f3231945c2f979055ca121bce128c152f7a34e6bd1728b1c5a AS frontend-builder
 WORKDIR /src/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 AS backend-builder
+FROM golang:1.26.9-alpine3.23@sha256:6750308561953d451210ed1a8086d36c8c8bdcbf672d38d9d0d424b8a7a0216c AS backend-builder
 RUN apk add --no-cache build-base
 WORKDIR /src/backend
 ARG TARGETOS=linux
@@ -25,7 +25,12 @@ ARG VERSION=dev
 COPY backend/ ./
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -mod=vendor -trimpath -ldflags="-s -w -X openreader/backend/api.Version=${VERSION} -X openreader/backend/api.Commit=${VCS_REF} -X openreader/backend/api.BuildDate=${BUILD_DATE}" -o /out/openreader .
 
-FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+FROM alpine:3.23.6@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0
+# The pinned official 3.23.6 base still ships zlib 1.3.2-r0. Install only the exact
+# v3.23 main maintenance fix at build time: apk verifies the signed repository index,
+# the release OS gate pins the package identity, and nothing upgrades at container start.
+# Kept before the ARGs so the validated layer is reused by the published build.
+RUN apk add --no-cache 'zlib=1.3.2-r1'
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="OpenReader" \
@@ -43,7 +48,7 @@ ENV OPENREADER_ADDR=:8080 \
     OPENREADER_PUBLIC_DIR=/app/public \
     GIN_MODE=release
 # The Go builder includes the standard CA bundle; time/tzdata is embedded in
-# the binary so this runtime stage needs no network package installation.
+# the binary, so the zlib fix above is the runtime stage's only package install.
 COPY --from=backend-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=backend-builder /out/openreader /app/openreader
 COPY --from=frontend-builder /src/frontend/dist /app/public

@@ -1,6 +1,192 @@
 # OpenReader Security Review Checklist
 
+2026-10-16 SQLite/WAL/OS-C contract-only supplement:
+[`compat/sqlite-wal-os-c-advisory-fixed-baseline-second-audit-p2-contract.md`](compat/sqlite-wal-os-c-advisory-fixed-baseline-second-audit-p2-contract.md).
+ActualC3.45.1/WAL/multipleconnections meet necessary conditions for maintainer WAL-reset risk, not
+proof of production corruption. Exacttwo-platform APK/secdb/native-version comparison identifies
+zlib1.3.2-r0 belowfixr1; nonblockingCgzwrite exposure not proven. Missingsecdb records and embeddedC/
+copiedCA/builders remain separate. OwnboundedactualSQL/WAL/gzip controls and failclosed tooltests
+must precede implementation. No modules/image/app/data/production change; broad audit remains open.
+
+After independently verified5bb35cf, ownempty/tworowSQL tests reproduce2conditional library
+correctness failures with3green controls, stable3runs/race/nativeGo1.26.9linuxarm64. Existing12db
+rootcontrols pass; noDATA RACE/startup/deadline failures countedred. NOTactualWAL-reset orCgzwrite
+overflow proof. Furtherharnessfault/driverlifecycle/WALschedule/OSgate tests remain beforeimplementation;
+Go modules/base/app/production unchanged, deliberatelyred checkpoint stays feature-only.
+
+After independent3982b9f, test-only lifecycle/runtime controls now give2libraryred/7normalgreen plus
+4real harness fault/reap checks on host, race and native Linuxarm64. Newbindings/Rows.Close/canceled
+query+transaction controls pass10runs; output/deadline/SIGINT/SIGTERM parent/worker rejection+PID-gone
+checks pass3runs. Only ownStart PIDs/newprocessgroup are signalled; no process-name bulk termination.
+Actualnative SQL compile_options confirms existingFTS3/RTREE/THREADSAFE1 andnoFTS5, not productionSQL.
+Normalrow-boundary cancellation is NOTactiveC-step/WALreset proof. WALschedule/in-flightC/APK/OSgate
+remain open; no dependency/app/production writes or release. See focusedcontract section8.
+
+After handoff fab8d3e the baseline reproduced exactly (2 library reds/7 normal/4 harness, race, vet,
+109/109). Test-only 52786f8 adds in-flight C-step cancellation controls: an owned WAL file DB, a
+connection-local marker registered only through `*sql.Conn.Raw` inside the owned test worker (no
+production SQL function or debug API), and a constant-memory recursive count cancelled while still in
+C. Query and write-transaction paths both return `context.Canceled` within 1s, reuse the connection or
+recover the single-connection pool, and keep committed values/integrity; 10 runs pass, and a temporary
+uncommitted non-cancelable mutation fails with the exact ignored-cancellation reason and no leftover
+worker. WAL deterministic scheduling was not written this session and stays unreproduced/open; no
+dependency/app/image/production change. See focused contract section 9.
+
+Build-only 7a1bf82 adopts go-sqlite3 v1.14.36/SQLite 3.51.3 (exact commit/h1, identical cgo flags, no
+3.53 jump). The two library reds turn green with the same assertions; 9 normal controls and 4 harness
+checks hold; runtime SQL reports 3.51.3/737ae4a3, compile_options only raise MAX_FUNCTION_ARG to 1000 and
+FTS5 stays off. Local full Go/vet/critical race (api 1019.965s under a 40m timeout; the default 10m limit expired with
+no goroutine in go-sqlite3), frontend 788/build, 109 gate tests,
+actual Go (only the known not-applicable GO-2026-5932) and full-lock npm scans, Compose and isolated
+HTTP+SQLite storage contracts pass; port-binding suites ran outside the sandbox. WAL-reset ordering stays
+unreproduced; evidence is the official 3.51.3 source ID plus the actual runtime version, not a line-by-line
+patch comparison. Browser/native arm64/volume/trusted publication pending; no image/production change.
+See focused contract section 10.
+
+OS/C contract (section 11, before implementation): official alpine:3.23 still resolves to the pinned
+3.23.6 digest, so zlib can only be fixed by installing the exact signed 1.3.2-r1 at build time. Both v3.23
+main APKINDEX files verify against the base image's official keys; per-arch `C:` identities and aports
+b92621a8 are recorded. The published fc4692c layers match every APK-owned file except the official
+`etc/shadow` rewrite; native apk 3.0.8 finds only zlib r0<r1 pending. Planned: a fail-closed APK/secdb
+release gate over both platform validation images (exact identities, per-file checksums, fresh secdb,
+reviewed unknown origins, no not-applicable path) and the exact Dockerfile fix. No runtime apk upgrade,
+untrusted packages, extra repositories or latest tags; image validation stays with Actions on main.
+
+OS/C implementation (section 12): test 97e9560 is red because the gate module is absent, ci 6aeda8b leaves
+only the Dockerfile assertion red, build d1d774f makes all 19 gate tests pass (128/128 with the existing
+gates under Node 26 and a local pinned Node 22). Every fail-closed case was checked for its exact reason.
+The real published arm64 image passes through `docker save` parsing (6 diff_ids, 109 APK-owned files,
+only the official etc/shadow rewrite) and is rejected for zlib 1.3.2-r0 under the reviewed baseline;
+full real secdb documents satisfy the strict schema. Candidate image build, both-platform gate runs,
+volumes and trusted publication remain pending in Actions; no image/production change.
+
+Release (section 13): main fast-forwarded to 186c762; trusted Actions 38896494238 passed every step,
+including the both-platform OS gate (16/16 packages, 110/109 APK files, only etc/shadow, 72 comparisons,
+no pending) and fresh/historical volume and portable checks. `186c762`/`latest` = index
+`bfda54269b4cf53bab46f1debdd3d9bef640f23c4de5a7f6b248ed081c43f83c`. Independent pull-by-digest checks
+of both platforms confirm the pinned zlib 1.3.2-r1 identity, unchanged APK-owned files, the full revision
+label, go-sqlite3 v1.14.36 and the SQLite 3.51.3 source ID with no 3.45.1 remnant. No production action;
+WAL-reset ordering remains unreproduced and device/browser regression is still open.
+
+2026-10-16 frontend supplement:
+[`compat/frontend-dependency-advisory-fixed-baseline-second-audit-p2-contract.md`](compat/frontend-dependency-advisory-fixed-baseline-second-audit-p2-contract.md)。
+Fresh all-lock npm audit8high packages, not8exploits; own tiny bounded fixtures before patches, distinguish
+actualapp/conditionallibrary/SSR/Node/Windows/build. Plan precise npm source-lock gate with no ignores,
+allseverity/schema/tool/registry/lock evidence fail-closed. Contract-only, no implementation or production
+change; Go foundation delivery does not close frontend/OS-C/device/full audit.
+
+Frontend red checkpoint after independent7ff39d9:13actual conditional-library leaves/13green normal+
+owned-lifecycle controls repeat3 and under actualNode22; noOOM/unfiredfixture/workerleftover. App normal
+wire/auth/401/cancel/nativeFormData controls green; fullfrontend775pass/13knownfail. Pure library/SSR/
+build conditions remain distinct from production exposure, unrelated map boundary remains open. New
+npm-gate missing module is1availability red only. No dependency/app/workflow/production implementation.
+
+Superseding implementation evidence (focused section7): independently pushed red218ad91 precedes
+exact same-major patches and three concrete safe leaf constraints. Actual Node26 and Node22 both pass
+788 frontend tests/build,109 gate tests,132-package full-lock audit with zero findings; fullGo/vet/
+Compose/owned HTTP pass. SourceGo/app/API/data unchanged. Fullrace and candidate browser/volumes/
+trusted publication/OCI pending; no production action or whole-system security-clear claim.
+
+Frontend section8 supersedes pending: applicationfc4692c passed trustedActions38868093878 (allsteps
+success), critical8package race (API1040.001s), exactcandidate and actualwholepublishedarm64 browser/
+fresh-historical-portable-crossuser-restart gates. Anonymousindependent OCI checks verify fullrevision,
+bothrealbinary metadata and all63frontend files EXACTcandidate bytes; fc4692c/latest index74ef48fd…
+(full digest in focusedcontract). Bothstrippedbinaries still only OpenPGPmodulefallback/pkgSymbols0,
+not7reachable issues. Preserve precise source exception review and no production operation. Frontend
+maintenance delivered, NOT wholeOS/C/SQLite/parser/device/security audit complete.
+
+2026-10-16追加 Go source advisory 发布门合同：
+[`compat/go-advisory-release-gate-contract.md`](compat/go-advisory-release-gate-contract.md)。
+只允许带完整现场导入图/版本/受影响包校验和复审期限的 OpenPGP 不适用项，不新增通配忽略。
+独立合同/测试后工具与接线已实施，含中断清理的59合同及真实source扫描通过；可信Actions38841543709通过，
+不替代二进制/OS/C/前端审计。
+
+2026-10-16交付维护切片：b2632a4双架构已发布，精确OCI index/config/实际二进制Go1.26.9/CGO1
+独立核验；CI nativeamd64新旧卷/portable门和本地完整race/三视口通过，见基础链合同第12节。
+两个实际剥离binary的OpenPGP报告均只有模块精度，source不适用前提与到期复审门仍生效。
+未声称C/OS/Node/frontend无漏洞；原8high前端包、其它advisory/设备/全量审计仍未关闭，未操作生产。
+
 Use this checklist for security-sensitive changes and release reviews.
+
+## P2 runtime/dependency advisory second audit (2026-10-15 inventory only)
+
+- [x] Pin official advisory/tool data, map upstream auth/XPath and actual application call paths; keep
+      source-host configuration, stripped-binary module fallback and browser/build/SSR/Node conditions separate.
+- [x] Independently commit the contract, then observe actual bounded JWT allocation and isolated XPath
+      non-termination reds, with normal behavior controls, before fixing affected dependencies.
+- [ ] Resolve required Go minimum/toolchain, module graph, frontend locks and supported official base pins;
+      prove fixed behavior and accurate fail-closed audit reporting without mass latest/force or broad ignores.
+- [ ] Complete full/race/vet/frontend/browser/native/candidate new-old-volume/backup/trusted-platform/OCI
+      gates and candidate-specific audit, preserving sessions/data/URLs; no production write or upgrade.
+
+Target: [`compat/runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md`](compat/runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md).
+Initial npm8high counts packages. Govulncheck JSON exit0 is not a clean verdict; b4 candidate Go1.24.13
+has no extracted symbols, so its76 matches are module-level only, not76 reachable vulnerabilities. Current
+host1.26.5 source28 symbol reports need condition checks. No behavioral reds, app/lock/base fixes or new
+Docker candidate yet; parserCPU/scan/peakFD/device/whole audit remain separately unfinished.
+
+Superseding evidence after93fd5fd:3actual red leaves (XPath1=1 memory-loop watchdog, JWT custom/compat
+allocation) plus11green controls repeat3times and under race, noDATA RACE/panic/unfired; all workers
+reaped. True() is already green, not an extra red. Logs/remote recovered and verified10-16; no app/base/
+lock fix, production probe or new candidate. This is two dependency issues, not all scanner findings.
+
+10-16 minimal implementation checkpoint supersedes that no-fix state only for jwt5.2.2/xpath1.3.6:
+3actual reds+11controls now PASS, fullGo/API116.144s, engine/auth full-package race10.528s/2.073s,
+vet/frontend762/build PASS. No auth/parser business-code changes or production upgrade. All broader
+module/toolchain/base/frontend maintenance, precise audits and candidate/runtime/browser/volume/release
+gates remain unchecked; official base image metadata was verified, not applied or runtime tested.
+
+Foundation supplemental reds (focused section9):3new leaves/5controls, stable3runs and race; actual
+document parser nontermination and norm-library NFC/NFKC no progress. All workers reaped, noDATARACE;
+prior14 JWT/XPath cases independently green. Module/base changes still absent; no production exploit
+or complete parser cancellation claim, and norm's API reachability stays explicitly unproven.
+
+Foundation checkpoint afterd3cc2d1:Go1.26.9/net0.60/crypto0.57/sys0.48/text0.42 and verified official
+base pins applied, no business/API/data migration.22focused/fullGo/API126.002s/vet/frontend762/build/
+Compose PASS; complete API/service race still live. Official source audit0package/symbol matches,
+1module-only OpenPGP with exact absence proven in host and both Linux target import graphs; no blanket
+ignore, and this does not cover C/OS/Node or exact candidate. Runtime/volume/browser/audit-gate/release and
+broader frontend work remain unchecked; pins alone are not a Linux runtime or whole-image security proof.
+
+## P2 local-import durable commit (2026-10-15 core validated, follow-up open)
+
+- [x] Bind initial LibraryDir/data/user/new-book allocation and actual raw/body/metadata/resource work to
+      one original opened session, exclusive creation and request ctx; do not re-admit replacements.
+- [x] Own every rollback entity; preserve unknown newcomers, external bait and historical archives.
+- [x] Commit Book/Chapter/requested memberships together with owner validation, guarded placeholder
+      columns and authoritative projection; no ignored category errors or fallback resurrection.
+- [x] Consume/notify only after the entire item commits; preserve retry stage on failure and earlier
+      batch successes on later cancellation, with fixed path/SQLite-free durability errors.
+- [x] Add actual fired old-app reds before implementation, then full/race/native/HTTP/browser and
+      exact-SHA fresh/historical/portable/backup/trusted-publication gates; no migration/production writes.
+
+Target: [`compat/local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md`](compat/local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md).
+Initial source windows were inventory only. Signed stageb2 and already-imported archive125fd93 controls
+do not prove new archive initialization or SQL/category durability; full parserCPU/exactly-once remains open.
+
+Superseding implementation evidence: independent477contract→38c8f07/09d9fd6 actual207reds→shared
+OwnedTree/importer/itemtx/thinAPI. All207 now green plus actualchunk/source cancellation, partialmkdir,
+unknownpreservation,120-cycleFD/marker600, lateSQL/column/batch controls. FinalfullGo/vet/frontend762,
+three-accountHTTP/three-viewReader/nonrootLinuxnative pass. Finalfullrace terminalPASS/API998.650s;
+exactb4ff9ca Go1.24/CGO candidate original fresh/historical/portable/backup/restart gates PASS first try.
+TrustedActions38745709308 exactfullb4 terminalsuccess, all validation/publication/platform gates PASS.
+Independent public OCI raw-byte SHA/header/actual-platform-config checks verify exactb4ff9ca/latest index
+`sha256:60e97193265ff47808a3910cae1d0bf8a8cec6a3c7b5b4a12efeb7bab144c6ee` and both fullb4 revisions.
+The watch client's networkEOF did not restart or fail the workflow. No migration, newenvironmentvariable,
+production write or upgrade; post-publication production health still reports fullb2b32f7/statusok.
+Placeholder external deletion/rebind controls remain unverified; do not sign off all required controls
+from column-merge/native greens. FullparserCPU, exactly-once and scan/peakFD/overall audit remain open.
+
+- [x] Coverage-only follow-up: after target selection and before item tx, actual external committed delete/
+      owner/source/URL/library/original rebind remains intact; failed auto/explicit restore has no
+      resurrection, foreign mutation, success event or token consumption. See focused contract section13;
+      do not present already-green guards or post-b4 controls as additional pre-implementation reds.
+
+Independent contract87e5a72 preceded48API/36service actual independent-pool SQL controls; all84 PASS
+with required fired/RowsAffected1/post-external-snapshot/filehash assertions. Focusedrace plus8APIcolumn/
+3normal service controls PASS (36.181s/3.421s), finalfullGo/API119.156s and vetPASS. No application change,
+new red count, production issue, schema/migration or new Docker release; full b4 release gates above remain
+the unchanged-app evidence. Late in-tx faults/fullCPU/scan/peakFD/cross-process/device/overall remain open.
 
 ## P2 trusted proxy and rate-limit identity (2026-08-25 implementation)
 

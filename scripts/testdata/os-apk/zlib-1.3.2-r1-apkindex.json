@@ -1,0 +1,18 @@
+{
+  "x86_64": {
+    "indexSha256": "d25ac254e383d4ef00d77c47551972dfda9b6372a6a9b7ad6d9df7f2b3aeda7b",
+    "indexDescription": "v3.23.6-61-g95654076fb0",
+    "record": "C:Q1jut3bNPRHp/JoWp0GWNhtIWnnQE=\nP:zlib\nV:1.3.2-r1\nA:x86_64\nS:56205\nI:108376\nT:A compression/decompression Library\nU:https://zlib.net/\nL:Zlib\no:zlib\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1791318904\nc:b92621a82657b055485976b304462bddf9aa9183\nD:so:libc.musl-x86_64.so.1\np:so:libz.so.1=1.3.2",
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/APKINDEX.tar.gz",
+    "lastModified": "Fri, 16 Oct 2026 05:46:38 GMT",
+    "signature": ".SIGN.RSA.alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"
+  },
+  "aarch64": {
+    "indexSha256": "c65d4f28636c329fa4f121427d8d14dadc1aae279bc988b72a66ff96cd0f8810",
+    "indexDescription": "v3.23.6-61-g95654076fb0",
+    "record": "C:Q1932/MXUWsUUsB2j59i8WBsgG3S0=\nP:zlib\nV:1.3.2-r1\nA:aarch64\nS:54331\nI:133008\nT:A compression/decompression Library\nU:https://zlib.net/\nL:Zlib\no:zlib\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1791318904\nc:b92621a82657b055485976b304462bddf9aa9183\nD:so:libc.musl-aarch64.so.1\np:so:libz.so.1=1.3.2",
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/APKINDEX.tar.gz",
+    "lastModified": "Fri, 16 Oct 2026 05:46:43 GMT",
+    "signature": ".SIGN.RSA.alpine-devel@lists.alpinelinux.org-616ae350.rsa.pub"
+  }
+}

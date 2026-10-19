@@ -372,25 +372,41 @@ func (x *Session) Consume() error {
 // ImportBook keeps the same admitted session through cached/fallback parsing
 // and the final stage check before durability. Consumption is a separate,
 // best-effort post-durable action: its failure must never roll back the Book.
-// Parser CPU and all SQL/archive internals are not an atomic context boundary.
+// Full parser CPU remains separately bounded/non-interruptible; durable archive
+// and SQL work now share the caller context and original stage commit guard.
 func (x *Session) ImportBook(importer localbook.Importer, request localbook.ImportRequest) (models.Book, error) {
+	result, err := x.ImportBookResult(importer, request)
+	return result.Book, err
+}
+
+func (x *Session) ImportBookResult(importer localbook.Importer, request localbook.ImportRequest) (localbook.ImportedBook, error) {
 	prepared, matched, err := x.Prepared(request)
 	if err != nil {
-		return models.Book{}, err
+		return localbook.ImportedBook{}, err
 	}
 	if !matched {
 		_, prepared, err = importer.Prepare(request)
 		if err != nil {
-			return models.Book{}, err
+			return localbook.ImportedBook{}, err
 		}
 		if err := x.SavePrepared(prepared); err != nil {
-			return models.Book{}, err
+			return localbook.ImportedBook{}, err
 		}
 	}
 	if err := x.Validate(); err != nil {
-		return models.Book{}, err
+		return localbook.ImportedBook{}, err
 	}
-	return importer.ImportPrepared(request, prepared)
+	prior := request.BeforeCommit
+	request.BeforeCommit = func() error {
+		if err := x.Validate(); err != nil {
+			return err
+		}
+		if prior != nil {
+			return prior()
+		}
+		return nil
+	}
+	return importer.WithContext(x.ctx).ImportPreparedResult(request, prepared)
 }
 
 type contextRead struct {

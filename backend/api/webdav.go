@@ -666,27 +666,24 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 		return
 	}
 
-	importer := localbook.NewImporter(s.cfg, s.db)
+	importer := localbook.NewImporter(s.cfg, s.db).WithContext(c.Request.Context())
 	imported := make([]gin.H, 0)
 	importedBooks := make([]bookListItem, 0)
 
 	for _, target := range plan.targets {
 		if target.override.ImportToken != "" {
-			book, err := s.importStagedStorageBook(c.Request.Context(), userID, userName, target.override.ImportToken, target.override, primaryCategoryID, importer)
+			result, err := s.importStagedStorageBook(c.Request.Context(), userID, userName, target.override.ImportToken, target.override, primaryCategoryID, categoryIDs, importer)
 			if err != nil {
-				if writeLocalImportStageCancellation(c, err, "") {
+				if writeLocalBookImportCancellation(c, err, "") || writeLocalImportStageCancellation(c, err, "") {
 					if len(importedBooks) > 0 {
 						_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
 					}
 					return
 				}
-				imported = append(imported, gin.H{"path": target.relativePath, "error": err.Error()})
+				imported = append(imported, gin.H{"path": target.relativePath, "error": storageBookImportError(err)})
 				continue
 			}
-			if len(categoryIDs) > 0 {
-				_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
-			}
-			item := s.bookShelfListItem(userID, book)
+			item := s.bookShelfListItemWithCategoryIDs(userID, result.Book, result.CategoryIDs)
 			imported = append(imported, gin.H{"path": target.relativePath, "book": item})
 			importedBooks = append(importedBooks, item)
 			continue
@@ -707,25 +704,29 @@ func (s *Server) importFromWebDAV(c *gin.Context) {
 			imported = append(imported, gin.H{"path": file.relativePath, "error": webDAVImportReadError(err)})
 			continue
 		}
-		book, err := importer.Import(localbook.ImportRequest{
-			UserID:     userID,
-			UserName:   userName,
-			FileName:   webDAVImportFileName(file.relativePath),
-			Extension:  file.extension,
-			Data:       data,
-			Title:      target.override.Title,
-			Author:     target.override.Author,
-			CategoryID: primaryCategoryID,
-			TOCRule:    target.override.TOCRule,
+		result, err := importer.ImportResult(localbook.ImportRequest{
+			UserID:      userID,
+			UserName:    userName,
+			FileName:    webDAVImportFileName(file.relativePath),
+			Extension:   file.extension,
+			Data:        data,
+			Title:       target.override.Title,
+			Author:      target.override.Author,
+			CategoryID:  primaryCategoryID,
+			CategoryIDs: categoryIDs,
+			TOCRule:     target.override.TOCRule,
 		})
 		if err != nil {
-			imported = append(imported, gin.H{"path": file.relativePath, "error": err.Error()})
+			if writeLocalBookImportCancellation(c, err, "") || writeLocalImportStageCancellation(c, err, "") {
+				if len(importedBooks) > 0 {
+					_ = s.hub.Broadcast(userID, nil, gin.H{"type": "bookshelf_update", "payload": importedBooks})
+				}
+				return
+			}
+			imported = append(imported, gin.H{"path": file.relativePath, "error": storageBookImportError(err)})
 			continue
 		}
-		if len(categoryIDs) > 0 {
-			_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
-		}
-		item := s.bookShelfListItem(userID, book)
+		item := s.bookShelfListItemWithCategoryIDs(userID, result.Book, result.CategoryIDs)
 		imported = append(imported, gin.H{"path": file.relativePath, "book": item})
 		importedBooks = append(importedBooks, item)
 	}

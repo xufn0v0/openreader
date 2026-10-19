@@ -263,3 +263,40 @@ test('cancels a touch sequence without preparing a full-chapter layer', () => {
   fixture.controller.handleTouchCancel()
   assert.deepEqual(fixture.calls, [])
 })
+
+test('short touch taps on reader buttons such as 重新加载 never page or toggle the tool layer', () => {
+  const button = {
+    tagName: 'BUTTON',
+    closest: selector => (selector.split(',').map(part => part.trim()).includes('button') ? button : null),
+  }
+  const buttonLabel = { tagName: 'SPAN', closest: selector => button.closest(selector) }
+  const text = { tagName: 'P', closest: () => null }
+  const pageActions = ['previous', 'next', 'chrome']
+  for (const [mode, point, textAction] of [
+    ['page', { clientX: 150, clientY: 60 }, 'previous'],
+    ['page', { clientX: 150, clientY: 540 }, 'next'],
+    ['page', { clientX: 150, clientY: 300 }, 'chrome'],
+    ['flip', { clientX: 30, clientY: 300 }, 'previous'],
+    ['flip', { clientX: 270, clientY: 300 }, 'next'],
+    ['scroll', { clientX: 150, clientY: 60 }, 'previous'],
+    ['scroll2', { clientX: 150, clientY: 540 }, 'next'],
+  ]) {
+    for (const target of [button, buttonLabel]) {
+      const mobileChromeVisible = ref(true)
+      const fixture = createController({ reader: reactive({ clickMethod: 'slide', mode }), mobileChromeVisible })
+      fixture.controller.handleTouchStart({ touches: [point], target })
+      fixture.setTimestamp(1080)
+      fixture.controller.handleTouchEnd({ changedTouches: [point], target })
+      const label = `${mode} tap on ${target.tagName} at ${point.clientX},${point.clientY}`
+      assert.deepEqual(fixture.calls.filter(([name]) => pageActions.includes(name)), [], `${label} reached the page actions`)
+      assert.equal(mobileChromeVisible.value, true, `${label} hid the tool layer`)
+    }
+
+    // The same tap on reader text keeps the existing tap-point mapping.
+    const fixture = createController({ reader: reactive({ clickMethod: 'slide', mode }) })
+    fixture.controller.handleTouchStart({ touches: [point], target: text })
+    fixture.setTimestamp(1080)
+    fixture.controller.handleTouchEnd({ changedTouches: [point], target: text })
+    assert.deepEqual(fixture.calls.filter(([name]) => pageActions.includes(name)), [[textAction]], `${mode} text tap mapping changed`)
+  }
+})

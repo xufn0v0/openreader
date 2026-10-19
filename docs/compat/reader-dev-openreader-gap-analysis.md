@@ -1,5 +1,134 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-10-17 P0 Reader 正文加载失败错误面盘点
+
+固定上游当前章失败时，正文区是一个“错误章节页”：`<h3>` 目标章目录标题，加 `获取章节内容失败！` 和原因
+（`Reader.vue#getContent` L1072–1118，`Content.vue` L62）；EPUB、音频、CBZ 在错误时也按文字页渲染。每次失败弹一次错误提示。
+正文里没有按钮，重试只走右侧刷新浮动按钮（`refreshContent` → `getContent(index, true)`）；错误页和普通页一样响应点击分区，
+页码按错误页重算；连续模式的失败章留在列表里，后一章照常加载；目录失败显示 `获取章节目录失败！` 加原因。当前 OpenReader 的
+主错误块只有原因文字和自有的“重新加载”按钮：没有标题，没有 `获取章节内容失败！`，不弹提示，后端英文消息
+`failed to load chapter content` 原样显示，stale 冲突显示通用兜底而不是已签收的 `章节状态已更新，请重试`。用本地 Go 服务加
+生产前端在 1440×900、390×844、360×800 复现：1440×900 四种模式（flip 设置在桌面按 page 渲染）里按钮都被 `.reader-tap-zones`
+的 `tap-upper` 盖住，真实鼠标点击跳到上一章末尾（`?chapter=4&offset=-1`）并写进度 `4:第五章 前邻`；真机触摸在 page/flip
+同样跳到上一章，在 scroll/scroll2 只上翻一下、隐藏工具层、写进度 `5:第一章 起点`，不重新加载；只有“窄视口 + 鼠标”能重试成功。
+已签收的连续模式内联错误块按钮在桌面下 30% 带里被盖住，触摸时附带翻页或切换工具层；连续模式目标章失败时主错误块占满正文，
+后一章不显示；目录失败后“重新加载”只按截断后的第 0 行请求正文，在 `?chapter=2` 下显示第一章，目录不重新请求；移动底栏沿用
+上一章的 `第 1/9 页`。工具栏“重新载入章节”在 3 视口都正常，与上游刷新一致。判定：错误页标题、`获取章节内容失败！`、失败提示、
+stale 文案、按钮被点击层遮挡与触摸穿透（P0）、内联按钮的可达性与文字、连续模式目标章失败、目录失败的页面与重试、页码进度均为
+**`must-fix`**；正文内“重新加载”按钮沿用连续合同“明确重试入口”的签收理由判 `acceptable-change`；原因取后端脱敏消息、纯文本
+渲染、不复现上游目录请求出错时的空白页和工具栏刷新抛错，均为 `acceptable-change`；英文稳定消息是否改成中文记为 **`unknown`，
+需要用户决定 D1**。运行标题、标签页标题、点击翻页区设计、章末入口、加载器机制、加载中提示和后端 API 都不重开。测试计划：
+源码合同（标题、两行文字、按钮定位与三个 `.stop`）、错误文字纯函数、加载器提示与失败后重算布局、`handleTouchEnd` 忽略按钮、
+目录失败后重试整本书、连续窗口的目标章失败；新增错误面浏览器合同（鼠标与触摸分开跑，命中测试、真实指针、内联按钮三个位置、
+文案、目录失败），并给 EPUB 与连续合同补失败步骤。另记三条观察，不并入本切片：刷新正文的成功提示与服务端 refresh 语义；
+失败态进度载荷（本次第一次实测到 `5:第一章 起点`）；EPUB 内链后路由不同步。完整合同见
+[`reader-chapter-error-surface-fixed-baseline-second-audit-p0-contract.md`](reader-chapter-error-surface-fixed-baseline-second-audit-p0-contract.md)。
+2026-10-18 记录 R7（按钮可达与穿透隔离，合同第 11 节）：红测 `e497358`（两个“重新加载”的源码合同 4 条、`handleTouchEnd`
+单元 1 条、新增 `reader-error-surface-contract.mjs` 的 E2/E3 与 E5 相邻章部分、连续合同 `runFailureRetry` 的触摸与 1440×900
+下带变体）在 `0427dd4`（Reader 与已发布的 `186c762` 相同）上按盘点复现：新浏览器合同 18/30 失败，正好是 1440×900 鼠标与两种
+手机触摸的全部用例，窄视口鼠标 12 组通过；连续合同的两个新变体失败；单元 793 条中只有新增 5 条失败。实现 `a6af2d6` 给两个
+按钮加 `position: relative; z-index: 3`（同章末 `加载下一章`：高于点击层 2、低于调暗层 4）和 `@click.stop @touchstart.stop
+@touchend.stop`，`handleTouchEnd` 对控件目标不做点击判定（与 `handleContentClick` 同一选择器）；点击层分区、映射和设备差异
+不变。修复后新合同 30/30、连续合同全部通过，frontend 793/793 与 build 通过，reader-mobile、text-modes、audio、epub、
+reauthentication 与 openreader-smoke 对照通过。七项临时变异中，去掉定位以及同时去掉 `.stop` 与触摸判断时浏览器按预期变红；
+只去掉其中一层时另一层仍能挡住穿透，浏览器不变，由源码合同或单元变红守住。附带：手机触摸音频播放键不再切换工具层
+（向上游靠拢）；桌面工作区面板打开时露出的“重新加载”与章末入口一样点中按钮、不关面板，记为合同第 10 节第 4 条另行裁决。
+R7 状态为 **implementation-complete / regression-validated**；R1–R6、R8 仍为 **contract-only**，D1 待用户决定。
+2026-10-18 发布：合并提交 `238e3f3` 快进 main，可信 Actions `39125862052` 成功，`238e3f3`/`latest` 指向 index
+`sha256:f45c8995a47c7ce696c07600533e620bf68b5b4e8df77d684539bb823afca4cf`，两平台前端产物与本地同提交 build 逐字节一致；
+R7 **released / awaiting-device-verification**，生产未操作。
+
+## 2026-10-17 P0 Reader 运行标题加载中与失败时的章节名盘点
+
+固定上游只有一个 `this.title`，同时驱动 mini 顶栏、非连续模式的正文 `<h3>` 和标签页标题。`getContent` 在请求正文之前
+就把它写成目标章目录标题（`Reader.vue` L1038–1040），正文失败不回退，迟到响应按 `bookUrl`/`index` 丢弃；EPUB 内链和
+连续滚动跨章在同一个同步块里写 index 和标题；连续模式的上一章/下一章、正文搜索和书签跳转把 index 和标题一起推迟到新章
+可见之后。当前运行标题的序号取 `currentIndex`（加载器开始时就写），章节名取已提交的 `chapter`（正文成功后才写，失败不写）。
+用本地 Go 服务加生产前端在 1440×900、390×844、360×800 复现：文本四种模式切章加载中显示 `第 2 章 第一章 起点`，正文 500
+之后一直是 `第 5 章 第二章 延迟`，重新加载期间不变；目录跳转和 EPUB 内链（`第 3 章 第一章（下）`）相同；目标已在缓存时也有
+1–4ms 的混合中间值；Reader 内换书显示“新书序号 + 旧书章节名”，新书正文失败时一直保留；没有 `chapter` 参数的首次进入先显示
+`第 1 章`。被取代的迟到请求不回写，与上游一致。判定：加载中、失败、重新加载、EPUB 内链、换书、目录替换和首次进入时的
+章节名均为 **`must-fix`**；目录越界时截断、连续模式“开始即换”的时机为 `acceptable-change`（运行时适配）。目标：章节名取
+`currentIndex` 对应的目录行，目录行未知时为空，导航开始即整体切换、失败不回退、不跨书拼接，并与标签页标题同源。序号格式、
+桌面/移动显示、几何和计数裁决都不重开；运行标题合同第 3 条“也在章节事务完成后更新”这句不是用户要求的措辞，按上游重新裁决。
+测试计划：改写 `readerTextModeFrameContract.test.mjs` 里固定 `chapter.value?.title` 的派生断言，新增纯函数和加载事务单元合同，
+新增用 MutationObserver 记录每个中间值的浏览器合同，并在 EPUB 合同的跨 XHTML 步骤里加延迟断言。另记三条观察，不并入本切片：
+1440×900 错误块的“重新加载”被点击层盖住；正文错误块没有章节标题；失败状态下的进度载荷可能不一致。完整合同见
+[`reader-running-title-load-failure-fixed-baseline-second-audit-p0-contract.md`](reader-running-title-load-failure-fixed-baseline-second-audit-p0-contract.md)。
+当前状态为 **contract-only**：产品代码和测试都没有改。
+
+## 2026-10-16 P0 Reader/首页 浏览器标签页标题盘点
+
+固定上游只有两个视图写 `document.title`：Index 在 `mounted`/`activated` 设为 `阅读`（首屏 `<title>` 也是 `阅读`）；
+Reader 在 `activated` 和 `watch.title` 设为 `书名 - 章节名`，章节名为空时只用书名。章节名是原始目录标题，导航开始时
+就换成目标章，正文失败也不回退；连续滚动跨章和 EPUB 内链同样更新。Reader `deactivated` 不恢复标题，回到 Index 时由
+Index 设回 `阅读`。登录是盖在当前视图上的对话框，不改标题；书源调试是独立静态页，标题 `Reader书源编辑器`。OpenReader
+没有任何代码写 `document.title`，所有路由和状态都是 `index.html` 的 `OpenReader`。判定：Reader 标题、切章更新、离开
+Reader 时恢复为 **`must-fix`**；书源调试需要独立标题，也是 `must-fix`；认证阻断时恢复为壳标题，是多用户隔离的
+`acceptable-change`；不复现上游的 `undefined` 书名、陈旧书名、简繁切换后的临时转换和空白章节名，均为
+`acceptable-change`。首页、首屏、登录页和书源调试标题的文字取决于产品名用 `阅读` 还是 `OpenReader`：查遍提交历史、
+docs 和交接文档都没有用户决定（侧栏在 `bd8afe5` 改回了 `阅读`，`<title>`、登录页和 manifest 仍是 `OpenReader`），
+记为 **`unknown`，需要用户决定 D1**。测试计划：新增纯函数和组合函数的单元合同，以及“只有一个写入点”的源码合同；
+新增标签页标题浏览器合同（切章、失败章、换书中间态、返回书架、后退、认证阻断、登录页、书源调试新标签页、远程阅读），
+并在连续阅读、EPUB、重新认证和书源调试合同里补标题断言。壳标题从 `index.html` 读取，所以 Reader 部分不必等 D1。
+另记一条观察：运行标题在加载中和切章失败时可能显示“新序号 + 旧章节名”，没有复现，不并入本切片。完整合同见
+[`browser-document-title-fixed-baseline-second-audit-p0-contract.md`](browser-document-title-fixed-baseline-second-audit-p0-contract.md)。
+合同 `c8ebd30` 先独立提交，之后在 `claude/xenodochial-carson-5004c3` 上以桌面计数切片 `9839270` 为基线
+cherry-pick 为 `c75e730`。2026-10-17 完成 Reader 部分（第 7.1 节）：红测 `377e8b8` 新增 17 条单元合同（纯函数、
+组合函数、Reader 接线与“只有一个写入点”）和标签页标题浏览器合同（每个视口三个流程：切章、目录跳转、空和只有空白的
+章节名、失败章、面板、书架换书时挂起新书目录、回首页、后退、401 阻断后同账号重新登录、远程临时阅读），并在连续阅读、
+EPUB、重新认证合同里补了标题断言。旧实现上 17 条单元全部失败（frontend 788/805），浏览器合同都在第一处标题等待处
+得到 `OpenReader`。实现 `4a0aae8` 新增 `utils/documentTitle.js`（唯一写入点）和 `useReaderDocumentTitle`，`Reader.vue`
+只加一次调用：标题由当前书、`currentIndex` 处的目录行派生，目录行的 `bookId` 与 `book.id` 不一致（换书的中间态）时
+只显示书名，Reader 卸载时恢复壳标题。frontend 805/805 与 build 通过；本地 Go 服务加生产前端上，新合同三视口、EPUB
+三视口、连续阅读四视口、重新认证四视口全部通过，移动端、文本模式、首页工作台、远程阅读、换源、音频、CBZ、书源调试
+对照通过；
+六项临时变异（组合函数不写、`Reader.vue` 不调用、只靠首页恢复壳标题、改用已提交的章节名、加序号、去掉同书校验）
+都按预期变红。另记一条观察：书架换书时，新书目录返回前会按旧目录长度为新书预加载正文，与标题无关，建议另行盘点。
+当前状态：Reader 部分 **implementation-complete / regression-validated**；首页、首屏、登录页与书源调试仍是
+**contract-only**，等用户决定 D1。实现改了 `frontend/**`，合入 main 会触发镜像发布，由用户决定；提交只在本地，未推送，
+没有新镜像，生产未动。
+
+发布（2026-10-17）：经用户确认快进合入，main 为 `2528d9c`；可信 Actions `39039046891` 成功，`2528d9c`/`latest` 指向 index
+`sha256:18b6c2992d9ef02bb89474186501afa8c9f72b3575bf60cfab1ba2d7ac9121fa`，两平台按 digest 核验前端产物与本地同提交 build
+逐字节一致。桌面计数与 EPUB 移动端合同随同一提交进入 main。Reader 部分 **released / awaiting-device-verification**，
+D1 仍待决定；生产未操作。
+
+## 2026-10-16 P0 Reader 桌面运行标注盘点
+
+固定上游桌面 `.top-bar` 渲染空字符串（`Reader.vue` L227–229，桌面样式只是一条 44px 空白），模板不引用 `catalog`
+或 `chapterIndex`。桌面上能看到当前章节的地方只有正文开头的 `<h3>` 和浏览器标签页标题 `书名 - 章节名`，书级进度
+只有右栏 `N%`。当前桌面页头左侧显示 `第 N 章 章节名`，右侧显示 `N / total`。查了全部本地分支历史、docs 和交接
+文档：运行序号与标题有“用户明确要求桌面和移动都显示”的书面记录（`9b96c50`、桌面分页合同第 28 行），判为
+`acceptable-change`，不重开；`N / total` 来自初始提交 `131d3f8` 的自有页头，之后只是被沿用，找不到用户要求，
+判为 **`must-fix`**：所有视口的页头只保留运行标题，可见或隐藏的计数都不允许。另发现 OpenReader 从不设置
+`document.title`，与上游 `书名 - 章节名` 不同，记为另行盘点的 `must-fix`，不并入本切片。测试计划：重写单元合同的
+“retain desktop count”断言和 EPUB 合同桌面分支的 `3 / 3` 等待，并在连续阅读合同里加“页头文本只等于运行标题”，
+这些断言在当前实现的桌面视口上应失败。完整合同见
+[`reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md`](reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md)。
+合同 `4092ea2` 先独立提交。红测 `4897a62` 按测试计划改写三处断言，在当前实现上：单元合同在 `:114` 失败
+（frontend 787/788）；EPUB 1440×900 在 `:737` 失败，页头实际为 `第 3 章 第二章3 / 3`，此前新增的桌面右栏 `N%`
+控制已通过；连续阅读合同 1440×900 与 1024×1366 的 scroll/scroll2 都在 `:178` 失败，页头多出 `1 / 6`；390×844、
+360×800 照常通过。实现 `035762d` 只删掉 `Reader.vue` 的计数 span 和 `chapterLabel`（2 行）。本地 Go 服务加生产
+前端上，EPUB 三视口、连续阅读四视口、text-modes 与 mobile 合同全部通过，frontend 788/788 与 build 通过。三项
+临时变异（桌面用内联表达式重新渲染计数、计数作为隐藏元素留在页头外、桌面不渲染页头）都按预期变红。当前状态为
+**implementation-complete / regression-validated**。实现改了 `frontend/**`，合入 main 会触发镜像发布，由用户
+决定；提交只在本地，未推送，没有新镜像，生产未动。
+
+## 2026-10-16 P0 Reader EPUB 移动端章节计数合同裁决
+
+对已发布 `186c762` 做三视口回归时，`reader-epub-contract.mjs:710` 在 390×844 与 360×800 等待 `3 / 3`
+超时，1440×900 通过。固定上游 `Reader.vue` 模板不引用 `catalog` 或 `chapterIndex`：mini top-bar 只显示
+当前章节 `title`，移动端进度只有 `第 x/y 页` 和 `阅读进度: N%`，任何视口都没有章节 `N / M` 计数。当前
+Reader 自 `e1631d0` 起与此一致；旧断言之前能通过，是因为 mini 头部虽被 `display: none` 隐藏，计数文本仍在
+DOM 中。裁决为测试合同 `must-fix`：移动端改为断言运行标题 `第 3 章 第二章` 可见且没有章节计数，桌面
+`3 / 3` 保持；Reader 产品代码不改。桌面计数相对上游空 top-bar 的分类记为 `unknown`，另行盘点。完整合同见
+[`reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md`](reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md)。
+合同 `5361e68` 先独立提交。红测 `0eb183d` 先让新的移动端上游控制通过，再在 390/360 上于同一 `3 / 3` 等待处
+复现超时。`41fd3e6` 把该等待原样限定为桌面，移动端改为“页头只有运行标题、没有章节计数”后，本地 Go 服务加生产
+前端的三视口全部通过。三项临时变异（mini 渲染计数、运行标题序号滞后、mini 隐藏页头）都按预期变红；frontend
+788/788 与 build 通过。当前状态为 **implementation-complete / regression-validated**；产品代码无改动，不产生新镜像。
+
 ## 2026-08-12 P2 用户配置写入请求边界第二轮
 
 固定上游 `saveUserConfig/getUserConfig` 认证后保存当前终端四项 localStorage 配置 object；OpenReader 已

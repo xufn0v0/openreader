@@ -1,14 +1,19 @@
 package engine
 
 import (
+	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"openreader/backend/services/rootedfs"
 )
 
 type ArchivedBook struct {
@@ -55,33 +60,67 @@ type ArchivedBookSource struct {
 
 var unsafePathChars = regexp.MustCompile(`[\\/:*?"<>|\r\n\t]+`)
 
+// Nil outside deterministic allocation ownership tests. Observe the selected
+// name before the legacy mkdir/write; this seam does not change admission.
+var archiveDirectorySelectedTestHook func(parent, name string)
+var archiveDirectoryCreatedTestHook func(directory string)
+
 func ArchiveImportedBook(libraryDir, userName, title, author, originalFilename string, data []byte) (ArchivedBook, error) {
+	archive, tree, err := OpenImportedBookArchive(context.Background(), libraryDir, userName, title, author, originalFilename, data)
+	if err != nil {
+		return ArchivedBook{}, err
+	}
+	defer tree.Close()
+	tree.Keep()
+	return archive, nil
+}
+
+// OpenImportedBookArchive transfers original archive ownership to the importer.
+// Keep only after the whole item commits; failed Close never removes by pathname.
+func OpenImportedBookArchive(ctx context.Context, libraryDir, userName, title, author, originalFilename string, data []byte) (archive ArchivedBook, tree *rootedfs.OwnedTree, returnErr error) {
 	userName = SafeFilename(userName)
 	if userName == "" {
 		userName = "default"
 	}
 	parentDirectory := filepath.Join("data", userName)
 	folderName := SafeBookFolderName(title, author)
-	directoryName, err := uniqueDirectory(filepath.Join(libraryDir, parentDirectory), folderName)
+	tree, err := rootedfs.OpenOwnedTree(ctx, libraryDir, parentDirectory)
 	if err != nil {
-		return ArchivedBook{}, err
+		return ArchivedBook{}, nil, err
+	}
+	defer func() {
+		if returnErr != nil {
+			_ = tree.Close()
+		}
+	}()
+	directoryName := folderName
+	for index := 2; ; index++ {
+		if archiveDirectorySelectedTestHook != nil {
+			archiveDirectorySelectedTestHook(filepath.Join(libraryDir, parentDirectory), directoryName)
+		}
+		err = tree.CreateRoot(directoryName)
+		if !errors.Is(err, os.ErrExist) {
+			break
+		}
+		separator := "_"
+		if strings.HasSuffix(folderName, "_") {
+			separator = ""
+		}
+		directoryName = fmt.Sprintf("%s%s%d", folderName, separator, index)
+	}
+	if err != nil {
+		return ArchivedBook{}, tree, err
 	}
 	directory := filepath.Join(parentDirectory, directoryName)
-	if err := os.MkdirAll(filepath.Join(libraryDir, directory), 0o755); err != nil {
-		return ArchivedBook{}, err
+	if archiveDirectoryCreatedTestHook != nil {
+		archiveDirectoryCreatedTestHook(tree.PathLabel())
 	}
-
-	originalFile := filepath.Join(directory, SafeFilename(originalFilename))
-	if err := os.WriteFile(filepath.Join(libraryDir, originalFile), data, 0o644); err != nil {
-		return ArchivedBook{}, err
+	fileName := SafeFilename(originalFilename)
+	if _, err := tree.Write(fileName, bytes.NewReader(data), int64(len(data))); err != nil {
+		return ArchivedBook{}, tree, err
 	}
-
-	return ArchivedBook{
-		Directory:    directory,
-		OriginalFile: originalFile,
-		TOCFile:      filepath.Join(directory, "chapters.json"),
-		SourceFile:   filepath.Join(directory, "bookSource.json"),
-	}, nil
+	return ArchivedBook{Directory: directory, OriginalFile: filepath.Join(directory, fileName),
+		TOCFile: filepath.Join(directory, "chapters.json"), SourceFile: filepath.Join(directory, "bookSource.json")}, tree, nil
 }
 
 func WriteBookSource(libraryDir string, archive ArchivedBook, source ArchivedBookSource) error {

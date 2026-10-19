@@ -3,7 +3,7 @@
 
   <div v-else-if="error" class="chapter-load-error">
     <p>{{ error }}</p>
-    <button type="button" @click="emit('reload')">重新加载</button>
+    <button type="button" @click.stop="emit('reload')" @touchstart.stop @touchend.stop>重新加载</button>
   </div>
 
   <ReaderEpubContent
@@ -57,7 +57,7 @@
       <div v-else-if="block.error" class="chapter-inline-error">
         <h3 data-pos="0">{{ block.title || '正文' }}</h3>
         <p data-pos="0" data-reader-block>{{ block.error }}</p>
-        <button type="button" @click.stop="emit('retry-block', block.index)">重新加载</button>
+        <button type="button" @click.stop="emit('retry-block', block.index)" @touchstart.stop @touchend.stop>重新加载</button>
       </div>
       <template v-else>
         <h3 v-if="!block.hideTitle" data-pos="0">{{ block.title || '正文' }}</h3>
@@ -334,6 +334,13 @@ p {
 
 .chapter-inline-error p {
   color: inherit;
+}
+
+/* Like .reader-chapter-end: above the desktop tap zones, below the dimming layer. */
+.chapter-load-error button,
+.chapter-inline-error button {
+  position: relative;
+  z-index: 3;
 }
 
 .chapter-load-error button {

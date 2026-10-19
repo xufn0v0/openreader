@@ -4,7 +4,7 @@
 
 轻量级、自部署、多端同步的小说阅读器，支持在线书源、本地书导入、WebDAV、RSS，并持续对齐 reader-dev 的阅读体验。
 
-![Go 1.24+](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)
+![Go 1.26.9+](https://img.shields.io/badge/Go-1.26.9+-00ADD8?logo=go)
 ![Vue 3.5](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vue.js)
 ![SQLite WAL](https://img.shields.io/badge/SQLite-WAL-brightgreen)
 ![项目状态：WIP](https://img.shields.io/badge/status-WIP-F59E0B)
@@ -229,6 +229,8 @@ OpenReader 不读取容器中的 `HTTP_PROXY`、`HTTPS_PROXY` 或 `ALL_PROXY`。
 
 ### 本地开发
 
+源码构建需要 Go 1.26.9 或更新版本。使用 Docker 镜像的用户无需安装 Go，也无需在本机编译镜像。
+
 ```bash
 git clone https://github.com/changshengyu/openreader.git
 cd openreader
@@ -288,7 +290,7 @@ docker buildx imagetools inspect ghcr.io/changshengyu/openreader:latest
 
 | 层级 | 技术 |
 |---|---|
-| 后端 | Go 1.24、Gin、GORM、SQLite WAL |
+| 后端 | Go 1.26.9+、Gin、GORM、SQLite WAL |
 | 前端 | Vue 3.5、Vite、Pinia、Vue Router、Element Plus |
 | 实时通信 | Gorilla WebSocket |
 | 内容解析 | goquery、reader-dev/Legado 兼容适配器、本地格式解析器 |

@@ -9,6 +9,12 @@ import {
   shouldPreventReaderTouchMove,
 } from '../utils/readerInteraction.js'
 
+const READER_CONTROL_SELECTOR = 'button, a, input, textarea, select, [role="button"]'
+
+function isReaderControlTarget(target) {
+  return Boolean(target?.closest?.(READER_CONTROL_SELECTOR))
+}
+
 export function useReaderPointer(options) {
   const windowTarget = options.windowTarget ?? window
   const now = options.now ?? Date.now
@@ -103,8 +109,7 @@ export function useReaderPointer(options) {
     if (now() - handledTouchTapAt < 450) return
     if (options.consumeSuppressedContentClick()) return
     if (event.defaultPrevented || event.button !== 0) return
-    const target = event.target
-    if (target?.closest?.('button, a, input, textarea, select, [role="button"]')) return
+    if (isReaderControlTarget(event.target)) return
     const rect = page.getBoundingClientRect()
     tapPoint({
       rect,
@@ -190,6 +195,8 @@ export function useReaderPointer(options) {
       && !unref(options.isOverlayOpen)
       && unref(options.pageEl)
       && touch
+      // A tap on a control (such as 重新加载) belongs to the control, like a mouse click.
+      && !isReaderControlTarget(event.target)
     ) {
       const rect = unref(options.pageEl).getBoundingClientRect()
       tapPoint({

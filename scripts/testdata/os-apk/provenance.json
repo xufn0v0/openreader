@@ -1,0 +1,48 @@
+{
+  "publishedImage": {
+    "revision": "fc4692c474df30d1f0427cba57e7ebc67c91b156",
+    "index": "sha256:74ef48fd0c9f5547fff9787fb97763fff22e3500a376be05d5379f19dd8af765",
+    "note": "installed databases copied from the verified base layer of each published platform"
+  },
+  "secdb": {
+    "observed": "2026-10-16T08:15Z",
+    "main": {
+      "url": "https://secdb.alpinelinux.org/v3.23/main.json",
+      "lastModified": "Tue, 13 Oct 2026 20:35:17 GMT",
+      "sha256": "1f2de2155f995d32e5e0e5e937ff10d5848d272b80aabd737ba3d4b4dc76ccec",
+      "packages": 282,
+      "kept": [
+        "apk-tools",
+        "busybox",
+        "musl",
+        "openssl",
+        "zlib"
+      ]
+    },
+    "community": {
+      "url": "https://secdb.alpinelinux.org/v3.23/community.json",
+      "lastModified": "Fri, 09 Oct 2026 18:09:41 GMT",
+      "sha256": "96d0e5fc011fbae425ade3a9c8f8b9da2efb41498c72d9bea92da7a0daa928b9",
+      "packages": 461,
+      "kept": []
+    }
+  },
+  "apkindex": {
+    "x86_64": {
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/APKINDEX.tar.gz",
+      "sha256": "d25ac254e383d4ef00d77c47551972dfda9b6372a6a9b7ad6d9df7f2b3aeda7b",
+      "lastModified": "Fri, 16 Oct 2026 05:46:38 GMT",
+      "signature": ".SIGN.RSA.alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub",
+      "description": "v3.23.6-61-g95654076fb0",
+      "signatureVerified": true
+    },
+    "aarch64": {
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/APKINDEX.tar.gz",
+      "sha256": "c65d4f28636c329fa4f121427d8d14dadc1aae279bc988b72a66ff96cd0f8810",
+      "lastModified": "Fri, 16 Oct 2026 05:46:43 GMT",
+      "signature": ".SIGN.RSA.alpine-devel@lists.alpinelinux.org-616ae350.rsa.pub",
+      "description": "v3.23.6-61-g95654076fb0",
+      "signatureVerified": true
+    }
+  }
+}

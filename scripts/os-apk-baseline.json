@@ -1,0 +1,224 @@
+{
+  "schema": "openreader-os-apk-baseline/v1",
+  "baseImage": "alpine:3.23.6@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0",
+  "distribution": {
+    "id": "alpine",
+    "versionId": "3.23.6",
+    "secdb": "v3.23"
+  },
+  "repositories": [
+    "https://dl-cdn.alpinelinux.org/alpine/v3.23/main",
+    "https://dl-cdn.alpinelinux.org/alpine/v3.23/community"
+  ],
+  "world": [
+    "alpine-baselayout",
+    "alpine-keys",
+    "alpine-release",
+    "apk-tools",
+    "busybox",
+    "musl-utils",
+    "zlib=1.3.2-r1"
+  ],
+  "command": [
+    "/app/openreader"
+  ],
+  "buildTimeFixes": {
+    "zlib": {
+      "from": "1.3.2-r0",
+      "to": "1.3.2-r1",
+      "ids": [
+        "CVE-2026-85091"
+      ],
+      "aportsCommit": "b92621a82657b055485976b304462bddf9aa9183",
+      "index": "v3.23.6-61-g95654076fb0"
+    }
+  },
+  "platforms": {
+    "linux/amd64": {
+      "apkArch": "x86_64",
+      "packages": {
+        "alpine-baselayout": {
+          "version": "3.7.2-r0",
+          "origin": "alpine-baselayout",
+          "checksum": "Q1VFqm8pEgmviZMrdh2eQiwneFlsw="
+        },
+        "alpine-baselayout-data": {
+          "version": "3.7.2-r0",
+          "origin": "alpine-baselayout",
+          "checksum": "Q1hYFmMtvOB7p+nnpin6We3b0Wh/s="
+        },
+        "alpine-keys": {
+          "version": "2.6-r0",
+          "origin": "alpine-keys",
+          "checksum": "Q1XEWoIc1rhNVDu9f/EqfeGFXFzRM="
+        },
+        "alpine-release": {
+          "version": "3.23.6-r0",
+          "origin": "alpine-base",
+          "checksum": "Q1miIu5GtDJ2t+YH9m2rX6+RXROYQ="
+        },
+        "apk-tools": {
+          "version": "3.0.8-r0",
+          "origin": "apk-tools",
+          "checksum": "Q1+nqEIqu7teF5AzzuVFUSQAeBeyI="
+        },
+        "busybox": {
+          "version": "1.37.0-r30",
+          "origin": "busybox",
+          "checksum": "Q18TR4AbuWsapA0X+CI3w/T/AqRyU="
+        },
+        "busybox-binsh": {
+          "version": "1.37.0-r30",
+          "origin": "busybox",
+          "checksum": "Q1GI0tARCvpY6KPj5f1CSy2Zbfegk="
+        },
+        "ca-certificates-bundle": {
+          "version": "20260909-r0",
+          "origin": "ca-certificates",
+          "checksum": "Q1C38kuKcTv0u4ad43dQWlBAI5p7w="
+        },
+        "libapk": {
+          "version": "3.0.8-r0",
+          "origin": "apk-tools",
+          "checksum": "Q1KRMobR0CZB05Iom6UlhQvmhW3xE="
+        },
+        "libcrypto3": {
+          "version": "3.5.8-r0",
+          "origin": "openssl",
+          "checksum": "Q1xdIKUDa9EsUTBlKHkFS+ZYQpwdU="
+        },
+        "libssl3": {
+          "version": "3.5.8-r0",
+          "origin": "openssl",
+          "checksum": "Q1BxhIh0keD+/6VxhEGbE4dFAEe7k="
+        },
+        "musl": {
+          "version": "1.2.5-r23",
+          "origin": "musl",
+          "checksum": "Q1G2xQQm08BlbpxaVnpaWWAcf0MHo="
+        },
+        "musl-utils": {
+          "version": "1.2.5-r23",
+          "origin": "musl",
+          "checksum": "Q1kv2+ltJfE/46PSl62lbk+5B6rOw="
+        },
+        "scanelf": {
+          "version": "1.3.8-r2",
+          "origin": "pax-utils",
+          "checksum": "Q1bqNt1E759jZPDN+r4J6hXS/b4ik="
+        },
+        "ssl_client": {
+          "version": "1.37.0-r30",
+          "origin": "busybox",
+          "checksum": "Q1W27Ak5z8m+R9lnejFSxUfMGLXt0="
+        },
+        "zlib": {
+          "version": "1.3.2-r1",
+          "origin": "zlib",
+          "checksum": "Q1jut3bNPRHp/JoWp0GWNhtIWnnQE="
+        }
+      }
+    },
+    "linux/arm64": {
+      "apkArch": "aarch64",
+      "packages": {
+        "alpine-baselayout": {
+          "version": "3.7.2-r0",
+          "origin": "alpine-baselayout",
+          "checksum": "Q1QkUOKD6u7R2NPH0hNZLIoLCqxGI="
+        },
+        "alpine-baselayout-data": {
+          "version": "3.7.2-r0",
+          "origin": "alpine-baselayout",
+          "checksum": "Q1T7JfQG4z3Ng25B508cv6zEZtjmg="
+        },
+        "alpine-keys": {
+          "version": "2.6-r0",
+          "origin": "alpine-keys",
+          "checksum": "Q1ttok1Zot0OOAMgV+EWlX5I5y9DQ="
+        },
+        "alpine-release": {
+          "version": "3.23.6-r0",
+          "origin": "alpine-base",
+          "checksum": "Q1QWFIC5mh4GHIl0wQr2hIVJdfTvA="
+        },
+        "apk-tools": {
+          "version": "3.0.8-r0",
+          "origin": "apk-tools",
+          "checksum": "Q1WiNQYOdbMTbUkU6FA0UT1xWVsp4="
+        },
+        "busybox": {
+          "version": "1.37.0-r30",
+          "origin": "busybox",
+          "checksum": "Q1ikqlwHVQiBbHyd5Y5R6TMlf4pN8="
+        },
+        "busybox-binsh": {
+          "version": "1.37.0-r30",
+          "origin": "busybox",
+          "checksum": "Q1/YFiyYlIXezr4VKV5b+L7sCjd1o="
+        },
+        "ca-certificates-bundle": {
+          "version": "20260909-r0",
+          "origin": "ca-certificates",
+          "checksum": "Q1dD/z5PZ+8Th/D8GkYvcdlRqP95A="
+        },
+        "libapk": {
+          "version": "3.0.8-r0",
+          "origin": "apk-tools",
+          "checksum": "Q1swdmYlzMDgGdvj1w0ZwzAMX24Ro="
+        },
+        "libcrypto3": {
+          "version": "3.5.8-r0",
+          "origin": "openssl",
+          "checksum": "Q1NqpCMuLCrNtmk8S8hQAc1KnPoOc="
+        },
+        "libssl3": {
+          "version": "3.5.8-r0",
+          "origin": "openssl",
+          "checksum": "Q1hx3hzCQRsEq2apjgQ+k/GK+X15s="
+        },
+        "musl": {
+          "version": "1.2.5-r23",
+          "origin": "musl",
+          "checksum": "Q1htKIaEsBKo1P1SXDlnR87oYkBzM="
+        },
+        "musl-utils": {
+          "version": "1.2.5-r23",
+          "origin": "musl",
+          "checksum": "Q1tciDNWavSBIvy8D7i3Vju1wL+fc="
+        },
+        "scanelf": {
+          "version": "1.3.8-r2",
+          "origin": "pax-utils",
+          "checksum": "Q1n864lrGFcx4BDLQ3sfHVol7hNqw="
+        },
+        "ssl_client": {
+          "version": "1.37.0-r30",
+          "origin": "busybox",
+          "checksum": "Q1gy9qWYcbvxYTV3MWRqCzY5fVHes="
+        },
+        "zlib": {
+          "version": "1.3.2-r1",
+          "origin": "zlib",
+          "checksum": "Q1932/MXUWsUUsB2j59i8WBsgG3S0="
+        }
+      }
+    }
+  },
+  "modifiedFiles": {
+    "etc/shadow": {
+      "package": "alpine-baselayout-data",
+      "packageChecksum": "Q1miRFe6MuYCWAiVxqiFzhddegBq4=",
+      "checksum": "Q1/czoE9mjqif//PBxJtLeq/F8sFc=",
+      "reason": "the official alpine:3.23.6 rootfs rewrites account entries after installing alpine-baselayout-data"
+    }
+  },
+  "unlistedOrigins": {
+    "alpine-base": "no record in the v3.23 main/community secdb snapshot of 2026-10-13; unknown, not clean",
+    "alpine-baselayout": "no record in the v3.23 main/community secdb snapshot of 2026-10-13; unknown, not clean",
+    "alpine-keys": "no record in the v3.23 main/community secdb snapshot of 2026-10-13; unknown, not clean",
+    "ca-certificates": "no record in the v3.23 main/community secdb snapshot of 2026-10-13; unknown, not clean",
+    "pax-utils": "no record in the v3.23 main/community secdb snapshot of 2026-10-13; unknown, not clean"
+  },
+  "reviewUntil": "2026-11-16T00:00:00Z"
+}

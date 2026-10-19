@@ -21,6 +21,8 @@ type PrivateScope struct {
 	label           string
 	created         []*createdDirectory
 	keepDirectories bool
+	directoryMode   os.FileMode
+	fileMode        os.FileMode
 }
 
 // PrivateEntry records original identity OR original absence. Reading an opened
@@ -37,6 +39,10 @@ type PrivateEntry struct {
 var privateScopeDirectoryCreatedTestHook func(*os.File)
 
 func OpenPrivateScope(ctx context.Context, boundary, relative string, create bool) (*PrivateScope, error) {
+	return openFileScope(ctx, boundary, relative, create, 0o700, 0o600)
+}
+
+func openFileScope(ctx context.Context, boundary, relative string, create bool, directoryMode, fileMode os.FileMode) (*PrivateScope, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -84,7 +90,8 @@ func OpenPrivateScope(ctx context.Context, boundary, relative string, create boo
 		_ = handle.Close()
 		return nil, err
 	}
-	s := &PrivateScope{read: read, parent: read.directory, ctx: ctx, label: filepath.Join(configured, relative)}
+	s := &PrivateScope{read: read, parent: read.directory, ctx: ctx, label: filepath.Join(configured, relative),
+		directoryMode: directoryMode, fileMode: fileMode}
 	complete := false
 	defer func() {
 		if !complete {
@@ -109,7 +116,7 @@ func OpenPrivateScope(ctx context.Context, boundary, relative string, create boo
 				if err != nil {
 					return nil, err
 				}
-				if err := unix.Mkdirat(int(s.parent.file.Fd()), name, 0o700); err != nil {
+				if err := unix.Mkdirat(int(s.parent.file.Fd()), name, uint32(directoryMode.Perm())); err != nil {
 					return nil, err
 				}
 				stageInfo, err := s.parent.meta.Lstat(name)
@@ -345,7 +352,8 @@ func (s *PrivateScope) Child(name string, info os.FileInfo) (*PrivateScope, erro
 		_ = h.Close()
 		return nil, err
 	}
-	return &PrivateScope{read: read, parent: read.directory, ctx: s.ctx, label: filepath.Join(s.label, name), keepDirectories: true}, nil
+	return &PrivateScope{read: read, parent: read.directory, ctx: s.ctx, label: filepath.Join(s.label, name),
+		keepDirectories: true, directoryMode: s.directoryMode, fileMode: s.fileMode}, nil
 }
 
 // WriteNew exclusively owns the final name; unknown name replacements are never
@@ -357,7 +365,7 @@ func (s *PrivateScope) WriteNew(e *PrivateEntry, write func(io.Writer) error) (e
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	fd, err := unix.Openat(int(s.parent.file.Fd()), e.Name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0o600)
+	fd, err := unix.Openat(int(s.parent.file.Fd()), e.Name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, uint32(s.fileMode.Perm()))
 	if err != nil {
 		return writePublicationError(err)
 	}

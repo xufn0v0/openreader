@@ -145,7 +145,6 @@
     >
       <header v-if="showRunningChapterHeader" class="reader-page-head">
         <span class="reader-running-chapter-title">{{ runningChapterLabel }}</span>
-        <span v-if="!isMobileReader">{{ chapterLabel }}</span>
       </header>
 
       <article
@@ -426,6 +425,7 @@ import { useReaderChapterReady } from '../composables/useReaderChapterReady'
 import { isCBZBook, useReaderChapterPresentation } from '../composables/useReaderChapterPresentation'
 import { useReaderChapterWindow } from '../composables/useReaderChapterWindow'
 import { useReaderChrome } from '../composables/useReaderChrome'
+import { useReaderDocumentTitle } from '../composables/useReaderDocumentTitle'
 import { useReaderExternalUpdates } from '../composables/useReaderExternalUpdates'
 import { epubChapterIndexForResourceURL } from '../composables/useReaderEpubFrame'
 import { useReaderLayout } from '../composables/useReaderLayout'
@@ -545,6 +545,7 @@ const readerBookDeleted = ref(false)
 const chapters = ref([])
 const chapter = ref(null)
 const currentIndex = ref(Number(route.query.chapter || 0))
+useReaderDocumentTitle({ book, chapters, currentIndex })
 const isNightTheme = computed(() => reader.themeType === 'night')
 const {
   cacheKey: readerDataCacheKey,
@@ -1422,7 +1423,6 @@ function formatRunningChapterLabel(index, title) {
   return normalizedTitle ? `${ordinal} ${normalizedTitle}` : ordinal
 }
 
-const chapterLabel = computed(() => `${currentIndex.value + 1} / ${chapters.value.length || 1}`)
 const runningChapterLabel = computed(() => formatRunningChapterLabel(currentIndex.value, chapter.value?.title))
 const showRunningChapterHeader = computed(() => !isAudioChapter.value && !isCBZBook(book.value))
 const isMobileReader = computed(() => shouldUseMiniInterface(reader.pageMode, windowWidth.value))

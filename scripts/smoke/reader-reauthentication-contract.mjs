@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 import { openSmokeBrowser } from './playwright-runtime.mjs'
+import { readShellDocumentTitle, waitForDocumentTitle } from './document-title.mjs'
 
 const targetUrl = (process.env.TARGET_URL || 'http://127.0.0.1:4173').replace(/\/$/, '')
 const privateTitle = '用户 A 的私有阅读书籍'
 const privateParagraph = '用户 A 的私有正文在认证失效后必须立即从页面移除。'
+// The tab uses the catalog row title (第一章), not the content response title (第1章).
+const privateReaderTitle = `${privateTitle} - 第一章`
+const shellTitle = readShellDocumentTitle()
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -39,6 +43,12 @@ function authorizationToken(request) {
 
 function userForToken(token, state) {
   return token === state.tokenB ? state.userB : state.userA
+}
+
+async function assertShellTitle(page, label) {
+  const title = await page.evaluate(() => document.title)
+  assert(!title.includes(privateTitle), `${label}: tab title exposes the private book name ${JSON.stringify(title)}`)
+  assert(title === shellTitle, `${label}: tab title ${JSON.stringify(title)} should be the shell ${JSON.stringify(shellTitle)}`)
 }
 
 async function installApiMocks(page, state) {
@@ -136,8 +146,8 @@ async function installApiMocks(page, state) {
     if (path === '/books/2') return route.fulfill(json(bookB))
     if (path === '/books/1/chapters') {
       return route.fulfill(json([
-        { id: 11, index: 0, title: '第一章' },
-        { id: 12, index: 1, title: '第二章' },
+        { id: 11, bookId: 1, index: 0, title: '第一章' },
+        { id: 12, bookId: 1, index: 1, title: '第二章' },
       ]))
     }
     if (/^\/books\/1\/chapters\/\d+\/content$/.test(path)) {
@@ -201,6 +211,7 @@ async function openReader(browser, viewport) {
   )
   await page.waitForSelector('.reader-body [data-reader-block]', { timeout: 15_000 })
   await page.getByText(privateParagraph, { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
+  await waitForDocumentTitle(page, privateReaderTitle, `${viewport.width}: Reader tab title`)
   return {
     context,
     errors,
@@ -216,6 +227,7 @@ async function assertExplicitLogout(browser, viewport) {
     await session.page.goto(targetUrl, { waitUntil: 'networkidle' })
     await session.page.getByText(privateTitle, { exact: true })
       .waitFor({ state: 'visible', timeout: 10_000 })
+    await assertShellTitle(session.page, `${viewport.width}: home before explicit logout`)
     if (viewport.width <= 750) {
       await session.page.locator('.mobile-menu-trigger').click()
       await session.page.waitForFunction(() => document.querySelector('.app-shell')?.classList.contains('mobile-nav-open'))
@@ -236,6 +248,7 @@ async function assertExplicitLogout(browser, viewport) {
       await session.page.getByText(privateTitle, { exact: true }).count() === 0,
       `${viewport.width}: explicit logout retained private shelf content`,
     )
+    await assertShellTitle(session.page, `${viewport.width}: login page after explicit logout`)
 
     await session.page.getByPlaceholder('请输入用户名').fill('same-user')
     await session.page.getByPlaceholder('请输入密码').fill('password')
@@ -247,6 +260,7 @@ async function assertExplicitLogout(browser, viewport) {
       await session.page.evaluate(token => localStorage.getItem('openreader_token') === token, session.state.tokenARenewed),
       `${viewport.width}: explicit logout relogin did not persist the renewed token`,
     )
+    await assertShellTitle(session.page, `${viewport.width}: home after explicit logout relogin`)
     assert(session.errors.length === 0, `${viewport.width}: ${session.errors.join('\n')}`)
   } finally {
     await session.context.close()
@@ -275,6 +289,7 @@ async function invalidateReader(session, viewport) {
   assert(await page.locator('.reader-body [data-reader-block]').count() === 0, `${viewport.width}: private paragraphs remained mounted`)
   assert(await page.getByText(privateTitle, { exact: true }).count() === 0, `${viewport.width}: private book title remained visible`)
   assert(await page.getByText(privateParagraph, { exact: true }).count() === 0, `${viewport.width}: private text remained visible`)
+  await assertShellTitle(page, `${viewport.width}: invalidated Reader`)
   assert(await page.locator('.auth-dialog .el-dialog__headerbtn').count() === 0, `${viewport.width}: invalid-session dialog exposed a close button`)
 
   await page.keyboard.press('Escape')
@@ -310,6 +325,7 @@ async function assertSameAccount(browser, viewport) {
     await session.page.getByText(privateParagraph, { exact: true })
       .waitFor({ state: 'visible', timeout: 10_000 })
     assert(session.page.url() === session.readerURL, `${viewport.width}: same-account login did not preserve Reader URL`)
+    await waitForDocumentTitle(session.page, privateReaderTitle, `${viewport.width}: same-account relogin restores the Reader tab title`)
     if (viewport.width <= 750) {
       assert(
         await session.page.locator('.reader-mobile-top.visible').count() === 1,
@@ -337,6 +353,7 @@ async function assertDifferentAccount(browser, viewport) {
     assert(await session.page.locator('.reader-shell').count() === 0, `${viewport.width}: different account retained Reader`)
     assert(await session.page.getByText(privateTitle, { exact: true }).count() === 0, `${viewport.width}: different account exposed old title`)
     assert(await session.page.getByText(privateParagraph, { exact: true }).count() === 0, `${viewport.width}: different account exposed old text`)
+    await assertShellTitle(session.page, `${viewport.width}: different account home`)
     const staleWrites = session.state.progressWrites
       .filter(write => write.token === session.state.tokenA)
     assert(staleWrites.length === 0, `${viewport.width}: different-account flow wrote old progress`)

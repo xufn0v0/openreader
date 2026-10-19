@@ -15,6 +15,14 @@ on:
       - scripts/smoke/store-read-list-lifecycle-contract.mjs
       - scripts/smoke/webdav-protocol-contract.sh
       - scripts/smoke/local-store-directory-lifecycle-contract.mjs
+      - scripts/check-go-advisories.mjs
+      - scripts/check-go-advisories.test.mjs
+      - scripts/check-frontend-advisories.mjs
+      - scripts/check-frontend-advisories.test.mjs
+      - scripts/check-os-advisories.mjs
+      - scripts/check-os-advisories.test.mjs
+      - scripts/os-apk-baseline.json
+      - scripts/testdata/os-apk/**
   workflow_dispatch:
 
 permissions:
@@ -70,6 +78,21 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Test Go advisory gate precision and failure handling
+        run: node --test scripts/check-go-advisories.test.mjs
+
+      - name: Check Go source advisories with explicit applicability evidence
+        run: node scripts/check-go-advisories.mjs
+
+      - name: Test complete-lock frontend advisory gate
+        run: node --test scripts/check-frontend-advisories.test.mjs
+
+      - name: Check frontend advisories including development dependencies
+        run: node scripts/check-frontend-advisories.mjs
+
+      - name: Test OS APK advisory gate precision and failure handling
+        run: node --test scripts/check-os-advisories.test.mjs
+
       - name: Test frontend
         working-directory: frontend
         run: npm test
@@ -107,6 +130,27 @@ jobs:
           cache-from: type=gha,scope=openreader-docker
           cache-to: type=gha,mode=max,scope=openreader-docker
 
+      # The OS gate must see both published platforms before anything is pushed.
+      - name: Build arm64 validation image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-contexts: |
+            go_vendor=${{ runner.temp }}/openreader-go-vendor
+          platforms: linux/arm64
+          load: true
+          push: false
+          tags: openreader-ci-arm64:${{ github.sha }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.short_sha }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.metadata.outputs.build_date }}
+          cache-from: type=gha,scope=openreader-docker-arm64
+          cache-to: type=gha,mode=max,scope=openreader-docker-arm64
+
+      - name: Check runtime APK packages against official Alpine secdb on both platforms
+        run: node scripts/check-os-advisories.mjs openreader-ci:${{ github.sha }} openreader-ci-arm64:${{ github.sha }}
+
       - name: Validate fresh volumes and portable backups
         env:
           IMAGE: openreader-ci:${{ github.sha }}
@@ -141,7 +185,9 @@ jobs:
             VERSION=${{ steps.metadata.outputs.short_sha }}
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ steps.metadata.outputs.build_date }}
-          cache-from: type=gha,scope=openreader-docker
+          cache-from: |
+            type=gha,scope=openreader-docker
+            type=gha,scope=openreader-docker-arm64
           cache-to: type=gha,mode=max,scope=openreader-docker
 
       - name: Verify published platforms

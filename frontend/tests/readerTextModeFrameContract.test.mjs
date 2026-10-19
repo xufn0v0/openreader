@@ -113,8 +113,18 @@ test('mobile vertical text restores the upstream document scroll surface', () =>
 test('reader exposes the current chapter number and title in the upstream running header', () => {
   assert.match(
     readerSource,
-    /<header\s+v-if="showRunningChapterHeader"\s+class="reader-page-head">[\s\S]*?class="reader-running-chapter-title">\{\{ runningChapterLabel \}\}<\/span>[\s\S]*?<span v-if="!isMobileReader">\{\{ chapterLabel \}\}<\/span>/,
-    'the running header must show the active chapter label and retain desktop count',
+    /<header\s+v-if="showRunningChapterHeader"\s+class="reader-page-head">\s*<span class="reader-running-chapter-title">\{\{ runningChapterLabel \}\}<\/span>\s*<\/header>/,
+    'the running header shows only the running chapter label on every viewport',
+  )
+  assert.doesNotMatch(
+    readerSource,
+    /\{\{\s*chapterLabel\s*\}\}/,
+    'fixed upstream reader renders no chapter N / total counter anywhere in the template',
+  )
+  assert.doesNotMatch(
+    readerSource,
+    /const chapterLabel = computed/,
+    'the unused chapter counter computed must be removed so it cannot be rendered again',
   )
   assert.match(
     readerSource,

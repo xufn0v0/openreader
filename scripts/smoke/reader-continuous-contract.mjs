@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { openSmokeBrowser } from './playwright-runtime.mjs'
+import { waitForDocumentTitle } from './document-title.mjs'
 
 const targetUrl = process.env.TARGET_URL || 'http://127.0.0.1:5173'
 const readerUrl = process.env.SMOKE_READER_URL || `${targetUrl.replace(/\/$/, '')}/books/1/read?chapter=0`
@@ -76,6 +77,7 @@ async function installMocks(page, requestCounts, progressWrites, options = {}) {
     if (path === '/books/1/chapters') {
       return route.fulfill(json(Array.from({ length: 6 }, (_, index) => ({
         id: index + 11,
+        bookId: 1,
         index,
         title: chapterTitle(index),
       }))))
@@ -122,7 +124,7 @@ function collectFailures(page) {
 }
 
 async function openReader(browser, viewport, options = {}) {
-  const context = await browser.newContext({ viewport })
+  const context = await browser.newContext(options.touch ? { viewport, isMobile: true, hasTouch: true } : { viewport })
   await context.addInitScript(({ mode, token }) => {
     localStorage.setItem('openreader_token', token)
     localStorage.setItem('reader', JSON.stringify({
@@ -163,7 +165,9 @@ async function runContinuousViewport(browser, viewport, mode) {
         indexes: [...document.querySelectorAll('.chapter-content')].map(element => Number(element.dataset.index)),
         headerPosition: window.getComputedStyle(header).position,
         headerPointerEvents: window.getComputedStyle(header).pointerEvents,
+        headerText: header.textContent.trim(),
         runningTitle: runningTitle.textContent.trim(),
+        documentTitle: document.title,
         runningTitleLeft: runningTitleRect.left,
         runningTitleRight: runningTitleRect.right,
         headerRight: headerRect.right,
@@ -174,6 +178,8 @@ async function runContinuousViewport(browser, viewport, mode) {
     })
     assert(initial.indexes.join(',') === '0,1', `${viewport.width}: initial blocks ${initial.indexes}`)
     assert(initial.runningTitle === `第 1 章 ${chapterTitle(0)}`, `${viewport.width}: running title ${JSON.stringify(initial.runningTitle)}`)
+    assert(initial.headerText === initial.runningTitle, `${viewport.width}/${mode}: running header must contain only the running title ${JSON.stringify(initial.headerText)}`)
+    assert(initial.documentTitle === `连续跨章契约测试 - ${chapterTitle(0)}`, `${viewport.width}/${mode}: tab title ${JSON.stringify(initial.documentTitle)}`)
     assert(initial.headerPointerEvents === 'none', `${viewport.width}: running header intercepts input`)
     assert(initial.runningTitleLeft >= 0 && initial.runningTitleRight <= initial.headerRight + 1, `${viewport.width}: running title overflows header`)
     assert(initial.headerPosition === 'fixed', `${viewport.width}: running header position ${initial.headerPosition}`)
@@ -264,6 +270,7 @@ async function runContinuousViewport(browser, viewport, mode) {
     await page.waitForFunction(() => (
       document.querySelector('.reader-running-chapter-title')?.textContent?.startsWith('第 2 章')
     ))
+    await waitForDocumentTitle(page, '连续跨章契约测试 - 第 2 章', `${viewport.width}/${mode}: tab title after crossing into chapter 2`)
 
     await page.evaluate(() => {
       const element = document.querySelector('.reader-shell.document-scroll')
@@ -413,6 +420,7 @@ async function runProgressTransaction(browser) {
     await page.waitForFunction(() => (
       document.querySelector('.reader-running-chapter-title')?.textContent?.startsWith('第 3 章')
     ))
+    await waitForDocumentTitle(page, '连续跨章契约测试 - 第 3 章', 'progress transaction: tab title after crossing into chapter 3')
     await page.waitForTimeout(180)
     assert((requestCounts.get(3) || 0) === 1, `delayed extension request count ${requestCounts.get(3) || 0}`)
     await page.evaluate(() => {
@@ -439,14 +447,83 @@ async function runProgressTransaction(browser) {
   }
 }
 
-async function runFailureRetry(browser) {
-  const fixture = await openReader(browser, { width: 390, height: 844 }, { failOnceAt: 1 })
+// The mouse variant is the original 390x844 check. The banded variants press the inline 重新加载 with a
+// real pointer at 88% of the viewport: on a phone that is outside the center tap region, on the desktop it
+// is inside the lower tap zone (error surface contract R7).
+const FAILURE_RETRY_VARIANTS = [
+  { name: '390x844 mouse', viewport: { width: 390, height: 844 } },
+  { name: '390x844 touch at 88%', viewport: { width: 390, height: 844 }, touch: true, band: 0.88 },
+  { name: '1440x900 mouse at 88% (lower tap zone)', viewport: { width: 1440, height: 900 }, band: 0.88 },
+]
+
+async function placeInlineRetry(page, band) {
+  return page.evaluate((targetBand) => {
+    const button = document.querySelector('.chapter-inline-error button')
+    const usesDocumentScroll = document.querySelector('.reader-shell.document-scroll') !== null
+    const element = usesDocumentScroll
+      ? (document.scrollingElement || document.documentElement)
+      : document.querySelector('.reader-content')
+    const viewport = usesDocumentScroll
+      ? { top: 0, height: window.innerHeight }
+      : { top: element.getBoundingClientRect().top, height: element.clientHeight }
+    const rect = button.getBoundingClientRect()
+    element.scrollTop += rect.top + rect.height / 2 - (viewport.top + viewport.height * targetBand)
+    ;(usesDocumentScroll ? window : element).dispatchEvent(new Event('scroll'))
+  }, band)
+}
+
+async function readInlineRetryState(page) {
+  return page.evaluate(() => {
+    const button = document.querySelector('.chapter-inline-error button')
+    const usesDocumentScroll = document.querySelector('.reader-shell.document-scroll') !== null
+    const element = usesDocumentScroll
+      ? (document.scrollingElement || document.documentElement)
+      : document.querySelector('.reader-content')
+    const state = {
+      scrollTop: Math.round(element.scrollTop),
+      chromeVisible: Boolean(document.querySelector('.reader-mobile-top.visible')),
+    }
+    if (!button) return state
+    const rect = button.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    const hit = document.elementFromPoint(x, y)
+    return {
+      ...state,
+      x: Math.round(x),
+      y: Math.round(y),
+      hitIsTarget: Boolean(hit && (hit === button || button.contains(hit))),
+      hit: hit ? hit.tagName.toLowerCase() + [...hit.classList].map(name => `.${name}`).join('') : null,
+    }
+  })
+}
+
+async function runFailureRetry(browser, variant = FAILURE_RETRY_VARIANTS[0]) {
+  const fixture = await openReader(browser, variant.viewport, { failOnceAt: 1, touch: variant.touch })
   const { context, failures, page, requestCounts } = fixture
   try {
     await page.waitForSelector('.chapter-inline-error', { timeout: 10_000 })
     assert(await page.locator('.chapter-content[data-index="0"] [data-reader-block]').count() > 0, 'current chapter disappeared after adjacent failure')
     assert(await page.locator('.chapter-inline-error').innerText().then(text => text.includes('fixture adjacent chapter failure')), 'adjacent error is not visible')
-    await page.locator('.chapter-inline-error button').click()
+    if (variant.band === undefined) {
+      await page.locator('.chapter-inline-error button').click()
+    } else {
+      await placeInlineRetry(page, variant.band)
+      await page.waitForTimeout(350)
+      const before = await readInlineRetryState(page)
+      assert(before.hitIsTarget, `inline 重新加载 at (${before.x},${before.y}) hits ${before.hit}`)
+      if (variant.touch) await page.touchscreen.tap(before.x, before.y)
+      else await page.mouse.click(before.x, before.y)
+      await page.waitForFunction(() => (
+        !document.querySelector('.chapter-content[data-index="1"] .chapter-inline-error')
+        && document.querySelectorAll('.chapter-content[data-index="1"] [data-reader-block]').length > 1
+      ), null, { timeout: 10_000 }).catch(() => {})
+      const after = await readInlineRetryState(page)
+      const detail = `chapter 1 requests ${requestCounts.get(1) || 0}, scroll ${before.scrollTop} -> ${after.scrollTop}, tools ${before.chromeVisible} -> ${after.chromeVisible}`
+      assert(await page.locator('.chapter-inline-error').count() === 0, `retry did not replace adjacent error block (${detail})`)
+      assert(Math.abs(after.scrollTop - before.scrollTop) <= 2, `retry press also moved the reader (${detail})`)
+      assert(after.chromeVisible === before.chromeVisible, `retry press toggled the tool layer (${detail})`)
+    }
     await page.waitForFunction(() => (
       !document.querySelector('.chapter-content[data-index="1"] .chapter-inline-error')
       && document.querySelectorAll('.chapter-content[data-index="1"] [data-reader-block]').length > 1
@@ -474,8 +551,16 @@ async function main() {
       await runContinuousViewport(browser, viewport, 'scroll')
       await runContinuousViewport(browser, viewport, 'scroll2')
     }
-    await runFailureRetry(browser)
+    const retryFailures = []
+    for (const variant of FAILURE_RETRY_VARIANTS) {
+      try {
+        await runFailureRetry(browser, variant)
+      } catch (error) {
+        retryFailures.push(`${variant.name}: ${error.message.split('\n')[0]}`)
+      }
+    }
     await runProgressTransaction(browser)
+    assert(retryFailures.length === 0, `inline failure retry failed:\n${retryFailures.join('\n')}`)
     console.log('reader continuous contract smoke passed')
   } finally {
     await browser.close()

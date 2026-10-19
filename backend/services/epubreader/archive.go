@@ -3,13 +3,15 @@ package epubreader
 import (
 	"archive/zip"
 	"bytes"
-	"errors"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"openreader/backend/services/rootedfs"
 )
 
 type extractionLimits struct {
@@ -18,6 +20,10 @@ type extractionLimits struct {
 	MaxEntryBytes   int64
 	MaxTotalBytes   int64
 }
+
+// Nil outside lifecycle fixtures; called only after an actual entry write and
+// source close. It never changes ordinary archive parsing or I/O.
+var afterArchiveEntryTestHook func(destination, canonical string)
 
 func defaultExtractionLimits() extractionLimits {
 	return extractionLimits{
@@ -66,7 +72,26 @@ type archiveEntry struct {
 	isDir     bool
 }
 
-func extractZipReader(reader *zip.Reader, destination string, limits extractionLimits) (returnErr error) {
+func extractZipReader(reader *zip.Reader, destination string, limits extractionLimits) error {
+	tree, err := rootedfs.OpenOwnedTree(context.Background(), destination, ".")
+	if err != nil {
+		return err
+	}
+	defer tree.Close()
+	if err := extractZipReaderOwned(reader, tree, ".", limits); err != nil {
+		return err
+	}
+	tree.Keep()
+	return nil
+}
+
+func extractZipReaderOwned(reader *zip.Reader, tree *rootedfs.OwnedTree, prefix string, limits extractionLimits) error {
+	if err := tree.Validate(); err != nil {
+		return err
+	}
+	if limits.MaxEntryBytes < 0 || limits.MaxTotalBytes < 0 {
+		return ErrExtractionLimit
+	}
 	if len(reader.File) > limits.MaxEntries {
 		return fmt.Errorf("%w: too many archive entries", ErrExtractionLimit)
 	}
@@ -75,6 +100,9 @@ func extractZipReader(reader *zip.Reader, destination string, limits extractionL
 	seen := make(map[string]bool, len(reader.File))
 	var total uint64
 	for _, file := range reader.File {
+		if err := tree.Context().Err(); err != nil {
+			return err
+		}
 		canonical, err := normalizeArchivePath(file.Name)
 		if err != nil {
 			return err
@@ -120,46 +148,42 @@ func extractZipReader(reader *zip.Reader, destination string, limits extractionL
 		entries = append(entries, archiveEntry{file: file, canonical: canonical, isDir: isDir})
 	}
 
-	if err := os.RemoveAll(destination); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(destination, 0o755); err != nil {
-		return err
-	}
-	defer func() {
-		if returnErr != nil {
-			_ = os.RemoveAll(destination)
-		}
-	}()
-
+	var actualTotal int64
 	for _, entry := range entries {
-		target, err := extractionTarget(destination, entry.canonical)
-		if err != nil {
+		if err := tree.Context().Err(); err != nil {
 			return err
 		}
+		target := filepath.Join(prefix, filepath.FromSlash(entry.canonical))
 		if entry.isDir {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := tree.Mkdir(target); err != nil {
 				return err
 			}
 			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
 		}
 		opened, err := entry.file.Open()
 		if err != nil {
 			return err
 		}
-		writeErr := writeBoundedFile(target, opened, limits.MaxEntryBytes)
+		written, writeErr := tree.Write(target, opened, limits.MaxEntryBytes)
 		closeErr := opened.Close()
 		if writeErr != nil {
+			if writeErr == rootedfs.ErrWriteLimit {
+				return ErrExtractionLimit
+			}
 			return writeErr
 		}
 		if closeErr != nil {
 			return closeErr
 		}
+		if written > limits.MaxTotalBytes-actualTotal {
+			return ErrExtractionLimit
+		}
+		actualTotal += written
+		if afterArchiveEntryTestHook != nil {
+			afterArchiveEntryTestHook(filepath.Join(tree.PathLabel(), prefix), entry.canonical)
+		}
 	}
-	return nil
+	return tree.Validate()
 }
 
 func normalizeArchivePath(name string) (string, error) {
@@ -199,30 +223,18 @@ func extractionTarget(root, archivePath string) (string, error) {
 	return target, nil
 }
 
-func writeBoundedFile(target string, source io.Reader, maxBytes int64) (returnErr error) {
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+func writeBoundedFile(target string, source io.Reader, maxBytes int64) error {
+	tree, err := rootedfs.OpenOwnedTree(context.Background(), filepath.Dir(target), ".")
 	if err != nil {
 		return err
 	}
-	defer func() {
-		closeErr := file.Close()
-		if returnErr == nil && closeErr != nil {
-			returnErr = closeErr
+	defer tree.Close()
+	if _, err := tree.Write(filepath.Base(target), source, maxBytes); err != nil {
+		if err == rootedfs.ErrWriteLimit {
+			return ErrExtractionLimit
 		}
-		if returnErr != nil {
-			_ = os.Remove(target)
-		}
-	}()
-
-	written, err := io.Copy(file, io.LimitReader(source, maxBytes+1))
-	if err != nil {
 		return err
 	}
-	if written > maxBytes {
-		return fmt.Errorf("%w: archive entry exceeded size limit", ErrExtractionLimit)
-	}
-	if err := file.Sync(); err != nil && !errors.Is(err, os.ErrInvalid) {
-		return err
-	}
+	tree.Keep()
 	return nil
 }

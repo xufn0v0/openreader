@@ -10,7 +10,6 @@ import (
 
 	"openreader/backend/engine"
 	"openreader/backend/middleware"
-	"openreader/backend/models"
 	"openreader/backend/services/importstage"
 	"openreader/backend/services/localbook"
 )
@@ -111,25 +110,29 @@ func (s *Server) importTXT(c *gin.Context) {
 		return
 	}
 
-	importer := localbook.NewImporter(s.cfg, s.db)
+	importer := localbook.NewImporter(s.cfg, s.db).WithContext(c.Request.Context())
 	request := localbook.ImportRequest{
-		UserID:     userID,
-		UserName:   userName,
-		FileName:   fileName,
-		Extension:  ext,
-		Data:       data,
-		Title:      payload.title,
-		Author:     payload.author,
-		CategoryID: categoryID,
-		TOCRule:    payload.tocRule,
+		UserID:      userID,
+		UserName:    userName,
+		FileName:    fileName,
+		Extension:   ext,
+		Data:        data,
+		Title:       payload.title,
+		Author:      payload.author,
+		CategoryID:  categoryID,
+		CategoryIDs: categoryIDs,
+		TOCRule:     payload.tocRule,
 	}
-	var book models.Book
+	var result localbook.ImportedBook
 	if importToken != "" {
-		book, err = payload.stage.ImportBook(importer, request)
+		result, err = payload.stage.ImportBookResult(importer, request)
 	} else {
-		book, err = importer.Import(request)
+		result, err = importer.ImportResult(request)
 	}
 	if err != nil {
+		if writeLocalBookImportCancellation(c, err, importToken) {
+			return
+		}
 		if writeLocalImportStageCancellation(c, err, importToken) {
 			return
 		}
@@ -145,14 +148,31 @@ func (s *Server) importTXT(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to import book"})
 		return
 	}
-	if len(categoryIDs) > 0 {
-		_ = s.setBookCategories(s.db, userID, book.ID, categoryIDs)
-	}
 	if importToken != "" {
 		_ = payload.stage.Consume()
 	}
 
-	c.JSON(http.StatusCreated, s.broadcastBookShelfUpdate(userID, book))
+	c.JSON(http.StatusCreated, s.broadcastBookShelfUpdateWithCategoryIDs(userID, result.Book, result.CategoryIDs))
+}
+
+func writeLocalBookImportCancellation(c *gin.Context, err error, token string) bool {
+	if !errors.Is(err, localbook.ErrImportCanceled) {
+		return false
+	}
+	response := gin.H{"error": "local book import canceled"}
+	if validLocalImportToken(token) {
+		response["importToken"] = token
+	}
+	c.JSON(http.StatusInternalServerError, response)
+	return true
+}
+
+func storageBookImportError(err error) string {
+	if errors.Is(err, errInvalidLocalImportToken) || errors.Is(err, importstage.ErrPreparedWrite) ||
+		errors.Is(err, localbook.ErrUnsupportedFormat) || errors.Is(err, localbook.ErrParseFailed) {
+		return err.Error()
+	}
+	return "failed to import book"
 }
 
 func writeLocalImportError(c *gin.Context, err error) {
@@ -280,24 +300,25 @@ func (s *Server) reparseStagedStorageImport(ctx context.Context, userID uint, im
 	return preview, importToken, nil
 }
 
-func (s *Server) importStagedStorageBook(ctx context.Context, userID uint, userName string, importToken string, override localBookImportItem, categoryID *uint, importer localbook.Importer) (models.Book, error) {
+func (s *Server) importStagedStorageBook(ctx context.Context, userID uint, userName string, importToken string, override localBookImportItem, categoryID *uint, categoryIDs []uint, importer localbook.Importer) (localbook.ImportedBook, error) {
 	stage, err := s.localImportStages().Open(ctx, userID, importToken)
 	if err != nil {
-		return models.Book{}, err
+		return localbook.ImportedBook{}, err
 	}
 	defer stage.Close()
 	request := localbook.ImportRequest{
-		UserID:     userID,
-		UserName:   userName,
-		FileName:   stage.Metadata.FileName,
-		Extension:  stage.Metadata.Extension,
-		Data:       stage.Data,
-		Title:      override.Title,
-		Author:     override.Author,
-		CategoryID: categoryID,
-		TOCRule:    override.TOCRule,
+		UserID:      userID,
+		UserName:    userName,
+		FileName:    stage.Metadata.FileName,
+		Extension:   stage.Metadata.Extension,
+		Data:        stage.Data,
+		Title:       override.Title,
+		Author:      override.Author,
+		CategoryID:  categoryID,
+		CategoryIDs: categoryIDs,
+		TOCRule:     override.TOCRule,
 	}
-	book, err := stage.ImportBook(importer, request)
+	book, err := stage.ImportBookResult(importer, request)
 	if err == nil {
 		_ = stage.Consume()
 	}

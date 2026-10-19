@@ -1,5 +1,305 @@
 # OpenReader 全量上游复审矩阵
 
+## 2026-10-17 当前切片：Reader 正文加载失败错误面盘点
+
+见[`reader-chapter-error-surface-fixed-baseline-second-audit-p0-contract.md`](reader-chapter-error-surface-fixed-baseline-second-audit-p0-contract.md)。
+固定fa22当前章失败时正文区是“错误章节页”：`<h3>`目标章目录标题+`获取章节内容失败！`+原因，EPUB/音频/CBZ错误时同样按
+文字页渲染；每次失败弹一次提示；正文无按钮，重试只走刷新浮动按钮；错误页照常响应点击分区，页码按错误页重算；连续模式失败章
+留在列表、后一章照常加载；目录失败显示`获取章节目录失败！`。当前主错误块只有原因和自有“重新加载”：无标题、无标签、无提示，
+英文`failed to load chapter content`原样显示，stale冲突显示通用兜底。本地Go服务+生产前端三视口复现：1440×900按钮被`tap-upper`
+盖住，真实点击跳上一章末尾并写进度`4:第五章 前邻`；真机触摸page/flip同样跳章，scroll/scroll2上翻、隐藏工具层、写`5:第一章 起点`
+而不重载；只有窄视口+鼠标能重试。已签收的内联错误块按钮桌面下带被盖住、触摸附带翻页或切换工具层；连续模式目标章失败时后一章
+不显示；目录失败后重试显示第0章、不重新请求目录；移动页码沿用上一章`第 1/9 页`。工具栏“重新载入章节”三视口正常。标题、标签、
+提示、stale文案、按钮遮挡与触摸穿透（P0）、内联按钮、连续目标章、目录失败、页码判must-fix；正文内按钮沿用连续合同理由判
+acceptable-change；原因取脱敏消息、纯文本渲染判acceptable-change；英文原因是否中文化判unknown（D1）。运行标题、标签页标题、
+点击翻页区设计、章末入口、加载器与API不重开。状态contract-only；下一步在运行标题/桌面计数/标签页标题切片之上红测（源码合同、
+触摸判定、目录重试、连续窗口、错误面浏览器合同），再分四个提交实现（按钮可达P0优先）。实现提交改frontend，合入main会触发
+发布，由用户决定。
+
+记录（2026-10-18，R7按钮可达与穿透隔离，取代上段中R7的状态）：红测e497358（源码合同4条、handleTouchEnd单元1条、新增
+`reader-error-surface-contract.mjs`的E2/E3/E5相邻章部分、连续合同runFailureRetry的触摸与1440×900下带变体）在0427dd4
+（=已发布Reader）上18/30浏览器用例失败（1440×900鼠标与手机触摸全部用例），连续合同两个新变体失败→a6af2d6两个“重新加载”
+加`position: relative; z-index: 3`（同章末入口）与`@click.stop @touchstart.stop @touchend.stop`，handleTouchEnd对控件目标
+不做点击判定；点击层分区、映射、设备差异不变。修复后30/30与连续合同通过，frontend 793/793与build通过，mobile/text-modes/
+audio/epub/reauthentication/openreader-smoke对照通过；七项临时变异：去掉定位、或同时去掉.stop与触摸判断时浏览器按预期变红，
+只去掉一层时浏览器不变、由源码合同或单元变红。附带：手机触摸音频播放键不再切换工具层（靠拢上游）；桌面面板打开时露出的
+重新加载与章末入口一样点中按钮不关面板，另行裁决（合同第10节第4条）。R7状态implementation-complete / regression-validated；
+R1–R6、R8仍contract-only，D1待用户决定。本地未推送、未合入main；镜像未构建；生产未动。
+
+发布（2026-10-18，取代上段Git/镜像状态）：自动推送要求下合并为238e3f3并快进main；发布前frontend 810/810与build、
+本地Go服务+生产前端9个浏览器合同（含错误面30例）通过。可信Actions 39125862052成功；`238e3f3`/`latest` = index
+`f45c8995…afca4cf`（amd64 `d11f20f9…`、arm64 `79086bcd…`），两平台前端63个文件与本地同提交build逐字节一致，
+zlib/SQLite/revision保持。R7 released / awaiting-device-verification；生产未操作，实际版本未知。
+
+## 2026-10-17 当前切片：Reader 运行标题加载中与失败时的章节名盘点
+
+见[`reader-running-title-load-failure-fixed-baseline-second-audit-p0-contract.md`](reader-running-title-load-failure-fixed-baseline-second-audit-p0-contract.md)。
+固定fa22只有一个`this.title`：`getContent`在请求正文前就写成目标章目录标题，失败不回退，迟到响应丢弃；EPUB内链和连续滚动
+跨章同步写index与标题；连续模式上一章/下一章、搜索和书签跳转把两者一起推迟。当前序号取`currentIndex`（加载开始即写），
+章节名取已提交的`chapter`（成功后才写）。本地Go服务+生产前端三视口复现：文本四模式加载中`第 2 章 第一章 起点`，500后持续
+`第 5 章 第二章 延迟`，重新加载期间不变；目录跳转与EPUB内链相同；缓存命中也有1–4ms中间值；Reader内换书出现“新书序号+旧书
+章节名”；无chapter参数首次进入先显示`第 1 章`；迟到请求不回写（aligned）。加载中/失败/重载/EPUB/换书/目录替换/首次进入判
+must-fix；越界截断与连续模式开始即换判acceptable-change。目标：章节名取`chapters[currentIndex]`，目录行未知为空，导航开始即
+整体切换、失败不回退、不跨书拼接，与标签页标题同源。序号、显示位置、几何与计数裁决不重开。状态contract-only；下一步在桌面
+计数与标签页标题切片之上红测（改写派生断言、纯函数/事务单元合同、MutationObserver浏览器合同、EPUB延迟断言），再实现。
+实现提交改frontend，合入main会触发发布，由用户决定。
+
+## 2026-10-16 当前切片：浏览器标签页标题（document.title）盘点
+
+见[`browser-document-title-fixed-baseline-second-audit-p0-contract.md`](browser-document-title-fixed-baseline-second-audit-p0-contract.md)。
+固定fa22只有Index（`阅读`，mounted/activated）和Reader（`书名 - 章节名`，章节名空时只用书名；activated与watch.title）
+写`document.title`；章节名是原始目录标题，导航开始即换、失败不回退，连续滚动跨章和EPUB内链同样更新；离开Reader由
+Index设回`阅读`；登录框不改标题；书源调试独立页为`Reader书源编辑器`。当前OpenReader全程是`index.html`的`OpenReader`。
+Reader标题、切章更新、卸载恢复判must-fix；书源调试独立标题判must-fix；认证阻断恢复壳标题为多用户隔离acceptable-change；
+不复现上游undefined书名、陈旧书名、简繁临时转换、空白章名为acceptable-change。首页/首屏/登录/书源调试的文字取决于产品名
+用`阅读`还是`OpenReader`，没有用户决定的记录，判unknown，等用户决定D1。状态contract-only；下一步Reader红测（壳标题从
+index.html读取，不等D1），再实现；D1之后做壳标题与书源调试。实现提交改frontend，合入main会触发发布，由用户决定。
+
+记录（取代上段状态）：合同c8ebd30（本分支以9839270为基线cherry-pick为c75e730）→红测377e8b8（单元17条全红，frontend
+788/805；新标签页合同三视口×navigation/auth/remote都在第一处等待得到`OpenReader`，EPUB三视口`:715`、连续四视口
+scroll/scroll2`:182`与进度事务`:423`、重新认证四视口`:214`同样失败）→实现4a0aae8（utils/documentTitle.js唯一写入点
++useReaderDocumentTitle，Reader.vue加一次调用；标题由book与currentIndex处目录行派生，目录行bookId与book.id不一致时只显示
+书名，卸载时恢复壳标题）。本地Go服务+生产前端：上述合同全部通过，移动端/文本模式/首页工作台/远程阅读/换源/音频/CBZ/
+书源调试对照通过；frontend 805/805与build通过；M1–M5（另加M1b：Reader.vue不调用）临时变异均按预期变红：只靠首页
+恢复在认证阻断处失败，已提交章节名在失败章与`第1章`处失败，去掉同书校验只在挂起目录的换书处失败。观察：书架换书时
+按旧目录长度为新书预加载正文，另行盘点。状态：Reader部分implementation-complete / regression-validated，首页/首屏/
+登录/书源调试仍contract-only等D1；合入main会触发发布，由用户决定；本地未推送，无新镜像，生产未动。
+
+发布（2026-10-17，取代上段Git/镜像状态）：经用户确认，xenodochial-carson线（EPUB移动端合同、桌面计数、Reader
+document.title及记录）快进合入，main 5bc38a3→2528d9c。发布前本地Go/vet、frontend 805/805与build、门测试128/128、
+实际扫描、Compose，以及本地Go服务+生产前端的smoke、document-title、EPUB、连续、重新认证、移动端合同三视口（含iPad）
+通过。可信Actions 39039046891成功；`2528d9c`/`latest` = index `18b6c299…ac9121fa`（amd64 `e47d2f69…`、arm64
+`bd61d51d…`）。按digest独立核验两平台：前端63个文件与本地同提交build逐字节一致，zlib 1.3.2-r1、SQLite 3.51.3、
+revision标签保持。状态Reader部分released / awaiting-device-verification；D1仍待用户决定；生产未操作，实际版本未知。
+
+## 2026-10-16 当前切片：Reader 桌面运行标注盘点
+
+见[`reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md`](reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md)。
+固定fa22桌面top-bar渲染空字符串，模板没有章节`N / M`；桌面只有正文`<h3>`、标签页标题`书名 - 章节名`和右栏`N%`。
+当前桌面页头为`第 N 章 章节名`+`N / total`。运行序号/标题有用户要求桌面与移动都显示的书面记录（9b96c50、桌面分页
+合同第28行），判acceptable-change，不重开；`N / total`来自初始提交131d3f8的自有页头，没有用户要求，判must-fix：
+所有视口的页头只留运行标题，可见或隐藏的计数都不允许。`document.title`缺失另记must-fix，不并入本切片。状态
+contract-only；下一步红测（改写单元“retain desktop count”与EPUB桌面`3 / 3`，连续合同加“页头只含运行标题”），
+再只改Reader.vue删除计数，最后三视口回归与记录。实现提交改frontend，合入main会触发发布，由用户决定。
+
+记录（取代上段状态）：合同4092ea2→红测4897a62（单元`:114`失败，frontend 787/788；EPUB 1440在`:737`页头实为
+`第 3 章 第二章3 / 3`，新增桌面`N%`控制先通过；连续1440/1024的scroll/scroll2在`:178`多出`1 / 6`；390/360照常
+通过）→实现035762d（Reader.vue删计数span与chapterLabel，共2行）。本地Go服务+生产前端：EPUB三视口、连续四视口、
+text-modes、mobile全部通过；frontend 788/788与build通过；三项临时变异（桌面内联计数、页头外hidden计数、桌面无
+页头）均按预期变红。状态implementation-complete / regression-validated；合入main会触发发布，由用户决定；本地
+未推送，无新镜像，生产未动。
+
+## 2026-10-16 当前切片：Reader EPUB 移动端章节计数合同裁决
+
+见[`reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md`](reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md)。
+已发布186c762三视口回归的唯一失败是EPUB合同移动端`3 / 3`等待。固定fa22 mini top-bar只显示当前章节
+title，模板没有章节`N / M`；当前Reader自e1631d0起一致，旧断言靠mini隐藏头里不可见的DOM文本通过。
+裁决为测试合同must-fix：移动端断言`第 3 章 第二章`可见且无计数，桌面`3 / 3`保持；Reader产品代码、
+API、数据、镜像与生产均不改。桌面计数对上游空top-bar的分类记unknown，另行盘点。状态contract-only；
+先合同，再红测，后改写合同脚本，最后三视口回归与记录。
+
+记录（取代上段状态）：合同5361e68→红测0eb183d（新移动控制通过后，390/360仍在同一`3 / 3`等待超时）→
+41fd3e6（该等待原样限定桌面，移动端改为页头只有运行标题、无计数）。本地Go服务+生产前端三视口全部通过；
+三项临时变异（mini渲染计数、序号滞后、mini隐藏页头）均按预期变红；frontend 788/788与build通过。后端/前端
+源码无diff，合入main不触发发布。状态implementation-complete / regression-validated；本地未推送，生产未动。
+
+## 2026-10-16 当前切片：SQLite WAL 与 OS/C 合同（未实施）
+
+见[`sqlite-wal-os-c-advisory-fixed-baseline-second-audit-p2-contract.md`](sqlite-wal-os-c-advisory-fixed-baseline-second-audit-p2-contract.md)。
+固定fa22备份/namespace逻辑JSON语义再提取，保留SQLite/GORM/WAL/portable/rooted适配。
+当前driver1.14.22/C3.45.1及WAL多连接落在维护者罕见WAL-reset修复前范围，未复现损坏；
+最低候选1.14.36/C3.51.3已核验header/commit/Go校验和，尚未改模块。真实两平台16APK按origin
+和官方secdb/原生apk比较发现zlib1.3.2-r0低于r1维护修复，非已证实服务gzwrite可达。其它
+未列包/C条件不默认为clean。先独立合同、后有界实际测试、再实施；应用/模块/镜像/生产未改，
+上一fc4692c正式交付保持，整体parser/OS-C/设备/重构继续。
+
+合同5bb35cf先独立推送后，仅加SQL测试：空聚合NULL/冗余UPSERT索引2实际red、3正常控制
+三轮/race/固定Go1.26.9原生Linuxarm64同样结果；既有db12root测试通过。不是WAL-reset/
+zlib复现，测试阶段尚需harness故障/driver取消复用/确定性时序/OS门，应用和依赖仍未改；
+详见合同第6节，只能feature test checkpoint，不可红灯发布或缩小整体范围。
+
+合同3982b9f后新增准备绑定复用、提前Rows.Close、取消查询/事务后原值与连接恢复控制；三项
+连续10轮通过，四项自有worker输出/超时/SIGINT/SIGTERM拒绝及回收连续3轮通过。当前完整db/
+race/原生Linuxarm64精确2库级red、7正常控制绿、4保护验证绿，既有12root仍过；实际SQL查询
+C版本/feature控制已补，非发布服务SQL探针。vet与既有审计门109/109通过，见合同第8节。
+WAL临界时序、in-flight C取消、APK/OS门及全量实施/发布仍开放，不以正常取消冒充WAL复现。
+
+Claude Code接续后先在同一工作树复现交接基线（2red/7正常/4保护、race、vet、109/109一致），
+再以独立测试提交52786f8新增in-flight C step取消控制：读/写事务两项在C内执行时取消，1秒内
+返回context.Canceled，同连接复用或单连接池恢复，原值/integrity保持；连续10轮20/20通过，临时
+反向变异能准确报出忽略取消。完整db/race现为2库级red/9正常/4保护。WAL确定性调度本轮未编写，
+如实保留未复现/open，不阻塞必须的driver维护，见合同第9节。下一步独立build:升级v1.14.36；
+OS/C工具门与zlib修复仍开放；应用/模块/镜像/生产未改。
+
+独立build:提交7a1bf82把go-sqlite3升至v1.14.36/SQLite3.51.3（精确commit/h1，cgo参数不变，不跨3.53）：
+两项库级red以同一断言转绿，9正常控制与4保护验证保持；实际runtime为3.51.3/737ae4a3，compile_options
+仅MAX_FUNCTION_ARG变为1000，仍无FTS5。本地全量：Go 29包/vet/关键race（api在40分钟时限1019.965s）、frontend
+788/build、审计门109/109与两项实际扫描、Compose、隔离存储HTTP+SQLite均通过（需监听端口的项在沙箱外执行）。
+浏览器三视口、原生arm64、新旧卷/portable及可信发布待main上的Actions；WAL调度仍未复现；未合main，无新镜像，
+生产未动；OS/C zlib/APK门仍开放，见合同第10节。
+
+OS/C合同（第11节，实施前）：官方alpine:3.23仍为3.23.6同一digest，zlib只能构建期安装签名校验的精确
+1.3.2-r1。两份v3.23 main APKINDEX已用base内官方公钥验签，记录两架构 `C:`/aports b92621a8；已发布
+fc4692c逐文件核对仅官方 `etc/shadow` 改写，原生apk 3.0.8比较唯一 `<` 为zlib r0<r1。计划新增失败关闭的
+APK/secdb发布门（两平台验证镜像、精确包身份、逐文件校验和、secdb新鲜度、unknown origin复审）与
+Dockerfile精确zlib修复；先测试后实现，实际镜像验证待main上的Actions。
+
+实施记录（合同第12节）：test 97e9560先以门模块缺失为红，ci 6aeda8b后仅Dockerfile断言红，build d1d774f
+后19/19；连同既有门128/128（Node 26与本地Node 22）。真实已发布arm64镜像走docker save真实路径：
+base-only基线16包/109文件通过、候选基线在zlib r0被拒；完整secdb通过严格schema；原生比较72组与fixture
+一致。候选镜像构建、两平台门、新旧卷与可信发布待main上的Actions；未合main，无新镜像，生产未动。
+
+发布（合同第13节）：main快进至186c762，可信Actions 38896494238全部成功（两平台OS门、新旧卷/portable
+通过），`186c762`/`latest` 为index `bfda5426…c43f83c`（amd64 `05014b1c…`、arm64 `d78a1190…`）。按digest
+独立核验两平台：zlib 1.3.2-r1与pin一致、APK文件仅放行etc/shadow、revision标签正确、二进制含go-sqlite3
+v1.14.36与SQLite 3.51.3 source ID且无3.45.1。状态released / awaiting-device-verification；WAL调度仍
+未复现，生产未操作、实际运行版本未知，整体parser/设备/全量重构继续。
+
+## 2026-10-16 当前切片：前端客户端与构建依赖 advisory 补充
+
+[`frontend-dependency-advisory-fixed-baseline-second-audit-p2-contract.md`](frontend-dependency-advisory-fixed-baseline-second-audit-p2-contract.md)
+已从固定fa22f271重新提取Axios/Vue挂载、登录/命名空间恢复，并核对当前双create实例/原生FormData。
+新全锁审计仍8high受影响包，SSR/Node/Windows/build条件单列；必要patch/version/integrity及
+维护者边界已核验，计划有界库级反例+真实app正常控制和准确npm发布门。状态contract-only /
+behavioral-reds-pending / implementation-not-started；应用/lock/workflow未改，b263已发布维护保持，
+生产无操作，整体advisory/设备/全量重构不计完成。先独立合同，再实际测试，后实现。
+
+独立合同7ff39d9精确推送后，原锁新增真实有界测试：最终26项三轮和Node22均13库级red/
+13正常及harness控制通过；全frontend788/775pass/同13fail，原762保持。精确section边界的
+另一个source-map查询差异单列不算advisory；新npm门缺失只算1availability red。应用/lock/
+workflow未改，详见合同第6节；下一步必须先独立test/docs推送，后实施，不可红灯发布。
+
+实施进展取代上述未实施快照：独立red218ad91已先推送，后精确补丁/3个具体叶约束和npm发布门。
+Node26及实际Node22均788/788、build、109/109门合同及132包全锁零finding通过；完整Go/
+vet/Compose/真实隔离HTTP通过。完整race仍同一进程，精确候选浏览器/卷/可信发布未完成，
+见合同第7节。无业务/API/数据迁移或生产操作，不以扫描归零签收整体重构。
+
+第8节正式交付取代上述pending：应用fc4692c、可信Actions38868093878全部success，关键8包
+race全部ok（API1040.001s）；本地精确候选及真正拉取的完整发布arm64镜像三视口UI登录/
+原生multipart上传/Reader交互、新旧卷/portable/跨用户/restart通过。独立两平台OCI/config/
+实际binary及63个前端文件字节与候选一致；fc4692c/latest index
+`sha256:74ef48fd0c9f5547fff9787fb97763fff22e3500a376be05d5379f19dd8af765`。
+两剥离binary的OpenPGP仍仅模块精度，不作reachable计数。生产另一Mac未操作/新核验；允许
+技术栈/必要维护适配，无API/数据迁移，OS-C/parserCPU/scan/峰值FD/late-tx/设备/整体仍开放。
+
+## 2026-10-16 Go advisory 发布门补充合同
+
+见[`go-advisory-release-gate-contract.md`](go-advisory-release-gate-contract.md)。这是源扫描的失败关闭
+门，不是上游功能重做：精确协议/终态/Go/DB/SBOM/图校验，唯一 OpenPGP 不适用项须现场核验
+三图且有复审期限；binary剥离精度单列。独立合同ceb6c28→测试35c6330后工具/接线已实施，
+含中断清理的最终59合同与真实source gate通过；可信Actions38841543709已success并发布b2632a4，
+仍不称整个安全审计完成。
+不修改用户API、数据或原已恢复事件；先合同、再新工具合同测试、后实现，更广重构不缩小。
+
+## 2026-10-16 当前切片：运行时与依赖 advisory（基础链源码已验证，候选门待办）
+
+见[`runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md`](runtime-dependency-advisory-fixed-baseline-second-audit-p2-contract.md)。
+固定upstream认证/XPath和当前实际调用已提取，JWT/XPath/HTML-text/已过支持期Go-Alpine属于维护
+must-fix，须先实际行为red再修；npm8high是8受影响包，不是8生产漏洞，SSR/Node/Windows/build
+前提分别记录。govulncheck1.9 JSON exit0不等于clean：宿主1.26.5 source有28符号报告但需条件
+复核；精确b4 Linux二进制实际Go1.24.13且pkgSymbols0，76匹配仅模块级，不能作可达性证明。
+本轮无应用/依赖/lock/Dockerfile变化、无生产写入；先独立合同再红测，保留原数据和已恢复原书事件。
+状态inventory-complete/behavioral-reds-pending/implementation-not-started，整体审计继续开放。
+
+后续证据覆盖上段red-pending：合同93fd5fd远端核验后，仅添加测试。XPath1=1实际evaluator
+分配循环触发自有32MiB看门狗；JWT32KiB分段输入16次在custom/compat分配约8.5/17MiB，
+共3leaf实际red/11控制绿（true()已绿不计red）。三轮重复与race同数，无竞争/panic/unfired，
+全部worker回收。10-16恢复时核验日志/远端，未执行的额度失败文档更新不作已保存证据。
+详见合同第7节；应用/模块/lock/base未改，只能feature checkpoint，不可红灯发布；其余审计未完成。
+
+10-16实施checkpoint：独立red8fb3970远端核验后，仅jwt5.2.2/xpath1.3.6及checksum更新，
+3实际red/11控制均绿，JWT分配降为8,584/16,064 bytes。fullGo/API116.144s、engine/auth全包
+race10.528s/2.073s、vet、frontend762/build通过。状态JWT-XPath-core-validated/wider-in-progress/
+Docker-not-published；其它Go/Go最低版本/frontendlock/base仍未改。完整基础链/HTML-text/
+后置scan/runtime/browser/卷/发布仍待继续，详见合同第8节，不称整体安全或生产升级完成。
+
+基础链追加red：同bccaac3后继树仅加test，实际sourceRuleDocument对官方最小HTML在握手后
+3秒不结束；库级norm NFC/NFKC三字节输入12步position0/无输出，追加3red/5控制。重复3轮和
+race同数，无竞争/未触发/遗留worker；旧JWT/XPath14项另跑全绿。x/net/text、Go最低、base/
+frontendlock未改，详见合同第9节；不是已实施、生产可利用或已发布结论。
+
+基础链实施取代上段未实施状态：独立d3cc2d1后更新Go最低1.26.9及net0.60/crypto0.57/sys0.48/
+text0.42，采用已核验官方base pins并显式更新双README。22focused全绿，fullGo/API126.002s、
+vet/frontend762/build/Compose通过；完整API等race真实live未终态。新source审计仅1模块级
+OpenPGP（精确导入图不含该族），0包/符号匹配，不能概括为全镜像无漏洞。候选/准确审计门/
+runtime/browser/卷/可信发布及其它frontend审计待办，详见合同第10节；main/生产未变。
+
+第11节本地终态取代上段待办：完整API等race终态PASS/API1028.510s，精确448本地arm64候选
+Go1.26.9/CGO1/Alpine3.23.6，fresh/historical/portable/backup/restart及真实三视口正文/交互通过，
+两个Linux独立rootedfs非root合同通过。剥离binary仍pkgSymbols0，OpenPGP只记模块回退；
+58项失败关闭gate合同/真实source扫描通过。可信Actions双架构/独立OCI未完成，未正式发布；
+frontend8high/OS-C/设备及全量重构仍开放，不更改生产或重开已恢复原书事件。
+
+基础链合同第12节正式发布取代上段未发布：b2632a4/fullSHA见合同，可信Actions全部门通过，
+`ghcr.io/changshengyu/openreader:b2632a4`/latest独立index
+`sha256:936939c55f86fe456af4425ac35506fccd7ba93dd2858402446b7ba01d2284ab`。
+两真实Linux manifest/config/revision及实际Go1.26.9/CGO1 binary逐层hash核验；两剥离binary
+OpenPGP仍只计模块回退。已发布arm64 binary在相同pin本地runtime的真实三视口追加通过，
+不是完整远端arm64镜像卷门。允许runtime/security适配，无API/数据迁移；production未新核验。
+状态Go-foundation-delivered/wider-advisory-open，不缩小frontend/OS-C/parser/设备/整体未完成范围。
+
+## 2026-10-15 当前切片：本地书导入持久提交（共享核心已验证并发布，后续开放）
+
+固定 upstream saveBook 的成功包含 Book/group/本地资源保存；next boundary 完整枚举新 archive
+allocation、raw/body/EPUB-CBZ resources、source/TOC、Book/Chapter/selected category transaction、
+failure compensation、durable-only consume/response/event，四 confirm 路由 raw/token/new/placeholder。
+状态 **core-regression-validated / Docker-published / follow-up-open / awaiting-device-verification**，见
+[`local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md`](local-book-import-durable-commit-lifecycle-fixed-baseline-second-audit-p2-contract.md)。
+ignored post-commit category errors、contextless durable work和 absolute archive RemoveAll 属源码
+must-fix，尚非 actual red/生产复现。不能只补 handler 错误检查，也不能以 db.WithContext 或末尾
+ctx guard 签收完整原实体 I/O。stage b2b32f7/已导入 archive125fd93/PUT-batch-category 既有完成保持。
+合同独立提交推送后再实际红测；无应用/测试改变、迁移或生产写入。Git基线9cb6a03，已发布应用
+b2b32f7/index ed57cc69…；生产最近独立只读db1ea21，原书已恢复事件关闭，整体重构仍未完成。
+
+2026-10-15后续：独立合同477587f远端精确确认后才加测试；旧临时worktree失联，从保存的同SHA
+恢复到受管理目录，不prune/delete/reset旧树、不宣称未提交状态已恢复。初轮真实红测128叶失败
+（分组48、误删unknown回收16、初始library/data/user link48、实际Chapter SQL后取消16），
+8正常新书分组/Reader/token/event控制全通过；最终API10.787s/exit1，无编译或fixture失败。
+应用仍b2，尚未实施；资源/partial/collision/晚期replacement/native/完整回归门仍待办。独立生产
+GET health现已返回完整b2b32f7/statusok，取代上文旧db1记录；不是本项持久提交修复或设备验收。
+最终同源码race78.770s保持128行为red/8控制通过，无data race；独立正常控制API1.500s与stage
+collision1.308s通过。全量应用/浏览器/镜像卷门待实现后再跑，不把初轮red当实现或正式候选。
+
+独立38c8f07后追加实际work观察接缝和79个真实跨层red：新归档独占/partial权限失败2，三格式
+new/restore晚期book/user replacement48、实际work取消后继续13、unknown成员误删6，EPUB/CBZ
+资源展开replacement/partial误删/MaxInt64各5。另15取消case原已安全是控制；最终普通/race均
+复核同数，无竞争或未触发fixture。超长中文名称未触发的初版夹具不计red，已改真实非rootEACCES。
+累计207是128 API+79跨层，不是207 API/完整合同签收；初始allocation→资源→SQL/category→owned
+compensation共享实现尚未开始，全部正式回归/卷/发布门仍待办，main和生产b2不变。
+
+后续实现checkpoint（以上初始/追加red描述保留历史）：09d9fd6远端确认后才建立OwnedTree及共同
+Importer持久路径；原scope有界raw/正文/ZIP/JSON、exclusive目录/owned补偿、同ctx Book/Chapter/
+所选分组tx、placeholder guarded列/重绑/权威重载、stage commit guard与薄API全部落地。207真实
+反例和新增nativechunk/partial/FD/权限、32晚期SQL+8列合并+8前项成功控制通过。最终fullGo
+API118.894s/vet、frontend762/build/Compose、三账号HTTP、confirmed Reader三视口和非rootLinux
+native全包通过，Linuxamd64编译。完整race真实live/终态待定；同SHA Go1.24/CGO candidate与
+fresh/historical/portable/backup、trusted双架构发布/OCI尚未通过，不称生产修复或整体完成。
+
+终态更新：精确应用b4ff9ca fullrace已PASS（API998.650s），同SHA Go1.24/CGO候选原始sh新旧卷/
+portable-v1/v2-assets/跨用户/历史四格式/进度书签/backup/restart均首次PASS。main非force更新到
+完整b4后，可信Actions38745709308全部验证门通过，仍在正式双架构构建/推送，尚无独立OCI签收。
+上方pending是历史阶段，不再当当前本地状态。原生受管理后继工作树同SHA/clean/廉价控制通过，
+原树保留。后续外部删除/rebind占位书覆盖、完整parserCPU/scan/峰值FD/设备/advisory及整体审计仍
+未完成，不用207绿灯签收全部合同。生产最新只读b2b32f7healthy，不是b4部署或设备验收。
+
+最终发布证据取代上段in-progress：可信Actions38745709308完整b4ff9ca终态success，所有发布/
+平台门PASS。独立公开Registry原字节SHA/config核验两真实Linux架构和完整b4 revision，
+`b4ff9ca`/`latest` index均为
+`sha256:60e97193265ff47808a3910cae1d0bf8a8cec6a3c7b5b4a12efeb7bab144c6ee`。
+详见合同第12节平台/config明细。发布后生产只读仍完整b2b32f7/statusok；未替用户升级，原书
+恢复事件保持关闭。后续覆盖及整体审计仍开放，不恢复旧99%作为完成证据。
+
+下一覆盖盘点（仅合同，应用仍b4）：固定upstream saveBook再次核对；自动placeholder与显式
+RestoreExisting在item tx前外部删除/owner/source/URL/library/original重绑定需实际SQL控制，当前
+源码guard不作覆盖签收，也不先认定缺陷。见同合同第13节：四confirm×raw/token、三格式×两
+service入口；外部提交后快照应保留，拒绝项无复活/成功事件、原token可重试、旧bait hash不变。
+若绿仅记后补控制；若红才更新具体must-fix并按红测→实现推进，不倒填b4之前的证据。
+
+该独立合同87e5a72之后补测终态：48API+36service真实独立SQLite外部提交控制全部PASS，
+focused race含8列合并/3正常恢复控制PASS（API36.181s/service3.421s），finalfullGo
+API119.156s/localbook8.860s与vetPASS。不是84新red，无应用改动或新生产缺陷；原207计数不变。
+仅原item tx前这组覆盖已核验，晚期tx内故障、完整CPU/scan/峰值FD等仍不签收；详见第13节。
+
 ## 2026-10-04 当前切片：WebDAV PUT 生命周期与进度接收
 
 从当前服务和固定上游重新取证，PUT 在 body 读取后仍按绝对路径 chmod/replace/cleanup，且没有复验
@@ -423,7 +723,7 @@ HTTP + SQLite trigger、候选/回拉容器纯 API 与 fresh/historical 卷门�
 | 章节请求预算与同章接管 | 上游正文专用 30 秒；迟到结果按当前书/章丢弃，但同章可复用请求不由已退出调用方独占。 | shelf/temporary GET 曾继承 12 秒；旧主 load 的 signal 又直接取消共享 Promise。`c7fbf73` 改为 30 秒并拆分 transport/subscriber ownership。 | **2026-09-14 第三次真机重开后已实施、回归并发布**：13 秒延迟正文三视口通过；最后订阅取消及 scope clear 仍会停止 transport，等待用户新镜像真机签收。 |
 | detached 书源的既有书籍正文 | 上游删除/替换书源列表不能使已入架书籍的当前来源在成功获取正文后被内部版本门拒绝。 | OpenReader 以 detached association 保留既有书籍的 source snapshot；`0a8a0ef` 抓取前接受该关联，提交后却要求 active，固定产生 stale 409。`8bebcbf` 统一为 existing association。 | **2026-09-29 生产重开**：生产 `8bebcbf` 一次 reload 的主请求与自动重试仍分别在约 191–215 ms、165–199 ms 返回精确 stale 409，且没有相邻章请求；detached 修复只关闭一个分支，不能视为 device-closed。`7057f52`/`f9b6c08`/`c1e1dbb` 已按合同、红测、实现增加安全 reason code；Actions `36516861894` 发布双架构 index `sha256:3d5eceaf00c0ceb6fcbb10121ef5fca444b2ea35756ebd4f2084b76d95f201d8`。生产健康检查仍是 `8bebcbf`，须部署 `c1e1dbb` 后取得具体 reason，才能为真实门继续补合同、红测和修复。 |
 | reader-dev 本地书原文件回填 | 上游按 name+author 替换已存在 shelf book，并保留章节位置；逻辑 ZIP 本身不带原文件。 | 唯一缺档占位行会原地回填；引用按完整 EPUB 身份、双向唯一标题、索引和有效边界重连，歧义候选不覆盖。 | **2026-09-14 已实施、回归并发布 `e1631d0`**：等待真机补传原文件验证；见 [`readerdev-local-book-reattachment-device-feedback-p0-contract.md`](readerdev-local-book-reattachment-device-feedback-p0-contract.md)。 |
-| 左上当前章节标注 | 上游 mini `.top-bar` 固定显示当前章节 title，并为正文保留 30px + safe-area 顶部区。 | 文本/EPUB 已显示 `第 N 章 章节名`；移动恢复固定 safe-area 栏，桌面保留右侧总进度，音频/CBZ 维持例外。 | **2026-09-14 已实施、四视口回归并发布 `e1631d0`**：等待用户真机签收；见 [`reader-running-chapter-header-device-feedback-p0-contract.md`](reader-running-chapter-header-device-feedback-p0-contract.md)。 |
+| 左上当前章节标注 | 上游 mini `.top-bar` 固定显示当前章节 title，并为正文保留 30px + safe-area 顶部区。 | 文本/EPUB 已显示 `第 N 章 章节名`；移动恢复固定 safe-area 栏，桌面保留右侧总进度，音频/CBZ 维持例外。 | **2026-09-14 已实施、四视口回归并发布 `e1631d0`**：等待用户真机签收；见 [`reader-running-chapter-header-device-feedback-p0-contract.md`](reader-running-chapter-header-device-feedback-p0-contract.md)。2026-10-16 EPUB 浏览器合同的移动端期望已按固定上游改为“运行标题可见且无章节计数”（`41fd3e6`），见 [`reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md`](reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md)。2026-10-16 桌面盘点：运行标题为用户要求的 `acceptable-change`；桌面 `N / total` 判 `must-fix`（contract-only，未实现），见 [`reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md`](reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md)。 |
 
 ## 不能再沿用的历史测试假设
 

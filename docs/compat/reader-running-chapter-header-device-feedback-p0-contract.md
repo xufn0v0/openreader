@@ -46,3 +46,21 @@
 - frontend 753/753 与 Vite build 通过；1440x900、1024x1366、390x844、360x800 的 scroll/scroll2
   浏览器合同验证了初始文字、跨章切换、fixed/absolute 几何、无溢出和不拦截点击，原移动/面板合同通过。
 - 可信 GitHub Actions run `34794997078` 已发布 `e1631d0`/`latest` 双架构镜像；用户真机显示效果仍待签收。
+- 2026-10-16 补记：本切片未运行 `reader-epub-contract.mjs`。该合同的移动端 `3 / 3` 等待原本靠 mini 隐藏头里的
+  计数文本通过，`e1631d0` 起必然超时。现已按
+  [`reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md`](reader-epub-mobile-chapter-counter-fixed-baseline-second-audit-p0-contract.md)
+  改为断言运行标题可见且没有章节计数（`41fd3e6`），桌面计数断言不变。
+- 2026-10-16 补记（桌面）：目标合同第 5 条“右侧保留 `N / total`”已在
+  [`reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md`](reader-desktop-running-header-fixed-baseline-second-audit-p0-contract.md)
+  对照上游重新分类为 `must-fix`，已由 `035762d` 删除，所有视口的页头只含运行标题（本地回归通过，尚未发布）；
+  左侧运行标题仍是用户要求的允许差异。第 5 条
+  “书名仍由浏览器标题提供”与当前代码不符：OpenReader 没有设置 `document.title`，另行盘点。
+- 2026-10-17 补记（标签页标题）：上一条的另行盘点见
+  [`browser-document-title-fixed-baseline-second-audit-p0-contract.md`](browser-document-title-fixed-baseline-second-audit-p0-contract.md)。
+  Reader 标签页标题已按其第 7.1 节实现为 `书名 - 章节名`（`4a0aae8`，本地回归通过，尚未发布），第 5 条“书名由浏览器
+  标题提供”的前提在 Reader 上成立；首页与书源调试的标题文字仍等用户决定。运行标题本身不变。
+- 2026-10-17 补记（加载中与失败）：第 3 条中间一句“也在章节事务完成后更新”已在
+  [`reader-running-title-load-failure-fixed-baseline-second-audit-p0-contract.md`](reader-running-title-load-failure-fixed-baseline-second-audit-p0-contract.md)
+  对照上游重新裁决，第 1 条的“当前激活 Chapter”明确为 `currentIndex` 对应的目录行。真实浏览器在加载中和正文失败后都
+  显示“新序号 + 旧章节名”，判 `must-fix`；目标是导航开始即整体切换到目标章，失败不回退（contract-only，尚未实现）。
+  序号格式和其余条目不变。
