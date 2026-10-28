@@ -6,6 +6,9 @@ export default defineConfig({
   build: {
     rolldownOptions: {
       output: {
+        // rolldown >= 1.1 hosts its runtime helpers in a shared app chunk that
+        // imports http-vendor back; strict order keeps them in their own chunk.
+        strictExecutionOrder: true,
         manualChunks(id) {
           if (id.includes('/node_modules/element-plus/')) return 'element-plus'
           if (id.includes('/node_modules/@element-plus/')) return 'element-icons'

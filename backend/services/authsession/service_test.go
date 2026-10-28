@@ -52,11 +52,14 @@ func newServiceFixture(t *testing.T) serviceFixture {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// An upgraded instance: the account existed before the session migration
+	// wrote its marker, so an older binary could have issued it a legacy token.
 	user := models.User{
 		Username:     "sessionfixture",
 		PasswordHash: "hash",
 		Role:         "user",
 		AuthVersion:  1,
+		CreatedAt:    marker.Add(-24 * time.Hour),
 	}
 	if err := database.Create(&user).Error; err != nil {
 		t.Fatal(err)

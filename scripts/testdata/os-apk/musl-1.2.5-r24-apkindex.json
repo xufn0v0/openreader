@@ -1,0 +1,32 @@
+{
+ "x86_64": {
+  "indexSha256": "e9e83b0cca8e0b7857cf8dd2c95e04eb27429ddff0619f8260c91db756b1e718",
+  "indexDescription": "v3.23.7-2-gddd3ce4d481",
+  "records": {
+   "musl": "C:Q1XUI1pl90RATg8vH/H5+0fF2ukao=\nP:musl\nV:1.2.5-r24\nA:x86_64\nS:414107\nI:666216\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\np:so:libc.musl-x86_64.so.1=1",
+   "musl-utils": "C:Q1rtAC/LK9HesmJYexXp60XOc2Ii8=\nP:musl-utils\nV:1.2.5-r24\nA:x86_64\nS:13596\nI:55421\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT AND BSD-2-Clause AND GPL-2.0-or-later\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\nD:scanelf so:libc.musl-x86_64.so.1\np:libc-utils=1.2.5-r24 cmd:getconf=1.2.5-r24 cmd:getent=1.2.5-r24 cmd:iconv=1.2.5-r24 cmd:ldconfig=1.2.5-r24 cmd:ldd=1.2.5-r24"
+  },
+  "installed": {
+   "musl": "C:Q1XUI1pl90RATg8vH/H5+0fF2ukao=\nP:musl\nV:1.2.5-r24\nA:x86_64\nS:414107\nI:666216\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\np:so:libc.musl-x86_64.so.1=1\nF:lib\nR:ld-musl-x86_64.so.1\na:0:0:755\nZ:Q13crgivDNooa7MOL+QZnL55MmE2o=\nR:libc.musl-x86_64.so.1\na:0:0:777\nZ:Q17yJ3JFNypA4mxhJJr0ou6CzsJVI=",
+   "musl-utils": "C:Q1rtAC/LK9HesmJYexXp60XOc2Ii8=\nP:musl-utils\nV:1.2.5-r24\nA:x86_64\nS:13596\nI:55421\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT AND BSD-2-Clause AND GPL-2.0-or-later\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\nD:scanelf so:libc.musl-x86_64.so.1\np:libc-utils=1.2.5-r24 cmd:getconf=1.2.5-r24 cmd:getent=1.2.5-r24 cmd:iconv=1.2.5-r24 cmd:ldconfig=1.2.5-r24 cmd:ldd=1.2.5-r24\nr:libiconv\nF:sbin\nR:ldconfig\na:0:0:755\nZ:Q12JjFFXEpeHF9tQIdw3HhVmECi/E=\nF:usr\nF:usr/bin\nR:getconf\na:0:0:755\nZ:Q1VDuwN8+ijGbxSwSGxrummiAGF/Q=\nR:getent\na:0:0:755\nZ:Q1dO4ZNPb3RBaLWznvWAjs5Qw/ib4=\nR:iconv\na:0:0:755\nZ:Q1Vv2qjXjmvPBgSb5vbjp924Lp56o=\nR:ldd\na:0:0:755\nZ:Q1yFAhGggmL7ERgbIA7KQxyTzf3ks="
+  },
+  "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/x86_64/APKINDEX.tar.gz",
+  "lastModified": "Thu, 22 Oct 2026 07:45:27 GMT",
+  "signature": ".SIGN.RSA.alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"
+ },
+ "aarch64": {
+  "indexSha256": "6f2b3dbd90d2bd502f811caffd2b0d10f5d1710ef24acbe0d17dfb0fcb62e60e",
+  "indexDescription": "v3.23.7-2-gddd3ce4d481",
+  "records": {
+   "musl": "C:Q1Gpmv84P2QM7qzmrxAM68h3dvVVQ=\nP:musl\nV:1.2.5-r24\nA:aarch64\nS:416083\nI:723480\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\np:so:libc.musl-aarch64.so.1=1",
+   "musl-utils": "C:Q19Wb50/jiOW4Y3ETW/Ke1KcyIHgk=\nP:musl-utils\nV:1.2.5-r24\nA:aarch64\nS:16888\nI:202534\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT AND BSD-2-Clause AND GPL-2.0-or-later\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\nD:scanelf so:libc.musl-aarch64.so.1\np:libc-utils=1.2.5-r24 cmd:getconf=1.2.5-r24 cmd:getent=1.2.5-r24 cmd:iconv=1.2.5-r24 cmd:ldconfig=1.2.5-r24 cmd:ldd=1.2.5-r24"
+  },
+  "installed": {
+   "musl": "C:Q1Gpmv84P2QM7qzmrxAM68h3dvVVQ=\nP:musl\nV:1.2.5-r24\nA:aarch64\nS:416083\nI:723480\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\np:so:libc.musl-aarch64.so.1=1\nF:lib\nR:ld-musl-aarch64.so.1\na:0:0:755\nZ:Q1Y0JyJhAMoIXD9alo4ky+WFZL3dQ=\nR:libc.musl-aarch64.so.1\na:0:0:777\nZ:Q14RpiCEfZIqcg1XDcVqp8QEpc9ks=",
+   "musl-utils": "C:Q19Wb50/jiOW4Y3ETW/Ke1KcyIHgk=\nP:musl-utils\nV:1.2.5-r24\nA:aarch64\nS:16888\nI:202534\nT:the musl c library (libc) implementation\nU:https://musl.libc.org/\nL:MIT AND BSD-2-Clause AND GPL-2.0-or-later\no:musl\nm:Natanael Copa <ncopa@alpinelinux.org>\nt:1792598402\nc:fd05fc094264bce4fb76efc6c7f61ba4abfcb609\nD:scanelf so:libc.musl-aarch64.so.1\np:libc-utils=1.2.5-r24 cmd:getconf=1.2.5-r24 cmd:getent=1.2.5-r24 cmd:iconv=1.2.5-r24 cmd:ldconfig=1.2.5-r24 cmd:ldd=1.2.5-r24\nr:libiconv\nF:sbin\nR:ldconfig\na:0:0:755\nZ:Q12JjFFXEpeHF9tQIdw3HhVmECi/E=\nF:usr\nF:usr/bin\nR:getconf\na:0:0:755\nZ:Q1Qf7scTTLezjVAG/DQSXyoHA8Goo=\nR:getent\na:0:0:755\nZ:Q1f8JDci940c3ccE1cWCH9iBFbrcg=\nR:iconv\na:0:0:755\nZ:Q1V3YFjUwWu1yLXpF5arfIZSWA/SE=\nR:ldd\na:0:0:755\nZ:Q1r+KYty/HCLl4p4dvPt8kCb1mhB0="
+  },
+  "url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/main/aarch64/APKINDEX.tar.gz",
+  "lastModified": "Thu, 22 Oct 2026 07:45:32 GMT",
+  "signature": ".SIGN.RSA.alpine-devel@lists.alpinelinux.org-616ae350.rsa.pub"
+ }
+}

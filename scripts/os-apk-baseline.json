@@ -16,7 +16,8 @@
     "alpine-release",
     "apk-tools",
     "busybox",
-    "musl-utils",
+    "musl=1.2.5-r24",
+    "musl-utils=1.2.5-r24",
     "zlib=1.3.2-r1"
   ],
   "command": [
@@ -31,6 +32,15 @@
       ],
       "aportsCommit": "b92621a82657b055485976b304462bddf9aa9183",
       "index": "v3.23.6-61-g95654076fb0"
+    },
+    "musl": {
+      "from": "1.2.5-r23",
+      "to": "1.2.5-r24",
+      "ids": [
+        "CVE-2026-107891"
+      ],
+      "aportsCommit": "fd05fc094264bce4fb76efc6c7f61ba4abfcb609",
+      "index": "v3.23.7-2-gddd3ce4d481"
     }
   },
   "platforms": {
@@ -93,14 +103,14 @@
           "checksum": "Q1BxhIh0keD+/6VxhEGbE4dFAEe7k="
         },
         "musl": {
-          "version": "1.2.5-r23",
+          "version": "1.2.5-r24",
           "origin": "musl",
-          "checksum": "Q1G2xQQm08BlbpxaVnpaWWAcf0MHo="
+          "checksum": "Q1XUI1pl90RATg8vH/H5+0fF2ukao="
         },
         "musl-utils": {
-          "version": "1.2.5-r23",
+          "version": "1.2.5-r24",
           "origin": "musl",
-          "checksum": "Q1kv2+ltJfE/46PSl62lbk+5B6rOw="
+          "checksum": "Q1rtAC/LK9HesmJYexXp60XOc2Ii8="
         },
         "scanelf": {
           "version": "1.3.8-r2",
@@ -178,14 +188,14 @@
           "checksum": "Q1hx3hzCQRsEq2apjgQ+k/GK+X15s="
         },
         "musl": {
-          "version": "1.2.5-r23",
+          "version": "1.2.5-r24",
           "origin": "musl",
-          "checksum": "Q1htKIaEsBKo1P1SXDlnR87oYkBzM="
+          "checksum": "Q1Gpmv84P2QM7qzmrxAM68h3dvVVQ="
         },
         "musl-utils": {
-          "version": "1.2.5-r23",
+          "version": "1.2.5-r24",
           "origin": "musl",
-          "checksum": "Q1tciDNWavSBIvy8D7i3Vju1wL+fc="
+          "checksum": "Q19Wb50/jiOW4Y3ETW/Ke1KcyIHgk="
         },
         "scanelf": {
           "version": "1.3.8-r2",

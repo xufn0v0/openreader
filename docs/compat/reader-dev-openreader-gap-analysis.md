@@ -1,5 +1,163 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-10-25 P1 文本编码识别：日文/韩文与单字节编码（E4/E8）
+
+OpenReader 只有 `gb18030`、`big5`、`shift_jis`、`euc-kr` 四个旧编码候选，自写评分偏向“解出汉字多”的结果：Shift_JIS 日文、
+EUC-KR 韩文被解成 GB18030 乱码，EUC-JP 日文成 Big5 乱码，ISO-2022-JP 被当成 UTF-8；没有单字节候选，西文、俄文、希腊文、土耳其文、
+希伯来文、阿拉伯文报错或成乱码。用上游 ICU 源码实测（75 个多语言夹具、55 个短文本、32 个用户小说片段）：文本不太短时上游对日文（Shift_JIS/EUC-JP/ISO-2022-JP）、
+韩文与各单字节语言都判对；用户 GBK 小说 32 个片段全为 GB18030（100）。但短文本（约 10 字以内）上游很不可靠：GBK 4–8 字判成
+Big5，Big5 4–8 字判成 ISO-8859-1，日文 8 字判成 windows-1255，现有测试里 13 字的 GB18030 文本因 EUC-JP 与 GB18030 并列 88 而判成
+EUC-JP；希伯来文被判成 Java 不认的 ISO-8859-8-I，上游导入直接失败。判定：E4、E8 为 **`must-fix`**；移植上游 ICU 的多字节、
+ISO-2022 与单字节识别器，多字节有证据（置信度大于 10 且高于单字节）时按置信度选、并列用现有评分（S2），单字节最高大于 10 且
+样本不是“不超过 10 个多字节字符且无坏字符”时用单字节（S1），否则保持现有选择；ISO-8859-8-I 按 ISO-8859-8 解码（H1）。S1、
+S2、H1 为 `intentional-redesign`；ISO-2022-KR/CN（J2）为 `unknown` 不改；E5 报错立场不变。完整合同见
+[`txt-charset-cjk-single-byte-recognition-fixed-baseline-second-audit-p1-contract.md`](txt-charset-cjk-single-byte-recognition-fixed-baseline-second-audit-p1-contract.md)。
+2026-10-25 记录（合同第 10 节）：合同 `7a161c8`；红测 `b45f75c`（14 种语言/编码、`DecodeBody` 两页、api 两本书）与 `2521eca`（一段德文）
+在 `5a2fc7d` 上按合同失败，短中文对照通过；实现 `c03827d` 移植上游 ICU 多字节、ISO-2022 与单字节识别器，`d84b837` 补比对夹具。Go 移植
+对 178 个语料文件的前五名与 31 个比对夹具的全部识别器结果与上游 Java 完全一致。实现中把第 5 步细化为“多字节字符还须占一半以上”，
+否则一段德文会被当成短中日韩文本。上游判对的日文、韩文与单字节夹具全部同编码，希伯来文可解码（上游失败），用户小说与短中文不变。
+六项变异各有测试捕获。backend 全量、vet、race，frontend 815/815 与 build，advisory 门与扫描，Compose，存储 HTTP 合同通过。状态
+**implementation-complete / regression-validated**；J2、E5 未改。
+2026-10-25 发布（合同第 11 节）：`main` 快进到 `3ccab90`，可信 Actions run `40185661590` 全部成功；`3ccab90`/`latest` 为 OCI index
+`sha256:9fd02a9cf548780ee313465c48a8e9b2ea4573875256042081dfe3f6442a5562`（amd64 + arm64，revision 标签为完整提交号）。状态
+**aligned / Docker-published / awaiting-device-verification**；生产运行版本未知。
+
+## 2026-10-25 P1 文本编码探测的少量非法字节容错（E2）
+
+E1 记下的 E2：样本里只要有一个坏字节，`detectAndDecodeText` 就淘汰对应的旧编码候选，非合法 UTF-8 也不再考虑 UTF-8，于是
+GBK、Big5、UTF-8 文件都报 `unable to detect text encoding`。用上游 `io.legado.app.lib.icu4j` 源码在 `eclipse-temurin:21-jdk`
+里照 `TextFile` 的调用方式实测 17 个夹具：GBK、Big5 有少量坏字节时上游按 GB18030、Big5（置信度 100）解码，坏字节处为
+U+FFFD；UTF-8 带 BOM 加坏字节（80）或末尾截断（100）判 UTF-8；不带 BOM 只有个别坏字节的 UTF-8 中文，上游 UTF-8 只得 25，
+被 Shift_JIS（53–72）压过，整本乱码；超出容错的输入与随机字节被判成 EUC-JP/Shift_JIS/UTF-16LE 乱码；Latin-1 英文判
+ISO-8859-1。OpenReader `83f7e48` 对除无坏字节夹具外的全部报错。用 OpenReader 解码器统计：GB18030 在损坏的 UTF-8 上也满足
+ICU 多字节容错（坏字符约 5%），所以必须先按 ICU 的 UTF-8 计数（有效序列多于无效序列 10 倍）认定 UTF-8；合法 GBK/Big5 按
+UTF-8 计数无效远多于有效，不会被误认。判定：T1（旧编码少量坏字节，按有效多字节字符不少于坏字符 20 倍入选）与 T2（UTF-8 带
+BOM 或末尾截断）为 **`must-fix`**；T3（不带 BOM 的损坏 UTF-8 认作 UTF-8 并排在旧编码之前）与 T4（按整个样本比例而非 ICU 扫描
+中途放弃）为用户要求的 `intentional-redesign`；无坏字符的候选仍然优先（T5，当前能导入的文件结果不变）；书源正文自动 charset
+（`DecodeBody`）与上游同用一个探测器（T7）。E5（超出容错时报错）保持 `unknown` 不改；新记 E8（单字节编码）为 `must-fix`，另起
+切片。同时勘误 E1：上游多字节与 UTF 识别器读整个 512000 字节样本，不是只看前 8000 字节，E3 实为 `aligned`。完整合同见
+[`txt-charset-malformed-tolerance-fixed-baseline-second-audit-p1-contract.md`](txt-charset-malformed-tolerance-fixed-baseline-second-audit-p1-contract.md)。
+2026-10-25 记录（合同第 9 节）：合同 `3350984`；红测 `5ca5684` 在 `83f7e48` 上 engine 八个容错用例、`DecodeBody` UTF-8 网页与
+api 两次上传按合同失败，无坏字节两行与三个超出容错的对照通过；实现 `9ce3d39` 后全部转绿，对照仍报错。变异 M1/M2（去掉或后移
+UTF-8 认定）恰好让 UTF-8 用例失败，M3（旧编码见坏字符即淘汰）恰好让 GBK/Big5 用例失败，M4（去掉 20:1）恰好让三个对照失败。
+上游实测夹具中，OpenReader 现在在上游判 GB18030/Big5/UTF-8 的地方给出相同编码，不带 BOM 的损坏 UTF-8 判 UTF-8（上游 Shift_JIS
+乱码）；用户小说结果不变，插入一个坏字节后 GBK 与 UTF-8 版本都能导入（455 章）。回归见合同第 9 节。状态
+**implementation-complete / regression-validated**；E4/E5/E8 未处理。
+2026-10-25 发布（合同第 10 节）：`main` 快进到 `7c447a5`，可信 Actions run `40179627517` 全部成功；`7c447a5`/`latest` 为 OCI
+index `sha256:afe0290b923ee8bd599a9abf787d982558382d273bbcf5fbbb65f7c3506d64ba`（amd64 + arm64，revision 标签为完整提交号）。
+状态 **aligned / Docker-published / awaiting-device-verification**；生产运行版本未知。
+
+## 2026-10-25 P1 本地 TXT 旧编码探测边界
+
+用户报告：4,117,155 字节的 GBK 小说 `前浪(校对加料版全本 1-425) 作者：刀一耕.txt` 在导入预检里显示“待修复”和
+`unable to detect text encoding`，上游能正常导入。整个文件按 GBK/GB18030 严格解码没有错误。`decodeTXTForCatalog` 截取前
+512000 字节判定编码，只对合法 UTF-8 回退到字符边界；这个文件的第 511999 字节 `0xCC` 是“抬”的前导字节，后续字节 `0xA7`
+在样本之外。`golang.org/x/text` 解码器把样本末尾当作输入结束，输出 U+FFFD，`detectAndDecodeText` 见到 U+FFFD 就拒绝候选，
+四个旧编码候选全部落选。合成夹具在 `1b8ef35` 上复现：GBK 双字节、GB18030 四字节、Big5 只在截断拆开字符时失败，对齐时成功；
+截断落在字符中间的概率约为一半。固定上游 `TextFile.getChapterList` 用 `EncodingDetect.getEncode` → ICU `CharsetDetector`，
+后者只看前 8000 字节（`kBufSize`），被截断的末尾字符至多记一个 `badCharCount`，非法字符在约 5% 以内仍判定该编码，从不报错。
+（这一点修正了 2026-07-11 TXT 目录合同“Detection sample”一行：上游的 512000 字节只用于选目录规则，编码判定只看前 8000 字节。）
+（**勘误 2026-10-25**：上面这条“修正”不对。上游 UTF-8/16/32 与多字节识别器读整个 512000 字节样本，只有 ISO-2022 与单字节
+识别器看前 8000 字节；原“Detection sample”一行正确，E3 实为 `aligned`。见下方 2026-10-25 E2 条目。）
+判定：截断拆开字符导致导入失败为 **`must-fix`（E1，本切片）**，目标是截断样本按“未到输入末尾”解码旧编码候选，末尾残缺字符
+不算错误；样本内部真实的少量非法字节（E2）为 `must-fix`，另起切片；无候选时上游回退 UTF-8（E5）为 `unknown`，随 E2 判定；
+512000 对 8000 的样本差异（E3）为 `acceptable-change`；Shift_JIS/EUC-KR 在对齐时也被判成 `gb18030`（E4）为 `unknown`，另行盘点。512000 探测窗口、目录规则、
+伪章节、暂存流程与 parser 预算都不重开。完整合同见
+[`txt-legacy-encoding-probe-boundary-fixed-baseline-second-audit-p1-contract.md`](txt-legacy-encoding-probe-boundary-fixed-baseline-second-audit-p1-contract.md)。
+2026-10-25 记录（合同第 8 节）：合同 `364aa82`；红测 `8f001c8` 在 `1b8ef35` 上 engine 三项截断拆字（GBK 保留 1 字节、
+GB18030 四字节保留 2 字节、Big5 保留 1 字节）与 api 三个入口（直接上传 400，LocalStore/WebDAV 预检条目报错无 book）按合同
+失败，五项对照通过；实现 `f84398d` 让 `decodeTXTForCatalog` 截取样本时以 `atEOF=false` 解码旧编码候选，同一六个子测试转绿，
+把调用改回 `atEOF=true` 的变异恰好让它们重新失败。用户文件解析为 455 章，解码全文与 `iconv -f GB18030` 逐字节一致；真实浏览器
+1440×900 下书仓导入直接进入“导入本地书籍”（455 章），导入后 Reader 打开截断处所在的 `第056章 担心`，正文无 U+FFFD。backend
+全量 29 包、vet、frontend 815/815 与 build、advisory 门与扫描、Compose、存储 HTTP 合同通过。状态
+**implementation-complete / regression-validated**；E2/E4/E5 未处理。
+2026-10-25 发布（合同第 9 节）：`main` 快进到 `94c696f`，可信 Actions run `40174734994` 全部成功；`94c696f`/`latest` 为 OCI
+index `sha256:50cd42f1fb17df94fae00b42253cfdc88ad4ca0b935e45ba5ea93215f60bc62d`（amd64 + arm64，revision 标签为完整提交号）。
+状态 **aligned / Docker-published / awaiting-device-verification**；生产运行版本未知。
+
+## 2026-10-23 P0 Reader 桌面工作区面板打开时的正文控件盘点
+
+固定上游的四个桌面面板（书架、书源、目录、设置）是没有遮罩的 `el-popover trigger="click"`（`Reader.vue` L9–55）。element-ui
+在 `document` 的冒泡阶段监听 `click` 来关闭面板，正文 `eventHandler`（L1713–1733）在面板打开时直接返回。所以面板打开时，按正文
+空白处只关闭面板；按面板外的控件（章末 `加载下一章` L246–247、右栏、进度、左栏）时控件照常执行，面板随之关闭，只有自己阻止冒泡
+的音频控件执行后面板不关。用上游依赖范围解析出的 vue 2.7.16 与 element-ui 2.15.14 搭了最小页面，在真实浏览器里复现了这些结果
+（1440×900 鼠标、1366×1024 触摸，四个面板相同）。OpenReader 用全屏透明关闭层（z-index 3）代替外点，面板为 4；章末
+`加载下一章` 和 R7 之后的两个“重新加载”也是 3，且在 DOM 里更靠后，露在面板外时按到的是按钮。用本地 Go 服务加生产前端在
+1440×900 鼠标、iPad 1366×1024 与 1024×1366 触摸下逐面板、逐控件实测了两份基线：`98f4ddb`（R7 之前）和 `0962dca`（与已发布的
+`238e3f3` 同树）。结果：`加载下一章` 进入下一章，面板不关；内联“重新加载”在 R7 之前只关面板、不重试，R7 之后重试、面板不关；
+主错误块的按钮总被面板盖住；面板外空白处只关闭面板；所有场景都没有触发点击层或正文的触摸判定。判定：`加载下一章` 和内联
+“重新加载”按下后面板不关，为 **`must-fix`**，目标是执行动作并关闭面板；空白处、主错误块、右栏、面板切换为 `aligned`。桌面
+进度块的上一章/下一章同样执行但不关面板，判 `must-fix`，但不在本切片范围内，由协调方决定是否并入。实现只需让三个处理函数经过
+已有的 `runWithDesktopWorkspaceClosed`，不改关闭层、面板和 R7 的层级，所以没有需要用户决定的事项。点击层分区与映射、R7 按钮层级、
+移动端面板都不重开。另记几条观察，不并入本切片：移动端面板盖住 `加载下一章`；音频控件；连续模式加载后阅读位置被拉回。完整合同见
+[`reader-desktop-panel-content-controls-fixed-baseline-second-audit-p0-contract.md`](reader-desktop-panel-content-controls-fixed-baseline-second-audit-p0-contract.md)。
+2026-10-23 记录（合同第 11 节）：合同提交 `3a0d507` 以 `20fb76d` cherry-pick 到 main `a7fd6aa` 之上（与
+`claude/desktop-panel-content-controls` 上的 `ec67388` 树相同）。红测 `860b9ea`（8.1 源码合同 5 条；8.2 新增浏览器合同
+`reader-desktop-panel-controls-contract.mjs`：1440×900 鼠标、iPad 1366×1024 与 1024×1366 触摸，四个面板，C1–C4 共 108 组）在 `20fb76d`
+（Reader 源码与已发布的 `238e3f3` 相同）上按盘点复现：C1、C2 的 48 组全部只在“面板关闭”失败，包括盘点没有实测的 1024×1366 flip
+设置；C3、C4 的 60 组通过；单元 815 条中只有新增的 3 条处理函数断言失败。实现 `74da65c` 只改 `Reader.vue`：`@reload`、`@retry-block`
+在绑定里经过 `runWithDesktopWorkspaceClosed`，`handleChapterEndNext` 的两个分支放进同一个函数（绑定 `@click.stop="handleChapterEndNext"`
+由 `readerPageEndPrompt` 固定，没有改）；关闭层、面板与三个控件的层级、DOM 顺序和 `.stop` 都不变。修复后浏览器 108/108、frontend
+815/815 与 build 通过，末章分支探针 12/12（提示 `本章是最后一章` 并关闭面板）；R7 错误面合同 30/30、连续、移动（含 iPad 外点、同工具与
+可见关闭）、文字模式与 openreader-smoke 对照通过。四项临时变异各只让对应断言变红：去掉章末包装（M1）只红 C1 的 24 组，去掉内联包装
+（M2）只红 C2 的 24 组，都只在“面板关闭”；把关闭层抬到 4 并移到正文之后（M3，第 7 节不采用的“只关闭”做法）时 C1、C2 的命中与动作
+断言失败而“面板关闭”通过，`readerDesktopPrimaryPopoverContract` 失败；去掉移动端判断（M4）只让源码锁定断言失败。进度块上一章/下一章
+（第 10 节第 1 条）没有收到并入确认，没有加 C5。状态 **implementation-complete / regression-validated**；本地未推送、未合入 main，镜像
+未构建，生产未动。
+2026-10-24 发布（合同第 12 节）：`1b8ef35` 快进 main，可信 Actions `40099542262` 成功，`1b8ef35` 指向 index
+`sha256:04d5d7b47d2b2438ce6966dd6e681cd1b775cea3b9d31be477a8e99f78905ea2`（amd64 + arm64，revision 为完整提交号），两平台前端产物与
+本地同一前端树的 build 逐字节一致；`latest` 已随之后的 `3ccab90` 发布前移，其间没有改 `frontend/`。P3、P4 **released /
+awaiting-device-verification**，进度块（第 10 节第 1 条）仍开放，生产未操作。
+
+## 2026-10-22 P1 发布流程 浏览器启动门（O3）
+
+依赖维护切片的观察 O3：vite 8.1.6 的产物单元测试和构建都通过，却在浏览器里是空白页（`http-vendor` 抛
+`e is not a function`，Vue 没挂载），只因本地手动跑了 `openreader-smoke.mjs` 才被拦下。可信发布流程不在浏览器里加载
+产物，卷门只请求 `/api/*` 和资源地址，同样的产物合入 main 会照常发布。判定 **`must-fix`（P1）**：紧接 native 候选镜像
+构建之后，用锁定的 Playwright 1.61.1 headless shell（revision 1228）从该镜像起一个全新容器，三视口加载入口，页面错误、
+`console.error`、`/api/` 5xx 或 `#app` 为空即失败，发生在约 16 分钟的 arm64 构建和发布之前。复用既有 checker，只把空白
+判断从整个 body 收紧到 `#app`，并在失败时附上页面错误和视口。arm64 镜像拷贝同一个构建平台阶段的产物、只检查未登录入口，
+两项记为 acceptable-change。上游行为不涉及。门测试先红后绿（6/10 → 10/10）；经已发布的 `92c98a9` 镜像，门脚本对
+删除 `strictExecutionOrder: true` 的构建失败并报出 `pageerror: e is not a function`，对镜像自带产物和当前树构建通过。状态
+**implementation-complete / regression-validated**，待可信 Actions 运行。完整合同见
+[`release-browser-boot-gate-fixed-baseline-second-audit-p1-contract.md`](release-browser-boot-gate-fixed-baseline-second-audit-p1-contract.md)。
+
+## 2026-10-22 P1 依赖维护 发布门新增公告
+
+认证会话 P0 修复的本地发布门里，两个失败关闭的 advisory 门在当前树上失败（上次成功发布为 10-18 的 `238e3f3`）：Go 门报
+未审查的 GO-2026-6809（`crypto/x509` 不再信任被攻破的中间证书，修复于 Go 1.26.10，经 `crypto/tls` 客户端握手可达）；前端
+全锁门报 vite 8.0.16（开发服务器公告，8.0 线无修复，最小修复 8.1.6）和经 axios 引入的 follow-redirects 1.16.0（修复 1.16.1，
+预期不进浏览器产物）。CI 在构建镜像前运行同样的门，不修就发布不了。判定三项均为 **`must-fix`（发布阻塞）**：go 指令与
+后端构建镜像升到 Go 1.26.10（官方 index pin），vite 精确升到 8.1.6，follow-redirects 用精确 override 固定 1.16.1；不加门例外、
+不改门脚本、不升级其他依赖，README 的 Go 版本字样留给进行中的 README 改写。上游行为不涉及。实施中发现 vite 8.1.6 的生产
+产物是空白页（rolldown 1.1+ 的运行时寄放导致 chunk 循环导入，8.2.4/8.3.5 同样复现），按合同第 8 节加
+`strictExecutionOrder: true`，产物结构恢复与旧构建一致。合入 main 后可信 Actions 又在 OS APK 门两次拦下：复制的构建镜像
+证书包与运行时 APK 记录不符（改为保留运行时自带证书包），以及 musl 1.2.5-r24（CVE-2026-107891）待修复（按 zlib 先例构建期
+安装签名精确版本、先行门测试、更新基线）。状态 **Docker-published**：run `39768628680` 全部门通过，
+`ghcr.io/changshengyu/openreader:92c98a9` / `latest` 为 OCI index `sha256:3b29f501…18d2`（amd64 + arm64）；发布流程不在浏览器里
+加载产物（O3）另起后续。完整合同见
+[`dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md`](dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md)。
+
+## 2026-10-22 P0 认证会话 旧格式 JWT 收编与公开默认密钥
+
+会话合同的七天旧格式 JWT 收编窗把“签名能验证”当作“本实例签发过”。`OPENREADER_JWT_SECRET` 未设置时用仓库公开的
+`change-this-before-deploy`（标准 Compose 不设置它），全新安装首次启动写下的 marker 又早于所有账号，两者叠加时任何人
+都能用公开密钥签 `{"userId":1,"iat":<2020>}`，在首次启动后七天内拿到管理员会话；今天才从早于 `a0edce3` 的镜像升级、
+没设密钥的实例，升级前的账号同样可被接管。REST、WebDAV Bearer、`/ws/sync` 共用同一个 `Authenticate`。另一会话已用临时
+测试复现（未提交）。固定上游没有 JWT（每次登录随机 token 写 `token_map`），这是 OpenReader 自有过渡设计的缺口。判定：
+公开值/空值下仍信任旧格式签名（F1）、收编不要求账号早于 marker（F2）为 **`must-fix`（P0）**。目标：公开值下在查询账号前
+拒绝旧格式 token（T1）；其余情况只收编 `created_at` 严格早于 marker 的账号（T2），全新安装因此没有收编窗。新格式会话靠
+随机 `jti` 摘要认证，不受影响、不重开；自定义密钥已升级实例的合法收编不变；公开默认值实例上的升级前旧 token 明确放弃
+（无法与伪造区分，代价是重新登录一次）。同一密钥派生的资源 capability（F3：封面可被当作匿名图片代理，中风险；EPUB/
+CBZ/音频/章节图片绑定内容指纹，低风险）判 `must-fix（P1）`，方向定为“永远不用公开值签名”，因改变启动与数据卷行为另起
+切片 S2。安全检查清单“必填”与 README“无需修改”的不一致（F4）在记录与发布后处理；窗口结束后已收编行也被拒绝（O1）、
+未注入会话服务时的中间件旧路径（O2，生产不可达）只记录。不改 schema、文件、启动、备份、前端。实现 `9e77cd9` 只改
+`authsession` 的旧格式分支；红测 `cfdcd8a` 在旧实现上按预期失败、修复后转绿，正常对照始终通过，真实二进制上新版四个
+入口都拒绝；安全检查清单 F4 已更正。状态 **Docker-published**：与依赖维护切片一起由 run `39768628680` 发布为
+`ghcr.io/changshengyu/openreader:92c98a9` / `latest`；生产版本未知。
+完整合同见
+[`authenticated-session-legacy-public-secret-fixed-baseline-second-audit-p0-contract.md`](authenticated-session-legacy-public-secret-fixed-baseline-second-audit-p0-contract.md)。
+
 ## 2026-10-17 P0 Reader 正文加载失败错误面盘点
 
 固定上游当前章失败时，正文区是一个“错误章节页”：`<h3>` 目标章目录标题，加 `获取章节内容失败！` 和原因
@@ -16,8 +174,9 @@
 上一章的 `第 1/9 页`。工具栏“重新载入章节”在 3 视口都正常，与上游刷新一致。判定：错误页标题、`获取章节内容失败！`、失败提示、
 stale 文案、按钮被点击层遮挡与触摸穿透（P0）、内联按钮的可达性与文字、连续模式目标章失败、目录失败的页面与重试、页码进度均为
 **`must-fix`**；正文内“重新加载”按钮沿用连续合同“明确重试入口”的签收理由判 `acceptable-change`；原因取后端脱敏消息、纯文本
-渲染、不复现上游目录请求出错时的空白页和工具栏刷新抛错，均为 `acceptable-change`；英文稳定消息是否改成中文记为 **`unknown`，
-需要用户决定 D1**。运行标题、标签页标题、点击翻页区设计、章末入口、加载器机制、加载中提示和后端 API 都不重开。测试计划：
+渲染、不复现上游目录请求出错时的空白页和工具栏刷新抛错，均为 `acceptable-change`；英文稳定消息是否改成中文原记为 `unknown`（D1），
+用户当天决定 (b)：按后端 code/HTTP 状态映射成中文短句，未知时用中文兜底，改判 **`must-fix`**（映射表见合同第 7 节）。
+运行标题、标签页标题、点击翻页区设计、章末入口、加载器机制、加载中提示和后端 API 都不重开。测试计划：
 源码合同（标题、两行文字、按钮定位与三个 `.stop`）、错误文字纯函数、加载器提示与失败后重算布局、`handleTouchEnd` 忽略按钮、
 目录失败后重试整本书、连续窗口的目标章失败；新增错误面浏览器合同（鼠标与触摸分开跑，命中测试、真实指针、内联按钮三个位置、
 文案、目录失败），并给 EPUB 与连续合同补失败步骤。另记三条观察，不并入本切片：刷新正文的成功提示与服务端 refresh 语义；
@@ -33,7 +192,7 @@ stale 文案、按钮被点击层遮挡与触摸穿透（P0）、内联按钮的
 reauthentication 与 openreader-smoke 对照通过。七项临时变异中，去掉定位以及同时去掉 `.stop` 与触摸判断时浏览器按预期变红；
 只去掉其中一层时另一层仍能挡住穿透，浏览器不变，由源码合同或单元变红守住。附带：手机触摸音频播放键不再切换工具层
 （向上游靠拢）；桌面工作区面板打开时露出的“重新加载”与章末入口一样点中按钮、不关面板，记为合同第 10 节第 4 条另行裁决。
-R7 状态为 **implementation-complete / regression-validated**；R1–R6、R8 仍为 **contract-only**，D1 待用户决定。
+R7 状态为 **implementation-complete / regression-validated**；R1–R6、R8 仍为 **contract-only**，D1 已于 2026-10-17 由用户决定为 (b)。
 2026-10-18 发布：合并提交 `238e3f3` 快进 main，可信 Actions `39125862052` 成功，`238e3f3`/`latest` 指向 index
 `sha256:f45c8995a47c7ce696c07600533e620bf68b5b4e8df77d684539bb823afca4cf`，两平台前端产物与本地同提交 build 逐字节一致；
 R7 **released / awaiting-device-verification**，生产未操作。

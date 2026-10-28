@@ -5,6 +5,9 @@
 `b2632a4c248a53ce7bade8bdba7bdef66b89b236`。状态 **contract-committed / behavioral-reds-reproduced /
 implementation-not-started**（以上为合同提取时快照；当前已发布验收见第7–8节）。补充运行时合同第3–5节，不把上一Go维护切片当作完整依赖审计完成。
 
+2026-10-22：全锁门在 vite 8.0.16 与 follow-redirects 1.16.0 上因新公告失败，最小升级见
+[`dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md`](dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md)；本合同结论不重开。
+
 ## 1. 固定上游与已签收适配
 
 本地pinned checkout不存在，重新只读读取精确commit（不取浮动HEAD）：

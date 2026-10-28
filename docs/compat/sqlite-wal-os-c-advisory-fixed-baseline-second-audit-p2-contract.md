@@ -9,6 +9,11 @@
 前端维护交付保持，不把npm/Go扫描当作C、OS或数据库持久性问题的覆盖。生产另一Mac不操作，
 原书已恢复事件关闭；本合同不声称发现生产数据库损坏或远程利用。
 
+2026-10-22：OS APK 门在发布时读到 musl 1.2.5-r24（CVE-2026-107891）待修复项，按本合同 zlib 先例在构建期安装签名
+精确修复，见
+[`dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md`](dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md)
+第 11 节；本合同的门设计与结论不重开。
+
 ## 1. 上游产品语义与已签收适配
 
 MAIN读取精确fa22的 `WebdavController.kt:726–823`：登录及secure下enable_webdav权限、

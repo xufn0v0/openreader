@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -117,6 +118,12 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Identity, err
 	if err != nil || claims.UserID == 0 || claims.IssuedAt == nil {
 		return Identity{}, ErrInvalidSession
 	}
+	legacy := claims.ID == "" && claims.AuthVersion == 0
+	// A legacy token proves its origin only by its signature, and a signature
+	// made with a published key is indistinguishable from a forged one.
+	if legacy && publicSecret(s.secret) {
+		return Identity{}, ErrInvalidSession
+	}
 	now := s.now().UTC()
 	if claims.IssuedAt.Time.After(now.Add(time.Minute)) {
 		return Identity{}, ErrInvalidSession
@@ -133,7 +140,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Identity, err
 		return Identity{}, ErrInvalidSession
 	}
 
-	if claims.ID != "" || claims.AuthVersion != 0 {
+	if !legacy {
 		if claims.ID == "" || claims.AuthVersion == 0 || claims.AuthVersion != user.AuthVersion {
 			return Identity{}, ErrInvalidSession
 		}
@@ -152,6 +159,15 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Identity, err
 		return Identity{}, err
 	}
 	if claims.IssuedAt.Time.After(marker) || now.After(marker.Add(SessionTTL)) {
+		return Identity{}, ErrInvalidSession
+	}
+	// Only an account that existed before the marker can hold a token from an
+	// older binary, so a fresh install has no adoption window at all.
+	createdBefore, err := s.accountCreatedBefore(ctx, user.ID, marker)
+	if err != nil {
+		return Identity{}, err
+	}
+	if !createdBefore {
 		return Identity{}, ErrInvalidSession
 	}
 	key := sessionDigest("legacy", token)
@@ -239,6 +255,18 @@ func (s *Service) migrationTime(ctx context.Context) (time.Time, error) {
 	return migration.AppliedAt.UTC(), nil
 }
 
+// accountCreatedBefore compares in Go: stored timestamps may carry different
+// UTC offsets, so SQLite text comparison would misorder them. A missing or
+// unparseable creation time fails closed.
+func (s *Service) accountCreatedBefore(ctx context.Context, userID uint, marker time.Time) (bool, error) {
+	var createdAt sql.NullTime
+	if err := s.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
+		Pluck("created_at", &createdAt).Error; err != nil {
+		return false, err
+	}
+	return createdAt.Valid && !createdAt.Time.IsZero() && createdAt.Time.Before(marker), nil
+}
+
 func pruneUserSessions(tx *gorm.DB, userID uint) error {
 	var stale []string
 	if err := tx.Model(&models.UserSession{}).
@@ -269,6 +297,17 @@ func parseClaims(secret, token string) (Claims, error) {
 		lastErr = err
 	}
 	return Claims{}, lastErr
+}
+
+// publicSecret reports whether secret is empty or one of the defaults
+// published in this repository.
+func publicSecret(secret string) bool {
+	switch strings.TrimSpace(secret) {
+	case "", legacyDefaultKey, currentDefaultKey:
+		return true
+	default:
+		return false
+	}
 }
 
 func compatibleSecrets(secret string) []string {

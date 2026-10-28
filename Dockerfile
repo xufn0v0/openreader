@@ -9,7 +9,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM golang:1.26.9-alpine3.23@sha256:6750308561953d451210ed1a8086d36c8c8bdcbf672d38d9d0d424b8a7a0216c AS backend-builder
+FROM golang:1.26.10-alpine3.23@sha256:107301490755aa2ea1b0b43788b6e62cff2faae45a538028b193becc06aaffba AS backend-builder
 RUN apk add --no-cache build-base
 WORKDIR /src/backend
 ARG TARGETOS=linux
@@ -26,11 +26,12 @@ COPY backend/ ./
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-$(go env GOARCH)} go build -mod=vendor -trimpath -ldflags="-s -w -X openreader/backend/api.Version=${VERSION} -X openreader/backend/api.Commit=${VCS_REF} -X openreader/backend/api.BuildDate=${BUILD_DATE}" -o /out/openreader .
 
 FROM alpine:3.23.6@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0
-# The pinned official 3.23.6 base still ships zlib 1.3.2-r0. Install only the exact
-# v3.23 main maintenance fix at build time: apk verifies the signed repository index,
-# the release OS gate pins the package identity, and nothing upgrades at container start.
-# Kept before the ARGs so the validated layer is reused by the published build.
-RUN apk add --no-cache 'zlib=1.3.2-r1'
+# The pinned official 3.23.6 base still ships zlib 1.3.2-r0 and musl 1.2.5-r23. Install
+# only the exact v3.23 main maintenance fixes at build time: apk verifies the signed
+# repository index, the release OS gate pins the package identities, and nothing
+# upgrades at container start. Kept before the ARGs so the validated layer is reused
+# by the published build.
+RUN apk add --no-cache 'zlib=1.3.2-r1' 'musl=1.2.5-r24' 'musl-utils=1.2.5-r24'
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="OpenReader" \
@@ -47,9 +48,10 @@ ENV OPENREADER_ADDR=:8080 \
     OPENREADER_DB=/app/data/openreader.db \
     OPENREADER_PUBLIC_DIR=/app/public \
     GIN_MODE=release
-# The Go builder includes the standard CA bundle; time/tzdata is embedded in
-# the binary, so the zlib fix above is the runtime stage's only package install.
-COPY --from=backend-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+# The runtime base's own ca-certificates-bundle provides the CA bundle (copying
+# the builder's would overwrite an APK-owned file whenever the builder's Alpine
+# point release differs); time/tzdata is embedded in the binary, so the zlib
+# fix above is the runtime stage's only package install.
 COPY --from=backend-builder /out/openreader /app/openreader
 COPY --from=frontend-builder /src/frontend/dist /app/public
 RUN mkdir -p /app/data /app/cache /app/library

@@ -1,5 +1,16 @@
 # OpenReader Security Review Checklist
 
+2026-10-22 release-blocker dependency maintenance:
+[`compat/dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md`](compat/dependency-advisory-release-blockers-fixed-baseline-second-audit-p1-contract.md).
+GO-2026-6809 (crypto/x509, reachable through crypto/tls) is fixed by Go 1.26.10 and the official
+golang:1.26.10-alpine3.23 index pin; vite moves to 8.1.6 (dev-server advisories) with
+`strictExecutionOrder` so the production bundle still boots; follow-redirects is pinned to 1.16.1 and is
+not part of the browser bundle. The runtime image keeps its own CA bundle instead of the builder's, and
+musl/musl-utils 1.2.5-r24 (CVE-2026-107891) are installed at build time from the signed index with pinned
+identities, following the zlib precedent. All fail-closed advisory gates, including the OS APK gate, pass without
+new exceptions; published as `92c98a9`. The release workflow still does not load the built bundle in a browser
+(observation O3, follow-up).
+
 2026-10-16 SQLite/WAL/OS-C contract-only supplement:
 [`compat/sqlite-wal-os-c-advisory-fixed-baseline-second-audit-p2-contract.md`](compat/sqlite-wal-os-c-advisory-fixed-baseline-second-audit-p2-contract.md).
 ActualC3.45.1/WAL/multipleconnections meet necessary conditions for maintainer WAL-reset risk, not
@@ -378,11 +389,33 @@ Contract `31b2963`, red tests `5734f74` and implementation `3bb465f` landed in o
 
 ## Authentication and authorization
 
-- [ ] `OPENREADER_JWT_SECRET` is required and not logged.
+- [ ] `OPENREADER_JWT_SECRET` is not logged. It is **not** required: when unset, `config.Load()` falls back to a
+  default that is published in this repository, so deployments should set their own value. Legacy-format session
+  tokens are never adopted under a published or blank secret, and fresh installs have no legacy adoption window
+  (see the P0 entry below). Resource capability links are still signed with the configured secret (follow-up S2).
 - [ ] Protected endpoints require valid JWT.
 - [ ] Admin endpoints check admin role.
 - [ ] User-owned rows are scoped by authenticated user ID.
 - [ ] Batch operations cannot affect another user’s data.
+
+### P0 legacy session adoption under a public default secret (2026-10-22 implemented)
+
+- [x] A legacy-format token (no `jti`, no `authVersion`) is rejected before any account lookup when the configured
+  secret is blank or one of the two published defaults; REST, both WebDAV Bearer prefixes and `/ws/sync` share the
+  check and keep their generic 401 responses.
+- [x] Otherwise a legacy token is adopted only for an account whose `created_at` is strictly before the
+  `authenticated-session-v1` marker, compared in Go; a missing or unparseable creation time fails closed. Fresh
+  installs therefore have no adoption window.
+- [x] Modern `jti`-backed sessions, the dual-default compatibility for them, legitimate adoption on upgraded
+  custom-secret instances, schema, backups and startup are unchanged. Legacy tokens on upgraded instances that use a
+  published secret are deliberately abandoned (one re-login).
+- [ ] Resource capability links (EPUB/CBZ/audio/chapter image: low; cover: medium) still use the configured secret;
+  follow-up slice S2 will stop signing with a published value.
+
+Target contract:
+[`docs/compat/authenticated-session-legacy-public-secret-fixed-baseline-second-audit-p0-contract.md`](compat/authenticated-session-legacy-public-secret-fixed-baseline-second-audit-p0-contract.md).
+Status is `Docker-published`: trusted Actions run `39768628680` published `ghcr.io/changshengyu/openreader:92c98a9` and
+`latest` (OCI index `sha256:3b29f501e659454ea096fddcc4e0a05ba3c881cccacf8c3a684218649ba218d2`, amd64 + arm64).
 
 ### P2 Bookmark write boundary (2026-08-12 implementation)
 
