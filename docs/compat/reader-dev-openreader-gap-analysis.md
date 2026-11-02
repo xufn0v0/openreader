@@ -1,5 +1,131 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-10-30 P1 夜间 Element Plus 组件外观（上游 `App.vue` `.night-theme`）
+
+前两个夜间切片（`24511c0`、`21d78ab`）只改了 Reader 自己画的工具栏、设置与列表；`html.dark-reader` 只改 `--app-*`，夜间所有
+Element Plus 组件（消息框、按钮、输入框、选择下拉、对话框、表格、复选框、标签页、分页、下拉菜单）仍是默认浅色。上游 `App.vue#setTheme`
+在 `isNight` 时给 `body` 加 `night-theme`，939–1141 行全局改写 Element：消息框 `#212121`/`#888`/`#777`、默认按钮 `#888`/`#ddd`、主要按钮
+`#185798`、输入框 `#444`/`#ddd`、下拉 `#333`/`#ddd`/悬停 `#444`、对话框 `#222`/`#bbb`、表格 `#222`/`#555`/`#888`、分页 `#444`/`#ddd`、下拉菜单
+`#444`/`#bbb`、“已选择 N 个” `#bbb`。上游打包时 Element UI 自己的 CSS 排在 `App.vue` 之后，同权重时 Element 规则赢；用 Element UI 2.15.14
++ 摊平的 `.night-theme` 在 Chromium 实测（禁用按钮仍白底 `#666` 字、类型按钮悬停 `#bbb`、选中项/选中标签页/选中复选框保持 `#409eff`）。
+当前与上游有 128 个测量属性不同。用户确认：全局，同上游（N1–N19 **`must-fix`**，所有夜间方案）；目录“本地/已缓存”标签夜间用上游
+标签惯例 `effect="dark"`；空状态插图用 Element Plus 暗色填充、`v-loading` 遮罩夜间 `#222`（O1–O3 `intentional-redesign`）；照上游实际
+渲染层叠结果（D4）。占位/禁用等未覆盖状态的 Element Plus 默认色差、内阴影环与键盘焦点轮廓为 `acceptable-change`；`Index.vue`/RSS/朗读
+组件自己的 `.night-theme` 规则、日间配色不重开。完整合同见
+[`night-element-plus-theme-fixed-baseline-second-audit-p1-contract.md`](night-element-plus-theme-fixed-baseline-second-audit-p1-contract.md)。
+状态 **contract-only**。
+2026-11-02 补充：实现中发现首页侧栏夜间样式（`AppLayout.vue`）与书籍信息书名 `#eee` 都写成 `:global(html.dark-reader) .x`，被 Vue 编译成
+只作用于 `<html>`，从未生效；用户补充决定 D5 首页侧栏保持原样（另起切片按上游 `Index.vue` `.night`）、D6 登录页保持原样（登录路由不加
+`night-theme`）。
+2026-11-02 记录（合同第 8 节）：合同 `038af4e`、红测 `e7ce35c`、D5/D6 `622445e`/`2a110b7`、实现 `30ef60c`、浏览器合同重构 `226c9a1`；
+回归时发现新公告 GHSA-mrwp-f3q8-3g9p，`15f7f73` 把 follow-redirects 精确覆盖改为 1.16.2。阅读页（五个视口，独立页面）与首页工作台合同的
+夜间值逐项为上游实测值，日间与改前构建完全相同（阅读页 346 个值、首页 195 个值）；侧栏设置下拉与登录页保持原样；前端 855/855 与
+build、后端全量/vet、公告门、16 个模拟浏览器合同、真实 Go 服务导入 TXT 的夜间对照、真实接口合同（书籍信息“追更”一项在改前构建同样
+失败，另起）通过。状态 **implementation-complete / regression-validated**，待可信 Actions。
+2026-11-02 发布：main 快进到 `0ce2bff`（ls-remote 核验，未强推）；可信 Actions run `41450840714` 全部成功（13:11–13:35Z）。`ghcr.io/changshengyu/openreader:0ce2bff` 与 `latest` 为 OCI index `sha256:4e17ce2b55ce3e3c999df31ddfa9571a6cc3f9331f325feaa5d5e7f27e43821a`（linux/amd64 `sha256:d9309c69…`、linux/arm64 `sha256:237abbf5…`），两平台 `org.opencontainers.image.revision` 均为 `0ce2bffd082b117059ed6fd292df4e5b110b933e`。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
+## 2026-10-30 P1 Reader 夜间目录/书架/换源列表文字
+
+夜间配色切片（`24511c0`）之后，三块列表面板仍是 4.5:1 替换出的纯白文字：目录分隔线日夜都是 `#f0f0f0`，移动目录当前章是 `#409eff`
+加 `#ecf5ff` 浅蓝块，悬停是 `#f5f7fa` 浅灰块。上游三个组件按 `isNight` 加 `.night`：目录章节继承 `.el-popover` 的 `#606266`、已缓存
+`#444`、当前章 `#EB4259` 无底色、分隔 `#333`；书架书名与未读数 `#888`、最近章节 `#555`、分隔 `#333`；换源书源名与耗时 `#606266`、
+最新章节 `#888`、分隔 `#333`；标题按钮加载中 `#606266`。用户确认全部改回上游、对所有夜间方案生效（L1–L4、L7–L13 **`must-fix`**），
+设置字体预览框（OpenReader 新增）夜间用控件夜间面 `rgba(45, 45, 45, 0.5)`/`#666`/`#606266`；目录悬停与移动“第 N 章”小字、选中红
+`#EB4259`→`#ed4259` 为 `acceptable-change`；面板里的 Element Plus 组件、日间配色与日夜共用结构不重开。完整合同见
+[`reader-night-list-typography-fixed-baseline-second-audit-p1-contract.md`](reader-night-list-typography-fixed-baseline-second-audit-p1-contract.md)。
+状态 **contract-only**。
+2026-10-30 记录（合同第 8 节）：合同 `465ad11`、红测 `f54fcbc`、实现 `849c33d`、浏览器夹具修正 `086e987`、L2 修订 `4ee2515`/`c576933`。实现中修订 L2：导入的本地书每章都有服务端 `cachePath`，沿用 `isCached` 会让整本目录夜间变成 `#444`；上游 `cachedCataMap` 只读浏览器缓存，现在 `cached` 只看浏览器缓存，`el-tag` 不变。真实账号对照 `ec3736f` 构建：五个视口日间列表与字体预览 computed style 完全相同，夜间逐项为上游值；移动/换源/书架刷新/文档标题/设置位置/EPUB 浏览器合同、前端 843/843 与 build、后端全量/vet、advisory 门通过（面板控件合同 C1 flip 的偶发 harness 超时在旧构建同样出现）。状态 **implementation-complete / regression-validated**，待可信 Actions。
+2026-10-30 发布：main 快进到 `21d78ab`（本切片以 `51377c1` 合并到实例签名密钥发布 `906cec5` 之上；ls-remote 核验，未强推）；可信 Actions run `41031337197` 全部成功（09:09–09:33Z）。`ghcr.io/changshengyu/openreader:21d78ab` 与 `latest` 为 OCI index `sha256:d0fca276c1fc41f1c25e00b0fcd07580c07a144f51c13fbdea640c272b588d1d`（linux/amd64 `sha256:ca6801a8…`、linux/arm64 `sha256:a4d715ac…`），两平台 `org.opencontainers.image.revision` 均为 `21d78aba21529fa255cf0e97a8fcec1f0620b691`。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
+## 2026-10-29 P1 认证与资源链接 实例签名密钥（S2，合同 2026-10-22）
+
+P0 合同第 8 节定下方向的后续切片。`OPENREADER_JWT_SECRET` 未设置（标准 Compose 的形态）、空白或为两个公开默认值之一时，
+会话 token 和五类资源 capability（EPUB/CBZ/音频/章节图片 HMAC，封面 AES-GCM）都用仓库里公开的值签名；会话靠随机
+`jti` 摘要认证不受影响，capability 却只靠签名认证（封面中风险：匿名图片代理；其余低风险）。现有卷门都显式设置密钥，
+这条标准部署路径从未被真实启动过。固定上游没有服务端签名密钥（随机 token 查 `token_map`，封面代理与 `/epub/*` 不带
+签名），这是 OpenReader 自有设计的安全修复。判定：公开值签名会话（F1）与 capability（F2）为 **`must-fix`（P1）**，缺少
+未设置密钥的真实启动门（F3）为 **`must-fix`（发布门）**。目标：首次启动生成 256 bit 实例密钥，原子创建、0600 保存在
+`data/instance-secret`（不进 WebDAV、`/uploads`、本地书仓与任何备份，随整份 `data/` 迁移），之后用它签名一切；自定义
+密钥行为不变且不碰该文件。公开值签名的新格式会话由 `user_sessions` 摘要认证，过渡期继续接受、不设截止时间；旧格式
+token 在实例密钥模式下一律拒绝；capability 没有过渡。代价：切换前的资源链接（12–48 小时）失效一次；回滚到 `92c98a9`
+及更早的镜像时切换后签发的会话失效。门：api 层红测、未设置密钥的真实启动/卷门（fresh、historical、restart、rollback、
+re-upgrade，旧镜像按 digest 固定），历史卷门新增未设置密钥模式。完整合同见
+[`instance-signing-secret-fixed-baseline-second-audit-p1-contract.md`](instance-signing-secret-fixed-baseline-second-audit-p1-contract.md)。
+
+记录（2026-10-22）：合同 `b0972b4`、红测 `3dec2ad`、Actions 接线 `f10c266`、夹具修正 `77dfee0`、实现 `26948f9`。`b1e84f3` 上 R1 4/4、
+R2 5/5、R3 3/3 子测试按预期失败，生命周期合同（二进制方式与已发布 `92c98a9` 镜像的 Docker 方式）在“升级后生成实例密钥”处失败，
+未设置密钥的卷门在首次启动处失败；实现后同一组断言全部通过，生命周期合同十个场景通过，四次临时变异各自只让对应用例变红。
+Go 30 包、vet、race，前端 810/810 与 build，advisory 门通过。状态 **implementation-complete / regression-validated**，候选镜像的
+Docker 门由 Actions 执行。
+
+合并记录（2026-10-30）：先后合并 `a7fd6aa`、`b4cf2be`、`24511c0`（`6137b37`/`2749428`/`af0035a`）；GO-2026-6860 由 main 上另一会话的
+`7a18346` 修复，本会话的重复升级未推送即丢弃。main 新增的 UMD 封面 capability 由 S2 守卫覆盖，R2 补上该用例（`bcba652`）。合并树
+上 Go 31 包、vet、race（engine 看门狗一次负载超时，重跑通过）、前端 836/836 与 build、advisory 门、生命周期、存储与浏览器合同通过。
+
+发布（2026-10-30）：可信 Actions `41001294540` 全部门通过（含未设置密钥的 fresh/historical 卷门与 Docker 方式生命周期合同），
+`ghcr.io/changshengyu/openreader:4c40a4a` / `latest` = OCI index `sha256:46f0b426…dd2e`（amd64 + arm64，revision 为完整提交号）。
+状态 **Docker-published**；生产未访问，版本未知。
+
+## 2026-10-29 P1 Reader 夜间工具栏与设置控件配色
+
+日夜切片（`b3164e3`）把内置夜间阅读面改回上游后，工具按钮与设置面板仍是 2026-07 夜间对比度合同的可读性配色：强调色 `#ff7589`、
+控件面 `#303030`/`#565656`，而且弹层文字按 4.5:1 替换，内置夜间正文是 `#666`、工具与设置文字却是纯白。上游夜间控件只看 `isNight`：
+工具图标/文字 `#666`、工具格线 `#444`、圆钮无边框、设置选项与步进器 `#666` 边框 + `rgba(45, 45, 45, 0.5)`、设置文字 `#606266`、
+数值 `#a6a6a6`、主题色块 `#666`、强调色 `#ed4259`、滑块 `#185798`。用户确认全部改回上游、对所有夜间方案生效（C1–C10
+**`must-fix`**）；悬停/开启高亮（保留 `#7ed8d4`）、日夜共用的分隔线/半透明栏、原生滑块未读段、设置分隔线为 `acceptable-change`；
+目录/书架/换源列表文字、朗读条、全局 Element 夜间覆盖另起切片。完整合同见
+[`reader-night-chrome-palette-fixed-baseline-second-audit-p1-contract.md`](reader-night-chrome-palette-fixed-baseline-second-audit-p1-contract.md)。
+状态 **contract-only**。
+2026-10-29 记录（合同第 8 节）：合同 `795d914`、红测 `a47bc03`、实现 `7d8a0b2`、浏览器合同与补充红测 `f84dbbc`、补充实现 `a44ea45`。实现中发现原生 range 配深色 `accent-color` 时 Chromium 把未读段画成浅色，C10 改为夜间按上游 `el-slider` 自绘（`#185798` 已读段、`#282828` 未读段与滑块）。真实账号对照 `c62c619` 构建：五个视口日间工具栏与设置面板 computed style 完全相同，夜间逐项为上游值；移动/EPUB/设置位置浏览器合同、前端 834/834 与 build、后端全量/vet、advisory 门通过（面板控件合同 C1 flip 的偶发 harness 超时在旧构建同样出现）。状态 **implementation-complete / regression-validated**，待可信 Actions。
+2026-10-29 发布：main 快进到 `24511c0`（把本切片合并到 M8 封面发布 `0561dee` 之上，只有两份总账顶部冲突、两条都保留；ls-remote 核验，未强推）；可信 Actions run `40890726765` 全部成功（14:21–14:38Z）。`ghcr.io/changshengyu/openreader:24511c0` 与 `latest` 为 OCI index `sha256:62eee27d0174d6b4782fa54aaa54bb5d3d572ad778b65827fbb52585d14e192c`（linux/amd64 `sha256:b6a68cc9…`、linux/arm64 `sha256:2b9fcb0a…`），两平台 `org.opencontainers.image.revision` 均为 `24511c08e63f9e6a241fae116c09503e096694d0`。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
+## 2026-10-29 P1 本地书封面：EPUB/UMD 书架封面与导入确认框封面（M8）
+
+上游导入 EPUB/UMD 时就写出封面：EPUB 按 epublib 取 `meta name="cover"`（清单 id 或 href）与 guide `type="cover"` 中的 JPG/PNG/GIF，UMD 取段 130
+后的附加段；书架、书籍信息与导入确认框都显示。OpenReader 只有 CBZ 有封面。C1（EPUB）、C2（UMD）、C3（确认框预览封面，2 MiB 内用
+`data:` URL）为 **`must-fix`**：EPUB 封面路径记入 `.epub-resources` 抽取标记并用现有 `/api/epub-resource` 能力地址投影，UMD 封面首次投影时
+抽到 `.umd-resources/<fingerprint>/` 并经新 `/api/umd-cover/<capability>` 提供，均只在响应里、自定义封面优先、不改库与备份格式。A1 图片格式、
+A2 预览上限为 acceptable-change，EPUB3 `cover-image` 不采用（上游不认）。完整合同见
+[`local-book-cover-fixed-baseline-second-audit-p1-contract.md`](local-book-cover-fixed-baseline-second-audit-p1-contract.md)。状态 **contract-only**。
+2026-10-29 记录（合同第 6 节）：骨架 `4dd84e0`，红测 `5ac9d00`/`7105dbf`/`e24def9`，测试修正 `0007fe2`，实现 `7901e1f`/`b5db7d6`，浏览器合同 `ad74f13`，服务测试 `8fb8f88`；补充 A7：一个预览响应的内联封面合计 ≤ 8 MiB，只有确认框预览计算封面。三视口导入 EPUB/UMD，确认框、书架、书籍信息都显示原图；后端全量/vet/race、前端 829/829 与 build、公告门、存储合同与导入浏览器合同通过。状态 **implementation-complete / regression-validated**，待可信 Actions。
+2026-10-29 发布：`main` 快进到 `21f749d`，可信 Actions run `40880848625` 全部成功；`21f749d`/`latest` 为 OCI index `sha256:fad3291832efb6ffba3866725069fce47ba1a5f96c05836ee829742396dd97a7`（amd64 + arm64，revision 标签为完整提交号）。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
+## 2026-10-29 P1 发布门新增依赖公告：`golang.org/x/net/html` 平方复杂度（GO-2026-6860）
+
+日夜/导入切片回归时 Go 依赖公告门失败关闭：`unreviewed advisory GO-2026-6860`（CVE-2026-78661，2026-10-27 公开），
+`x/net/html` 合并文本节点为 O(n²)，`v0.62.0` 修复。govulncheck 符号级可达：书源页面经 `goquery → html.Parse`（main 已有），
+EPUB 简介经新的 `html.ParseFragment`。CI 在构建镜像前跑同一门，main 当前也无法发布。裁决 **`must-fix`（发布阻塞）**：`x/net`
+精确升到 `v0.62.0`，随 MVS 带上 `x/crypto v0.58.0`、`x/sys v0.49.0`、`x/text v0.43.0`，不动工具链与门脚本。完整合同见
+[`dependency-advisory-x-net-html-quadratic-p1-contract.md`](dependency-advisory-x-net-html-quadratic-p1-contract.md)。状态 **contract-only**。
+2026-10-29 记录（合同第 5 节）：合同 `53770f4`，升级 `7a18346`；Go 公告门由 exit 1 变为 exit 0（只剩已评审的 `GO-2026-5932`），后端全量/vet/race 与前端 827/827、build 通过。状态 **implementation-complete / regression-validated**，待可信 Actions。
+2026-10-29 发布：`main` 快进到 `b3164e3`，可信 Actions run `40834553001` 全部成功；`b3164e3`/`latest` 为 OCI index `sha256:39d3d1cc3c9b55171fbe2aeef53270d37f65c55b6eed370a52e1831e31da0ea1`（amd64 + arm64，revision 标签为完整提交号）。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
+## 2026-10-29 P1 本地书导入：书名/作者/简介/目录规则自动识别
+
+上游导入本地书时先按文件名用四个正则（`《书名》作者：X`、`X《书名》`、`书名 作者：X`、`书名 by X`，再退到删除“作者…/X 著”）拆出
+书名和作者；直接上传先删 `\/:*?"<>|.` 并截到 50 个 UTF-16 单元，书仓/WebDAV 用原名。EPUB 再用第一个 `dc:title`、`dc:creator`
+（epublib“姓, 名”格式）和 `dc:description` 覆盖，UMD 读书名/作者/类型，TXT 把自动选中的目录规则写回 `tocUrl` 并显示在确认框的规则文本框里。
+OpenReader 没有文件名解析：用户的 `前浪(校对加料版全本 1-425) 作者：刀一耕.txt` 在上游是书名 `前浪(校对加料版全本 1-425)`、作者
+`刀一耕`，在 OpenReader 整名当书名、作者为空，reader-dev 备份里的占位书也因此无法按书名+作者回填。用 `eclipse-temurin:21-jdk`
+离线移植上游逻辑实测 26 个文件名与 6 个 EPUB 作者作为夹具。M1–M7 为 **`must-fix`**；EPUB/UMD 封面图片（M8）另起切片。完整合同见
+[`local-book-import-metadata-recognition-fixed-baseline-second-audit-p1-contract.md`](local-book-import-metadata-recognition-fixed-baseline-second-audit-p1-contract.md)。
+状态 **contract-only**。
+2026-10-29 记录（合同第 7 节）：骨架 `d87bb2d`、红测 `4aadc03`（engine/localbook/api/前端均为断言失败）、实现 `d2b4f68`、默认封面文字 `aeaccf0`、浏览器合同 `936f672`。Go 移植对 28 个文件名 × 两种来源与 6 个 EPUB 作者和 Java 结果逐项一致；三视口直接导入用户的书，确认框与书架均为`前浪(校对加料版全本 1-425)` / `刀一耕`，`tocRule` 为自动选中的“目录(去空白)”。状态 **implementation-complete / regression-validated**，待可信 Actions；M8 封面另起切片。
+2026-10-29 发布：`main` 快进到 `b3164e3`，可信 Actions run `40834553001` 全部成功；`b3164e3`/`latest` 为 OCI index `sha256:39d3d1cc3c9b55171fbe2aeef53270d37f65c55b6eed370a52e1831e31da0ea1`（amd64 + arm64，revision 标签为完整提交号）。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
+## 2026-10-29 P1 Reader 日间/夜间：按设备跟随系统与内置夜间配色
+
+上游日/夜只存在本浏览器，自动切换只看本机系统深浅色。OpenReader 的阅读设置是账号级并实时广播，自动切换的结果也会写入账号：
+一台设备启动或系统变色后，另一台设备被带着切换（用户确认遇到的就是这个），而且开着自动切换时每次打开页面都写一次设置。
+N1–N4 为 **`must-fix`**：自动套用只在本设备生效，收到账号设置后按本机系统复核，启动即按系统套用；手动切换写账号、自动切换开关账号级、
+缺少默认方案时回退内置方案为 `acceptable-change`。用户同时决定内置夜间配色改回上游：`body_6`/`content_6` 暗纹理、浮窗 `#121212`、
+正文 `#666`、不做对比度替换、页面边框 `#444`（P1–P5），旧默认 `#ffffff` 在设置版本 15 规范化为 `#666666`（P6）；自定义方案、隐藏
+`black` 主题、日间主题与夜间控件色不变。完整合同见
+[`reader-day-night-device-scope-and-palette-fixed-baseline-second-audit-p1-contract.md`](reader-day-night-device-scope-and-palette-fixed-baseline-second-audit-p1-contract.md)。
+状态 **contract-only**。
+2026-10-29 记录（合同第 7 节）：红测 `1feb7da`（9 项）→ 实现 `07f4752`；双设备检查前发现手动选择会被另一设备的保存改回，补红测 `d1188ce` → `02cefe7`（本设备手动选择保持到刷新、系统变色或重新打开自动切换，与上游一致）；浏览器合同 `936f672`。三视口夜间为 `body_6`/`content_6` 纹理、`#171717` 页面、`#666` 正文；两个上下文（浅色/深色）打开、刷新均不写设置，互不带动。状态 **implementation-complete / regression-validated**，待可信 Actions。
+2026-10-29 发布：`main` 快进到 `b3164e3`，可信 Actions run `40834553001` 全部成功；`b3164e3`/`latest` 为 OCI index `sha256:39d3d1cc3c9b55171fbe2aeef53270d37f65c55b6eed370a52e1831e31da0ea1`（amd64 + arm64，revision 标签为完整提交号）。状态 **aligned / Docker-published / awaiting-device-verification**；生产未访问。
+
 ## 2026-10-25 P1 文本编码识别：日文/韩文与单字节编码（E4/E8）
 
 OpenReader 只有 `gb18030`、`big5`、`shift_jis`、`euc-kr` 四个旧编码候选，自写评分偏向“解出汉字多”的结果：Shift_JIS 日文、

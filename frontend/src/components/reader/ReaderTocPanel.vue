@@ -5,7 +5,7 @@
       v-for="item in filteredChapters"
       :key="item.id"
       class="toc-item"
-      :class="{ active: item.index === currentIndex }"
+      :class="{ active: item.index === currentIndex, cached: isBrowserCached(item) }"
       :data-chapter-index="item.index"
       type="button"
       @click="$emit('jump', item.index)"
@@ -14,7 +14,7 @@
         <span>{{ item.title }}</span>
         <small v-if="!desktopGrid">第 {{ item.index + 1 }} 章<template v-if="showMeta"> · {{ isCached(item) ? '已缓存' : '未缓存' }}</template></small>
       </span>
-      <el-tag v-if="!showMeta && isCached(item)" size="small" type="success" effect="plain">{{ browserCachedMap[item.index] ? '本地' : '已缓存' }}</el-tag>
+      <el-tag v-if="!showMeta && isCached(item)" size="small" type="success" :effect="isNight ? 'dark' : 'plain'">{{ browserCachedMap[item.index] ? '本地' : '已缓存' }}</el-tag>
     </button>
     <el-empty v-if="searchable && keyword && !filteredChapters.length" description="没有匹配章节" />
   </div>
@@ -60,6 +60,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  isNight: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'jump'])
@@ -79,6 +83,12 @@ const filteredChapters = computed(() => {
 
 function isCached(item) {
   return Boolean(item?.cachePath || props.browserCachedMap?.[item?.index])
+}
+
+// reader-dev PopCatalog dims only chapters held in the browser cache (cachedCataMap);
+// every imported local-book chapter also has a server cachePath.
+function isBrowserCached(item) {
+  return Boolean(props.browserCachedMap?.[item?.index])
 }
 
 const tocListRef = ref(null)
@@ -164,13 +174,18 @@ function scrollToBottom() {
   width: 100%;
   min-height: 52px;
   padding: 9px 8px;
-  color: inherit;
+  color: var(--reader-list-text, var(--reader-popup-text, var(--reader-text)));
   background: transparent;
   cursor: pointer;
   border: 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--reader-list-border, #f0f0f0);
   font-size: 14px;
   text-align: left;
+}
+
+/* Before hover and the current chapter, which override it at the same specificity. */
+.toc-item.cached {
+  color: var(--reader-list-cached-text, var(--reader-list-text, var(--reader-popup-text, var(--reader-text))));
 }
 
 .toc-list.desktop-grid .toc-item {
@@ -198,19 +213,19 @@ function scrollToBottom() {
 
 .toc-item small {
   flex: 0 0 auto;
-  color: var(--app-text-muted, #909399);
+  color: var(--reader-shelf-chapter-text, var(--app-text-muted, #909399));
   font-size: 12px;
 }
 
 .toc-item:hover {
-  color: #409eff;
-  background: #f5f7fa;
+  color: var(--reader-list-active-text, #409eff);
+  background: var(--reader-list-active-bg, #f5f7fa);
 }
 
 .toc-item.active {
-  color: #409eff;
+  color: var(--reader-list-active-text, #409eff);
   font-weight: 600;
-  background: #ecf5ff;
+  background: var(--reader-list-active-bg, #ecf5ff);
 }
 
 @media (max-width: 750px) {
