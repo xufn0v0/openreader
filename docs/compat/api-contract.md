@@ -195,10 +195,11 @@ server event names and existing business payloads remain stable.
   a normal same-user startup race must never expose a UNIQUE error as `500`.
 - Concurrent authenticated startup reads such as `GET /api/sources` and `GET /api/explore/sources` may both
   initialize the caller's book-source namespace. Every pooled SQLite connection must therefore inherit WAL and
-  a 5000 ms busy timeout, while all in-process book-source service instances serialize the rare uninitialized
-  namespace transaction. A bounded retry handles SQLite's immediate `BUSY/LOCKED` result when that read transaction
-  must upgrade behind an unrelated writer; ordinary initialization contention must retain the existing successful
-  response schemas instead of exposing `database is locked` as `500`.
+  a 5000 ms busy timeout and begin transactions with `BEGIN IMMEDIATE` (`db.Open`), so the namespace transaction
+  waits for the write lock instead of failing a read-to-write upgrade, and rechecks the namespace under that lock
+  so that only the first caller copies the defaults. No process-wide mutex or retry is involved (2026-11-04): a wait
+  longer than the busy timeout fails like every other write. Ordinary initialization contention must retain the
+  existing successful response schemas instead of exposing `database is locked` as `500`.
 - `PUT /api/settings/:key` may receive additive `force:true` only for the confirmed “备份用户配置” action.
   It bypasses stale-base comparison for that authenticated user's legal `reader/shelf/search` row only; ordinary
   background writes keep CAS. Explicit restore never creates a missing row as a side effect of reading it.
@@ -1580,6 +1581,15 @@ red tests `2396537` and implementation `a0edce3` landed in order. Go full/race/v
 four-viewport browser logout/relogin, real REST/WebDAV/WS lifecycle probes, Actions run `32914105929` volume gates and
 fresh GHCR pull all passed. The `a0edce3`/`latest` OCI index is
 `sha256:5d7fe23ba96107c5c545e9e44815514fe277e5a6f83eb25cb006859c5d515d78`.
+
+2026-11-04 write throttle (branch `claude/throttle-per-request-auth-writes`, after
+`claude/sqlite-immediate-write-transactions`): a session is renewed at most once a minute, so its expiry stays within
+60 s of seven days after the latest successful authentication. Protected REST and WebDAV requests rewrite the user's
+persisted `last_active_at` at most once a minute, so `lastLoginAt`/`lastActiveAt` in `GET /api/admin/users` and
+`GET /api/me` can trail the latest request by up to 60 s; login and registration still set it exactly. Every request
+still reads the user and session rows, so logout, password reset, user deletion and expiry take effect on the next
+request. Paths, bodies, status codes and errors are unchanged. Contract:
+[`authenticated-request-write-throttle-p2-contract.md`](authenticated-request-write-throttle-p2-contract.md).
 
 ## P2 default book-source snapshot lifecycle (2026-08-26 implemented/published)
 

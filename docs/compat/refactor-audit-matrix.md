@@ -1,5 +1,135 @@
 # OpenReader 全量上游复审矩阵
 
+## 2026-11-04 当前切片：TXT 目录规则——阅读器内置规则切换与章回识别（P1，R1–R5、D1–D7）
+
+见[`txt-toc-rule-selection-fixed-baseline-second-audit-p1-contract.md`](txt-toc-rule-selection-fixed-baseline-second-audit-p1-contract.md)。从 `origin/main` `8c3cf79` 切出。
+用户反馈两点：阅读器目录栏“修改规则”对 TXT 只有正则输入框，上游 `PopCatalog.vue` 是内置规则下拉 + 文本框（R1 must-fix；EPUB 同一弹窗与上游
+选项名 R2、规则未变提示“未修改规则”R3 must-fix）；“第x章 … 第x回 …”开头、其后各回只有“第x回 …”的书只识别出章（D1）。上游与 Legado
+（官方仓库已清空，镜像 `hectorqin/legado`）都只在禁用规则里认“回”，Readest 把章、回放在同一交替里。方案：追加 OpenReader 规则 -19
+“目录(章回、话)”（回/话必须带“第”，章回合并行回字前后各 30 字），自动识别时按 Legado 1000 字间隔计数至少多出 2 才接管
+（D1–D4 intentional-redesign，用户要求；D6 章行紧跟回行、D7 单处“第一回”保持不变）；负向前瞻改为只检查单位字后一位（D5 must-fix，对齐上游）。
+计划测试 T1–T6、C1–C5、P1–P8、浏览器 B1。状态 contract-only。
+记录（2026-11-04，取代上段的状态）：合同 `9d3ec44`、红测 `1fbd58d`、实现 `f8c20ab`、浏览器合同点击修正 `e61157f`。红测在 `8c3cf79`：
+用户版式只得 2 项（应 8），长合并行、只有回、只有话退化为伪章节，“目录”对 `第一章 部分真相` 等 0 命中，规则列表 18 条；前端 9 项失败
+（TXT 打开 prompt、EPUB 原生 select、EPUB 选项名等）。实现后同一断言转绿；对照（普通章节小说、章行紧跟回行、单处“第一回”、书首目录区）
+不变。后端全量 31 个包与 vet、race 26 个包（api 1049.6 s）；前端 877/877 与 build；公告门自测 114/114、实时扫描通过；浏览器合同 B1 三视口与本地导入合同
+三视口通过。状态 implementation-complete / regression-validated；未合入 main，镜像未发布，生产未动。
+发布（2026-11-04）：main 快进到 `257f458`（ls-remote 核验，未强推），run `41832867417` 43 步全部成功；`257f458`/`latest` = index `43c89177…c776`（amd64 `0ead270a…`、arm64 `1c8419b1…`，两个平台 revision 标签均为 `257f458…`）。状态 aligned / Docker-published / awaiting-device-verification；生产未动。已导入的书不会自动重新解析，需在阅读器目录“修改规则”中选“目录(章回、话)”。
+
+## 2026-11-04 当前切片：认证请求的会话续期与活动写入节流（P2，W1–W7）
+
+见[`authenticated-request-write-throttle-p2-contract.md`](authenticated-request-write-throttle-p2-contract.md)。基于 `claude/sqlite-immediate-write-transactions`，
+在它之后合入。每个认证请求提交两次（`renew` 与 `TrackActivity`）：`GET /api/me` 与 WebDAV Bearer 每次 2 个写事务，WebDAV Basic 1 个。
+W1/W2 must-fix：60 秒内只读不写，每次仍读会话行与用户行，检查保持精确。W3 滑动期限误差 ≤ 60 秒、W4 上次登录精度 60 秒、W5 修剪排序精度、
+W6 多两次主键读，均为 acceptable-change；W7 退出、改密、删用户与过期检查不变。计划红测：A1/A2（commit hook 计数）、U1/U2（注入时钟）、
+M1（真实时钟、混合时区）；对照 U3/U4 与既有会话测试；T3/C3 夹具改用第二个两分钟前续期的会话。状态 contract-only。
+记录（2026-11-04，取代上段的状态）：合同 `dccc96d`、红测 `b312782`、实现 `b3ea517`。红测 A1/A2、U1/U2、M1 在 `5bfb0b8` 上失败，
+实现后通过；后端全量 31 个包与 vet、race 26 个包（api 1055.1 s） 通过；deferred `db.go` 下新 T3 仍失败、原 T3 空测通过。压力：并发 `GET` p50
+2.8–3.4 → 1.9–2.4 ms、p95 6.5–7.2 → 3.0–3.7 ms，0 失败。状态 implementation-complete / regression-validated；未合入 main，镜像未发布，生产未动。
+发布（2026-11-04）：重新合入新 main（合并提交 `6006659`，基于 TXT 目录规则发布 `aa87cc6`，只有两份兼容文档顶部冲突、两边保留），合并树复跑后端全量/vet、race 26 包（api 1070.9 s）、前端 877/877 与 build、公告门自测 136/136 与实时扫描、Compose、存储合同、真实接口浏览器合同（认证会话生命周期、书籍信息完整模式五视口、目录规则三视口）通过；main 快进到 `6006659`（ls-remote 核验，未强推），run `41843829943` 43 步全部成功；`6006659`/`latest` = index `9b64829f…23e5`（amd64 `5b8dca3d…`、arm64 `98ac1c31…`，revision 标签核验）。状态 aligned / Docker-published / awaiting-device-verification；生产未动。
+
+
+## 2026-11-04 当前切片：退役 SQLite BUSY 局部绕行（P2，R1–R4）
+
+见[`sqlite-busy-workaround-retirement-p2-contract.md`](sqlite-busy-workaround-retirement-p2-contract.md)。从 P1 分支 `5bfb0b8`（`BEGIN IMMEDIATE`，尚未合入 main）切出，须在 P1 之后合入。
+W1 RSS 六个写入的整笔重试、W2 命名空间初始化的进程级互斥与重试、W3 书源新建/导入的无值变更先写。R1 管理员重置与新用户首次访问互等
+53.8 s 为 must-fix；R2 删除三处绕行（命名空间复查移入事务）、R3 超过 5 秒的等待与其他写入一样失败为 acceptable-change；R4 按用户写锁、
+DSN/WAL/连接池/busy_timeout、续期频率不重开。计划测试：守护 G1–G7（没有绕行时在 immediate 下通过，在 deferred 下失败），红测 T1。
+状态 contract-only。
+记录（2026-11-04，取代上段的状态）：合同 `8a7dd1b`、测试 `5166e03`、实现 `ed855a8`。T1 在 `5bfb0b8` 上 53.6 s 失败、实现后 0.42 s 通过；
+G1–G7 有无绕行都通过，deferred 且无绕行时失败；去掉事务内复查时 G2 失败。超过 5 秒的写锁等待改为与其他写入一样失败（实测 5.3 s）。
+后端全量/vet、race 26 个包、前端 870/870 与 build、公告门自测 114/114。状态 implementation-complete / regression-validated；分支已推送（基于 `5bfb0b8`，须在 P1 之后合入），未合入 main，镜像未发布，生产未动。
+发布（2026-11-04）：与 SQLite 写事务、退役 BUSY 绕行、BookInfo 追更、可移植书架封面断言一起经合并提交 `1b50602` 合入，
+合并树复跑后端全量/vet、race 26 包（api 40m）、前端 872/872 与 build、公告门与实时扫描、Compose、存储合同、
+真实接口与 Reader 浏览器合同通过；main 快进到 `1b50602`（ls-remote 核验，未强推），run `41799562504` 全部成功；
+`1b50602`/`latest` = index `cb74b843…9f14`（amd64 `910aa91a…`、arm64 `189b738f…`，
+revision 标签核验）。状态 aligned / Docker-published / awaiting-device-verification；
+生产未动。
+
+## 2026-11-04 当前切片：SQLite 写事务改为 BEGIN IMMEDIATE（P1，S1–S4）
+
+见[`sqlite-immediate-write-transactions-p1-contract.md`](sqlite-immediate-write-transactions-p1-contract.md)。
+deferred 事务先读后写，另一连接持锁或提交时立即 `database is locked`；每个认证请求提交两次，让 `PUT /api/books/:id` 的封面/追更在并发
+请求下返回 500。S1 `PUT /api/books/:id`、S2 其余 39 个先读后写事务 must-fix；S3 写事务从 `BEGIN` 起持锁、并发写者最多等 5 秒，为
+acceptable-change；S4 续期频率、已有重试与先写绕行、WAL/连接池/busy_timeout、smoke 轮询不重开。计划红测：db 层 T1/T2（`_busy_timeout=0`
+探测连接在读与写之间提交）、api 层 T3（真实 `authsession` 续期，追更与封面）；对照 C1–C3。状态 contract-only。
+记录（2026-11-04，取代上段的状态）：合同 `7eaf51d`、红测 `7a15fe1`/`2f023ab`、实现 `cd0d96a`（DSN 加 `_txlock=immediate`）。后端全量/vet、
+race 26 个包、前端 870/870 与 build、公告门与存储合同通过；动态探测 0 处事务内外层写入；压力 main 45–126 次失败 → 修复 0；BookInfo 真实接口
+合同：修复 18/18、交替运行的改前树 17/18（`cover state persisted` 超时）。状态 implementation-complete / regression-validated；未合入 main，镜像未发布，生产未动。
+合入要求（2026-11-04 补充）：不能单独合入，须紧接着在同一次发布中合入 `claude/retire-sqlite-busy-workarounds`（`1ec50a6`）。原因：本分支上事务内的 `sourceNamespaceInitMu` 会造成 52.2 s 互相等待（合同第 13 节）。
+发布（2026-11-04）：与 SQLite 写事务、退役 BUSY 绕行、BookInfo 追更、可移植书架封面断言一起经合并提交 `1b50602` 合入，
+合并树复跑后端全量/vet、race 26 包（api 40m）、前端 872/872 与 build、公告门与实时扫描、Compose、存储合同、
+真实接口与 Reader 浏览器合同通过；main 快进到 `1b50602`（ls-remote 核验，未强推），run `41799562504` 全部成功；
+`1b50602`/`latest` = index `cb74b843…9f14`（amd64 `910aa91a…`、arm64 `189b738f…`，
+revision 标签核验）。状态 aligned / Docker-published / awaiting-device-verification；
+生产未动。
+
+## 2026-11-03 当前切片：Reader 菜单栏与弹出面板布局与逻辑（P0，A1–A7、B1–B6、C1–C6、D1、E1）
+
+见[`reader-menu-chrome-panels-fixed-baseline-second-audit-p0-contract.md`](reader-menu-chrome-panels-fixed-baseline-second-audit-p0-contract.md)。
+上游 `web/` 原样构建后与当前 main 同数据四视口日夜实测：移动顶栏/悬浮按钮/底栏、移动主面板（顶 0 盖住顶栏、面板打开时悬浮与底栏仍可点）、
+桌面左栏（只包住按钮）/右列/进度列/缓存区、桌面面板（x=50%−rwc/2、宽 rwc−1）、书架/书源/目录列表、显示翻页区域、阅读进度
+`(index+1)/总章数`、页码公式、章节键边界提示、阅读框 `rwc` 宽度、简洁模式工具色全部 must-fix。用户决定 D1 目录去掉序号副行与“本地/已缓存”
+标签；D2 桌面关闭按钮保留并移到面板外。保留：原生连续滚动、步进器、亮度、字体预览、运行章节标题、书签添加当前段落。计划红测：
+`readerMenuUpstreamAlignmentContract` 单元/源码合同与 `reader-menu-upstream-contract.mjs` 浏览器合同（逐项比对上游实测值）。
+状态 contract-only。
+记录（2026-11-03，取代上段的状态）：合同 `7a8b073`、红测 `5c08708`（单元 15 项、浏览器 693 项检查在 `69c27bc` 失败）、实现 `da438bc`、
+类名钩子 `f1c92da`、smoke 迁移 `4be6e20`。前端 870/870 与 build、后端全量/vet、公告门自测与前端实时扫描、菜单合同六视口、18 个模拟浏览器
+合同、真实服务 EPUB/CBZ 与 4 个真实接口合同通过；首页书架封面（portable-appearance-assets）与书籍信息“追更”两项改前构建同样失败，另起。
+状态 implementation-complete / regression-validated。发布阻塞：Go 公告门 GO-2026-5932 新增伪版本修复，门失败关闭，待用户决定；未合入 main。
+发布（2026-11-03）：`fbbd890` 解除 GO-2026-5932 后以合并提交 `636b1ff` 合入，main 快进到 `636b1ff`（ls-remote 核验，未强推），
+run `41643708227` 全部成功；`636b1ff`/`latest` = index `c407eb1b…af40`（amd64 `b926e5a5…`、arm64 `601d4f7d…`，revision 标签核验）。
+状态 aligned / Docker-published / awaiting-device-verification；生产未动。
+
+## 2026-11-03 当前切片：发布门依赖公告 GO-2026-5932 出现修复（P1，发布阻塞）
+
+见[`dependency-advisory-x-crypto-openpgp-fix-p1-contract.md`](dependency-advisory-x-crypto-openpgp-fix-p1-contract.md)。
+GO-2026-5932 增加修复版本，唯一不适用项的前提失效，Go 公告门在 main 上失败关闭（`advisory changed: review required`）。
+must-fix：x/crypto 精确固定到 `v0.58.1-0.20261009181718-2f1f834330b2`（`v0.58.0` 只删 `openpgp/`），门只接受该伪版本到 2026-12-16；
+退役不适用项（任何 finding 阻止发布），openpgp 族无条件禁止。计划红测：门合同测试 9 项。状态 contract-only。
+记录（2026-11-03，取代上段的状态）：合同 `c998b7a`、红测 `d0659bf`（9/65 失败）、实现 `544b980`；门测试 65/65 + 49/49，现场 Go 门
+exit 0、0 个发现，前端门 exit 0，后端全量/vet、Compose、存储 HTTP 合同、`-mod=vendor` 编译通过。状态 implementation-complete /
+regression-validated，待合入 main 与可信 Actions；镜像未发布；生产未动。
+发布（2026-11-03）：main 快进到 fbbd890（ls-remote 核验，未强推），run 41636824884 全部成功；fbbd890/latest = index `1c159363…6b8b`
+（amd64 `44452254…`、arm64 `6afeeb90…`，revision 标签核验）。状态 aligned / Docker-published / awaiting-device-verification；生产未动。
+
+## 2026-11-03 当前切片：BookInfo 追更开关（P2，F1–F3）
+
+见[`bookinfo-follow-toggle-fixed-baseline-second-audit-p2-contract.md`](bookinfo-follow-toggle-fixed-baseline-second-audit-p2-contract.md)。
+本地书架书的追更开关可见但点了无效（处理函数要求 `sourceId`）；真实接口合同的“远程书”因 `POST /api/books` 忽略书源字段而实为无书源书，
+完整模式在第一个视口追更一步超时。F1 本地追更同上游保存，must-fix；F2 合同远程书改走 `POST /api/books/remote` + 回环夹具书源，F3 本地分支
+实际切追更并在本地更新后核对。计划红测：单元 T1/T2（本地切追更成功/失败）、浏览器 T4（本地分支等待 PUT 超时）；T3 远程分支为对照。
+状态 contract-only。
+记录（2026-11-03，取代上段的状态）：合同 `1f6cced`、红测 `b8a106d`（T1/T2 失败，浏览器停在本地追更第 508 行）、实现 `408cf1a`。frontend
+857/857 与 build、后端全量/vet、公告门自测、前端公告门、真实接口合同完整五视口与两个聚焦模式通过；Go 公告门在 `69c27bc` 基础上报
+GO-2026-5932 变化（main 的 `544b980` 已固定），合入 `636b1ff` 预检通过。另起：并发认证请求让 `PUT /api/books/:id` 500 `database is locked`
+（`user_sessions` 续期写 + deferred 事务读后写），真实接口合同封面一步偶发失败。状态 implementation-complete / regression-validated，
+待合入与可信 Actions；镜像未发布，生产未动。
+发布（2026-11-04）：与 SQLite 写事务、退役 BUSY 绕行、BookInfo 追更、可移植书架封面断言一起经合并提交 `1b50602` 合入，
+合并树复跑后端全量/vet、race 26 包（api 40m）、前端 872/872 与 build、公告门与实时扫描、Compose、存储合同、
+真实接口与 Reader 浏览器合同通过；main 快进到 `1b50602`（ls-remote 核验，未强推），run `41799562504` 全部成功；
+`1b50602`/`latest` = index `cb74b843…9f14`（amd64 `910aa91a…`、arm64 `189b738f…`，
+revision 标签核验）。状态 aligned / Docker-published / awaiting-device-verification；
+生产未动。
+
+## 2026-11-03 当前切片：可移植外观资产书架封面浏览器断言（P2-B 门禁 4 维护，R1–R3）
+
+见[`portable-appearance-assets-p2b-contract.md`](portable-appearance-assets-p2b-contract.md)第 9 节。真实接口合同在 1440×900 读取书架
+`.list-cover` 的 CSS 背景而失败；上游书架封面是 `el-image`（`<img>`），OpenReader 自 `ceb4baa` 起也是 `BookCover` 的 `<img>`，`69c27bc`
+三视口实测恢复封面已加载且为目标用户新 URL。R1 渲染、R2 恢复映射与上游和本合同一致，不改产品；R3 断言过时，must-fix（测试工具）：改为
+等待 `.list-cover img.loaded`，`src` 精确等于恢复 URL、1×1。计划：旧断言在改前构建的失败即红，新断言三视口通过，两项临时变异（忽略
+`customCoverUrl`、封面 404）证明有效。状态 contract-only。
+记录（2026-11-03，取代上段的状态）：合同 `2727bc9`、断言迁移 `df0ac15`（产品无改动）。旧断言在 `69c27bc` 构建 1440×900 失败；新断言在
+同一构建与 `3bc8788`（菜单分支，自动合并）三视口通过，三项临时变异（忽略 `customCoverUrl`、封面 404、可加载的 `?stale` 地址）都被拦下。
+前端 855/855 与 build、后端全量（31 包）/vet、公告门自测 109/109 通过；实时扫描未跑（不涉及依赖，Go 门被 GO-2026-5932 阻塞）。
+状态 implementation-complete / regression-validated；未合入 main，单独合入不触发镜像发布。
+发布（2026-11-04）：与 SQLite 写事务、退役 BUSY 绕行、BookInfo 追更、可移植书架封面断言一起经合并提交 `1b50602` 合入，
+合并树复跑后端全量/vet、race 26 包（api 40m）、前端 872/872 与 build、公告门与实时扫描、Compose、存储合同、
+真实接口与 Reader 浏览器合同通过；main 快进到 `1b50602`（ls-remote 核验，未强推），run `41799562504` 全部成功；
+`1b50602`/`latest` = index `cb74b843…9f14`（amd64 `910aa91a…`、arm64 `189b738f…`，
+revision 标签核验）。状态 aligned / Docker-published / awaiting-device-verification；
+生产未动。
+
 ## 2026-10-30 当前切片：夜间 Element Plus 组件外观（P1，N1–N22、O1–O3）
 
 见[`night-element-plus-theme-fixed-baseline-second-audit-p1-contract.md`](night-element-plus-theme-fixed-baseline-second-audit-p1-contract.md)。
