@@ -99,3 +99,44 @@ OpenReader 当前映射：
 - 共享分栏定位改为使用 rendered column geometry；这是上游 `showParagraph()` 的 Vue 等价实现，同时修复 TTS、书签和正文搜索跳到分栏段落时 `offsetLeft` 不可靠的问题。
 - 源码 commit `5260efd083dea8002bed491eed7c2cc039d6cf0f` 已在本机构建 `linux/amd64` 与 `linux/arm64`，发布为 `ghcr.io/changshengyu/openreader:5260efd` 和 `latest`。两 tag 的 OCI index digest 均为 `sha256:5c8c7d9ab186ec80b26ed709123c1c88fe37261f18cf937988c4ffbfdc9a4df4`；amd64 manifest 为 `sha256:dd30334f4e301d283980d0f9cb1877e984218f47602dec1987755a54ebd755bf`，arm64 manifest 为 `sha256:30376bc19ca4941bc0a2cf56ce0430363ad69bee7d6132c5e13f23f46163a9f6`。
 - 当前镜像的历史 volume/portable backup 脚本因 Codex 自动授权额度拒绝 OrbStack socket 而未能重复执行。此项不记为“当次通过”；兼容判断继承 `370d0f7` 已通过的旧 TXT、EPUB、UMD、CBZ、相对 cache、owner isolation 和 portable restore 证据，并额外确认 `370d0f7..5260efd` 的 backend、Dockerfile、volume/backup 脚本均为零差异。
+
+## 8. 2026-11-12 补充：朗读条“音调”改回上游“语调”（P0，文案）
+
+- 上游：`web/src/views/Reader.vue`（fa22f271）朗读条展开后，L179 起依次是 `语音库`，`语音设置` 下的 `语速`（L193）、`语调`（L201，
+  `speechPitch`）、`定时`（L207）。第 2 节“栏位结构”一行写的也是“语速、语调、定时”。
+- 现状：`frontend/src/components/reader/ReaderTTSBar.vue` 第 56 行把 `speechPitch` 一行标成 `音调`，步进器的三个无障碍名称是
+  `降低朗读音调`、`提高朗读音调`、`自定义朗读音调`。其余三行（`语音库`、`语速`、`定时`）与上游一致。
+- 判定：**`must-fix`**，属于可见文案与上游不一致。步进器替代滑块仍是用户要求的改进，不重开；`语音设置` 分组标题与“重置”按钮按第 2 节
+  已签收的结构保持现状。
+- 目标：这一行的标签改为 `语调`，步进器的无障碍名称改为 `降低朗读语调`、`提高朗读语调`、`自定义朗读语调`。数值范围（0–2，步长 0.1）、
+  存储 key 和朗读参数都不变。
+- 测试：新增源码合同 `frontend/tests/readerTTSBarLabels.test.mjs`，检查行标签依次为 `语速`、`语调`、`定时`，步进器三个名称都带 `语调`，
+  模板里不再出现 `音调`。`scripts/smoke/reader-tts-contract.mjs` 展开后检查行标签依次为 `语音库`、`语速`、`语调`、`定时`，按
+  1440×900、390×844、360×800 各跑一次。`readerSettingsPanelContract.test.mjs` 原来的“设置面板不重复朗读控件”检查包含 `朗读音调`，
+  这里再加上 `朗读语调`，原有字符串保留。
+
+## 9. 2026-11-12 第 8 节的实施与验证
+
+| 提交 | 阶段 | 内容 |
+| --- | --- | --- |
+| `a06b6f08` | 合同 | 第 8 节，gap analysis 与 matrix。 |
+| `6f8aff8a` | 红测 | `readerTTSBarLabels.test.mjs`（2 条）；`reader-tts-contract.mjs` 检查四行标签；设置面板防重复检查加 `朗读语调`。 |
+| `b650eede` | 实现 | `ReaderTTSBar.vue` 的标签和三个无障碍名称改成“语调”。 |
+
+单元：`a06b6f08` 上两条新断言失败（实际行标签 `语速`、`音调`、`定时`），设置面板检查通过；`b650eede` 上 935/935，`vite build` 通过。
+
+浏览器（go1.26.11 二进制，全新数据目录，模拟接口）：`reader-tts-contract.mjs` 依次用 1440×900、390×844、360×800 跑，`b650eede` 之前的前端 3 个视口都失败：`TTS rows must use the reader-dev labels: ["语音库","语速","音调","定时"]`；`b650eede` 的前端 3 个视口都通过。
+
+状态：**implementation-complete / regression-validated**。Git：分支 `claude/reader-error-title-progress-59bcb6`，未合入 main。镜像：未构建。生产：未访问。
+
+## 10. 发布（2026-11-13）
+
+本节内容（朗读条“语调”）随本次合并发布。合并提交 `4856215`（闲读）、`310745d`（书籍上限与记住登录信息）、`f5bfd5d`（Reader P0）、`6175cae`（桌面“左右滑动”两项），main 由 `f82e0f5` 快进到 `f8786ab`（ls-remote 核验，未强推）。
+
+推送前在合并树上：后端 `go test ./...` 31 个包与 vet，race api/db/services（api 1088.9 秒）无数据竞争；前端 971/971 与 build；公告门自测 114/114，现场 Go 与前端扫描 0 个发现（推送前重跑）；compose 配置、存储 HTTP 合同、浏览器 smoke 接线 10/10；secdb main 与 11-10 快照一致。真实 Go 服务、全新数据目录下浏览器合同全部通过：openreader-smoke，标签页标题四个流程（壳标题 `闲读`），错误页 48 例，运行标题，桌面面板正文控件连续 3 次 120/120（`C1 flip` 36/36），晚到 flip 设置，D4 9/9，设置位置，TTS 五个视口，连续，重新认证四视口，记住登录信息，书籍上限，注册限制，移动（含 iPad），会话生命周期，首页会话隔离，文本模式，EPUB，音频，书源调试。服务日志没有 panic；唯一的 5xx 是注册限制合同关页时被取消的 `PUT /api/settings/shelf`（`settings.go` 把取消的请求记为 500，原有行为，另起切片）。合并适配：`f45f766` 让“闲读”技术名对照改查 `utils/authToken.js` 的 `AUTH_TOKEN_KEY = 'openreader_token'`，`f8786ab` 让 D4 合同从 `da438bc7` 之后的 `.rail-item[aria-label="设置"]` 打开设置，断言都没改。合入 flip 分支前，`C1 flip` 在 main `f82e0f5`（三次共 8/36 失败）、Reader 分支与合并树上都偶发超时，原因是晚到的账号设置让桌面停在 flip；合入后消失。
+
+可信 Actions run `43400193943` 43/43 步成功（09:18–09:35 UTC）：两平台 OS 门 `pass-with-unknown-origins`（16/16 包、110/109 个 APK 文件、74 组比较无待修复项，secdb main 11-12 22:52:32，复审期限 2026-12-10），Go 公告门 go1.26.11 0 个发现（250 条公告，x/crypto pin 复审期限 2026-12-16），前端公告门 0 个发现，卷门与平台核验通过。
+
+镜像：`ghcr.io/changshengyu/openreader:f8786ab` 与 `latest` 指向 OCI index `sha256:0066943b9fb879041a503391723bf9bc4b31ee19aee06d273073b6ac4142890f`；linux/amd64 `sha256:6944f67944131f2d90e15ccd83e56d6b808ec3cbb4a4f8474d808f15fa064d13`，linux/arm64 `sha256:2537a5de7dc67046ee4449db329c77d0028ab03d291cfe142b290ec4c0bfa729`，另有两个 attestation。两平台 revision 标签均为 `f8786abe2679ca34b76b6aaa6017558225662ecd`；两平台 `/app/openreader` 均由 go1.26.11 构建，`/app/public/index.html` 标题为 `闲读`（逐层校验 sha256 后读取）。
+
+状态 **released / Docker-published / awaiting-device-verification**；生产未访问，实际运行版本未知。

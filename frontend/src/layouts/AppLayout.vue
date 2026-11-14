@@ -12,11 +12,11 @@
     <aside class="app-sidebar" :style="mobileNavigationStyle">
       <div class="app-sidebar-scroll">
       <div class="app-brand" @click="goHome">
-        <div class="app-brand-mark">阅</div>
+        <div class="app-brand-mark">闲</div>
         <div>
           <div class="app-brand-title-row">
-            <div class="app-brand-title">阅读</div>
-            <button class="app-version-text" type="button" @click.stop="refreshHealthInfo(true)">{{ appVersionLabel }}</button>
+            <div class="app-brand-title">闲读</div>
+            <button class="app-version-text" type="button" @click.stop="updateAppVersion">{{ appVersionLabel }}</button>
           </div>
           <div class="app-brand-subtitle">清风不识字，何故乱翻书</div>
         </div>
@@ -175,6 +175,8 @@ import { cacheFirstRequest, networkFirstRequest, removeBrowserCache } from '../u
 import { clearBrowserLocalCacheGroup, currentBrowserLocalCacheStats } from '../utils/localCacheStats'
 import { currentViewportWidth, shouldUseMiniInterface } from '../utils/responsive'
 import { currentUserScope } from '../utils/authScope'
+import { forceServiceWorkerUpdate } from '../utils/serviceWorker'
+import { restoreShellDocumentTitle } from '../utils/documentTitle'
 import { createShelfForegroundReconciler } from '../utils/shelfSyncFreshness'
 
 const router = useRouter()
@@ -631,6 +633,13 @@ async function refreshHealthInfo(showMessage = false) {
   }
 }
 
+// Upstream Index.vue#updateForce: the version text forces an update. The build-info
+// toast comes first; without a registered service worker nothing else happens (Q2-A).
+async function updateAppVersion() {
+  await refreshHealthInfo(true)
+  await forceServiceWorkerUpdate()
+}
+
 function shortCommit(value) {
   if (!value || value === 'unknown') return ''
   return String(value).slice(0, 12)
@@ -903,6 +912,9 @@ watch(
   ],
   () => clearRouteWorkspaceOperationOverlayIntent(),
 )
+
+// The home workspace shows the shell title whenever it mounts (S2), also after returning from source debug.
+onMounted(restoreShellDocumentTitle)
 
 onMounted(() => {
   updateViewportFlags()

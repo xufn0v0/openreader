@@ -4,7 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
+
+// reader-dev caps accounts with reader.app.userLimit, default 50 and at most 50
+// (UserController.kt#getUserLimit: min(max(userLimit, 1), 50)).
+const (
+	DefaultUserLimit = 50
+	MaxUserLimit     = 50
+)
+
+// reader-dev caps each bookshelf with reader.app.userBookLimit, default 200
+// (BookController.kt#saveBook: 超过用户书籍数上限). OpenReader applies no limit
+// unless OPENREADER_USER_BOOK_LIMIT is set: the user's decision of 2026-11-13,
+// docs/compat/user-book-limit-fixed-baseline-second-audit-p2-contract.md section 12.
 
 type Config struct {
 	Address                     string
@@ -49,6 +62,16 @@ type Config struct {
 	MaxCoverCacheBytes          int64
 	CoverImageTimeoutSeconds    int
 	MaxCoverImageRedirects      int
+	// InviteCode, when set, is required by self-registration (reader-dev
+	// reader.app.inviteCode); administrators add users without it.
+	InviteCode string
+	// UserLimit caps accounts for registration and the admin add-user action.
+	// Read it through EffectiveUserLimit: a zero value means "not configured".
+	UserLimit int
+	// UserBookLimit caps the books on each shelf unless an administrator gave
+	// the user a positive BookLimit. Read it through EffectiveUserBookLimit: a
+	// zero value means "not configured", which is no limit.
+	UserBookLimit int
 	// JWTPreviousSecrets are published values that signed sessions before an
 	// instance secret replaced JWTSecret (services/instancesecret). They only
 	// verify jti-backed session tokens and never sign anything.
@@ -108,7 +131,63 @@ func Load() Config {
 		MaxCoverCacheBytes:          envInt64("OPENREADER_MAX_COVER_CACHE_BYTES", 256*1024*1024),
 		CoverImageTimeoutSeconds:    envPositiveInt("OPENREADER_COVER_IMAGE_TIMEOUT_SECONDS", 3),
 		MaxCoverImageRedirects:      envPositiveInt("OPENREADER_MAX_COVER_IMAGE_REDIRECTS", 3),
+		InviteCode:                  strings.TrimSpace(os.Getenv("OPENREADER_INVITE_CODE")),
+		UserLimit:                   userLimitFromEnv(),
+		UserBookLimit:               userBookLimitFromEnv(),
 	}
+}
+
+// userLimitFromEnv follows reader-dev: unset or non-numeric values use the
+// default, explicit values are clamped to 1..MaxUserLimit.
+func userLimitFromEnv() int {
+	value := strings.TrimSpace(os.Getenv("OPENREADER_USER_LIMIT"))
+	if value == "" {
+		return DefaultUserLimit
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return DefaultUserLimit
+	}
+	return clampUserLimit(parsed)
+}
+
+func clampUserLimit(value int) int {
+	if value < 1 {
+		return 1
+	}
+	if value > MaxUserLimit {
+		return MaxUserLimit
+	}
+	return value
+}
+
+// EffectiveUserLimit is the account cap the server enforces. A Config built
+// without Load (UserLimit 0) gets the default.
+func (cfg Config) EffectiveUserLimit() int {
+	if cfg.UserLimit == 0 {
+		return DefaultUserLimit
+	}
+	return clampUserLimit(cfg.UserLimit)
+}
+
+// userBookLimitFromEnv reads OPENREADER_USER_BOOK_LIMIT (reader-dev
+// READER_APP_USERBOOKLIMIT). Only a positive integer sets a limit; unset,
+// empty, non-numeric, zero or negative values mean no limit (0).
+func userBookLimitFromEnv() int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(os.Getenv("OPENREADER_USER_BOOK_LIMIT")))
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return parsed
+}
+
+// EffectiveUserBookLimit is the instance bookshelf cap, or 0 for no limit. A
+// Config built without Load (UserBookLimit 0) has no limit.
+func (cfg Config) EffectiveUserBookLimit() int {
+	if cfg.UserBookLimit <= 0 {
+		return 0
+	}
+	return cfg.UserBookLimit
 }
 
 func env(key, fallback string) string {

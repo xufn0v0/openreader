@@ -537,3 +537,114 @@ Go 1.26.9、Node v26.4.0、Playwright 1.61.1 / Chrome Headless Shell 1228。会�
 63 个文件与本地同一提交的 build 逐字节一致，bundle 含 document.title 写入；zlib 1.3.2-r1、SQLite 3.51.3 与完整
 revision 标签保持。生产未访问，实际运行版本未知。
 状态：Reader 部分 **released / awaiting-device-verification**；首页、首屏、登录与书源调试标题仍 contract-only，等用户决定 D1。
+
+## 14. D1 决定：产品显示名“闲读”（2026-11-12）
+
+用户在第 6 节的 A（`阅读`）、B（`OpenReader`）之外选了 C：产品显示名为 **闲读**。2026-11-12 先请求“想个更好听的名字”，在候选
+开卷、书舟、青灯、拾卷、闲读、书斋中选定“闲读”。这是品牌名的决定，所以范围比第 6 节的标签页文字更大，第 6 节末尾“不改 manifest”的约束由本节取代。
+
+| 位置 | 现状 | 目标 | 分类 |
+| --- | --- | --- | --- |
+| `frontend/index.html` `<title>`（壳标题，S1） | `OpenReader` | `闲读` | `must-fix`（D1 已决定） |
+| `utils/documentTitle.js` `SHELL_DOCUMENT_TITLE` | `OpenReader` | `闲读`（与 `<title>` 一致，已有单元合同） | `must-fix` |
+| 首页工作区挂载（S2）与 `/login` 挂载（S3） | 只靠 `index.html` 初值和 Reader 卸载恢复 | 挂载时主动设壳标题 | `must-fix` |
+| 书源调试（T1） | 壳标题 | 挂载设 `闲读书源编辑器`（上游 `Reader书源编辑器` 的 `<产品名>书源编辑器` 格式），卸载恢复壳标题 | `must-fix` |
+| 侧栏品牌 `.app-brand-title` | `阅读`（`bd8afe5` 按上游改回） | `闲读` | 用户要求的差异 |
+| 登录页 `<h1 class="auth-title">` | `OpenReader` | `闲读` | 用户要求的差异 |
+| `manifest.webmanifest` `name`/`short_name`、`apple-mobile-web-app-title` | `OpenReader` | `闲读` | 用户要求的差异 |
+| 图标 `openreader.svg` 的 `aria-label` | `OpenReader` | `闲读` | 用户要求的差异 |
+
+不改：仓库与镜像名 `changshengyu/openreader`、`OPENREADER_*` 环境变量、浏览器存储 key（`openreader_token` 等）、`OpenReaderCustom*`
+字体族、导出文件名前缀（`OpenReader-source-debug-…`）、README 中作为项目名的 OpenReader、Reader 标题格式与运行标题。
+
+测试（先红后绿）：
+- 单元 `frontend/tests/displayNameContract.test.mjs`：
+  - 产品名是 `闲读`，`<title>`、`apple-mobile-web-app-title`、manifest `name`/`short_name`、图标 `aria-label`、侧栏品牌与登录页 `<h1>` 都等于它；
+  - `SOURCE_DEBUG_DOCUMENT_TITLE === '闲读书源编辑器'`；
+  - 首页工作区与登录页挂载时调用 `setDocumentTitle(SHELL_DOCUMENT_TITLE)`；书源调试挂载时设书源调试标题、卸载时恢复壳标题；
+  - 仍然只有 `utils/documentTitle.js` 给 `document.title` 赋值。
+- 浏览器 `scripts/smoke/document-title-contract.mjs` 补上第 8.2 节第 1 步与第 11 步，即新增 `shell` 流程：
+  - `/`、打开再关闭 `/?overlay=sources`、`/search` 都是壳标题，侧栏品牌文字等于壳标题；
+  - 无 token 时打开 `/login` 是壳标题，`<h1>` 等于壳标题；
+  - `/source-debug`、`/bookSourceDebug/`、`/sources?action=debug` 是 `<壳标题>书源编辑器`；
+  - 1440×900 下从首页点“调试书源”，新标签页是书源调试标题，原标签页仍是壳标题。
+
+  移动视口的侧栏需要先展开，这一步只在桌面检查，其余在三个视口都检查。
+
+状态 **contract-only**（由下方记录取代）。
+
+### 14.1 记录（2026-11-13）
+
+提交：
+- 合同 `cb2c545`；
+- 红测 `7b181ca`：单元 4 项中 3 项失败（`<title>` 仍为 `OpenReader`、壳标题常量、挂载接线），技术名对照通过；浏览器 `shell` 流程在 1440×900 因侧栏品牌为 `阅读` 失败；
+- 实现 `52cec1e`。实现中另把侧栏单字徽标 `阅` 改为 `闲`，与新名一致。
+
+验证：
+- 前端 886/886（原 882 加新增 4 项），build 通过；
+- 真实 Go 服务提供生产构建：
+  - `document-title-contract.mjs` 全部四个流程（navigation、auth、remote、shell）在 1440×900、390×844、360×800 通过，壳标题为 `闲读`；
+  - `openreader-smoke.mjs` 三视口、`reader-reauthentication-contract.mjs` 四视口、`source-debug-contract.mjs` 通过；
+  - `registration-limits-contract.mjs` 三视口 6 项检查通过；
+- 后端与依赖未改，Go 测试与公告门留给推送前检查和 CI。
+
+状态 **implementation-complete / regression-validated**；分支 `claude/display-name-xiandu` 已推送，未合入 main，镜像未发布，生产未访问。
+
+## 15. 发布（2026-11-13）
+
+本节内容（D1 产品显示名“闲读”）随本次合并发布。合并提交 `4856215`（闲读）、`310745d`（书籍上限与记住登录信息）、`f5bfd5d`（Reader P0）、`6175cae`（桌面“左右滑动”两项），main 由 `f82e0f5` 快进到 `f8786ab`（ls-remote 核验，未强推）。
+
+推送前在合并树上：后端 `go test ./...` 31 个包与 vet，race api/db/services（api 1088.9 秒）无数据竞争；前端 971/971 与 build；公告门自测 114/114，现场 Go 与前端扫描 0 个发现（推送前重跑）；compose 配置、存储 HTTP 合同、浏览器 smoke 接线 10/10；secdb main 与 11-10 快照一致。真实 Go 服务、全新数据目录下浏览器合同全部通过：openreader-smoke，标签页标题四个流程（壳标题 `闲读`），错误页 48 例，运行标题，桌面面板正文控件连续 3 次 120/120（`C1 flip` 36/36），晚到 flip 设置，D4 9/9，设置位置，TTS 五个视口，连续，重新认证四视口，记住登录信息，书籍上限，注册限制，移动（含 iPad），会话生命周期，首页会话隔离，文本模式，EPUB，音频，书源调试。服务日志没有 panic；唯一的 5xx 是注册限制合同关页时被取消的 `PUT /api/settings/shelf`（`settings.go` 把取消的请求记为 500，原有行为，另起切片）。合并适配：`f45f766` 让“闲读”技术名对照改查 `utils/authToken.js` 的 `AUTH_TOKEN_KEY = 'openreader_token'`，`f8786ab` 让 D4 合同从 `da438bc7` 之后的 `.rail-item[aria-label="设置"]` 打开设置，断言都没改。合入 flip 分支前，`C1 flip` 在 main `f82e0f5`（三次共 8/36 失败）、Reader 分支与合并树上都偶发超时，原因是晚到的账号设置让桌面停在 flip；合入后消失。
+
+可信 Actions run `43400193943` 43/43 步成功（09:18–09:35 UTC）：两平台 OS 门 `pass-with-unknown-origins`（16/16 包、110/109 个 APK 文件、74 组比较无待修复项，secdb main 11-12 22:52:32，复审期限 2026-12-10），Go 公告门 go1.26.11 0 个发现（250 条公告，x/crypto pin 复审期限 2026-12-16），前端公告门 0 个发现，卷门与平台核验通过。
+
+镜像：`ghcr.io/changshengyu/openreader:f8786ab` 与 `latest` 指向 OCI index `sha256:0066943b9fb879041a503391723bf9bc4b31ee19aee06d273073b6ac4142890f`；linux/amd64 `sha256:6944f67944131f2d90e15ccd83e56d6b808ec3cbb4a4f8474d808f15fa064d13`，linux/arm64 `sha256:2537a5de7dc67046ee4449db329c77d0028ab03d291cfe142b290ec4c0bfa729`，另有两个 attestation。两平台 revision 标签均为 `f8786abe2679ca34b76b6aaa6017558225662ecd`；两平台 `/app/openreader` 均由 go1.26.11 构建，`/app/public/index.html` 标题为 `闲读`（逐层校验 sha256 后读取）。
+
+状态 **released / Docker-published / awaiting-device-verification**；生产未访问，实际运行版本未知。
+
+## 16. W19 决定：manifest 按上游 `fullscreen`、不锁方向（2026-11-13）
+
+来源：PWA 合同（`pwa-service-worker-fixed-baseline-second-audit-p2-contract.md`）把 W19（manifest 的 `display` 与 `orientation`）交给本合同判断。用户 2026-11-13 选择“按上游 fullscreen”。基于 main `684c849`。
+
+上游（fa22f27 的实际构建产物，见 PWA 合同 2.9）：发布的 `manifest.json` 中 `display` 为 `fullscreen`，没有 `orientation`。fork 提交 `0556c7b` 的 `public/manifest.json`（`standalone` + `portrait`）被构建插件忽略，没有进入产物。
+
+| 编号 | 项 | 当前 | 目标 | 分类 |
+| --- | --- | --- | --- | --- |
+| M1 | `display` | `standalone` | `fullscreen` | must-fix（用户决定，对齐上游构建产物） |
+| M2 | `orientation` | `portrait` | 删除该键，不锁方向 | must-fix（同上） |
+| M3 | `name`、`short_name`、颜色、图标、`start_url`、`scope`、`lang` | 现值 | 不变 | 不在本切片：名称是 D1 的“闲读”；上游的白色 `theme_color`、黑色 `background_color` 与 android-chrome 图标不在这次的选择里 |
+| M4 | `index.html` 的 `theme-color`、`apple-mobile-web-app-*` 与 manifest 链接 | 现值 | 不变 | iOS 主屏幕网页不读 manifest 的 `display`，由 `apple-mobile-web-app-capable` 决定 |
+
+行为：
+- 支持 `fullscreen` 的浏览器（如 Android Chrome）从主屏幕打开时隐藏系统状态栏；不支持的浏览器依次回退到 `standalone`、`minimal-ui`、`browser`。
+- 去掉方向锁后，手机和平板可以横屏。首页、搜索、发现与工作台已有的 `orientationchange` 处理照常重排。
+
+测试计划：
+- 单元 `frontend/tests/manifestDisplayContract.test.mjs`：
+  - 红：`display === 'fullscreen'`，没有 `orientation` 键；
+  - 对照（绿）：`name`、`short_name` 为“闲读”，`start_url`、`scope` 为 `/`，`index.html` 仍有 manifest 链接与 `apple-mobile-web-app-capable`。
+- 回归：前端全量与 build（manifest 在 SW 预缓存清单中，构建号会变）；PWA 合同、标签页标题合同、openreader-smoke、移动端合同。
+
+状态 **contract-only**（由下方记录取代）。
+
+### 16.1 记录（2026-11-13）
+
+提交：合同 `508fa5a`；红测 `61598ac`（M1/M2 在 `display: standalone` 处失败，M3/M4 对照通过）；实现 `47375c8`（`display` 改为 `fullscreen`，删除 `orientation`）。
+
+验证：
+- 前端 999/999（新增 2 项），build 通过；SW 构建号变为 `e5c767f8429a3a17`，仍预缓存 64 个文件；产物 manifest 为 `fullscreen`、无 `orientation`、名称“闲读”。
+- 真实 Go 服务（后端与 `2f19133` 相同）：PWA 合同 E1–E7、openreader-smoke 三视口、标签页标题合同四个流程、移动端合同（含 iPad）通过，服务日志无 5xx。
+
+状态 **implementation-complete / regression-validated**；分支 `claude/manifest-fullscreen-w19`，未合入 main，镜像未发布，生产未访问。
+
+### 16.2 发布（2026-11-13）
+
+本节内容（第 16 节的 W19 manifest）随本次合并发布：合并提交 `12ead30`（W19 manifest）与 `73158ab`（书籍上限默认不限），另含 `bd9b03e`（README_CN 补上邀请码与用户数上限的说明）。main 由 `684c849` 快进到 `bd9b03e`（ls-remote 核验，未强推）。
+
+推送前在合并树上：后端 `go test ./...` 31 个包（api 等 6 个包重跑，api 130.3 秒）与 vet，race api/config/db/services 与根包 28 个包（api 1091.6 秒）无数据竞争；前端 999/999 与 build（SW `e5c767f8429a3a17`，预缓存 64 个文件）；公告门自测 114/114，现场 Go 与前端扫描 0 个发现；compose 配置、浏览器 smoke 接线 10/10；secdb main 与 11-10 快照一致。真实 Go 服务、全新数据目录下：书籍上限合同在 `OPENREADER_USER_BOOK_LIMIT=2` 时三视口仍然限制，不设变量时三视口第 201 本经 API 被接受、第 202 本经导入对话框成功且不出现提示；openreader-smoke、注册限制、记住登录信息、标签页标题、移动端（含 iPad）、PWA E1–E7、存储 HTTP 合同通过。服务日志没有 panic；唯一的 5xx 是注册限制合同关页时被取消的设置写入（原有行为，已另起任务）。
+
+可信 Actions run `43438877834` 43/43 步成功（14:01–14:24 UTC）：两平台 OS 门 `pass-with-unknown-origins`（16/16 包、110/109 个 APK 文件、74 组比较无待修复项，复审期限 2026-12-10），Go 公告门 go1.26.11 0 个发现（x/crypto pin 复审期限 2026-12-16），前端公告门 0 个发现，卷门与平台核验通过。
+
+镜像：`ghcr.io/changshengyu/openreader:bd9b03e` 与 `latest` 指向 OCI index `sha256:0f2301d1398217d2edcf9617f9b4ea819f6d16d6028cb7a59dd62947bb1b771d`；linux/amd64 `sha256:fc872080dd4cef6c56f4fa70f94284225b800a10858021dc5e900d114ddec994`，linux/arm64 `sha256:063cc6b767db6890ced468a559f1523dee01b17fead5efb292439bdb0d3cb46f`，另有两个 attestation。两平台 revision 标签均为 `bd9b03e21c10c5b594b6eea2882872f89199cf5f`；两平台 `/app/openreader` 均由 go1.26.11 构建，页面标题为 `闲读`；`/app/public/manifest.webmanifest` 为 `display: fullscreen`、没有 `orientation`，`sw.js` 构建号 `e5c767f8429a3a17` 与本地构建相同（逐层校验 sha256 后读取）。
+
+状态 **released / Docker-published / awaiting-device-verification**；生产未访问，实际运行版本未知。
