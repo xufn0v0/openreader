@@ -53,6 +53,11 @@ export function useReaderToc(options) {
   async function jump(index) {
     visible.value = false
     const targetIndex = readerTocTargetIndex(index, unref(options.chapters)?.length)
+    const currentFailed = targetIndex === unref(options.currentIndex) && options.isCurrentChapterFailed?.()
+    if (currentFailed || options.isWindowChapterFailed?.(targetIndex)) {
+      await options.reloadChapter?.(targetIndex)
+      return
+    }
     await options.goChapter(targetIndex)
   }
 

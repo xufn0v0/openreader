@@ -1,13 +1,12 @@
-import { unref } from 'vue'
+import { getCurrentScope, onScopeDispose, unref } from 'vue'
 import {
   parseReaderRoutePercent,
   savedBookChapterPercent,
 } from '../utils/readerRoute.js'
 
 export function useReaderBookLoad(options) {
-  async function reconcileServerProgress(serverSaved, reconcileOptions = {}) {
-    const currentBookId = unref(options.bookId)
-    if (!serverSaved?.bookId || Number(serverSaved.bookId) !== Number(currentBookId)) return
+  async function reconcileServerProgress(serverSaved, reconcileOptions, isCurrent) {
+    if (!isCurrent() || !serverSaved?.bookId || Number(serverSaved.bookId) !== Number(unref(options.bookId))) return
     const routeQuery = options.getRouteQuery()
     const canFollowServer = (
       reconcileOptions.resumeFromProgress
@@ -37,54 +36,59 @@ export function useReaderBookLoad(options) {
     )
     const targetOffset = Math.max(0, Math.floor(Number(serverSaved.offset || 0)))
     const restorePercent = savedBookChapterPercent(serverSaved, options.chapters.value.length)
-    await options.navigate({
-      resume: '1',
-      chapter: targetIndex,
-      ...(targetOffset ? { offset: targetOffset } : {}),
-      ...(restorePercent !== null
-        ? { percent: Number(restorePercent.toFixed(6)) }
-        : {}),
-    })
-    await options.loadChapter(targetIndex, targetOffset, {
-      restorePercent,
-      saveAfterLoad: false,
-    })
-    options.markProgressSaved(options.getCurrentProgress())
+    await trackRestore(serverSaved, async finishNavigation => {
+      const reachedPosition = await options.navigate({
+        resume: '1',
+        chapter: targetIndex,
+        ...(targetOffset ? { offset: targetOffset } : {}),
+        ...(restorePercent !== null
+          ? { percent: Number(restorePercent.toFixed(6)) }
+          : {}),
+      })
+      if (!reachedPosition || !isCurrent()) return
+
+      finishNavigation?.()
+      await options.loadChapter(targetIndex, targetOffset, {
+        restorePercent,
+        saveAfterLoad: false,
+        restoredProgress: serverSaved,
+      })
+    }, { waitForNavigation: true })
   }
 
-  async function refreshCaches(refreshOptions = {}) {
-    const targetBookId = unref(options.bookId)
-    const requests = []
-    if (refreshOptions.book) {
-      requests.push(
-        options.refreshBook(targetBookId)
-          .then(response => ({ key: 'book', data: response.data })),
-      )
-    }
-    if (refreshOptions.chapters) {
-      requests.push(
-        options.refreshChapters(targetBookId)
-          .then(response => ({ key: 'chapters', data: response.data })),
-      )
-    }
-    const rows = await Promise.all(requests)
-    if (Number(unref(options.bookId)) !== Number(targetBookId)) return
-    rows.forEach(row => {
-      if (row.key === 'book' && row.data?.id) {
-        options.book.value = options.mergeLoadedBook(row.data)
-      }
-      if (row.key === 'chapters' && Array.isArray(row.data)) {
-        options.chapters.value = row.data
-      }
-    })
+  async function refreshCachedBook(targetBookId, isCurrent) {
+    const { data } = await options.refreshBook(targetBookId, isCurrent)
+    if (isCurrent() && data?.id) options.book.value = options.mergeLoadedBook(data)
   }
+
+  async function refreshCachedChapters(targetBookId, isCurrent) {
+    const { data } = await options.refreshChapters(targetBookId, isCurrent)
+    if (isCurrent() && Array.isArray(data)) options.chapters.value = data
+  }
+
+  let loadGeneration = 0
+  const trackRestore = options.trackRestore ?? ((progress, restore) => restore())
+  if (getCurrentScope()) onScopeDispose(() => { loadGeneration++ })
 
   async function load() {
-    options.cancelProgressSave()
+    const generation = ++loadGeneration
     const targetBookId = unref(options.bookId)
+    const isCurrent = () => generation === loadGeneration && unref(options.bookId) === targetBookId
+    try {
+      await loadBook(targetBookId, isCurrent)
+    } catch (error) {
+      if (isCurrent()) throw error
+    }
+  }
+
+  async function loadBook(targetBookId, isCurrent) {
+    options.cancelProgressSave()
+    // A catalog belongs to the book it was loaded for. Drop the previous book's rows before the first await so the
+    // TOC, preloads, chapter clamping, progress and N% never size or label this book with them.
+    options.chapters.value = []
     if (unref(options.isTemporaryReader)) {
       const response = await options.loadTemporaryReader(targetBookId)
-      if (unref(options.bookId) !== targetBookId) return
+      if (!isCurrent()) return
       const temporaryBook = response?.book
       const temporaryChapters = response?.chapters
       if (!temporaryBook || !Array.isArray(temporaryChapters)) {
@@ -113,29 +117,27 @@ export function useReaderBookLoad(options) {
     const cachedProgress = options.reader.cachedProgress(targetBookId)
     const shelfBook = options.getShelfBook?.(targetBookId) || null
     if (shelfBook?.id) options.book.value = options.mergeLoadedBook(shelfBook)
-    const bookRequest = options.loadCachedBook(targetBookId)
-      .catch(error => {
-        if (shelfBook?.id) return { error }
-        throw error
-      })
-    const chapterResponse = await options.loadCachedChapters(targetBookId)
-    if (Number(unref(options.bookId)) !== Number(targetBookId)) return
+    const bookRequest = options.loadCachedBook(targetBookId, isCurrent)
+      .catch(error => ({ error }))
+    const chapterResponse = await options.loadCachedChapters(targetBookId, isCurrent)
+    if (!isCurrent()) return
 
     let bookResponse = null
     if (!shelfBook?.id) {
       bookResponse = await bookRequest
-      if (Number(unref(options.bookId)) !== Number(targetBookId)) return
+      if (!isCurrent()) return
+      if (bookResponse.error) throw bookResponse.error
       options.book.value = options.mergeLoadedBook(bookResponse.data)
     }
 
     const saved = cachedProgress?.bookId
       ? cachedProgress
       : await progressRequest
-    if (Number(unref(options.bookId)) !== Number(targetBookId)) return
+    if (!isCurrent()) return
 
     options.chapters.value = chapterResponse.data
     if (options.book.value?.progress?.bookId) {
-      options.reader.applyServerProgress(options.book.value.progress)
+      if (!options.book.value.progress.pendingSync) options.reader.applyServerProgress(options.book.value.progress)
       options.bookshelf.applyBookProgress(options.book.value.progress)
     }
     if (saved?.bookId) {
@@ -166,10 +168,16 @@ export function useReaderBookLoad(options) {
     const savedPercent = shouldUseSavedPosition
       ? savedBookChapterPercent(saved, options.chapters.value.length)
       : null
-    await options.loadChapter(options.currentIndex.value, initialOffset, {
+    const restoredProgress = shouldUseSavedPosition && !hasRouteOffset && routePercent === null && saved?.bookId
+      ? saved
+      : null
+    await trackRestore(restoredProgress, () => options.loadChapter(options.currentIndex.value, initialOffset, {
       restorePercent: routePercent ?? (hasRouteOffset ? null : savedPercent),
       saveAfterLoad: false,
-    })
+      ...(restoredProgress ? { restoredProgress } : {}),
+    }))
+
+    if (!isCurrent()) return
 
     const initialProgressKey = options.progressKey(options.getCurrentProgress())
     progressRequest.then(serverSaved => {
@@ -179,31 +187,29 @@ export function useReaderBookLoad(options) {
         resumeFromProgress,
         hasRouteOffset,
         routePercent,
-      }).catch(() => {})
+      }, isCurrent).catch(() => {})
     })
-    if (chapterResponse.fromCache) refreshCaches({ chapters: true }).catch(() => {})
+    if (chapterResponse.fromCache) refreshCachedChapters(targetBookId, isCurrent).catch(() => {})
     bookmarksRequest?.then(data => {
-      if (options.bookmarks && Number(unref(options.bookId)) === Number(targetBookId)) {
+      if (options.bookmarks && isCurrent()) {
         options.bookmarks.value = data
       }
     }).catch(() => {})
     await options.jumpToRouteLine()
 
     if (!bookResponse) bookResponse = await bookRequest
-    if (Number(unref(options.bookId)) !== Number(targetBookId)) return
+    if (!isCurrent()) return
     if (bookResponse?.data?.id) {
       options.book.value = options.mergeLoadedBook(bookResponse.data)
       if (saved?.bookId) {
         options.book.value = options.mergeBookProgress(options.book.value, saved)
       }
     }
-    if (bookResponse?.fromCache) refreshCaches({ book: true }).catch(() => {})
+    if (bookResponse?.fromCache) refreshCachedBook(targetBookId, isCurrent).catch(() => {})
   }
 
   return {
     load,
-    reconcileServerProgress,
-    refreshCaches,
   }
 }
 

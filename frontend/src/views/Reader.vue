@@ -477,10 +477,8 @@ function readerRouteLocation(query = {}) {
     : { name: 'reader', params: { id: bookId.value }, query }
 }
 
-let suppressNextReaderPositionReload = () => {}
 function replaceReaderPositionWithoutReload(query = {}) {
-  suppressNextReaderPositionReload(query)
-  return router.replace(readerRouteLocation(query))
+  return readerRouteSync.replacePosition(readerRouteLocation(query))
 }
 
 function temporaryReaderUnavailable() {
@@ -653,9 +651,9 @@ const {
   bookshelf,
   reader,
   currentBookId: bookId,
-  currentChapterCount: () => chapters.value.length,
   router,
   saveProgress: () => saveCurrentProgress({ force: true }),
+  onSuccess: message => ElMessage.info(message),
   onWarning: message => ElMessage.warning(message),
   onError: (error, fallback) => ElMessage.error(readError(error, fallback)),
 })
@@ -699,6 +697,12 @@ const {
   runRefreshing: runTocRefreshing,
 } = useReaderToc({
   chapters,
+  currentIndex,
+  // A failed book load has no catalog rows to press; its retry is the book reload below.
+  isCurrentChapterFailed: () => Boolean(chapterLoadError.value) && !readerCatalogLoadFailed.value,
+  isWindowChapterFailed: index => isContinuousScrollRead.value
+    && chapterBlocks.value.some(block => block.index === index && block.error),
+  reloadChapter: index => loadChapter(index, 0, { refresh: true, saveAfterLoad: true }),
   isRemoteBook,
   isTemporaryReader: isTemporaryRemoteReader,
   onUnavailable: temporaryReaderUnavailable,
@@ -1013,7 +1017,7 @@ const {
   nextFrame,
 })
 const {
-  apply: applyLocalProgressSnapshot,
+  apply: writeLocalProgressSnapshot,
   currentPayload: currentProgressPayload,
   serverBaseUpdatedAt: progressServerBaseUpdatedAt,
   upsert: upsertReaderBookProgress,
@@ -1033,6 +1037,9 @@ const {
   mergeBook: mergeShelfBook,
   isTemporaryReader: isTemporaryRemoteReader,
 })
+function applyLocalProgressSnapshot(payload = currentProgressPayload()) {
+  if (!isRestoredProgressPosition(payload)) writeLocalProgressSnapshot(payload)
+}
 const {
   busy: continuousWindowBusy,
   compute: computeShowChapterList,
@@ -1172,7 +1179,7 @@ const {
   canMatchBookmark: () => chapterFormat.value === 'text',
   onBookmarkNotFound: () => ElMessage.error('无法定位内容所在段落'),
   flashParagraph,
-  saveProgress: () => saveCurrentProgress(),
+  saveProgress: () => saveProgressQuietly(),
 })
 useReaderContentSearchIntent({
   request: computed(() => overlay.searchBookContentJump),
@@ -1218,7 +1225,7 @@ const {
     showTocDrawer.value = false
   },
   navigate: query => router.replace(readerRouteLocation(query)),
-  saveProgress: () => saveCurrentProgress(),
+  saveProgress: () => saveProgressQuietly(),
   scheduleProgressSave: delay => scheduleProgressSave(delay),
   cancelProgressSave: () => cancelProgressSave(),
   onVerticalPageSettled: () => settleVerticalPageScroll(),
@@ -1263,7 +1270,7 @@ const {
   getCurrentChapterPercent: currentChapterPercent,
   navigate: query => router.replace(readerRouteLocation(query)),
   applyLocalProgress: () => applyLocalProgressSnapshot(),
-  saveProgress: () => saveCurrentProgress(),
+  saveProgress: () => saveProgressQuietly(),
   scheduleProgressSave: delay => scheduleProgressSave(delay),
 })
 
@@ -1698,7 +1705,7 @@ const {
   updateLayout: updateFlipLayout,
   nextFrame,
   restorePosition: restoreReadingPosition,
-  saveProgress: () => saveCurrentProgress(),
+  saveProgress: () => saveProgressQuietly(),
   setRestoring: value => {
     restoringPosition.value = value
   },
@@ -1743,6 +1750,7 @@ const {
   contentEl: scrollViewport,
   isOverlayOpen,
   isVerticalRead,
+  onNativeScrollInput: recordReaderScrollInput,
   cancelPageAnimation,
   nextPage,
   previousPage,
@@ -1765,7 +1773,7 @@ const {
   currentVisibleParagraph,
   scrollBehavior: readerScrollBehavior,
   nextPage,
-  saveProgress: () => saveCurrentProgress(),
+  saveProgress: () => saveProgressQuietly(),
   notify: showReaderToast,
 })
 const {
@@ -1788,6 +1796,7 @@ const {
   scheduleSelectedTextOperation,
   suppressContentClick,
   consumeSuppressedContentClick,
+  onNativeScrollInput: recordReaderScrollInput,
   cancelPageAnimation,
   preparePageInput,
   nextPage,
@@ -1798,24 +1807,42 @@ const {
 const {
   cancelScheduled: cancelProgressSave,
   isBusy: isProgressSaveBusy,
+  isRestoredPosition: isRestoredProgressPosition,
   key: progressSaveKey,
   markSaved: markProgressSaved,
+  recordRestoreScroll,
   save: saveCurrentProgress,
   schedule: scheduleProgressSave,
   suspend: suspendProgressSaving,
   resume: resumeProgressSaving,
+  trackRestore: trackProgressRestore,
 } = useReaderProgressPersistence({
   minimumInterval: 1200,
   isBlocked: () => continuousWindowBusy.value || readerBookDeleted.value,
-  getPayload: () => chapter.value ? currentProgressPayload() : null,
+  // The payload names a catalog row even before any chapter loaded, so a failed first load is saved on leave
+  // (failure progress contract P2); without a row of this book there is nothing to save.
+  getPayload: () => currentProgressPayload(),
+  getRestoreScrollViewport: () => (
+    chapterLoaded.value && !restoringPosition.value && !chapterLoading.value
+      ? scrollViewport.value
+      : null
+  ),
   getBaseUpdatedAt: progressServerBaseUpdatedAt,
-  applyLocal: applyLocalProgressSnapshot,
+  applyLocal: writeLocalProgressSnapshot,
   saveRemote: payload => reader.saveProgress({ ...payload, mode: interfaceReaderMode.value }),
   onSaved: progress => upsertReaderBookProgress(progress, { replace: true }),
   getMode: () => effectiveReaderMode.value,
-  getStoredProgress: targetBookId => reader.progressByBook[targetBookId],
+  getStoredProgress: targetBookId => reader.cachedProgress(targetBookId),
   ensureClientId: () => reader.ensureClientId(),
 })
+function recordReaderScrollInput(delta) {
+  recordRestoreScroll(bookId.value, delta)
+}
+// Failure progress contract P7: progress saves are best effort, as reader-dev's saveBookProgress swallows every error.
+// Callers that do not wait for the result use this; the local pending snapshot stays for the next sync.
+function saveProgressQuietly(saveOptions) {
+  return saveCurrentProgress(saveOptions).catch(() => {})
+}
 const {
   goShelf,
   openBookInfo: openReaderBookInfo,
@@ -1841,7 +1868,7 @@ const {
   getCustomBgColor: () => reader.customBgColor,
   getLineHeight: () => reader.lineHeight,
   refreshBrowserCachedChapters: computeBrowserCachedChapters,
-  saveProgress: saveCurrentProgress,
+  saveProgress: saveProgressQuietly,
   navigate: routeLocation => router.push(routeLocation),
   openBookmarksOverlay: currentBook => overlay.openBookmark(currentBook, {
     createDraft: currentBookmarkDraft(),
@@ -1862,6 +1889,7 @@ const {
 
 const {
   clearLoadingTimer: clearChapterLoadingTimer,
+  invalidate: invalidateChapterLoad,
   load: loadChapter,
 } = useReaderChapterLoader({
   chapters,
@@ -1894,7 +1922,7 @@ const {
   updateLayout: updateFlipLayout,
   restorePosition: restoreReadingPosition,
   preloadNearby: preloadNearbyChapters,
-  saveProgress: saveCurrentProgress,
+  saveProgress: saveProgressQuietly,
   markProgressSaved,
   getCurrentProgress: currentProgressPayload,
   computeChapterWindow: computeShowChapterList,
@@ -1909,7 +1937,7 @@ const {
   },
   formatError: error => readerChapterErrorReason(error, READER_CHAPTER_ERROR_CONTENT),
   notifyError: error => notifyReaderLoadFailure(READER_CHAPTER_ERROR_CONTENT, error),
-  showFailedChapterWindow: (index, error) => showFailedContinuousChapter(index, error),
+  showFailedChapterWindow: showFailedContinuousChapter,
   nextFrame,
   onEpubPrepared: pending => {
     epubPendingRestore.value = pending
@@ -1959,25 +1987,25 @@ const {
   getShelfBook: targetBookId => bookshelf.books.find(
     item => Number(item.id) === Number(targetBookId),
   ),
-  loadCachedBook: targetBookId => cacheFirstRequest(
+  loadCachedBook: (targetBookId, canWrite) => cacheFirstRequest(
     () => api.get(`/books/${targetBookId}`),
     readerDataCacheKey(`book:${targetBookId}`),
-    { validate: data => Boolean(data?.id) },
+    { validate: data => Boolean(data?.id), canWrite },
   ),
-  loadCachedChapters: targetBookId => cacheFirstRequest(
+  loadCachedChapters: (targetBookId, canWrite) => cacheFirstRequest(
     () => api.get(`/books/${targetBookId}/chapters`),
     readerDataCacheKey(`chapters:${targetBookId}`),
-    { validate: data => Array.isArray(data) },
+    { validate: data => Array.isArray(data), canWrite },
   ),
-  refreshBook: targetBookId => networkFirstRequest(
+  refreshBook: (targetBookId, canWrite) => networkFirstRequest(
     () => api.get(`/books/${targetBookId}`),
     readerDataCacheKey(`book:${targetBookId}`),
-    { validate: data => Boolean(data?.id) },
+    { validate: data => Boolean(data?.id), canWrite },
   ),
-  refreshChapters: targetBookId => networkFirstRequest(
+  refreshChapters: (targetBookId, canWrite) => networkFirstRequest(
     () => api.get(`/books/${targetBookId}/chapters`),
     readerDataCacheKey(`chapters:${targetBookId}`),
-    { validate: data => Array.isArray(data) },
+    { validate: data => Array.isArray(data), canWrite },
   ),
   mergeLoadedBook,
   mergeBookProgress: (loadedBook, progress) => mergeShelfBook(
@@ -1989,6 +2017,7 @@ const {
   progressKey: progressSaveKey,
   getCurrentProgress: currentProgressPayload,
   navigate: replaceReaderPositionWithoutReload,
+  trackRestore: trackProgressRestore,
   markProgressSaved,
   jumpToRouteLine,
 })
@@ -2111,6 +2140,7 @@ const {
 })
 
 const readerRouteSync = useReaderRouteSync({
+  router,
   bookId,
   currentIndex,
   positionQuery: () => [route.query.chapter, route.query.offset, route.query.percent],
@@ -2121,12 +2151,16 @@ const readerRouteSync = useReaderRouteSync({
   onBookLoadStart: () => {
     readerBookDeleted.value = false
     resumeProgressSaving()
+    // The previous book's content and in-flight chapter load are not the new book's: show the existing loading
+    // state until the new catalog and target chapter arrive.
+    invalidateChapterLoad()
+    chapterLoaded.value = false
+    chapterLoading.value = true
     chapterLoadError.value = ''
     readerCatalogLoadFailed.value = false
   },
   onBookLoadError: handleReaderBookLoadError,
 })
-suppressNextReaderPositionReload = readerRouteSync.suppressNextPositionReload
 
 useReaderTypographySync({
   reader,
@@ -2160,6 +2194,7 @@ const {
   getCurrentProgress: currentProgressPayload,
   cancelProgressSave,
   navigate: replaceReaderPositionWithoutReload,
+  trackRestore: trackProgressRestore,
   loadChapter,
   markProgressSaved,
   getCurrentOffset: currentOffset,
@@ -2192,7 +2227,7 @@ useReaderPageLifecycle({
   cancelProgressSave,
   clearChapterLoadingTimer,
   stopAutoReading,
-  saveProgress: saveCurrentProgress,
+  saveProgress: saveProgressQuietly,
   onResize: handleResize,
   onWheel: handleReaderWheel,
   onScroll: () => {
@@ -2218,7 +2253,7 @@ useReaderPageLifecycle({
 })
 
 onBeforeRouteLeave(() => {
-  saveCurrentProgress({ force: true, background: true })
+  saveProgressQuietly({ force: true, background: true })
 })
 
 function nextFrame() {
@@ -2368,11 +2403,11 @@ function readerScrollBehavior() {
 }
 
 function handleReaderPageHide() {
-  saveCurrentProgress({ force: true, background: true })
+  saveProgressQuietly({ force: true, background: true })
 }
 
 function handleReaderVisibilityChange() {
-  if (document.hidden) saveCurrentProgress({ force: true, background: true })
+  if (document.hidden) saveProgressQuietly({ force: true, background: true })
 }
 
 function currentBookmarkParagraphContext() {

@@ -20,6 +20,9 @@ function openDB() {
           db.createObjectStore(STORE_NAME, { keyPath: 'key' })
         }
       }
+    }).catch(error => {
+      dbPromise = undefined
+      throw error
     })
   }
   return dbPromise
@@ -32,18 +35,36 @@ async function idbGet(key) {
     const store = tx.objectStore(STORE_NAME)
     const request = store.get(key)
     request.onerror = () => reject(request.error || new Error('failed to read cache'))
-    request.onsuccess = () => resolve(request.result?.value)
+    request.onsuccess = () => resolve(request.result)
   })
 }
 
-async function idbSet(key, value) {
+async function idbSet(key, value, canWrite, chapterRequest) {
   const db = await openDB()
+  if (canWrite?.() === false) return
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite')
     const store = tx.objectStore(STORE_NAME)
-    const request = store.put({ key, value, updatedAt: Date.now() })
-    request.onerror = () => reject(request.error || new Error('failed to write cache'))
-    request.onsuccess = () => resolve()
+    if (!chapterRequest) {
+      const request = store.put({ key, value, updatedAt: Date.now() })
+      request.onerror = () => reject(request.error || new Error('failed to write cache'))
+      request.onsuccess = () => resolve()
+      return
+    }
+    tx.oncomplete = () => resolve()
+    tx.onabort = () => reject(tx.error || new Error('failed to write cache'))
+    // Read and conditionally replace the chapter within one transaction across tabs.
+    const existing = store.get(key)
+    existing.onsuccess = () => {
+      const indexedReload = existing.result?.chapterReload
+      const fallbackReload = readLegacyCache(key)?.openReaderChapterReload
+      const currentReload = newerReload(fallbackReload, indexedReload) ? fallbackReload : indexedReload
+      const lastReload = updateChapterReload(currentReload, chapterRequest)
+      if (lastReload === false || canWrite?.() === false) return
+      const record = { key, value, updatedAt: Date.now() }
+      if (lastReload) record.chapterReload = lastReload
+      store.put(record)
+    }
   })
 }
 
@@ -56,6 +77,19 @@ async function idbRemove(key) {
     request.onerror = () => reject(request.error || new Error('failed to remove cache'))
     request.onsuccess = () => resolve()
   })
+}
+
+function newerReload(candidate, current) {
+  return candidate !== undefined && (current === undefined || candidate > current)
+}
+
+function updateChapterReload(lastReload, request) {
+  if (request.refreshRemote) {
+    if (lastReload >= request.startedAt) return false
+    return request.startedAt
+  }
+  if (lastReload !== request.chapterReload) return false
+  return lastReload
 }
 
 function prefixedKey(key) {
@@ -81,23 +115,53 @@ function writeLegacyCache(key, value) {
 }
 
 export async function getBrowserCache(key) {
+  return (await readBrowserCacheRecord(key)).value
+}
+
+export async function readBrowserCacheRecord(key) {
   const cacheKey = prefixedKey(key)
+  let record
   try {
-    const value = await idbGet(cacheKey)
-    if (value) return value
+    record = await idbGet(cacheKey)
   } catch {
     // Fall through to the old localStorage-compatible path.
   }
-  return readLegacyCache(cacheKey)
+  const cached = readLegacyCache(cacheKey)
+  if (record?.value && !newerReload(cached?.openReaderChapterReload, record.chapterReload)) return record
+  if (cached?.openReaderChapterReload) {
+    const { openReaderChapterReload, ...value } = cached
+    return { value, chapterReload: openReaderChapterReload }
+  }
+  return { value: cached }
 }
 
-export async function setBrowserCache(key, value) {
+export async function setBrowserCache(key, value, canWrite, chapterRequest) {
+  if (canWrite?.() === false) return
   const cacheKey = prefixedKey(key)
   try {
-    await idbSet(cacheKey, value)
-    return
+    await idbSet(cacheKey, value, canWrite, chapterRequest)
   } catch {
-    writeLegacyCache(cacheKey, value)
+    if (!chapterRequest) {
+      if (canWrite?.() !== false) writeLegacyCache(cacheKey, value)
+      return
+    }
+    const writeChapter = () => {
+      if (canWrite?.() === false) return
+      const existing = readLegacyCache(cacheKey)
+      const lastReload = updateChapterReload(existing?.openReaderChapterReload, chapterRequest)
+      if (lastReload === false) return
+      writeLegacyCache(cacheKey, lastReload ? { ...value, openReaderChapterReload: lastReload } : value)
+    }
+    const locks = globalThis.navigator?.locks
+    if (!locks) {
+      writeChapter()
+      return
+    }
+    try {
+      await locks.request(cacheKey, writeChapter)
+    } catch {
+      writeChapter()
+    }
   }
 }
 
@@ -179,7 +243,7 @@ export async function cacheFirstRequest(requestFunc, cacheKey, options = {}) {
   }
   const response = await requestFunc()
   if (response?.data && (!options.validate || options.validate(response.data))) {
-    await setBrowserCache(cacheKey, response.data)
+    await setBrowserCache(cacheKey, response.data, options.canWrite)
   }
   return response
 }
@@ -188,7 +252,7 @@ export async function networkFirstRequest(requestFunc, cacheKey, options = {}) {
   try {
     const response = await requestFunc()
     if (response?.data && (!options.validate || options.validate(response.data))) {
-      await setBrowserCache(cacheKey, response.data)
+      await setBrowserCache(cacheKey, response.data, options.canWrite)
     }
     return response
   } catch (err) {

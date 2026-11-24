@@ -1,5 +1,37 @@
 # OpenReader 全量上游复审矩阵
 
+## 2026-11-15 页面标题旧候选复核
+
+旧分支 `claude/youthful-blackburn-9df7fb`（红测 `7e932f22`）及未提交草稿已被主线产品显示名合同第 14 节和 `f8786ab` 发布取代。固定上游的“阅读”和“Reader书源编辑器”按用户 2026-11-12 决定改为“闲读”和“闲读书源编辑器”。主线 HTML、首页/登录挂载、调试页进入退出及 Reader 动态标题均有实现，displayNameContract 与 document-title-contract 覆盖这些入口。旧候选中要求旧品牌或特定 composable 结构的测试不再适用。原工作树保留供用户查阅。本次只读核验，关闭旧待办。
+
+## 2026-11-15 三线整合发布
+
+主线发布提交 `44aebaa10ce078938335a1eacdb1bed98751b01c`。完成 Reader 待同步进度保留（书架更新、缓存打开、空服务端进度补传）、切书目录与迟到错误隔离、其余 API handler 请求取消处理，以及 x/crypto v0.59.0 正式版本升级。
+
+最终前端 1041/1041 与 build 通过。后端全量、vet、专项 race 通过，完整 race 日志覆盖 31 包（26 通过、5 无测试，原句柄因会话重连失效）。浏览器离线进度 24/24、换书三视口两模式 6/6、既有失败章进度 33/33、标签页标题三视口通过。最后两项复审补充边界通过先红后绿的单元测试。
+
+[可信 Actions 43696695582](https://github.com/changshengyu/openreader/actions/runs/43696695582) 完成双平台镜像、真实浏览器启动、新卷、历史卷、可移植备份与实例密钥升级/重启/回滚/再升级验证。标签 `ghcr.io/changshengyu/openreader:44aebaa` 与发布时 `latest` 的索引摘要为 `sha256:096cd5878e46ace71fa78c0ee856c59d737d7eaf4a400879c407680b31f5bdb5`，平台 linux/amd64 与 linux/arm64。
+
+允许差异沿用多用户隔离、运行时取消适配及既有安全加固。OS 门为 `pass-with-unknown-origins`，沿用 2026-12-10 复审期限。设备验收仍待确认。页面标题旧工作树已于下述复核关闭。
+
+## 2026-11-14 当前切片：其余 handler 的请求取消不返回或记录 5xx（P2，运行时适配）
+
+见[`request-cancellation-remaining-handlers-p2-contract.md`](request-cancellation-remaining-handlers-p2-contract.md)。基于 main `0584ae7`，分支 `claude/request-cancellation-remaining-handlers`，只改 `backend/api`。
+范围：设置取消合同 3.3 的 C2–C8（发 token、登出、同步升级、管理员用户与书源操作、默认书源、单源搜索、LocalStore 管理操作），加上 `requireAdmin` 403、`requireSourceEdit` 500、LocalStore 改名 409 三处取消误判，以及默认快照提交后的读回与镜像（D8，改用 `context.WithoutCancel`）。
+不改事务语义、WAL、单连接、中间件、services、go.mod 与访问日志格式，不新增 499；导入流程的取消 500 不重开。D12（被取消的登出不吊销会话）待决定，另开切片。
+红测 `5a4847b7`：`request_cancellation_remaining_handlers_contract_test.go`，每个 C 项至少一条，加正常请求与真实错误对照；红测提交新增 nil-in-production 接缝 `beforeLocalStoreWriteTestHook`。实现 `e32c3366`。状态 **已实现并通过本地 Go 与 LocalStore HTTP 回归（2026-11-15）**。
+
+## 2026-11-14 当前切片：发布门依赖 x/crypto 换成标签版本 v0.59.0（P1，2026-12-16 前的发布阻塞）
+
+见[`dependency-advisory-x-crypto-tagged-release-p1-contract.md`](dependency-advisory-x-crypto-tagged-release-p1-contract.md)。基于 main `0584ae7`，分支 `claude/go-advisory-x-crypto-tagged-release`，
+只改 `backend/go.mod`、`backend/go.sum`、Go 公告门脚本与测试和文档。x/crypto `v0.59.0`（2026-11-11）包含 GO-2026-5932 修复（无 `openpgp/`），取代 2026-12-16 到期的修复伪版本。
+must-fix：X1 换成标签版本、X2 删除门里的固定项特例；acceptable-change：X3 x/sys `v0.50.0`、x/text `v0.44.0` 连带升级。不重开：D2 任何 finding 阻止发布、D3 OpenPGP 无条件禁止、
+DB 时效、Go 工具链与构建镜像 pin。计划红测：门合同测试 3 项（R1–R3）。状态 contract-only；镜像未构建，生产未动。
+记录（2026-11-14，取代上段的状态）：合同 `8257461`、红测 `614daa4`（3/67 失败）、实现 `c9121b4`；门测试 67/67 + 49/49，现场 Go 门 exit 0、0 个发现（`crypto` 为 `v0.59.0`），前端门 0 个发现；backend 全量 31 包、vet、race api/db/services 26 个包（api 1139.6 s，无 DATA RACE）；vendor/trimpath 与两个 Linux 目标检查、frontend 999/999 与 build、smoke 三视口、存储 HTTP 合同 10/10、Compose 通过。状态 implementation-complete / regression-validated；分支已推送，未合入 main，镜像仍为 `b563af7`，生产未动。
+## 2026-11-15 Reader 离线进度与换书目录
+
+[离线待同步进度](reader-progress-pending-sync-keepalive-fixed-baseline-second-audit-p0-contract.md)与[换书目录归属](reader-shelf-switch-stale-catalog-fixed-baseline-second-audit-p1-contract.md)均完成实现。两个浏览器合同分别通过 24/24 和 6/6。
+
 ## 2026-11-14 当前切片：Reader 失败态进度载荷盘点（P0）
 
 见[`reader-failure-progress-payload-fixed-baseline-second-audit-p0-contract.md`](reader-failure-progress-payload-fixed-baseline-second-audit-p0-contract.md)。基于 main `9602dc4`，分支 `claude/reader-failure-progress-inventory`，只写文档。
@@ -8,6 +40,9 @@ must-fix：F1、F9、F10（P0）与 F11、F12。待用户决定：D1（失败章
 状态 contract-only / awaiting-user-decision；未改应用代码，镜像未构建，生产未动。
 决定（2026-11-14，盘点提交 `feeb256` 之后）：用户对 D1 选 A，按上游把进度改到失败章；F2、F3、F5 改判 must-fix，P2、P3 与测试只保留 A。D2 仍待定。
 决定（2026-11-14，取代上段的状态）：用户对 D2 选 (a)，不重开 R6 第 13 节第 7 条。决定已齐，状态 contract-only，下一步红测；镜像未构建，生产未动。
+记录（2026-11-14，取代上段的状态）：红测 `2f25981`，实现 `9d3bc11`、`8f7d14a`、`614745a`、`cf73ae5`，合并 main `0584ae7`。单元 1015/1015（红测时 13 条失败）与 build；新真实服务合同 33/33（红测基线 0/33）；错误页、运行标题、连续、桌面面板、移动（含 iPad）、TTS 五视口、smoke、文本模式、书架刷新、标签页标题、EPUB、音频、重新认证、桌面 flip、双客户端进度回归全部通过。状态 implementation-complete / regression-validated；未合入 main，镜像未构建，生产未动。
+
+发布（2026-11-15）：GitHub main 已包含四项修复。[Actions run 43673767925](https://github.com/changshengyu/openreader/actions/runs/43673767925) 在 `49392de5` 通过后端、前端、真实浏览器启动、新卷、历史卷、备份及实例密钥升级/回滚门禁，随后发布并验证 linux/amd64 和 linux/arm64。GHCR 标签 `49392de` 与本次发布时的 `latest` 指向索引 `sha256:73bf217aa9473a5ce04030589e10b911f9fe332e1819cdef221531a5eadd01c4`。生产设备验收仍待确认。
 
 ## 2026-11-13 当前切片：设置写入在客户端取消时不返回或记录 500（P2，运行时适配 + 日志加固）
 
@@ -559,8 +594,9 @@ G2（checker按整个body而非`#app`判空白）、G3（空白失败不报页�
 错误；workflow增加浏览器安装、门精度/接线测试和门步骤，`paths`纳入门文件。G4只测amd64、G5只测入口为acceptable-change。
 提交b41b33f/2453d01/501eb58/06800f0/a83264f：门测试红6/10→9/10→10/10；经已发布92c98a9镜像，门脚本对删除
 `strictExecutionOrder`的构建失败（`empty #app at /`+`pageerror: e is not a function`），对镜像自带产物与当前树构建通过；
-advisory门测试131/131、两项实际扫描、前端810/810与build、Compose、存储HTTP合同通过。状态implementation-complete /
-regression-validated，待可信Actions运行。
+advisory门测试131/131、两项实际扫描、前端810/810与build、Compose、存储HTTP合同通过。run 39884938803全部成功，新门三步
+共约26 s（门测试10/10，native候选镜像三视口`/login`），发布`a7fd6aa`/`latest`（index `sha256:c5dcdffb…d7c1`，amd64+arm64）。
+状态Docker-published，O3关闭。
 
 ## 2026-10-22 当前切片：发布门新增依赖公告维护（P1，阻塞 P0 发布）
 

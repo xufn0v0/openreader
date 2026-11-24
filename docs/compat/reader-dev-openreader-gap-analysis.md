@@ -1,5 +1,24 @@
 # Reader-dev vs OpenReader Gap Analysis
 
+## 2026-11-14 P2 其余 handler 在请求被客户端取消时不再返回或记录 5xx
+
+见[`request-cancellation-remaining-handlers-p2-contract.md`](request-cancellation-remaining-handlers-p2-contract.md)。基于 main `0584ae7`，分支 `claude/request-cancellation-remaining-handlers`，只改 `backend/api` 的 handler、测试与文档。
+来源是设置取消合同第 3.3 节的 C2–C8：登录/注册发 token 与登出（500）、同步升级认证（500）、管理员设为默认书源/重置书源/重置密码/删除用户/清理不活跃用户（500）、默认书源状态/保存/恢复（500）、单源搜索（502）、LocalStore 根初始化/列表/上传/下载/新建目录（500）。
+另查出三处误判：`requireAdmin` 把取消判成 403、`requireSourceEdit` 判成 500、LocalStore 改名判成 409；以及默认快照保存（和未配置时的初始化）在 SQLite 提交后用请求 context 读回并写 `defaultBookSources.json`，提交后取消时返回 500，镜像落后于 SQLite。
+上游 handler 不观察客户端断开，归为运行时适配。规则沿用设置切片：提交前取消不写库、不发事件、不写响应体、不返回 5xx；提交后取消时读回、镜像与广播用 `context.WithoutCancel`；鉴权与权限判断被取消时不写 401/403；访问日志不变，不新增 499。导入流程固定的取消 500 不重开（导入入口的根初始化保留 500）。
+待决定 D12：提交前被取消的登出不吊销会话（与现状相同；上游与前端的 fire-and-forget 登出都期望服务端完成），要完整处理还需改认证中间件，建议另开切片。实现 `e32c3366`。状态 **已实现并通过本地 Go 与 LocalStore HTTP 回归（2026-11-15）**。
+
+## 2026-11-14 P1 发布门依赖：x/crypto 换成包含 GO-2026-5932 修复的标签版本 v0.59.0
+
+见[`dependency-advisory-x-crypto-tagged-release-p1-contract.md`](dependency-advisory-x-crypto-tagged-release-p1-contract.md)。基于 main `0584ae7`，分支 `claude/go-advisory-x-crypto-tagged-release`。
+main 的 x/crypto 是 GO-2026-5932 修复伪版本 `v0.58.1-0.20261009181718-2f1f834330b2`，Go 公告门只接受到 2026-12-16，到期后所有发布都会失败关闭。
+查证（proxy.golang.org、vuln.go.dev、sum.golang.org）：`v0.59.0`（2026-11-11，`6c966a75`）是第一个包含该修复的标签版本，zip 里没有 `openpgp/`，按 SEMVER 在 GO-2026-5932 范围之外，
+h1 与校验和库一致。它声明 `go 1.26.0`，最小版本选择连带 x/sys `v0.50.0`、x/text `v0.44.0`（都是 `@latest`，本项目路径上只有加固），x/net 不变；三张依赖图 361/360/359
+与 main 逐字节相同，bcrypt/blowfish/sha3 逐字节相同。草稿副本上的现场门 0 个发现。X1（伪版本到期）、X2（门里的固定项特例）为 must-fix，X3（x/sys、x/text 连带升级）为 acceptable-change。
+目标：`go.mod` 3 行、`go.sum` 6+/6-；删除 `cryptoPin`/`cryptoPinReviewUntil`，x/crypto 只能是标签版本，摘要去掉 `pinReviewUntil`；D2（任何 finding 阻止发布）、D3（OpenPGP 无条件禁止）与其它判定不变。
+计划红测 3 项（R1–R3）。状态 **contract-only**；镜像未构建，生产未访问。
+记录（2026-11-14，取代上段的状态）：合同 `8257461`、红测 `614daa4`（旧门 67 项中 3 项失败，即 R1–R3）、实现 `c9121b4`（`go.mod` 3 行、`go.sum` 6+/6-，门删除固定项特例）。门测试 67/67 + 前端门 49/49；现场 Go 门 exit 0、`pass`、go1.26.11、**0 个发现**（DB 2026-11-11T02:51:11Z，250 条公告，`crypto` 为 `v0.59.0`，三张图 361/360/359 与 main 逐字节相同），前端全锁门 0 个发现；backend 全量 31 个包与 vet、race api/db/services 26 个包（api 1139.6 s，无 DATA RACE）；`-mod=vendor -trimpath` 编译与两个 Linux 目标的编译和 `#cgo` 检查通过；frontend 999/999 与 build；smoke 三视口、存储 HTTP 合同 10/10（bcrypt 注册与 WebDAV Basic）、Compose 通过。状态 **implementation-complete / regression-validated**；分支已推送，未合入 main，镜像仍为 `b563af7`，生产未访问。
+
 ## 2026-11-14 P0 Reader 失败态进度载荷
 
 见[`reader-failure-progress-payload-fixed-baseline-second-audit-p0-contract.md`](reader-failure-progress-payload-fixed-baseline-second-audit-p0-contract.md)。基于 main `9602dc4`，只写文档。
@@ -10,6 +29,7 @@
 状态 **contract-only / awaiting-user-decision**；未改应用代码，镜像未构建，生产未访问。
 决定（2026-11-14，盘点提交 `feeb256` 之后）：用户对 D1 选 A，按上游把进度改到失败章；F2、F3、F5 改判 must-fix，目标与测试只保留 A（合同第 12 节）。D2 仍待定。状态 contract-only / awaiting-user-decision（D2）。
 决定（2026-11-14，取代上段的状态）：用户对 D2 选 (a)，不重开 R6 第 13 节第 7 条，F6 维持已签收。决定已齐，状态 **contract-only**，下一步红测；未改应用代码，镜像未构建，生产未访问。
+记录（2026-11-14，取代上段的状态）：合同第 13、14 节。前置 `825fe0e`、红测 `2f25981`、实现 `9d3bc11`（P1、P3、P4、P7）、`8f7d14a`（P5）、`614745a`（P6）、`cf73ae5`（P2），合并 main `0584ae7`。实施补充：没有正文的目标章若已存进度就是这一行则沿用其位置（续读失败不丢位置）；加载成功后的保存被拒不再把章节显示成错误页。红测 1015 条中 13 条失败（全部新增），修复后 1015/1015 与 build；新合同 `reader-failure-progress-contract.mjs`（真实服务，33 例）红测基线 0/33、修复后 33/33；错误页 48/48、运行标题 24/24、连续、桌面面板 120/120、移动（含 iPad）、TTS 五视口、smoke、文本模式、书架刷新、标签页标题、EPUB、音频、重新认证、桌面 flip 9/9 与 7/7、双客户端进度全部通过，服务日志无 400、无 5xx、无 panic；M1–M6 变异各自让对应单元转红。后端与 main 相同，Go 门由 main 负责。状态 **implementation-complete / regression-validated**；未合入 main，镜像未构建，生产未访问。
 
 ## 2026-11-13 P2 设置 写入请求被客户端取消时不再返回或记录 500
 
@@ -725,7 +745,8 @@ awaiting-device-verification**，进度块（第 10 节第 1 条）仍开放，�
 判断从整个 body 收紧到 `#app`，并在失败时附上页面错误和视口。arm64 镜像拷贝同一个构建平台阶段的产物、只检查未登录入口，
 两项记为 acceptable-change。上游行为不涉及。门测试先红后绿（6/10 → 10/10）；经已发布的 `92c98a9` 镜像，门脚本对
 删除 `strictExecutionOrder: true` 的构建失败并报出 `pageerror: e is not a function`，对镜像自带产物和当前树构建通过。状态
-**implementation-complete / regression-validated**，待可信 Actions 运行。完整合同见
+**Docker-published**，O3 关闭：可信 run `39884938803` 中新门约 26 s 通过（门测试 10/10，native 候选镜像三视口加载 `/login`），
+发布 `ghcr.io/changshengyu/openreader:a7fd6aa` / `latest`（OCI index `sha256:c5dcdffb…d7c1`，amd64 + arm64）。完整合同见
 [`release-browser-boot-gate-fixed-baseline-second-audit-p1-contract.md`](release-browser-boot-gate-fixed-baseline-second-audit-p1-contract.md)。
 
 ## 2026-10-22 P1 依赖维护 发布门新增公告
